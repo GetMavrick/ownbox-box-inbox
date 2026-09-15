@@ -70,6 +70,9 @@ class Settings:
     # else brain). Set SLACK_DM_INTENT to pin every DM to one lane instead.
     slack_dm_intent        = os.environ.get("SLACK_DM_INTENT", "")
     operator_slack_user_id = os.environ.get("OPERATOR_SLACK_USER_ID", "")
+    # Ownbox's provisioner, as user@host, which the operator's own box reads over ssh to page a person when
+    # an order needs one (core/watchdog.py). Unset on every customer box, which keeps the probe inert.
+    ownbox_orders_ssh      = os.environ.get("OWNBOX_ORDERS_SSH", "")
     # The reel channel — morning-drop posts land here, and dashboard-approved
     # rows with no recorded origin fall back to it for their ready notice.
     reel_slack_channel_id  = os.environ.get("REEL_SLACK_CHANNEL_ID", "")

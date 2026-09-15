@@ -25,6 +25,13 @@ if ! caddy validate --config /etc/caddy/Caddyfile.candidate --adapter caddyfile 
   echo "✗ the new Caddyfile does not validate — the live one is untouched:"; sed 's/^/    /' /tmp/caddy-validate.txt | head -8; rm -f /etc/caddy/Caddyfile.candidate; exit 1
 fi
 mv /etc/caddy/Caddyfile.candidate /etc/caddy/Caddyfile
+# CADDY'S HOME MUST EXIST AND BE CADDY'S before it starts. It runs as user caddy and cannot create /var/lib/caddy
+# itself; without it every certificate fails with "permission denied" (image v2 shipped that way, measured
+# 2026-09-15, see image_prepare.sh). Created only when missing, so a working box's directory is left alone.
+if id caddy >/dev/null 2>&1; then
+  [ -d /var/lib/caddy ] || install -d -o caddy -g caddy -m 0700 /var/lib/caddy
+  [ "$(stat -c %U /var/lib/caddy)" = caddy ] || chown caddy:caddy /var/lib/caddy
+fi
 systemctl enable --now caddy
 systemctl reload caddy || systemctl restart caddy
 [ -n "$ZONE" ] && echo "  *.$ZONE: on-demand certificates, gated by https://$DOMAIN/tls/ask (needs the one wildcard DNS record → this box)"

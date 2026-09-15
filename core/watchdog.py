@@ -1616,6 +1616,68 @@ def _page_new_stuck_produce(was_failing: bool) -> tuple[set, bool]:
     return (new_ids if (new_ids and was_failing) else set(), bool(sent_ok))
 
 
+_OWNBOX_ORDERS_KEY = "/var/lib/aios/ownbox_orders_key"
+_OWNBOX_ORDERS_KNOWN_HOSTS = "/var/lib/aios/ownbox_orders_known_hosts"
+_OWNBOX_ORDERS_MISSES = 3
+
+
+def _probe_ownbox_orders(run=None) -> dict[str, tuple[bool, str]]:
+    """AN OWNBOX ORDER THAT NEEDS A PERSON pages the operator, one page per order.
+
+    Measured 2026-09-15: the first real test order failed at the boot deadline and nobody was told, because
+    the provisioner has no way to reach a person (no mail sender, no Slack). This box does. It reads the
+    provisioner's open orders over ssh, with a key the provisioner's authorized_keys pins to ONE read-only
+    command (`python -m provisioner.run --status --json`), so this box holds no way to change an order.
+
+    EACH ORDER IS ITS OWN ALERT KEY, so a second customer's failure pages on its own instead of hiding behind
+    the first's standing alert. An order drops off the moment a person records what they did
+    (`--resolve <id> --note ...`) or it is delivered, and reports recovered once.
+    An unreadable provisioner pages only after three passes in a row, so one dropped connection is not a page.
+    Inert unless OWNBOX_ORDERS_SSH is set, which only the operator's own box does.
+    """
+    import json
+    import subprocess
+    target = (settings.ownbox_orders_ssh or "").strip()
+    if not target:
+        return {}
+    cmd = ["ssh", "-i", _OWNBOX_ORDERS_KEY, "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
+           "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={_OWNBOX_ORDERS_KNOWN_HOSTS}",
+           "-o", "ConnectTimeout=15", target]
+    orders, why = None, "no order list"
+    try:
+        res = (run or subprocess.run)(cmd, capture_output=True, text=True, timeout=60)
+        if res.returncode != 0:
+            why = f"ssh exit {res.returncode}: {(res.stderr or '').strip()[-160:]}"
+        else:
+            data = json.loads(res.stdout or "")
+            orders = data.get("orders") if isinstance(data, dict) else None
+    except subprocess.TimeoutExpired:
+        why = "ssh timed out"
+    except (OSError, ValueError) as e:
+        why = type(e).__name__
+    if not isinstance(orders, list):
+        misses = int(state.get_alert("ownbox_orders:misses") or 0) + 1
+        state.set_alert("ownbox_orders:misses", str(misses))
+        if misses < _OWNBOX_ORDERS_MISSES:
+            return {"ownbox_orders_readable": (True, f"skip (miss {misses}: {why})")}
+        return {"ownbox_orders_readable": (False, f"cannot read Ownbox's orders from the provisioner for "
+                                                  f"{misses} passes: {why}")}
+    state.set_alert("ownbox_orders:misses", "0")
+    need = {str(o["id"]): o for o in orders if isinstance(o, dict) and o.get("id") and o.get("needs_person")}
+    paged = {i for i in (state.get_alert("ownbox_orders:ids") or "").split(",") if i}
+    probes = {"ownbox_orders_readable": (True, f"{len(orders)} open order(s), {len(need)} need a person")}
+    for oid, o in need.items():
+        key = " (its update key needs a person)" if o.get("key_state") == "needs_human" else ""
+        probes[f"ownbox_order:{oid}"] = (False, (
+            f"{o.get('host') or 'no address yet'} is {o.get('state')}{key}: "
+            f"{str(o.get('last_error') or o.get('key_error') or '')[:160]} | customer {o.get('email') or '?'} | "
+            f"once handled: python -m provisioner.run --resolve {oid} --note '<what you did>'"))
+    for oid in sorted(paged - set(need)):
+        probes[f"ownbox_order:{oid}"] = (True, "resolved or delivered")
+    state.set_alert("ownbox_orders:ids", ",".join(sorted(need)))
+    return probes
+
+
 def run_once() -> None:
     # Self-initialize like the other entrypoints (worker/dispatch/slack_socket): the state.py
     # migration contract already promises the watchdog boots + calls init_db, and its probes read
@@ -1670,6 +1732,7 @@ def run_once() -> None:
     }
     # Probe the reasoning path that is actually CONFIGURED (shared with the A2 startup
     # probe so both page on one key).
+    probes.update(_probe_ownbox_orders())
     _bkey, _bok, _bdetail = probe_backend()
     probes[_bkey] = (_bok, _bdetail)
     resolve_deconfigured_backend_alerts(_bkey)

@@ -229,6 +229,44 @@ if services.exists():
     ok(f"the glob covers everything install_services.sh names ({len(named)} units)",
        named <= on_disk, str(sorted(named - on_disk)))
 
+print("\n— Caddy's home: emptied, never deleted —")
+# Measured 2026-09-15 on image v2, which deleted /var/lib/caddy: every clone logged "failed storage check: mkdir
+# /var/lib/caddy: permission denied" and no box built from it ever got a certificate.
+src = SCRIPT.read_text()
+fn = re.search(r"^caddy_home_problem\(\) \{.*?^\}", src, re.S | re.M).group(0)
+me = subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()
+
+
+def caddy_home(where, user):
+    return subprocess.run(["bash", "-c", fn + '\ncaddy_home_problem "$1" "$2"', "_", str(where), user],
+                          capture_output=True, text=True).stdout.strip()
+
+
+home = pathlib.Path(tempfile.mkdtemp()) / "caddy"
+r = caddy_home(home, me)
+ok("a missing Caddy home is refused, and the refusal says a clone would never get a certificate",
+   "missing" in r and "certificate" in r, r)
+home.mkdir()
+ok("an empty Caddy home owned by Caddy's user passes", caddy_home(home, me) == "", caddy_home(home, me))
+(home / ".local/share/caddy/certificates").mkdir(parents=True)
+(home / ".local/share/caddy/certificates/box.crt").write_text("not for a clone")
+r = caddy_home(home, me)
+ok("a certificate left inside is refused, and the refusal names a path", "Caddy state remains" in r and str(home) in r, r)
+shutil.rmtree(home / ".local")
+r = caddy_home(home, "not-" + me)
+ok("a Caddy home owned by anyone but Caddy's user is refused", "belongs to" in r, r)
+ok("the scrub list no longer deletes /var/lib/caddy",
+   "/var/lib/caddy" not in re.search(r"^SYS_PATHS=\((.*)\)$", src, re.M).group(1))
+ok("the scrub empties it and keeps it, owned by Caddy's user",
+   'find "$CADDY_HOME" -mindepth 1 -delete' in src
+   and 'install -d -o "$CADDY_USER" -g "$CADDY_USER" -m 0700 "$CADDY_HOME"' in src)
+ok("the droplet half of --verify checks it",
+   'caddy_home_problem "$CADDY_HOME" "$CADDY_USER"' in src[src.index("verify() {"):src.index("# MACOS METADATA")])
+ex = (ROOT / "scripts" / "expose.sh").read_text()
+ok("expose.sh makes Caddy's home, if missing, before it starts Caddy",
+   "install -d -o caddy -g caddy -m 0700 /var/lib/caddy" in ex
+   and ex.index("install -d -o caddy") < ex.index("systemctl enable --now caddy"))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} FAILED:"); [print("   -", f) for f in FAILS]; sys.exit(1)

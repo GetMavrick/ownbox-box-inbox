@@ -38,7 +38,23 @@ done
 # because the tree's paths are relative to $AIOS and the system's are absolute.
 TREE_PATHS=(.env licence.json my data backups wall .x_articles_token.json)
 TREE_GLOBS=('*.db' '*.db-wal' '*.db-shm')
-SYS_PATHS=(/etc/caddy/Caddyfile /var/lib/caddy /root/.ssh/authorized_keys /root/.bash_history /var/lib/aios/update_key /var/lib/aios/update_key.pub)
+SYS_PATHS=(/etc/caddy/Caddyfile /root/.ssh/authorized_keys /root/.bash_history /var/lib/aios/update_key /var/lib/aios/update_key.pub)
+
+# CADDY'S HOME IS EMPTIED, NEVER DELETED. What is inside is one box's (its certificates and its ACME account), but the
+# directory belongs to the package: Caddy runs as user caddy, which cannot create it under root's /var/lib.
+# Measured 2026-09-15 on image v2, which deleted it: every clone logged "failed storage check: mkdir /var/lib/caddy:
+# permission denied", never asked Let's Encrypt at all, and no box built from it ever got a certificate.
+CADDY_HOME=${AIOS_CADDY_HOME:-/var/lib/caddy}
+CADDY_USER=${AIOS_CADDY_USER:-caddy}
+
+caddy_home_problem() {   # prints why an image's Caddy home would stop a clone getting a certificate; nothing if fine
+  local dir="$1" user="$2" owner first
+  [ -d "$dir" ] || { echo "$dir is missing, and Caddy (user $user) cannot recreate it: no clone would ever get a certificate"; return; }
+  owner=$(stat -c %U "$dir" 2>/dev/null || stat -f %Su "$dir")
+  [ "$owner" = "$user" ] || { echo "$dir belongs to $owner, not $user: Caddy could not store a certificate there"; return; }
+  first=$(find "$dir" -mindepth 1 -print -quit 2>/dev/null)
+  [ -z "$first" ] || echo "Caddy state remains: $first (every clone would share its certificates and ACME account)"
+}
 
 verify() {
   local root="$1" bad=0 p
@@ -62,6 +78,9 @@ verify() {
     if compgen -G "/etc/ssh/ssh_host_*_key" >/dev/null; then
       echo "  ✗ SSH host keys remain — every clone would present the same fingerprint"; bad=1
     fi
+    local caddy
+    caddy=$(caddy_home_problem "$CADDY_HOME" "$CADDY_USER")
+    [ -n "$caddy" ] && { echo "  ✗ $caddy"; bad=1; }
     local on
     on=$(systemctl list-unit-files 'aios-*' --no-legend 2>/dev/null | awk '$2=="enabled"{print $1}' | tr '\n' ' ')
     [ -n "$on" ] && { echo "  ✗ enabled on the image: $on — an image must boot inert"; bad=1; }
@@ -170,6 +189,8 @@ for p in "${TREE_PATHS[@]}"; do rm -rf "${AIOS:?}/$p"; done
 find "$AIOS" -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' | while read -r f; do rm -f "$f"; done
 find "$AIOS" -name '._*' -type f -delete               # AppleDouble files from a Mac-built tarball (see verify)
 rm -rf "${SYS_PATHS[@]}"
+[ -d "$CADDY_HOME" ] && find "$CADDY_HOME" -mindepth 1 -delete          # its certificates and account, dotfiles too
+id "$CADDY_USER" >/dev/null 2>&1 && install -d -o "$CADDY_USER" -g "$CADDY_USER" -m 0700 "$CADDY_HOME"
 rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
 : > /etc/machine-id                                   # regenerated on first boot; dbus follows it
 rm -f /var/lib/dbus/machine-id
