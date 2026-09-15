@@ -19,9 +19,11 @@ The check is intentionally dumb — a name defined and never mentioned again in 
 It cannot know whether a registered test is MEANINGFUL, only that it is reachable.
 """
 import ast
+import io
 import pathlib
 import re
 import sys
+import tokenize
 
 ROOT = pathlib.Path(__file__).resolve().parent
 _fails = []
@@ -174,6 +176,39 @@ def test_the_scan_can_actually_SEE_an_orphan():
     ok("a test passed by reference is not a false positive", orphans_in(byref) == [])
 
 
+def _drives_exporter(path: pathlib.Path) -> bool:
+    """True when this suite RUNS scripts/export_box.sh, not when it merely mentions it.
+
+    WHY THIS IS NOT A SUBSTRING MATCH ANY MORE. It was, and on 2026-09-15 it failed
+    test_demo_first_run.py in CI over a `#` comment explaining why the exporter leaves a script
+    out of an inbox box. The remedy the message offered — add it to the skip set — would have
+    been the wrong one: that suite SHOULD ship to buyer boxes (it is a real box check, and the
+    same PR is what makes it pass inside one), so obeying the guard would have deleted it from
+    every sold box to satisfy a comment.
+
+    A guard that fires on prose teaches people to stop writing prose. Comments are stripped
+    here; everything else — string literals, docstrings, f-strings, any code path — still counts,
+    so the check stays conservative in the direction that matters. A real driver names the script
+    inside a string it hands to a subprocess, and that is untouched by this.
+    """
+    try:
+        src = path.read_text()
+    except OSError:
+        return False
+    try:
+        code = "".join(
+            "" if tok.type == tokenize.COMMENT else tok.string
+            for tok in tokenize.generate_tokens(io.StringIO(src).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        code = src                      # unparseable: fall back to the old, stricter behaviour
+    return "export_box.sh" in code
+
+
+# A file whose ONLY reference to the exporter is a comment, written out so the guard above can
+# prove it does not flag one. It is not a suite and never runs; it exists to be read.
+_TOKENIZE_PROBE = pathlib.Path(__file__).resolve().parent / "fixtures" / "mentions_exporter.py"
+
+
 def test_every_export_driving_suite_is_kept_home():
     """A suite that runs scripts/export_box.sh must be in the exporter's skip set, or it ships
     into every buyer box and fails there on a script that never ships. This happened THREE
@@ -191,7 +226,7 @@ def test_every_export_driving_suite_is_kept_home():
         return
     skip_src = exporter.read_text()
     drivers = sorted(p.name for p in ROOT.glob("test_*.py")
-                     if "export_box.sh" in p.read_text() and p.name != "test_suite_integrity.py")
+                     if _drives_exporter(p) and p.name != "test_suite_integrity.py")
     ok("found the export-driving suites (none = the glob is wrong)", bool(drivers))
     missing = [d for d in drivers if f'"{d}"' not in skip_src]
     ok(f"every suite that drives export_box.sh is in the exporter's skip set"
@@ -199,6 +234,9 @@ def test_every_export_driving_suite_is_kept_home():
     # the guard must be able to see: a driver that IS skip-listed must not be reported
     ok("the check can see a skip-listed driver", "test_recipe_ships.py" in drivers and
        '"test_recipe_ships.py"' in skip_src)
+    # …and must NOT see a suite that only talks about the exporter. See _drives_exporter.
+    ok("a suite that only mentions the exporter in a comment is not a driver",
+       _TOKENIZE_PROBE.exists() and not _drives_exporter(_TOKENIZE_PROBE))
 
 
 def test_every_suite_is_actually_run_by_ci():

@@ -171,7 +171,8 @@ def test_a_second_claim_is_refused_for_good():
     ok("...and the recorded owner is unchanged",
        claim.claimed()["email"] == "buyer@testco.com")
     r = client().get(f"/claim?c={ORDER}")
-    ok("the page says the box is taken", b"already been set up" in r.data)
+    ok("the page says the box is taken, in the approved words",
+       b"already been claimed" in r.data)
     # THE ANSWER MUST NOT VARY WITH THE GUESS. If a claimed box answered a right code
     # differently from a wrong one, the claim page would become an oracle for the order id
     # long after the claim itself stopped working.
@@ -394,12 +395,30 @@ def test_the_landing_order_itself_is_what_OSDev1_asked_for():
        lands_when("/dash/home", "/voice/"))
     ok("...whichever order the routes happen to be registered in",
        lands_when("/voice/", "/dash/home") == "/dash/home")
-    # The buyer's box: no dashboard of any kind.
-    ok("an inbox-only box lands on the inbox", lands_when("/voice/") == "/voice/")
+    # AND THE OWNER'S BOX IS UNMOVED BY THE INBOX-FIRST CHANGE. His everything-box serves all
+    # three, so it must still land on /dash/home — a box holding it never reaches the entries
+    # below it. This is the assertion that keeps his 2026-09-09 ruling true.
+    ok("the everything-box still lands on the client home, inbox route or not",
+       lands_when("/dash/home", "/voice/inbox", "/voice/", "/dash") == "/dash/home",
+       lands_when("/dash/home", "/voice/inbox", "/voice/", "/dash"))
+    # THE BUYER'S BOX, AND THE CASE THAT WAS WRONG UNTIL 2026-09-15. `/voice/` is not the inbox
+    # — the app's tabs are Today · Inbox · Settings and `/voice/` is TODAY, the uptime and
+    # pagespeed report. This assertion used to read `lands_when("/voice/") == "/voice/"` and call
+    # it "the inbox", which is how a sold box came to land its buyer on a monitoring page. The
+    # real inbox is `/voice/inbox`, and where a box serves it, it wins.
+    ok("a box serving the real inbox lands on the INBOX, not on Today",
+       lands_when("/voice/", "/voice/inbox") == "/voice/inbox",
+       lands_when("/voice/", "/voice/inbox"))
+    ok("...whichever order the routes were registered in",
+       lands_when("/voice/inbox", "/voice/") == "/voice/inbox")
+    # Today is still a landing for a box that somehow serves it alone — never a 404, never login.
+    ok("a box with Today and no inbox still lands on Today", lands_when("/voice/") == "/voice/")
     # THE CASE THAT DISTINGUISHES OSDev1'S ORDER FROM MY FIRST ONE. I had /dash second, which
     # lands a BUYER on the reel operator dashboard when their box has one and no client home.
     # His puts the inbox first: they land on the machine they bought.
     ok("with the reel dashboard and the inbox but no client home, the INBOX wins",
+       lands_when("/dash", "/voice/inbox") == "/voice/inbox", lands_when("/dash", "/voice/inbox"))
+    ok("...and Today still beats the operator dashboard on a box without the inbox route",
        lands_when("/dash", "/voice/") == "/voice/", lands_when("/dash", "/voice/"))
     ok("...and /dash is still reached when it is genuinely all there is",
        lands_when("/dash") == "/dash")

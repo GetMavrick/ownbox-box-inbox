@@ -30,6 +30,26 @@ sys.path.insert(0, str(ROOT))
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
+# THE DEVELOPER'S OWN SHELL IS NOT THE BOX. Every case below spawns a child that builds its own
+# credentials and then asserts what the login accepts. A child inherits the parent's environment,
+# so a DASH_TOKEN exported in whatever shell runs the tests silently becomes the box's dash
+# password and the assertions measure that instead. Measured 2026-09-15 inside an exported
+# customer_voice box on a machine with DASH_TOKEN set: the correct password came back 401 and the
+# suite reported "one stranger cannot lock the owner out of his own box" — a sentence that reads
+# like a live security hole and had nothing to do with the throttle. A test whose verdict depends
+# on who is running it is worse than no test, because the failure text points somewhere real.
+_CREDENTIAL_ENV = ("DASH_TOKEN", "DISPATCH_BEARER_TOKEN", "AIOS_DB_PATH", "AIOS_RELEASE_FILE",
+                   "UNSUB_SIGNING_KEY", "AIOS_DEPLOY_TOKEN")
+
+
+def _clean_env(**extra):
+    """The parent environment with every credential this suite sets for itself removed."""
+    env = {k: v for k, v in os.environ.items() if k not in _CREDENTIAL_ENV}
+    env.update(extra)
+    return env
+
+
+
 def ok(label, cond, detail=""):
     print(f"  {'ok  ' if cond else 'FAIL'} {label}" + (f"  — {detail}" if not cond and detail else ""))
     if not cond:
@@ -48,7 +68,8 @@ def _mint(env_body, var):
         env = Path(d) / ".env"
         env.write_text(env_body)
         script = f'cd {d}\nVPY={sys.executable!r}\n{body}\nmint {var} "why"\n'
-        r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        r = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                           env=_clean_env())
         assert r.returncode == 0, r.stderr
         return env.read_text(), r.stdout
 
@@ -111,7 +132,7 @@ else:
 
 def _run(dash_line):
     r = subprocess.run([sys.executable, "-c", _CASE.format(dash=dash_line, root=str(ROOT))],
-                       capture_output=True, text=True, cwd=ROOT)
+                       capture_output=True, text=True, cwd=ROOT, env=_clean_env())
     assert r.returncode == 0, r.stdout + r.stderr
     return dict(l.split(" ", 1) for l in r.stdout.splitlines() if l.startswith(
         ("DASH_TOKEN_IS", "DASH_PRESENT", "BEARER", "DASH ", "WRONG")))
@@ -171,7 +192,7 @@ def test_the_login_stops_answering_unlimited_guesses():
     compare_digest stops a timing oracle, not a guessing machine, and ten boxes are about to sit
     on public subdomains."""
     r = subprocess.run([sys.executable, "-c", _THROTTLE.format(root=str(ROOT))],
-                       capture_output=True, text=True, cwd=ROOT)
+                       capture_output=True, text=True, cwd=ROOT, env=_clean_env())
     assert r.returncode == 0, r.stdout + r.stderr
     o = dict(l.split(" ", 1) for l in r.stdout.splitlines() if l.startswith(
         ("DASH_PRESENT", "CODES", "RETRY_AFTER", "RIGHT_WHILE_BLOCKED", "OTHER_IP", "CLEARED",

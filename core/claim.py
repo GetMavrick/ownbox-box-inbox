@@ -59,7 +59,17 @@ MIN_PASSWORD = 12                 # length only, deliberately — see `password_
 
 
 class ClaimRefused(Exception):
-    """The claim did not happen. The message is shown to a stranger, so it says little."""
+    """The claim did not happen, and nothing changed.
+
+    CARRIES A `kind`, NOT A SENTENCE TO RENDER. What a person should be told differs per state
+    and the words belong to docs/COPY_INBOX_FIRST_RUN.md §1 — a screen rendering whatever string
+    an exception happened to hold is how "invalid code" reaches a buyer, which that doc forbids
+    by name. The `str()` stays useful for logs and for callers with no screen.
+    """
+
+    def __init__(self, kind: str, detail: str = ""):
+        self.kind = kind
+        super().__init__(detail or kind)
 
 
 def hash_password(password: str) -> str:
@@ -97,6 +107,17 @@ def provisioned_order() -> str | None:
         return None
     order = str(order or "").strip()
     return order or None
+
+
+def provisioned_host() -> str:
+    """The hostname this box was built as, or "". §1.1 names it back to the buyer — "This one is
+    yours — <hostname>" — which is the cheapest possible proof they are on the right machine and
+    not on a page that could belong to anybody."""
+    try:
+        with open(PROVISION_JSON, encoding="utf-8") as fh:
+            return str(json.load(fh).get("host") or "").strip()
+    except Exception:                       # noqa: BLE001 — absent or unreadable is simply no name
+        return ""
 
 
 def claimed() -> dict | None:
@@ -155,20 +176,32 @@ def claim_box(*, code: str, email: str, password: str,
     test guesses.
     """
     if claimed():
-        raise ClaimRefused("This box has already been set up. Sign in instead.")
+        raise ClaimRefused("already_claimed")
     if provisioned_order() is None:
-        # Not a failure of the claim: this box was never sold. Say which it is — the buyer of a
-        # real box and the owner of a hand-installed one need completely different next steps.
-        raise ClaimRefused("This box was not set up by a purchase, so there is nothing to claim.")
+        # Not a failure of the claim: this box was never sold. A separate state because the buyer
+        # of a real box and the owner of a hand-installed one need completely different next steps.
+        raise ClaimRefused("not_sellable")
     if not code_matches(code):
-        raise ClaimRefused("That code does not match this box.")
+        raise ClaimRefused("bad_code")
 
+    # PAST THIS LINE THE CALLER HAS PROVEN THEY HOLD THE ORDER, so telling them precisely what is
+    # wrong with their email or password costs nothing: they are the buyer. A wrong code never
+    # reaches here, so it can never draw a password complaint.
+    #
+    # WHAT THIS DOES AND DOES NOT PREVENT, stated accurately because the comment that used to sit
+    # here overstated it. It is NOT a uniform refusal. Someone who guesses a code and submits a
+    # deliberately bad password learns from the reply that the code was right, WITHOUT spending
+    # the one-shot claim. That is a real distinction and it is accepted rather than overlooked:
+    # the alternative is telling a paying customer "that link did not work" when their password
+    # is simply eight characters, which is a support ticket and a refund risk at the worst moment.
+    # The control is the throttle plus the shape of the secret — a Stripe Checkout Session id,
+    # answered five times before the wait becomes exponential.
     email = str(email or "").strip().lower()
     if not email or "@" not in email or " " in email:
-        raise ClaimRefused("Enter the email address you want to sign in with.")
+        raise ClaimRefused("bad_email")
     problem = password_problem(password, email=email, code=code)
     if problem:
-        raise ClaimRefused(problem)
+        raise ClaimRefused("bad_password", problem)
 
     # THE EXISTING OWNER ROW, NOT A NEW ONE. Every session on this box already points at it
     # (migration 47), so minting a second owner would leave the box with two and the older

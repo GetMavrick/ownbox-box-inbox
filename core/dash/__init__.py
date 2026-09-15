@@ -667,7 +667,26 @@ def _clear_failures(ip: str) -> None:
 #
 # The defect was never "we land on the wrong page on a box that has one". It was "we land on a
 # page this box does not serve". Only the fall-through had to change.
-_LANDINGS = ("/dash/home", "/voice/", "/dash")
+# THE ORDER IS THE RULING, SO THE REASONS LIVE HERE.
+#
+# `/voice/` IS NOT THE INBOX. The app's tabs are Today · Inbox · Settings, and `/voice/` is
+# TODAY — the site uptime and pagespeed report. Until 2026-09-15 a SOLD inbox box therefore
+# landed its buyer, thirty seconds after paying for a unified inbox, on a website-monitoring
+# page reading "— good checks today / 0 checks on your site" plus a hint naming a YAML key.
+# Measured by claiming an exported box and rendering what came back, not inferred from the
+# route name — which is the mistake the previous order encoded (OSDev4's own #1172 ruling said
+# "the buyer lands on /voice/", meaning the inbox, and /voice/ is not it).
+#
+# `/voice/inbox` goes FIRST, and only ahead of `/voice/`. The empty inbox already says the right
+# thing — "No conversations yet. The first person who messages you appears here" — which tells a
+# buyer nothing is wrong and what happens next, where dashes and zeroes tell him the box is
+# broken in the minute he bought it.
+#
+# THE OWNER'S BOX IS DELIBERATELY UNTOUCHED. His ruling of 2026-09-09 about what he sees first is
+# carried by `/dash/home`, which stays at the head of this tuple and which his everything-box
+# serves; a box holding /dash/home never reaches the two entries below it. This changes exactly
+# one shape: a box that has an inbox and no client home — which is the product we sell.
+_LANDINGS = ("/dash/home", "/voice/inbox", "/voice/", "/dash")
 
 
 def landing() -> str:
@@ -757,37 +776,143 @@ def _claim_states():
     return _claim.claimed() is not None, _claim.provisioned_order() is not None
 
 
+# EVERY WORD ON THESE SCREENS COMES FROM docs/COPY_INBOX_FIRST_RUN.md §1, and that is a rule
+# rather than a courtesy. This is the first screen a paying customer ever sees on their own box,
+# the copy was written and approved for it, and the version that shipped first was written before
+# that doc existed — so it cut the ownership line §1.1 marks do-not-cut and opened with exactly
+# the "invalid code" accusation §1.2 forbids by name. Changing these strings means changing the
+# doc first. `tests/test_claim_copy.py` holds them to it.
+_CLAIM_REFUSALS = {
+    # §1.2 — never "invalid code": it tells the buyer nothing they can act on and reads as an
+    # accusation at the moment they are least sure of themselves.
+    "bad_code": ("That link did not work.",
+                 "Check the link in your welcome email — it needs to be the whole thing, including "
+                 "the part after the question mark. If you have lost the email, reply to it and "
+                 "we will send the link again."),
+    # Not in §1: the buyer of a box that was never sold. Kept separate because the answer ("sign
+    # in with your dashboard password") is useless to a buyer and exactly right for the owner.
+    "not_sellable": ("There is nothing to claim here.",
+                     "This box was not set up by a purchase. Sign in with your dashboard "
+                     "password."),
+}
+
+# THE FALLBACK EXISTS SO THAT A KIND WITH NO COPY BEHIND IT CANNOT REACH A SCREEN. A missing entry
+# used to be a KeyError — a 500 on the first page a buyer opens — and the near-miss beside it was
+# worse: the recoverable path rendered `str(exception)`, whose fallback IS the kind, so the literal
+# string `bad_email` was printed in red to a paying customer (§2.8, measured 2026-09-15 by posting
+# a malformed address to the built screens, not by reading them). Words for an unknown kind are
+# therefore generic but TRUE: `claim_box` raises having changed nothing, so the link really does
+# still work. The event is logged at error level, because loud in the logs and calm on the screen
+# is the right pair — the opposite pair is what shipped.
+_UNKNOWN_REFUSAL = ("We could not set this box up.",
+                    "Nothing has changed and your link still works. Try it again, and if it "
+                    "happens twice reply to your welcome email — we will sort it out.")
+
+# §2.7 AND §2.8 — THE KINDS A BUYER RECOVERS FROM WITHOUT LEAVING THE FORM. These are one sentence
+# rendered under the field, not an (h1, body) page: the buyer keeps his code, his address and his
+# place. The two tables are separate on purpose, because a kind belongs to exactly one of them and
+# a single table would have to be read to know which.
+_CLAIM_PROBLEMS = {
+    # §2.8. The second sentence is the only place a buyer is ever told what the address is FOR;
+    # without it a person who reads the field as a mailing-list signup types a throwaway and
+    # locks himself out of the box he just bought.
+    "bad_email": "That does not look like an email address. This is the address you will sign "
+                 "in with.",
+    # §2.7's words come from `password_problem()`, which builds them from MIN_PASSWORD so the
+    # screen cannot disagree with the box about the number. This entry is what renders if that
+    # rule ever returns nothing — it is a backstop, not the copy.
+    "bad_password": "That password will not work. Choose a longer one.",
+}
+
+
+# AND THE ONE KIND THAT CARRIES NO WORDS OF ITS OWN, declared rather than hardcoded in the view.
+# `already_claimed` does not render a message: it REDIRECTS to `GET /claim`, where §1.4's whole
+# screen — both paths and a button — is already built. An (h1, body) pair cannot hold that screen,
+# so forcing it into the table above would flatten the copy to fit the table. Written here as data
+# because the suite reads all three of these and requires every kind `core/claim.py` raises to
+# appear in exactly one; a kind that is in none of them has nothing to say to a buyer.
+_CLAIM_REDIRECTS = {"already_claimed": "/claim"}
+
+
+def _claim_problem(e: "_claim.ClaimRefused") -> str:
+    """The sentence shown under the field — from the copy table, never from the exception.
+
+    `bad_password` is the SINGLE kind whose words come from the raised detail, and only because
+    `password_problem()` is written to return customer-ready sentences. Even there the detail is
+    used only when it is genuinely a detail: `ClaimRefused.__init__` falls back to the kind when
+    no detail is given, and printing that fallback is precisely the §2.8 defect.
+    """
+    detail = str(e)
+    if e.kind == "bad_password" and detail and detail != e.kind:
+        return detail
+    return _CLAIM_PROBLEMS[e.kind]
+
+
 @blueprint.get("/claim")
 def claim_form():
     done, sellable = _claim_states()
     if done:
-        # SAYS NOTHING ABOUT THE CODE. A claimed box answers identically to a stranger with the
-        # right code and a stranger with the wrong one, because the only thing either of them
-        # can still do here is learn whether they guessed right.
-        return _claim_page('<p class="val">This box has already been set up. '
-                           '<a class="dlink" href="/dash/login">Sign in</a>.</p>')
+        # §1.4, AND BOTH PATHS ALWAYS — a dead end here is a support ticket at best. It also says
+        # NOTHING about the code: a claimed box answers a stranger with the right code exactly as
+        # it answers one with the wrong code, because guessing is the only thing left to do here.
+        return _claim_page(
+            '<label class="lbl mb">This box has already been claimed.</label>'
+            '<p class="val">Someone created the login for this box. If that was you, sign in '
+            'below. If it was not, reply to your welcome email now and we will help.</p>'
+            '<p><a class="btn-primary" href="/dash/login">Sign in</a></p>')
     if not sellable:
-        # The ordinary answer on the owner's own machine or a hand-installed box: there is no
-        # purchase behind it, so there is nothing to claim and no form that could ever succeed.
-        return _claim_page('<p class="val">This box was not set up by a purchase, so there is '
-                           'nothing to claim here. Sign in with your dashboard password.</p>')
+        h1, body = _CLAIM_REFUSALS["not_sellable"]
+        return _claim_page(f'<label class="lbl mb">{html.escape(h1)}</label>'
+                           f'<p class="val">{html.escape(body)}</p>')
     # THE CODE IS CARRIED IN A HIDDEN FIELD, NOT RE-READ FROM THE QUERY ON SUBMIT, so the
     # address bar is the only place it ever appears and a mistyped POST cannot half-work.
     code = html.escape(str(request.args.get("c", ""))[:220])
+    return _claim_page(_claim_form_body(code))
+
+
+def _claim_form_body(code: str, *, email: str = "", problem: str = "") -> str:
+    """§1.1's screen, optionally carrying a recoverable refusal (§2.7).
+
+    ONE FUNCTION FOR BOTH, because §2.7 requires the buyer to STAY ON THE PAGE: "a short password
+    is a typo, not a failed claim; a box that spends its single-use code on one is a support
+    ticket on the day of the sale." Sending them to a message and a Try-again link means retyping
+    everything, and the earlier version of this screen did exactly that.
+
+    THE PASSWORD IS NEVER CARRIED BACK — "not in the field, not in the message, not in a log."
+    The address is, because it is theirs and retyping it is friction with nothing bought for it.
+    """
+    # §1.1 NAMES THE BOX BACK TO THEM. "This one is yours — <hostname>" is the cheapest proof
+    # available that they are on their own machine and not on a page that could belong to anyone;
+    # a box with no hostname on disk simply drops the clause rather than printing an empty dash.
+    host = _claim.provisioned_host()
+    whose = (f"This one is yours — {html.escape(host)}. Create the first login and it is "
+             "locked to you." if host else
+             "Create the first login and it is locked to you.")
+    # §2.7: RENDER THE SENTENCE THE RULE RETURNS, do not write one. `password_problem()` builds it
+    # from MIN_PASSWORD, so the screen cannot disagree with the box about the number — which is
+    # the failure §2.7 says it nearly shipped, specifying 10 in prose against a rule of 12. No h1,
+    # no strength meter, no "for your security": §2.7 asks for the string and nothing around it.
+    note = (f'<p class="val" style="color:var(--bad,#c0392b)">{html.escape(problem)}</p>'
+            if problem else "")
     body = f"""
 <section style="max-width:420px">
-  <label class="lbl mb">Set up your box</label>
-  <p class="val">Choose how you will sign in. This happens once.</p>
+  <label class="lbl mb">Your box is ready.</label>
+  <p class="val">{whose}</p>
+  {note}
   <form method="post" action="/claim">
     <input type="hidden" name="c" value="{code}">
-    <input type="email" name="email" placeholder="your email" autocomplete="username"
+    <input type="email" name="email" placeholder="Your email address"
+           aria-label="Your email address" autocomplete="username"
+           value="{html.escape(email)}" required style="margin-bottom:10px">
+    <input type="password" name="password" placeholder="Choose a password"
+           aria-label="Choose a password" autocomplete="new-password"
            required style="margin-bottom:10px">
-    <input type="password" name="password" placeholder="a password ({_claim.MIN_PASSWORD}+ characters)"
-           autocomplete="new-password" required style="margin-bottom:10px">
-    <button class="btn-primary" type="submit">Set up</button>
+    <button class="btn-primary" type="submit">Create my login</button>
   </form>
+  <p class="val" style="margin-top:12px">This link works once. After you use it nobody else can
+     claim this box — including us.</p>
 </section>"""
-    return _claim_page(body)
+    return body
 
 
 @blueprint.post("/claim")
@@ -800,9 +925,13 @@ def claim_submit():
     ip = _client_ip()
     wait = _block_seconds(ip)
     if wait:
+        # §1.3 — THE THROTTLE IS A FEATURE, SO SAY SO. Named as protection rather than reported as
+        # a fault, it stops reading like the box is broken at the moment the buyer is most anxious.
         log.warning("claim.throttled", ip=ip, wait_s=wait)
         resp = make_response(_claim_page(
-            f'<p class="val">Too many attempts. Try again in {wait}s.</p>', 429))
+            '<label class="lbl mb">Too many tries.</label>'
+            '<p class="val">Wait a minute, then try again. This is here so nobody can guess '
+            'their way into your box.</p>', 429))
         resp.headers["Retry-After"] = str(wait)
         return resp
     try:
@@ -811,13 +940,28 @@ def claim_submit():
                                  password=request.form.get("password", ""),
                                  ip=ip, user_agent=request.headers.get("User-Agent", ""))
     except _claim.ClaimRefused as e:
-        # EVERY refusal counts against the throttle, including a too-short password. Separating
-        # "bad code" from "bad password" here would hand an attacker a free oracle for the code:
-        # submit any password, read which complaint comes back.
+        # EVERY refusal counts against the throttle, including a too-short password — an attempt
+        # is an attempt, and a state that were free would be the cheapest way to probe this box.
         _note_failure(ip)
-        log.warning("claim.refused", ip=ip)
-        return _claim_page(f'<p class="val">{html.escape(str(e))} '
-                           '<a class="dlink" href="/claim">Try again</a></p>', 400)
+        log.warning("claim.refused", ip=ip, kind=e.kind)
+        if e.kind in _CLAIM_REDIRECTS:
+            return redirect(_CLAIM_REDIRECTS[e.kind])   # §1.4 renders it: both paths and a button
+        if e.kind in _CLAIM_PROBLEMS:
+            # §2.7 AND §2.8 — A TYPO, NOT A FAILED CLAIM. They hold the code, the code is still
+            # valid (`claim_box` raised having changed nothing), so the form comes back with
+            # their address and a sentence from the copy table. Never the password, and never
+            # the exception's own text: this line used to read `problem=str(e)`, which for
+            # `bad_email` printed the kind itself.
+            return _claim_page(_claim_form_body(
+                request.form.get("c", ""), email=request.form.get("email", ""),
+                problem=_claim_problem(e)), 400)
+        if e.kind not in _CLAIM_REFUSALS:
+            log.error("claim.refusal_has_no_copy", kind=e.kind)
+        h1, body = _CLAIM_REFUSALS.get(e.kind, _UNKNOWN_REFUSAL)
+        return _claim_page(
+            f'<label class="lbl mb">{html.escape(h1)}</label>'
+            f'<p class="val">{html.escape(body)}</p>'
+            '<p><a class="dlink" href="/claim">Try again</a></p>', 400)
     _clear_failures(ip)
     # STRAIGHT IN. He has just proved he holds the order and chosen his password; sending him to
     # a login form to type it again is a door that opens onto another door.

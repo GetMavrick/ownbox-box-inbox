@@ -705,6 +705,44 @@ def _channel(value: str) -> str:
     return _ch.name(value, fallback="Unknown")
 
 
+def _drafts_row() -> str:
+    """docs/COPY_INBOX_FIRST_RUN.md §2.6 — the row that turns drafting on.
+
+    THIS IS NOT AN OPTION AT LAUNCH, IT IS THE ONLY SWITCH. A delivered box ships
+    `brain.backend: api` with no key from install.sh and none from the provisioner, so
+    `drafter/draft.py` returns {"skipped": "unconfigured"} and the box files messages and writes
+    nothing. The buyer has no shell and no `.env`. Without this row the product silently does not
+    do the thing it was bought for — §2.6's warning, in its own words: "a buyer sees an empty
+    reply box, is never told drafting exists, and concludes the box does not do what the card
+    said. Today that is exactly what a delivered box does."
+
+    PHRASED AS A CAPABILITY, NOT A MISSING KEY, which is §2.6's call and a good one: "No API key
+    configured" is a fault report about our plumbing, and the buyer did nothing wrong and does
+    not know what an API key is. It says what the box can do, then what it needs to do it — and
+    turns the one real advantage of bring-your-own-key, that nothing they receive passes through
+    us, from an apology into the reason.
+
+    WHEN MANAGED INFERENCE LANDS, §2.5's wording replaces this and the row stays where it is.
+    """
+    from core import box_secrets
+    if not box_secrets.is_set(box_secrets.ANTHROPIC):
+        return ('<div class="setrow"><b>Drafts</b>'
+                '<span>Ownbox can write a reply for every message, ready for you to read and '
+                'send. It needs an AI account to write with — yours, on your own bill, so '
+                'nothing you receive passes through us.</span>'
+                '<p style="margin:10px 0 0"><a class="btn" href="/voice/drafts">'
+                'Connect an AI account</a></p></div>')
+    # THE SECOND SENTENCE IS LOAD-BEARING AND DOES NOT GET CUT (§2.6). It is the promise the
+    # whole product rests on, and Settings is where a nervous buyer goes to check it.
+    return ('<div class="setrow"><b>Drafts</b>'
+            '<span>On. Ownbox writes a reply for every message that arrives. You read it and '
+            'you send it — nothing goes out on its own.</span>'
+            '<span style="margin-top:8px">Writing with your own AI account. '
+            '<a href="/voice/drafts" style="color:var(--accent)">Change</a> · '
+            '<a href="/voice/drafts?off=1" style="color:var(--accent)">Turn off</a></span>'
+            '</div>')
+
+
 def _chips(space: str, current: str) -> str:
     """All, then one chip per channel THIS BOX ACTUALLY HAS. Never a menu of hopes.
 
@@ -888,7 +926,7 @@ def _compose(zcid: str, conv: dict) -> str:
     # becomes a message only when he taps Send — through the identical path a reply he typed
     # himself takes. If the drafter is off, unconfigured, or has nothing for this thread, the
     # box is simply empty and the screen behaves exactly as it did before.
-    drafted, note = "", ""
+    drafted, note, off_note = "", "", ""
     try:
         from marketing.customer_voice.drafter import store as _drafts
         row = _drafts.latest_for(_space(), zcid)
@@ -897,6 +935,20 @@ def _compose(zcid: str, conv: dict) -> str:
             note = '<div class="drafted">Drafted for you — read it before you send.</div>'
     except Exception as e:                       # noqa: BLE001 — no draft is not a broken page
         log.info("voice.draft_unreadable", extra={"error": type(e).__name__})
+    # §2.6, THE THIRD STATE: no banner, no upsell, no empty-draft placeholder. One line, under
+    # the box, and ONLY on a thread that would have had a draft — which is why it hangs off the
+    # same `row` the drafter would have filled. A buyer with drafting on never sees it; a buyer
+    # who has not connected an account sees it once, where the missing thing would have been,
+    # instead of being told nothing at all and concluding the box does not work.
+    if not drafted:
+        from core import box_secrets
+        if not box_secrets.is_set(box_secrets.ANTHROPIC):
+            off_note = ('<div class="quiet" style="margin-top:8px">Drafts are off. '
+                        '<a href="/voice/settings" style="color:var(--accent)">Turn them on in '
+                        'Settings</a>.</div>')
+    # `note` sits ABOVE the box because it introduces the draft inside it. `off_note` sits BELOW,
+    # because §2.6 puts it there and the reason is the difference between the two: one labels
+    # what is in the box, the other is an aside about what is not. Only one is ever present.
     return ('<form class="compose" method="post" action="' + _esc(f"/voice/inbox/{zcid}/reply")
             + '">'
             f'<input type="hidden" name="n" value="{_esc(_reply.new_nonce())}">'
@@ -904,7 +956,7 @@ def _compose(zcid: str, conv: dict) -> str:
             '<textarea name="text" rows="3" maxlength="1800" required '
             f'placeholder="Write a reply…">{_esc(drafted)}</textarea>'
             '<button class="btn" type="submit">Send</button>'
-            '</form>')
+            '</form>' + off_note)
 
 
 # NOT `@blueprint.post`. `tests/test_customer_voice.py:498-500` scans this department for a CALL
@@ -1033,6 +1085,7 @@ def r_settings():
     body = (
       '<h1>Settings</h1>'
       '<div class="card">'
+      + _drafts_row() +
       '<div class="setrow"><b>Appearance</b>'
       '<span>System follows your phone, including its own light and dark schedule.</span>'
       f'{switch}</div>'
@@ -1211,6 +1264,70 @@ def r_sw():
 # publishing (it registers an INBOUND route) so this is a false positive on the name, but the
 # guard is worth more than the two characters it costs me to avoid it. Weakening a "cannot
 # publish" rule to fit a beacon would be a bad trade at any price.
+# NOT `@blueprint.post`. tests/test_customer_voice.py scans this department for a CALL named
+# `post`, and a decorator is a call — the same two extra characters app.py:659 and :909 spend.
+@blueprint.route("/voice/drafts", methods=["GET", "POST"])
+def r_drafts():
+    """§2.6 — where the buyer connects the AI account that writes their drafts.
+
+    THE KEY IS WRITTEN, NEVER READ BACK. It goes into `box_secrets` (which explains why a table
+    rather than `.env`: the drafter runs in the worker, a different process, and the web app
+    cannot write its environment). No screen and no route ever returns it — the Settings row
+    reports only that one is present, and this form is always empty even when a key is set.
+    """
+    from core import box_secrets
+    gate = _gate()
+    if gate is not None:
+        return gate
+    # WHO SET IT, for the audit line. Best effort and never a blocker: `_gate` has already
+    # refused anyone not signed in, so this only decides whose name the row carries.
+    try:
+        _u = dash.session_user(request) or {}
+    except Exception:                            # noqa: BLE001 — an unreadable session is not
+        _u = {}                                  # a reason to refuse the buyer their own key
+    whoami = _u.get("id")
+    if request.args.get("off"):
+        # "Turn off" — §2.6's second state offers it, so it has to actually work. Removing the
+        # key is the whole of turning drafting off: the drafter skips with no key, and every
+        # message still arrives and is still answerable by hand.
+        box_secrets.clear(box_secrets.ANTHROPIC, user_id=whoami)
+        return redirect("/voice/settings")
+    note = ""
+    if request.method == "POST":
+        try:
+            # VALIDATED IN THE STORE, NOT HERE, so the rule is the same whoever writes a key —
+            # this screen, a future one, or a script. The screen's job is to show the sentence.
+            box_secrets.put(box_secrets.ANTHROPIC,
+                            str(request.form.get("key") or ""), user_id=whoami)
+            return redirect("/voice/settings")
+        except box_secrets.SecretRejected as e:
+            # Never a lecture and never an echo — the same discipline as the claim form. The
+            # field comes back empty: a key is not something to re-display for correction.
+            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
+    body = (
+      '<h1>Add your AI key.</h1>'
+      '<div class="card">'
+      '<div class="setrow">'
+      '<span>Ownbox writes replies in your voice using your own AI account. The words never '
+      'pass through us, and you pay the provider directly instead of a markup on our bill.</span>'
+      '<p style="margin:10px 0 0"><a href="https://console.anthropic.com/settings/keys" '
+      'target="_blank" rel="noopener" style="color:var(--accent)">How to get a key →</a></p>'
+      '</div></div>'
+      + note +
+      '<form class="compose" method="post" action="/voice/drafts">'
+      '<input type="password" name="key" autocomplete="off" spellcheck="false"'
+      ' aria-label="Paste your key" placeholder="Paste your key" '
+      'style="width:100%;font:inherit;font-size:16px;padding:12px 14px;'
+      'border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)">'
+      '<button class="btn" type="submit">Turn drafts on</button>'
+      '</form>'
+      '<p class="quiet" style="margin-top:12px">You can change or remove this key any day. '
+      'Nothing about it reaches us.</p>'
+      '<p style="margin-top:14px"><a href="/voice/settings" style="color:var(--accent)">'
+      '← Settings</a></p>')
+    return _shell(body, here="/voice/settings"), 200
+
+
 @blueprint.route("/voice/installed", methods=["POST"])
 def r_installed():
     """A device reported that it is running installed.

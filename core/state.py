@@ -24,6 +24,19 @@ log = get_logger(__name__)
 # not look absent, or the handler re-runs (re-spends) it on every re-entry.
 MISSING = object()
 
+# ── TABLES THAT HOLD A CREDENTIAL, declared once so nothing has to remember them ──────────
+#
+# WHY THIS IS A CONSTANT AND NOT A COMMENT. `scripts/export_data.py` is customer-facing — the
+# buyer's "give me my data" — and it was a DENY-LIST: a table nobody named was exported in full.
+# The day `box_secrets` arrived, the buyer's own Anthropic key went into the export as plaintext,
+# and `box_claim`'s password hash with it. Measured by seeding one and running the export.
+#
+# Naming them there would have fixed that day only. Declaring them HERE, beside the schema that
+# creates them, means the next person to add a secret-bearing table adds it to a list that sits
+# in front of them — and the exporter also redacts credential-NAMED columns in every other table
+# as a second rule, for the table nobody classified.
+SECRET_TABLES = frozenset({"box_secrets", "box_claim"})
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS spend_ledger (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -211,6 +224,39 @@ CREATE TABLE IF NOT EXISTS box_claim (
   pw_hash     TEXT NOT NULL,   -- scrypt$n$r$p$salt$hash — never the password
   ip          TEXT,            -- who claimed it, for the audit line
   user_agent  TEXT
+);
+
+-- ── THE BOX'S OWN SECRETS, set from a screen rather than from .env ───────────────────
+-- SCHEMA, not MIGRATIONS: a brand-new table needs no version number (the rule above).
+--
+-- WHY THIS TABLE HAD TO EXIST. A delivered box drafts nothing: `brain.backend` ships as `api`
+-- (bring your own key), install.sh mints none and the provisioner passes none, so
+-- `drafter/draft.py` returns {"skipped": "unconfigured"} and the box files messages in silence.
+-- The buyer's only way to fix that is to give the box a key — and the ONE PLACE THEY CAN TYPE
+-- IT IS A SCREEN. They have no shell, no .env and no reason to want either.
+--
+-- AND A SCREEN CANNOT WRITE THE ENVIRONMENT. `core/config.Settings` reads os.environ at import,
+-- so a value set after boot is invisible to the running process; worse, the DRAFTER RUNS IN THE
+-- WORKER, a different process from the web app entirely. Nothing the web process puts in its own
+-- environment ever reaches it. The database is the only medium the two already share, which is
+-- why this is a table and not a file write plus a restart.
+--
+-- WHOSE SECRET THIS IS, because it decides whether the row is alarming. It is the CUSTOMER'S own
+-- vendor key, on a box the customer has root on, sitting beside the password to that same box
+-- (`box_claim.pw_hash`). Ownbox holds no copy and has no way in. It is not a fleet credential and
+-- it must never become one — OSDev1's standing rule: no static Ownbox key on a box the buyer
+-- has root on.
+--
+-- STORED AS THE VALUE, NOT A HASH, and that is forced rather than chosen: unlike a password, the
+-- box has to PRESENT this to Anthropic on every call, so a one-way hash cannot work. What
+-- follows from that: it is never rendered back to any screen (the Settings row shows only that a
+-- key is present), never returned by any route, and `core/logging` already scrubs key-ish values
+-- from the journal.
+CREATE TABLE IF NOT EXISTS box_secrets (
+  name        TEXT PRIMARY KEY,   -- 'anthropic_api_key'
+  value       TEXT NOT NULL,
+  set_at      TEXT NOT NULL,
+  set_by      TEXT                -- the users.id who typed it, for the audit answer
 );
 
 -- ── CONNECTOR SEATS (docs/PLAN_AIOS_CONNECTOR.md section 6 step 2) ────────────────────────

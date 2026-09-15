@@ -8,6 +8,8 @@ import subprocess
 import sys
 import tempfile
 
+import yaml
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 fails = 0
 
@@ -17,6 +19,23 @@ def ok(name, cond, detail=""):
     print(("  ok   " if cond else "  FAIL ") + name + (f"  — {detail}" if detail and not cond else ""))
     fails += 0 if cond else 1
 
+
+# WHOSE FIRST LOOK. scripts/demo.py narrates leads, dedupe, compliance and the sequencer — the
+# Lead Machine's contract — and export_box.sh deliberately leaves it out of a box that ships no
+# Lead Machine. An inbox buyer's first look is the app itself, not a script. Asserting the file
+# unconditionally failed this suite inside every exported customer_voice box (measured
+# 2026-09-15) with a FileNotFoundError dressed up as "it runs on a box with no keys at all".
+#
+# The guard reads the box's own manifest, not the file's absence: a Lead box that stops shipping
+# its demo is exactly the regression worth catching, and it still fails here.
+_modules = (yaml.safe_load((ROOT / "config/aios.config.yaml").read_text()) or {}).get("modules") or []
+_has_lead = any(str(m).startswith("marketing.lead_machine") for m in _modules)
+_demo = ROOT / "scripts/demo.py"
+if not _has_lead and not _demo.exists():
+    print("  ok   no Lead Machine on this box — scripts/demo.py is not part of this product")
+    print("all ok")
+    sys.exit(0)
+ok("the demo script ships on a box that has the lane it narrates", _demo.exists(), str(_demo))
 
 real_db = pathlib.Path(tempfile.mkdtemp()) / "the-buyers.db"
 env = {k: v for k, v in os.environ.items() if not k.startswith("AIOS_")}

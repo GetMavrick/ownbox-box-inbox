@@ -1671,7 +1671,10 @@ def _probe_ownbox_orders(run=None) -> dict[str, tuple[bool, str]]:
         probes[f"ownbox_order:{oid}"] = (False, (
             f"{o.get('host') or 'no address yet'} is {o.get('state')}{key}: "
             f"{str(o.get('last_error') or o.get('key_error') or '')[:160]} | customer {o.get('email') or '?'} | "
-            f"once handled: python -m provisioner.run --resolve {oid} --note '<what you did>'"))
+            # A BOX THAT IS UP BUT COULD NOT BE ANNOUNCED (no mail sender yet) is handed over by a person, and the
+            # one thing they need is its claim link; without it here they would have to ssh in and look it up.
+            + (f"claim link to send them: {o['claim_url']} | " if o.get("claim_url") and o.get("state") == "needs_human" else "")
+            + f"once handled: python -m provisioner.run --resolve {oid} --note '<what you did>'"))
     for oid in sorted(paged - set(need)):
         probes[f"ownbox_order:{oid}"] = (True, "resolved or delivered")
     state.set_alert("ownbox_orders:ids", ",".join(sorted(need)))

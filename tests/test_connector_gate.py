@@ -32,6 +32,8 @@ import pathlib
 import sys
 import tempfile
 
+import yaml
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 os.environ["AIOS_HERMETIC_TEST"] = "1"
@@ -104,9 +106,24 @@ ok("/health is still public", r.status_code == 200, str(r.status_code))
 
 # The unsubscribe page: a CAN-SPAM one-click opt-out already printed in sent mail. A 401 here is
 # a compliance incident, not a test failure, which is why the gate is a prefix and not a default.
+#
+# WHICH BOX IS THIS. /gtm/unsubscribe lives in marketing/lead_machine/web.py, so a sold box that
+# ships no Lead Machine has no route — correctly, because it sends no mail and has therefore
+# printed no opt-out link anyone could follow. Asserting the route unconditionally failed this
+# suite inside every exported customer_voice box (measured 2026-09-15) while passing in the
+# monorepo, which meant the green gate was checking the everything-box and not the product.
+#
+# The guard reads the box's OWN manifest rather than the absence of the route, because "the route
+# is missing" is exactly the failure being looked for on a box that does send mail. A Lead box
+# that loses its unsubscribe page still fails here, loudly.
+_modules = (yaml.safe_load((ROOT / "config/aios.config.yaml").read_text()) or {}).get("modules") or []
+_sends_mail = any(str(m).startswith("marketing.lead_machine") for m in _modules)
 rules = {str(rule) for rule in dispatch.app.url_map.iter_rules()}
 unsub = [p for p in rules if "unsubscribe" in p]
-ok("the unsubscribe route is mounted on this box", bool(unsub), str(sorted(rules))[:120])
+if _sends_mail:
+    ok("the unsubscribe route is mounted on this box", bool(unsub), str(sorted(rules))[:120])
+else:
+    print("  ok   no outbound-mail lane on this box — no opt-out link exists to answer")
 for p in unsub:
     r = client.get(p.replace("<email>", "x@example.com"))
     ok(f"{p} answers an UNAUTHENTICATED stranger (opt-out is a legal right)",

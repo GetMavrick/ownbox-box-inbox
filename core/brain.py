@@ -37,6 +37,7 @@ from core.logging import get_logger
 log = get_logger(__name__)
 
 _client = None
+_client_key = ""          # the key `_client` was built with; a change rebuilds it
 
 # Anthropic exception class names that mean "transient — retry later", matched by
 # name so the spine never imports the SDK at module load. Covers overloaded (529),
@@ -57,15 +58,25 @@ def _is_transient(e: Exception) -> bool:
 
 
 def _client_():
-    global _client
+    global _client, _client_key
+    # THE KEY CAN NOW ARRIVE AFTER BOOT. A delivered box has none in its environment — the buyer
+    # types it into Settings, and it lands in `box_secrets` because the web process cannot write
+    # the worker's environment (different unit entirely). So the client is keyed BY THE KEY: if
+    # the buyer changes or removes it, the next call rebuilds instead of holding a stale client
+    # for the life of the worker. `.env` still wins, so every box running today is untouched.
+    from core import box_secrets
+    key = box_secrets.anthropic_key()
+    if _client is not None and key != _client_key:
+        _client = None
     if _client is None:
         from anthropic import Anthropic  # imported lazily so the spine needs no SDK
         # Autonomous system: transient 429/529 (overloaded) from Anthropic are
         # routine and must not fail a whole job. The SDK does exponential backoff
         # for us when max_retries is set. A per-call timeout bounds a hung request
         # (a tiny router call should never block the worker for minutes).
+        _client_key = key
         _client = Anthropic(
-            api_key=settings.anthropic_api_key,
+            api_key=key,
             max_retries=4,      # ~exponential backoff on 429/500/503/529 + network errors
             timeout=120.0,      # seconds; generous for reasoning, finite for safety
         )
@@ -347,8 +358,13 @@ def can_think() -> tuple[bool, str]:
         if not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
             return False, "brain.backend=claude_code needs CLAUDE_CODE_OAUTH_TOKEN in the environment"
         return True, "claude_code"
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return False, "brain.backend=api needs ANTHROPIC_API_KEY in the environment"
+    # THE BUYER'S KEY COUNTS, and asking the environment alone is what made this answer wrong on
+    # a delivered box: a customer who has typed their key into Settings has a box that can think,
+    # and a probe that said otherwise would report a working box as broken.
+    from core import box_secrets
+    if not box_secrets.anthropic_key():
+        return False, ("brain.backend=api needs an Anthropic key — set ANTHROPIC_API_KEY in the "
+                       "environment, or add one in Settings")
     return True, "api"
 
 

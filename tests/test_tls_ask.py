@@ -1,5 +1,5 @@
 """The demo zone's gate: Caddy issues a certificate only when /tls/ask says yes — and it says yes
-only for this box's own address or an industry a pack claims, under the configured zone."""
+only for this box's own address or a label this box admits, under the configured zone."""
 import os, sys, pathlib, tempfile
 os.environ.setdefault("AIOS_HERMETIC_TEST", "1")
 os.environ.setdefault("AIOS_DB_PATH", tempfile.mkdtemp() + "/t.db")
@@ -15,16 +15,29 @@ def ok(label, cond, detail=""):
     if not cond: _failed += 1
 
 cfg = get_config(); dsec = cfg.setdefault("dash", {}); old_zone = dsec.get("demo_zone"); old_base = os.environ.get("DASHBOARD_BASE_URL")
+# A LABEL THE GATE WILL ACTUALLY ADMIT, ON WHICHEVER BOX THIS IS. The gate admits from two
+# sources: an industry a pack claims, and `dash.labels` in config. Recipe packs are a Lead Machine
+# thing, so a sold customer_voice box claims none — and this file used to assert one existed,
+# which made the very first line fail and every case below it cascade. Measured 2026-09-15 inside
+# an exported inbox box: 4 failures, none of them a defect in the gate.
+#
+# The answer is not to skip the file. This gate is how a sold box gets its certificate, so it
+# matters MORE on the box than in the monorepo. Where no pack claims an industry the label is
+# registered through the gate's other admission path instead, and every case below runs unchanged
+# against a real one. `dash.labels` is restored in the same `finally` that restores the zone.
 claimed = sorted({str(m.get("industry", "")).lower() for m in packs.discover() if m.get("industry")})
-ok("at least one pack claims an industry (the gate needs a real label to admit)", bool(claimed), str(claimed))
 label = claimed[0] if claimed else "med-spas"
+old_top_labels = dsec.get("labels")
+if not claimed:
+    print(f"ok   no pack claims an industry on this box — admitting {label!r} via dash.labels instead")
+    dsec["labels"] = {**(old_top_labels or {}), label: ["job:"]}
 try:
     os.environ["DASHBOARD_BASE_URL"] = "https://aios.example.com"
     dsec["demo_zone"] = ""
     ok("zone unset: the box's own address is admitted", dash.ask_tls("aios.example.com"))
     ok("zone unset: an industry label under any zone is refused", not dash.ask_tls(f"{label}.nlvl.co"))
     dsec["demo_zone"] = "nlvl.co"
-    ok(f"zone set: {label}.nlvl.co (an industry a pack claims) is admitted", dash.ask_tls(f"{label}.nlvl.co"))
+    ok(f"zone set: {label}.nlvl.co (a label this box admits) is admitted", dash.ask_tls(f"{label}.nlvl.co"))
     ok("upper case and a port are normalised", dash.ask_tls(f"{label.upper()}.NLVL.CO:443"))
     for bad, why in [("acme.nlvl.co", "a client name, not an industry"), ("nlvl.co", "the bare zone"), (f"{label}.example.com", "another zone"),
                      (f"deep.{label}.nlvl.co", "a deeper subdomain"), ("probe-no-such-industry.nlvl.co", "an unclaimed label"), ("203.0.113.7", "an IP"),
@@ -53,6 +66,8 @@ try:
     ok("…and one carrying X-Forwarded-Host", r5.status_code == 403, r5.status_code)
 finally:
     dsec["demo_zone"] = old_zone
+    if old_top_labels is None: dsec.pop("labels", None)
+    else: dsec["labels"] = old_top_labels
     if old_base is None: os.environ.pop("DASHBOARD_BASE_URL", None)
     else: os.environ["DASHBOARD_BASE_URL"] = old_base
 print(f"{_failed} FAILED" if _failed else "all ok"); sys.exit(1 if _failed else 0)

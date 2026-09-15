@@ -8,7 +8,9 @@ plus the config gates is how a CLI and a GUI end up disagreeing about what is en
 Each row:
   name        the timer's registered name, or the recipe's slug
   kind        "timer" (worker.PERIODIC) | "recipe" (an installed `kind:` pack, ridden by gtm_recipes)
-  interval_s  seconds between runs (a recipe reports its carrier's interval)
+  interval_s  seconds between runs (a recipe reports its carrier's interval; 0 = no carrier here)
+  runnable    recipes only: False when this box registers no RECIPE_CARRIER timer, so nothing
+              will ever run the pack however its gate is set
   gate        the config key that turns it on ("gtm.outbound_sending", "machines.<slug>.enabled"),
               or None when the timer has no gate (it always runs)
   state       "on" | "off" | "dry" | "live" | "ungated"
@@ -73,8 +75,21 @@ def snapshot(cfg: dict | None = None, *, load: bool = True) -> dict:
                 state, note = "dry", "plans, spends nothing"
             else:
                 state, note = "live", ""
+            # NO CARRIER, NO RUN — and it must not say otherwise. Recipe packs do not schedule
+            # themselves; they are ridden by the RECIPE_CARRIER timer, which marketing/lead_machine
+            # registers. A box that ships no Lead Machine has no carrier, so `carrier` is 0 and
+            # nothing on that box will ever run this pack. Until 2026-09-15 the row still reported
+            # state "live" and the doctor still printed "via gtm_recipes  ON, LIVE" — naming a timer
+            # that does not exist on that box, for work that cannot happen. Measured inside an
+            # exported customer_voice box: a machine pack the customer had PAID for and switched on
+            # rendered as ON, LIVE with interval_s 0.
+            #
+            # This reports the truth. It does not make the pack run — giving an inbox box a carrier
+            # is a product decision about what a bought machine does there, not a display fix.
             rows.append({"name": m["slug"], "kind": "recipe", "interval_s": carrier,
-                         "gate": f"machines.{m['slug']}.enabled", "state": state, "note": note})
+                         "gate": f"machines.{m['slug']}.enabled",
+                         "state": state, "note": note,
+                         "runnable": bool(carrier)})
     except Exception as e:  # noqa: BLE001 — a bad pack set must not blank the whole view
         warnings.append(f"could not list recipes: {e}")
     return {"rows": rows, "warnings": warnings}
@@ -88,7 +103,13 @@ def render(snap: dict) -> list[str]:
     for r in snap["rows"]:
         if r["kind"] == "recipe":
             st = {"off": "off (ships dark)", "dry": "ON, dry_run (plans, spends nothing)", "live": "ON, LIVE"}[r["state"]]
-            out.append(f"    recipe {r['name']:<21} via {RECIPE_CARRIER}  {st}")
+            if r.get("runnable", True):
+                out.append(f"    recipe {r['name']:<21} via {RECIPE_CARRIER}  {st}")
+            else:
+                # The gate's state is still shown — the operator did switch it on, and hiding that
+                # would be its own lie — but it is shown as what it is: switched on, never run.
+                out.append(f"    recipe {r['name']:<21} NOT RUNNABLE HERE "
+                           f"(no {RECIPE_CARRIER} timer on this box)  {st}")
         else:
             tail = {"on": "  ON", "off": "  off" + ("  (ships dark)" if r["note"] else ""), "ungated": ""}[r["state"]]
             out.append(f"    {r['name']:<28} every {r['interval_s']:>6}s{tail}")

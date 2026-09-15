@@ -31,13 +31,28 @@ TITLE = "Unified Inbox"
 # your website" — an instruction to do a thing that was already done. MEASURED on the live box
 # 2026-09-09, minutes after Stage 1 deployed. Telling someone to fix what they have fixed is how
 # a dashboard teaches them to stop reading it, which is the same failure as a false red light.
+# NO CONFIGURATION KEY EVER REACHES THIS PAGE. Three of these hints used to name one: `Site` and
+# `Speed` both read "point customer_voice.site_url at your website" and `Competitors` read "name
+# them in customer_voice.competitors.roster". A buyer met the first two on his FIRST screen after
+# paying (measured 2026-09-15 by claiming an exported box and rendering it), under a heading that
+# says "Worth watching" — so the product's opening move was to tell him to worry about something
+# he cannot act on, in a language he does not speak, naming a YAML path he will never see.
+#
+# The rule, stated once here because this is where it broke: no config key, YAML path, env var or
+# module name appears on a screen a customer can reach. These hints now say what the box needs in
+# the same voice as the three that were always right ("connect your Google Business Profile").
+#
+# They deliberately do NOT name a place to go and do it. There is no field for a website address
+# in the app today (`/voice/settings` carries appearance, install and refresh), and sending a
+# buyer to a screen that cannot help him is the same defect wearing politer words. When the field
+# exists, these gain "in Settings" and not before.
 LABEL = {
-    "uptime": ("Site", "point customer_voice.site_url at your website"),
-    "pagespeed": ("Speed", "point customer_voice.site_url at your website"),
+    "uptime": ("Site", "tell Ownbox your website address and it will watch it for you"),
+    "pagespeed": ("Speed", "tell Ownbox your website address and it will watch it for you"),
     "reviews": ("Reviews", "connect your Google Business Profile"),
     "comments": ("Comments", "connect your Facebook and Instagram accounts"),
     "seo": ("Search", "connect Search Console and Analytics"),
-    "competitors": ("Competitors", "name them in customer_voice.competitors.roster"),
+    "competitors": ("Competitors", "name the businesses you want watched"),
 }
 
 
