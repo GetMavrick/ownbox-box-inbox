@@ -148,7 +148,17 @@ class Settings:
     # Auto Poster (Zernio) — deep SDK integration. Posts a finished reel to social.
     # Inert until ZERNIO_API_KEY is set (account ids auto-discovered via the SDK).
     zernio_api_key         = os.environ.get("ZERNIO_API_KEY", "")
+    # The Zernio PROFILE this box posts as. On a box we built, the provisioner minted a profile of its own
+    # and scripts/connector_handoff.py wrote its id here at first boot; the key is scoped to it, and the
+    # client needs the id as well because the API takes profileId on its own calls. Empty on every other
+    # box, which is exactly the behaviour before it existed.
+    zernio_profile_id      = os.environ.get("ZERNIO_PROFILE_ID", "")
     zernio_timeout         = float(os.environ.get("ZERNIO_TIMEOUT", "30"))
+    # WHERE A BUYER CANCELS MANAGED. Stripe's own customer-portal login page, which takes an email and mails
+    # back a link — so cancelling needs NO credential of ours on a box its customer has root on, and no
+    # service of ours in the path at all. Unset, the Managed page says to reply to the welcome email
+    # instead, which is honest rather than a dead button.
+    managed_portal_url     = os.environ.get("MANAGED_PORTAL_URL", "")
     # Cockpit Post trigger: set this Airtable single-select to the trigger value on a
     # READY reel to publish it. Schedule field set → Zernio holds + releases on that date;
     # else it fires immediately (autopost_default_mode = "now"). Defaults match the owner's

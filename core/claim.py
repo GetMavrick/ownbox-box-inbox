@@ -120,6 +120,20 @@ def provisioned_host() -> str:
         return ""
 
 
+def provisioned_managed_until() -> str:
+    """The day this box's free three months of Managed end, or "" when it has no Managed service.
+
+    Written by the provisioner into provision.json at build time (it reads the cart's line items). It is
+    NOT a licence and gates nothing: a box whose Managed has lapsed is exactly as much the buyer's as one
+    whose trial is running. It exists so the box can tell its owner what is about to happen to their card.
+    """
+    try:
+        with open(PROVISION_JSON, encoding="utf-8") as fh:
+            return str(json.load(fh).get("managed_until") or "").strip()
+    except Exception:                       # noqa: BLE001 — absent or unreadable is simply no Managed
+        return ""
+
+
 def claimed() -> dict | None:
     """The claim row, or None. Cheap enough to call on every render of the claim page."""
     try:

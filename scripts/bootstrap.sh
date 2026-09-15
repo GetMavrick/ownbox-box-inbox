@@ -107,6 +107,11 @@ bash scripts/install.sh "${INSTALL_ARGS[@]}"
 # A BOX THAT FETCHES RELEASES FROM ITS BOX REPOSITORY gets its own read-only update key here, with
 # GitHub's host keys pinned (scripts/box_update_key.sh). Any other checkout is left as it is.
 bash scripts/box_update_key.sh
+# A BOX BUILT WITH A CONNECTOR takes its own scoped key out of provision.json and into .env. Python, not
+# shell: the key is read from a file and written to a file, never passed as an argument. Silent and green
+# on every box that has no connector block, which is every box the owner installs by hand.
+python3 scripts/connector_handoff.py || echo "   connector handoff failed; the box works, Instagram waits"
+
 
 echo "== 4/6 the box's public address =="
 # Sending refuses without an https base (every email carries an unsubscribe link built from it)

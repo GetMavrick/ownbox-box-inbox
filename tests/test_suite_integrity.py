@@ -262,8 +262,6 @@ def test_every_suite_is_actually_run_by_ci():
         "test_dialogue_pipeline": "asserts the CODE default photo engine while reading the "
                                   "configured one, so it passes in the repo only by test order "
                                   "(already named in the exporter's skip set for the same reason)",
-        "test_halt_knowledge_export": "kill switch + knowledge folder + export-everything; "
-                                      "never added when it landed",
     }
     src = wf.read_text()
     names = sorted([p.stem for p in ROOT.glob("test_*.py")] + ["smoke_test"])

@@ -92,7 +92,10 @@ def _default_space() -> dict:
         "airtable_table": settings.airtable_videos_table,
         "slack_channel": settings.reel_slack_channel_id,
         "zernio_key": settings.zernio_api_key,
-        "zernio_profile_id": None,     # single-tenant: the key isolates
+        # Single-tenant: the key isolates, so this stayed None — but a box WE built now posts as a profile
+        # of its own, and the client needs the id as well (it sends profileId on its own calls). Set by
+        # scripts/connector_handoff.py at first boot; None everywhere else, exactly as before.
+        "zernio_profile_id": settings.zernio_profile_id or None,
         "carousel_table": None,        # opt-in per Space (spec §4)
         "written_table": None,         # opt-in per Space (owner 2026-07-30)
         "label": None,                 # opt-in per Space (owner 2026-09-05): no label, no subdomain

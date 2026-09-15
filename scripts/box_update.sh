@@ -97,6 +97,16 @@ PY
 # Schema evolution: init_db runs idempotent CREATE-IF-NOT-EXISTS for new tables AND the
 # versioned _run_migrations() (user_version-gated, transactional) for changes to existing ones.
 .venv/bin/python scripts/init_db.py
+# A BOX BUILT FROM AN OLDER IMAGE STILL GETS ITS CONNECTOR. The handoff (provision.json -> .env)
+# runs in bootstrap, and bootstrap runs ONCE, at first boot. Every box built from an image cut
+# before that code existed therefore has a Zernio key sitting unread in provision.json forever —
+# found 2026-09-15 with the live image still at .17 and the handoff shipped in .19. Running it
+# here heals them on the next update instead of requiring a new image to reach every box: it is
+# idempotent, it says "already set" when there is nothing to do, and it refuses to replace a key
+# the buyer chose. A box with no connector block prints one line and moves on.
+if [ -f scripts/connector_handoff.py ]; then
+  .venv/bin/python scripts/connector_handoff.py || echo "   connector handoff failed; box unaffected"
+fi
 # UNIT FILES REACH THE BOX. Editing deploy/*.service did nothing: install_services.sh copies
 # them once, and deploy only restarted. Live-found 2026-09-04 — the installed worker unit was
 # from June 11, missing the Nice/IOScheduling priorities AND the NoNewPrivileges/PrivateTmp/

@@ -1160,6 +1160,65 @@ def _people_list(notice: str = "") -> str:
 </section>"""
 
 
+# ── Managed: what the buyer's card is about to do, and how to stop it ────────────────────────────
+#
+# Managed is a separate product bought in the same cart as the box (owner, 2026-09-15): a free three
+# months that then RENEWS AUTOMATICALLY. A subscription that renews itself owes its buyer two things —
+# to be told before the charge, and to be cancellable without asking us — and the second is the law
+# (FTC click-to-cancel), not a nicety.
+#
+# THE CANCEL LINK IS STRIPE'S OWN PORTAL, on purpose. Minting a portal session would put a Stripe
+# credential in the path, and this page runs on a droplet the CUSTOMER has root on — so the box holds
+# no key, talks to no billing service of ours, and simply points at the page Stripe already runs. It
+# costs the buyer one email round-trip and costs us no secret on a machine we do not control.
+#
+# WITH NOTHING CONFIGURED IT SAYS SO. An unset portal URL prints the fallback instead of a dead link:
+# a cancel button that does nothing is worse than a sentence telling you who to write to.
+
+
+def _managed_page(body: str, code: int = 200):
+    return page("Managed", "narrow", body, title=f"{brand()} · Managed"), code
+
+
+def _managed_body() -> str:
+    until = _claim.provisioned_managed_until()
+    if not until:
+        # Every box that nobody bought Managed for, which is most of them. Say it plainly and stop.
+        return ('<label class="lbl mb">This box does not have the Managed service.</label>'
+                '<p class="val">Nothing here renews and nothing is charged. The box is yours either way.</p>')
+    try:
+        day = datetime.fromisoformat(until).strftime("%-d %B %Y")
+    except ValueError:
+        day = until                          # an unparseable date is still better shown than swallowed
+    portal = (settings.managed_portal_url or "").strip()
+    # STRIPE IS THE SOURCE OF TRUTH, AND THIS PAGE SAYS SO. The date came from the cart at build time and
+    # never changes — so on a box whose owner has already cancelled, an unqualified "it renews" would be a
+    # lie told by us to the person who cancelled. Until the box can read subscription state (it cannot: that
+    # needs a credential this machine must never hold), the honest move is to name what was BOUGHT and point
+    # at who knows what is true now.
+    how = (f'<p><a class="btn-primary" href="{html.escape(portal)}" rel="noopener">Manage or cancel Managed</a></p>'
+           '<p class="val">That is Stripe, where the subscription lives and where its current state is. '
+           'They will email you a link to sign in. If you have already cancelled, Stripe will say so.</p>'
+           if portal.startswith("https://") else
+           '<p class="val">To cancel, reply to your welcome email and we will stop it the same day.</p>')
+    return ('<label class="lbl mb">Managed is on.</label>'
+            f'<p class="val">You bought Managed with this box, with three months free to '
+            f'<strong>{html.escape(day)}</strong>. Unless you cancel, it renews after that.</p>'
+            f'{how}'
+            '<p class="val">Cancelling Managed does not touch the box. It keeps running, it keeps your data, '
+            'and it stays yours — you would simply be running it yourself.</p>')
+
+
+@blueprint.get("/dash/managed")
+def managed():
+    if not session_ok(request):
+        return redirect("/dash/login?next=/dash/managed")
+    if not _owner_session():
+        # Billing is the owner's, but a colleague asking must not meet a blank 403 with no explanation.
+        return _managed_page('<p class="val">Only the box owner can see or change the Managed service.</p>', 403)
+    return _managed_page(_managed_body())
+
+
 def _invite_notice(email: str, token: str) -> str:
     link = f"{request.host_url.rstrip('/')}/join?t={quote(token, safe='')}"
     return (f'<p class="val">Invite link for {html.escape(email)} — shown once, copy it now:<br>'
