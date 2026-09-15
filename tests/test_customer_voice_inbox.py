@@ -29,11 +29,24 @@ class FakeInbox:
         self.messages_result = {"messages": [], "next_cursor": None}
         self.send_impl = lambda cid, aid, text, tag: {"message_id": "out-1"}
         self.list_raises = None
+        # platform token -> page, for the tests that care WHICH channel answered.
+        self.list_by_platform: dict = {}
 
-    def list(self, *, limit=50):
+    def list(self, *, limit=50, platform="facebook"):
+        # THE FAKE HONORS `platform` BECAUSE THE VENDOR DOES. Zernio returns a channel's
+        # conversations only under that channel's own token — an IG thread is invisible to
+        # platform="facebook" and vice versa (both directions live-verified). A fake that
+        # ignored the argument would hand every channel the same thread, which is the one
+        # shape that makes a broken two-channel sweep look like a working one.
         if self.list_raises:
             raise self.list_raises
-        return self.list_result
+        if self.list_by_platform:
+            return self.list_by_platform.get(
+                platform, {"conversations": [], "next_cursor": None})
+        # Default: `list_result` is Messenger's page (what every test here predates the
+        # second channel by), and the other channels are empty.
+        return (self.list_result if platform == "facebook"
+                else {"conversations": [], "next_cursor": None})
 
     def messages(self, cid, account_id, *, limit=100):
         return self.messages_result
@@ -301,18 +314,23 @@ def main():
     INBOX.list_raises = zernio.ZernioError("PLATFORM_NOT_SUPPORTED")
     for _ in range(3):
         poller.poll_sweep()
-    ok("repeated poll failure warns once (throttled)",
-       sum(1 for m in warns if m == "inbox.poll_list_failed") == 1)
-    ok("suppressed repeats still counted", poller._poll_fail["sp-x"]["count"] == 3)
+    # ONE WARNING PER CHANNEL, not one per sweep: each polled channel makes its own list
+    # call and carries its own throttle, so three sweeps over two channels warn twice total.
+    n_chan = len(poller.channels.POLLED)
+    ok("repeated poll failure warns once PER CHANNEL (throttled)",
+       sum(1 for m in warns if m == "inbox.poll_list_failed") == n_chan)
+    ok("suppressed repeats still counted",
+       poller._poll_fail[("sp-x", "messenger")]["count"] == 3)
     clock[0] += poller._POLL_WARN_THROTTLE_S + 1
     poller.poll_sweep()
     ok("re-warns after the throttle window",
-       sum(1 for m in warns if m == "inbox.poll_list_failed") == 2)
+       sum(1 for m in warns if m == "inbox.poll_list_failed") == n_chan * 2)
     INBOX.list_raises = None
     INBOX.list_result = {"conversations": [], "next_cursor": None}
     poller.poll_sweep()
     ok("recovery logged + throttle cleared",
-       "sp-x" not in poller._poll_fail and "inbox.poll_recovered" in infos)
+       not any(k[0] == "sp-x" for k in poller._poll_fail)
+       and "inbox.poll_recovered" in infos)
     poller.log.warning, poller.log.info, poller._now_s = _sv_w, _sv_i, _sv_n
 
     # ── crash-safety: watermark must NOT advance past an un-enqueued inbound ──

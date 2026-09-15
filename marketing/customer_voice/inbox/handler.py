@@ -5,7 +5,8 @@ model cost): a new ad conversation gets ONE fixed opener, guarded five ways:
 
   kill switch  (config inbox.autonomy: off → nothing sends, instantly)
   opt-out      (a STOP inbound marks the conversation opted_out, forever)
-  24h window   (window.py decides; fail closed — never the caller's judgment)
+  24h window   (window.py decides, FOR THIS THREAD'S CHANNEL; fail closed — never
+                the caller's judgment, and never another channel's clock)
   rate cap     (hourly, per space — over-cap DEFERS via RateCapped/not_before to
                 when capacity frees; no retry attempt burned, truly "sends later")
   exactly-once (atomic opener claim + idem-keyed send ledger — a requeue,
@@ -23,7 +24,7 @@ from core.logging import get_logger
 
 from core.vendors import zernio
 
-from . import store, window
+from . import channels, store, window
 
 log = get_logger(__name__)
 
@@ -65,7 +66,7 @@ def _notify(job: dict, text: str) -> None:
 
 
 def handle(job: dict) -> dict:
-    """Worker entry for one new inbound Messenger message."""
+    """Worker entry for one new inbound message, on any polled channel."""
     try:
         req = json.loads(job.get("raw_text") or "{}")
     except ValueError as e:
@@ -77,11 +78,25 @@ def handle(job: dict) -> dict:
     inbound_text = req.get("inbound_text") or ""
     ad_bit = f" (ad: {req['ad_title']})" if req.get("ad_title") else (
         f" (ad {req['ad_meta_id']})" if req.get("ad_meta_id") else "")
+    # WHICH CHANNEL THIS THREAD IS ON. Two things downstream turn on it and they are not
+    # equally forgiving: every Slack line below used to say "Messenger" as a literal, which
+    # on an Instagram thread is merely wrong; the 24h window below is keyed by it, and there
+    # a wrong answer authorises a send under a rulebook that does not govern this thread.
+    # The poller stamps it on the row AND in the payload — see `_sweep_channel`.
+    platform = str(req.get("platform") or "").strip().lower()
+    if not platform:
+        # A job enqueued before the poller stamped the channel — or a requeue of one. The
+        # row knows, and one local read is worth not telling the owner "New this channel
+        # message". This lookup is for the LABEL; the send window below re-reads the row
+        # it actually holds and never trusts a value resolved this early.
+        platform = str((store.get_conversation(space_name, zcid) or {})
+                       .get("platform") or "").strip().lower()
+    chan = channels.label(platform)
 
     # ── STOP: opt-out law runs before anything else, kill switch included ──────
     if _is_stop(inbound_text):
         store.set_opted_out(space_name, zcid)
-        _notify(job, f":no_bell: Messenger contact opted out{ad_bit} — "
+        _notify(job, f":no_bell: {chan} contact opted out{ad_bit} — "
                      "conversation muted for automation.")
         return {"status": "opted_out", "conversation": zcid}
 
@@ -96,19 +111,39 @@ def handle(job: dict) -> dict:
     _ACTIVE_TIERS = {"opener"}          # Phase 1. Phase 2 (AI replies) registers its tier here.
     autonomy = str(_cfg().get("autonomy", "unset")).strip().lower()
     if autonomy not in _ACTIVE_TIERS:
-        _notify(job, f":speech_balloon: New Messenger message{ad_bit} — autonomy is "
+        _notify(job, f":speech_balloon: New {chan} message{ad_bit} — autonomy is "
                      f"'{autonomy}' (not an active send tier), observed only, no auto-reply "
                      f"sent. “{inbound_text[:140]}”")
         return {"status": "observed", "conversation": zcid}
 
     conv = store.get_conversation(space_name, zcid) or store.upsert_conversation(
-        space=space_name, zcid=zcid, last_inbound_at=req.get("inbound_at"))
+        # A job whose row is gone (restored DB, pruned table) recreates it. `platform or
+        # "messenger"` is a MIGRATION-WINDOW fallback with an expiry, not a default: the
+        # only payloads without the key are the ones already sitting in the queue when this
+        # change deployed, and every one of those is Messenger — it was the only channel
+        # polled. It is written as a literal here rather than left to the store's own
+        # default so that the day it stops being true, this line is the one that says so.
+        space=space_name, zcid=zcid, platform=platform or "messenger",
+        last_inbound_at=req.get("inbound_at"))
     if conv.get("opted_out"):
         return {"status": "opted_out", "conversation": zcid}
 
-    # ── 24h window: fail closed (a stale requeue must not message anyone) ─────
-    if window.allowed_send(conv.get("last_inbound_at") or req.get("inbound_at")) != "freeform":
-        log.warning("inbox.window_blocked", space=space_name, conversation=zcid)
+    # THE ROW OUTRANKS THE PAYLOAD. The row is what the screen renders and what a person
+    # reading this thread believes; a payload can be a requeue of a job written by an older
+    # poller. They agree in every ordinary case — when they cannot, the send must be judged
+    # by the same channel the human sees.
+    platform = str(conv.get("platform") or "").strip().lower() or platform
+    chan = channels.label(platform)
+
+    # ── the send window FOR THIS CHANNEL: fail closed (a stale requeue must not message
+    # anyone). Passed explicitly — `allowed_send` defaults to Messenger for its Phase-1
+    # callers, and inheriting that default is precisely what window.py refuses to allow
+    # ("adding a platform string to the poller must never be enough to authorise a send
+    # on it"). An unknown or empty channel has no rule and therefore BLOCKS. ──────────
+    if window.allowed_send(conv.get("last_inbound_at") or req.get("inbound_at"),
+                           platform=platform) != "freeform":
+        log.warning("inbox.window_blocked", space=space_name,
+                    channel=platform, conversation=zcid)
         return {"status": "window_blocked", "conversation": zcid}
 
     # ── account_id is REQUIRED to send (F-1) and is the tenant boundary under the
@@ -116,7 +151,7 @@ def handle(job: dict) -> dict:
     # do NOT claim (a claim we can't fulfill would loop). ────────────────────────
     if not account_id:
         log.warning("inbox.no_account_id", space=space_name, conversation=zcid)
-        _notify(job, f":warning: New Messenger message{ad_bit} but I can't resolve the "
+        _notify(job, f":warning: New {chan} message{ad_bit} but I can't resolve the "
                      "connected account to reply from — surfaced, not auto-replied. "
                      f"“{inbound_text[:140]}”")
         return {"status": "no_account", "conversation": zcid}
@@ -145,14 +180,14 @@ def handle(job: dict) -> dict:
         if not store.get_send(space_name, f"opener:{space_name}:{zcid}"):
             log.error("inbox.opener_claimed_unsent",
                       space=space_name, conversation=zcid)
-            _notify(job, f":warning: Opener for this Messenger thread{ad_bit} was "
+            _notify(job, f":warning: Opener for this {chan} thread{ad_bit} was "
                          "claimed but no send is recorded (crash mid-send?) — check "
                          "the thread and reply manually. "
                          f"“{inbound_text[:140]}”")
             return {"status": "already_opened", "conversation": zcid}
         # Phase 1 takes no further automated action; surface the follow-up message
         # to the owner instead (a human continues the thread).
-        _notify(job, f":speech_balloon: Reply on an opened Messenger thread{ad_bit}: "
+        _notify(job, f":speech_balloon: Reply on an opened {chan} thread{ad_bit}: "
                      f"“{inbound_text[:140]}” — take it away.")
         return {"status": "already_opened", "conversation": zcid}
 
@@ -170,7 +205,7 @@ def handle(job: dict) -> dict:
             # May have landed: KEEP the claim, record it, tell the owner — never resend.
             store.record_send(space=space_name, zcid=zcid, idem_key=idem,
                               kind="opener", status="indeterminate", error=str(e))
-            _notify(job, f":warning: Messenger opener{ad_bit} is INDETERMINATE "
+            _notify(job, f":warning: {chan} opener{ad_bit} is INDETERMINATE "
                          "(timeout after send) — check the thread before replying "
                          "manually; automation will not resend.")
             log.error("inbox.opener_indeterminate", space=space_name,
@@ -184,10 +219,10 @@ def handle(job: dict) -> dict:
                       status="ok", zernio_message_id=sent["message_id"])
     store.record_message(space=space_name, zcid=zcid, zmid=sent["message_id"],
                          direction="out", sent_by="ai", body=text)
-    _notify(job, f":mega: *New Messenger ad lead*{ad_bit} — they said "
+    _notify(job, f":mega: *New {chan} ad lead*{ad_bit} — they said "
                  f"“{inbound_text[:140]}” · opener auto-sent. Thread is yours "
                  "when you want it.")
-    log.info("inbox.opener_sent", space=space_name, conversation=zcid,
-             message_id=sent["message_id"])
+    log.info("inbox.opener_sent", space=space_name, channel=platform,
+             conversation=zcid, message_id=sent["message_id"])
     return {"status": "opened", "conversation": zcid,
             "message_id": sent["message_id"]}
