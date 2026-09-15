@@ -1,0 +1,10 @@
+[Unit]
+Description=AIOS nightly DB backup — 03:00 owner time
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 America/Los_Angeles
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

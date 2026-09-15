@@ -1,0 +1,12 @@
+[Unit]
+Description=AIOS nightly SQLite backup (online .backup, 7-day rotation)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aios
+EnvironmentFile=/opt/aios/.env
+ExecStart=/opt/aios/.venv/bin/python scripts/backup_db.py
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

@@ -1,0 +1,18 @@
+# Keeps your secrets and your data OUT of the GitHub repo you are about to create.
+# Do not remove these lines. `git status` should never show .env or a .db file.
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+data/backups/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.bak
+*.log
+.DS_Store
+Thumbs.db

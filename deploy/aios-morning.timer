@@ -1,0 +1,13 @@
+[Unit]
+Description=AIOS morning ideas drop — every day at 8 AM owner time
+
+[Timer]
+# Owner's morning, not the box's (droplets run UTC).
+OnCalendar=*-*-* 08:00:00 America/Los_Angeles
+# A box that was down at 8 AM posts the drop when it comes back, instead of
+# silently skipping the day. The date-keyed idempotency makes replays safe.
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

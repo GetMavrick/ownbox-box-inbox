@@ -1,0 +1,21 @@
+[Unit]
+Description=AIOS Litestream replication (continuous off-box SQLite backup)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aios
+EnvironmentFile=/opt/aios/.env
+ExecStart=/usr/local/bin/litestream replicate -config /opt/aios/deploy/litestream.yml
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+# Litestream needs to write its own WAL-shadow dir next to the db:
+ReadWritePaths=/opt/aios
+
+[Install]
+WantedBy=multi-user.target

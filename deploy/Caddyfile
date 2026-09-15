@@ -1,0 +1,15 @@
+# AIOS public edge — installed to /etc/caddy/Caddyfile by scripts/expose.sh
+# (which substitutes the domain). Caddy terminates TLS (auto-provisioned
+# Let's Encrypt certs) and proxies to the loopback-bound gunicorn.
+#
+# What this exposes, and why each is safe:
+#   /dispatch        bearer-gated (constant-time compare) — Mavrick's ingress
+#   /dash*           session-gated operator dashboard (login = DASH_TOKEN, or the
+#                    dispatch bearer when DASH_TOKEN is unset — see README.box.md)
+#   /reel/<token>*   PUBLIC view-only capability pages — the unguessable token
+#                    is the whole access grant; approval still needs login
+#   /health          liveness only, no data
+{$AIOS_DOMAIN} {
+	encode gzip
+	reverse_proxy 127.0.0.1:8000
+}

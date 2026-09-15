@@ -1,0 +1,34 @@
+[Unit]
+Description=AIOS worker (claims jobs, runs module handlers)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aios
+EnvironmentFile=/opt/aios/.env
+# /usr/local/bin carries the node/npx symlinks provision_render.sh creates;
+# /root/.local/bin is where the native claude installer lands (defect B6: a
+# binary visible to your SSH shell but not to the service is the classic
+# "works by hand, fails as a service").
+Environment=PATH=/usr/local/bin:/root/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+# Low CPU/IO priority for the WHOLE worker (renders, whisper alignment, ffmpeg
+# run as its children and inherit): on the 1 vCPU box an encode otherwise pegs
+# the core and STARVES interactive serving — live-found as choppy video playback
+# while a render was finishing. Offline work yields; gunicorn/Caddy stay smooth;
+# renders take marginally longer (overnight batches don't care).
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+ExecStart=/opt/aios/.venv/bin/python -m core.worker
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+Restart=always
+RestartSec=5
+# No sandbox directives here on purpose: the render path (chromium via npx,
+# /dev/shm, .studio workspace) was proven on this box WITHOUT them. Harden only
+# what we can verify doesn't break a paid render.
+
+[Install]
+WantedBy=multi-user.target

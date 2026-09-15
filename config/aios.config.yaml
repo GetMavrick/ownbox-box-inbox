@@ -1,0 +1,501 @@
+# Box configuration. Every knob is commented in place. Tenant values go in my/settings.yaml.
+
+# AIOS configuration — model tiering, cost ceiling, rate table.
+# Reasoning runs on the Anthropic Messages API under Commercial Terms (API key).
+
+cost:
+  # One DM a day of every meter (used / cap / days to cap at this pace), and one the moment a
+  # vendor crosses 80% of its cap — from the same meter the vendors are charged against. The
+  # Places cap and the HeyGen cap were both discovered from a FAILED RUN on 2026-09-06.
+  digest:
+    enabled: true
+    hour_local: 8            # first tick at/after this hour (cost.timezone) sends the day's digest
+    # THE MORNING REVIEW ABSORBED THIS DIGEST (2026-09-09): the review renders the same meters as
+    # its bottom rail, so the standalone meters DM would make breakfast two messages. false = the
+    # 80% crossing alert still fires the moment it happens (a transition, not a digest); only the
+    # daily meters message is folded into the review. true = the old standalone DM as well.
+    standalone: false
+  monthly_ceiling_usd: 90.0     # in-system governor (Layer 2), below the console cap (Layer 1)
+  billing_cycle_day:  1   # SET THIS to your Anthropic console billing-cycle reset day
+  timezone: "UTC"        # set your own timezone
+
+# CUSTOMER VOICE — what the outside world says about this business, and whether its front door
+# works (marketing/customer_voice/, docs/PLAN_CUSTOMER_VOICE.md). Stage 1 is the two rails that
+# need NO account and NO approval: is the site up, and is it fast. They report from the first
+# poll on any box, with no key to find and nothing to switch on.
+#
+# The rails that DO need an account (reviews, comments, search) stay inert until their credential
+# exists — which is an absent key, not a flag set false. Nothing here ships dark.
+customer_voice:
+  enabled: true
+  # THE SITE THIS BUSINESS ANSWERS ON. Empty = the uptime and speed rails have nothing to check
+  # and say so as "connect", never as a failure. A clone puts the buyer's own domain here.
+  site_url: ""
+  uptime:
+    interval_s: 900            # every 15 minutes; a front door that is down is worth knowing fast
+    timeout_s: 12
+    slow_ms: 2500              # answered, but slowly enough that a visitor feels it
+  pagespeed:
+    interval_s: 86400          # once a day: the score moves with deploys, not with minutes
+    strategy: mobile           # mobile is what Google ranks on
+    # PageSpeed Insights answers unauthenticated at a low quota. A key raises it and is the only
+    # credential in Stage 1 — absent is fine, and the rail still runs.
+    api_key: ""
+  # WHO THIS BUSINESS COMPETES WITH — HIS LIST, and the box never guesses at it. The three shops
+  # on the same street, a national chain, or neither: nothing on this machine can tell, and
+  # guessing turns the most motivating page in the product into the least trustworthy one.
+  #
+  # Each entry is a Places text query — a name plus enough place to be unambiguous. `self` is his
+  # own listing, because the entire point is the comparison. Empty = the rail says "name the
+  # competitors to watch" and costs nothing.
+  #
+  # BOUNDED AND MONTHLY, deliberately: one metered Places search per entry per month, and the
+  # place id is resolved once and reused. A roster of six costs six searches a month.
+  competitors:
+    interval_s: 2592000        # 30 days
+    max_roster: 8              # a refusal, not a truncation — see competitors/roster.py
+    # HOW MANY REVIEWS A RATING NEEDS TO BE COMPARABLE. A 5.0 from two people is not ahead of a
+    # 4.9 from four hundred, and ranking on the number alone says it is. Below this a listing is
+    # still SHOWN — hiding a real competitor would be worse — but it takes no position, and the
+    # page says why. A stated floor, not a weighting curve somebody has to reverse-engineer.
+    min_reviews: 5
+    self: ""                   # e.g. "Brian MacDonald, Halifax NS"
+    roster: []                 # e.g. ["Acme Consulting, Halifax NS", "Beta Studio, Halifax NS"]
+
+  # THE RAILS THIS BUSINESS ACTUALLY HAS, his answer and nobody's inference. A rail he has not
+  # been asked about renders NOTHING; one he owns but has not connected says "connect", never a
+  # failure. Guessing here is how a clone nags forever about a Yelp listing that does not exist.
+  rails_owned: [uptime, pagespeed]
+
+# THE MORNING REVIEW — one report per machine per day, sent at breakfast and kept forever
+# (core/report.py, docs/PLAN_MORNING_REVIEW.md). Owner, 2026-09-09: "a crucial feature that
+# every business owner will want to receive. Every single morning."
+review:
+  enabled: true
+  hour_local: 8              # first worker tick at/after this hour (cost.timezone) sends the DM
+  # Which days the DM goes out. Every day is the default (owner: "every single morning");
+  # list weekdays here to ratchet back. Reports are WRITTEN every day regardless, so a day never
+  # disappears from the page's picker.
+  send_days: [mon, tue, wed, thu, fri, sat, sun]
+  # THE SAME REVIEW AS AN EMAIL, beside the Slack DM (owner, 2026-09-10: "Wish it was an email
+  # with the 3 sections"; one section per machine, Lead, Content, Customer Voice). Empty means no
+  # email, and empty is right here: the address is per box, so it belongs in my/settings.yaml.
+  # email_from falls back to GTM_FROM_EMAIL, which is already on a Resend-verified domain.
+  email_to: ""
+  email_from: ""
+
+worker:
+  max_attempts: 5               # RetryableError requeues before a job is failed (survives outages)
+  retry_backoff_s: 60           # exponential base: 60s, 120s, 240s ... (cap 600s) via jobs.not_before
+
+# Department modules to load at worker startup (each self-registers a handler).
+# core/ never imports these directly — the dependency is data, not code.
+modules:
+  - marketing.customer_voice
+  - marketing.customer_voice.inbox
+
+# Vendor meter — monthly caps in each vendor's NATIVE units (renders, credits).
+# Same billing cycle as `cost:`. Omit a vendor (or its cap) to leave it unmetered.
+# est_usd_per_unit is the USD OVERLAY: enforcement stays in units; reporting (the
+# watchdog spend line, check_budget) converts to one cross-vendor dollar number.
+# Set it to your plan price / monthly units; 0 = not priced yet (reported as $0).
+# Reasoning backend for brain.think():
+#   api          Anthropic Messages API (Commercial Terms). REQUIRED for resold
+#                clones — each client brings their own ANTHROPIC_API_KEY.
+#   claude_code  the OWNER's Claude subscription through the official Claude Code
+#                CLI headless mode (token from `claude setup-token`, installed as
+#                CLAUDE_CODE_OAUTH_TOKEN in /opt/aios/.env). Owner box ONLY —
+#                consumer subscriptions are per-person and must never power clones.
+brain:
+  backend: api   # BYOK: your ANTHROPIC_API_KEY. (claude_code is the vendor subscription path, never a clone.)
+
+vendors:
+  heygen:
+    monthly_unit_cap: 100       # avatar renders per cycle — SET TO YOUR HEYGEN PLAN
+    est_usd_per_unit: 0.0       # ≈ plan $ ÷ monthly renders — SET for USD reporting
+  scrapecreators:
+    monthly_unit_cap: 1500      # credits per cycle. LIVE-VERIFIED: list calls AND
+                                # transcripts each cost 1 credit; failed calls are
+                                # not charged. Credits never expire (pay-as-you-go).
+    est_usd_per_unit: 0.0019    # Freelance tier $47 / 25,000 credits (repriced
+                                # 2026-07-28 — the old $10/5,000 tier is gone)
+  # ── ONE WALLET, TWO METERS ────────────────────────────────────────────────────────
+  # `email_verify` and `mev_leads` below are two ledger meters but ONE MyEmailVerifier
+  # account: same GTM_VERIFY_API_KEY, same balance URL. A per-meter daily cap can read as
+  # honoured while the account still overspends, which is how the 2026-09-12 cycle burn
+  # (1247 of 1500 units) happened against a ceiling that was only ever monthly.
+  #
+  # OWNER 2026-09-12: "We only have 100 leads in the entire system!!! And we only try to
+  # add 20 per day so we shouldn't burn more than 50 per day!!!!"  — 50 is the ACCOUNT's
+  # day, so it is enforced here, across both meters, not inside either one.
+  #
+  # send_reserve is the load-bearing half. Discovery sweeps run in the early morning; the
+  # drip runs at 6am. Without a reserve, a sweep can drain the whole 50 before the drip
+  # ever asks, every pre-send verify then returns a `capped` hold, and the day sends ZERO
+  # while every guard still reports healthy. These credits are spendable ONLY by the send
+  # path (drip.py, purpose='send'); every other caller defaults to discovery and cannot
+  # reach them. RAISE THIS ALONGSIDE THE EFFECTIVE SEND CAP — it is a floor of guaranteed
+  # pre-send verifies, one per send, and today the owner's `send cap 2` needs only 2.
+  mev_wallet:
+    daily_unit_cap: 50        # credits/day for the WHOLE account. 0 disables (monthly still applies).
+    send_reserve: 10          # of those 50, reserved for pre-send verification
+
+  # Pre-send email verification (MyEmailVerifier — owner decision 2026-08-04, cheapest
+  # per API request). Metered in LOOKUPS. At the pinned 2/day send cap that is ~60 a
+  # month, so 500 leaves headroom for batch-scoring a list too while still refusing a
+  # runaway. The free tier refills 100 credits DAILY, which covers the send path outright.
+  # Raise only alongside daily_send_cap — they scale together, one lookup per send.
+  email_verify:
+    monthly_unit_cap: 500
+    # DAILY PACING. Owner, 2026-09-12, after a cycle burn of 1247 of 1500 units: "We only have
+    # 100 leads in the entire system!!! And we only try to add 20 per day so we shouldn't burn
+    # more than 50 per day!!!!"
+    #
+    # A MONTHLY ceiling alone cannot hold, because the gtm.* per-day budgets are counted in
+    # LEADS while the spend is counted in VERIFY UNITS, and waterfall_tiers tries up to 12
+    # candidate addresses per lead (3 domains x 4 patterns). Budgets that read as ~155
+    # leads/day are up to ~1,722 units/day: pipeline 25 + probe_sweep 40 + person_finder 50 +
+    # finder_sweep 20, times twelve, plus verify_sweep 100 and the drip's 2. One day eats the
+    # month. Enforced in email_verify.verify(), the single chokepoint all six callers use; a
+    # breach returns the same 'capped' hold they already handle, and a hold never sends.
+    daily_unit_cap: 50          # units/day. 0 disables the daily cap (monthly still applies).
+    est_usd_per_unit: 0.0025    # published per-request rate; the daily free 100 cost $0
+  # MyEmailVerifier LEADS API (list factory, OUTREACH_STACK_V5 §3) — same vendor
+  # account as email_verify but a different credit economy: search 5, reveal 10,
+  # not_found 5. Measured cost is ~6-7 credits per verified contact via the
+  # search-then-construct route. 2,000/cycle ≈ ~300 contacts a month, roughly two
+  # agency batches — the whole purchased balance (4,456) cannot be burned in one
+  # runaway month.
+  mev_leads:
+    monthly_unit_cap: 2000
+    est_usd_per_unit: 0.004     # ≈ purchase price ÷ credits; refine from the invoice
+  google_places:
+    monthly_unit_cap: 200       # Places (New) requests per cycle. Text Search Pro is
+                                # ~$32/1,000 → 200 req ≈ $6.40/mo, and each request
+                                # returns up to 20 businesses (≈4,000 discovered/mo).
+                                # Sized against the owner's infra budget — RAISE ONLY
+                                # WITH HIS SIGN-OFF, it is real per-call money.
+    est_usd_per_unit: 0.032
+  prospeo:
+    # Free tier: 100 credits a month, renewing on the 9th, and a credit is spent ONLY
+    # when an address comes back. Verified addresses, and it returns the person's real
+    # LinkedIn URL, which is how a profile inferred from a search slug gets corrected.
+    monthly_unit_cap: 100
+    est_usd_per_unit: 0.0
+  apollo:
+    # FREE PLAN, 75 credits a month (owner, 2026-09-04). The cap was 500, which would
+    # have let one evening of enrichment spend seven months of the plan before the
+    # guard said a word. A search is metered per PERSON RETURNED here, so callers ask
+    # for few: employer_enrich requests 5 and only after the LinkedIn X-ray has failed
+    # to name anyone.
+    monthly_unit_cap: 75       # people-search results per cycle — SET TO YOUR PLAN.
+                                # UNVERIFIED unit cost: confirm on first live run.
+    est_usd_per_unit: 0.0
+    alerts: false               # SILENCED (owner 2026-07-31, verbatim: "I get like 25 of them
+                                # every day and it's so annoying ... I don't need a warning every
+                                # minute"). Apollo stays FULLY WIRED IN — he was explicit about
+                                # that — and the cap still refuses spend; this only stops the
+                                # Slack page. The alert had also gone stale: the autopilot spent
+                                # the whole 500 between Jul 12–21 (exactly 50/day, a full page
+                                # each run) and has not called Apollo since, so a "quota" warning
+                                # described a condition that had stopped happening ten days
+                                # earlier. Usage still shows in the watchdog spend line.
+  hunter:
+    # FREE PLAN: 50 searches and 100 verifications a month (checked 2026-09-04, and
+    # spent for that cycle). Owner's ruling the same day: Hunter is LAST in the
+    # enrichment waterfall and runs only when a caller names it. The cap was 500,
+    # ten times the plan, so the guard could never have fired before the vendor did.
+    monthly_unit_cap: 50        # email-finder lookups per cycle — SET TO YOUR PLAN.
+                                # UNVERIFIED unit cost: confirm on first live run.
+    est_usd_per_unit: 0.0
+  tomba:
+    monthly_unit_cap: 1000      # PAID Starter tier (owner 2026-07-13): 1,000 domain-searches/mo
+                                # (+2,000 FREE verifications, unmetered). This is the real
+                                # governor — cost_guard stops gather at 1,000/cycle. Match this
+                                # to your Tomba plan's monthly search allowance if you change it.
+    est_usd_per_unit: 0.0
+  resend:
+    monthly_unit_cap: 3000      # Resend free tier ≈ 3,000/mo, 100/day. The gtm
+                                # daily_send_cap is the tighter day-to-day guardrail.
+    est_usd_per_unit: 0.0
+
+# Department web dashboards loaded by the dispatch app (data-not-code seam,
+# mirrors `modules:`). Each exposes a Flask `blueprint`.
+# The name on every dashboard screen. These get filmed for the shop and for buyer handovers, so
+# the mark changes here and nowhere else (it was hardcoded in ten places across two files).
+dash:
+  # HOW MANY PEOPLE MAY SIGN IN TO THIS BOX. 0 or absent = unlimited.
+  #
+  # THIS ONE LINE IS THE $499 / Pro DIFFERENCE (docs/PRICING_AND_PACKAGING_OWNBOX.md §6.1):
+  # $499 covers five people, Pro at $1,599 sells unlimited seats and custom roles. Config rather
+  # than a constant precisely so the tier is editable per box, by hand, without a release.
+  #
+  # UNDER `dash:` AND NOT `inbox:`, WHICH IS WHERE §6.1 NAMES IT. Seats are a property of the
+  # BOX, not of the inbox machine, and the config sections are split the same way: scripts/
+  # export_box.sh:38/41/57 ships `dash` to every box type and `inbox` only to customer_voice.
+  # Left under `inbox`, `max_users` would be ABSENT on a Lead box — and absent means unlimited,
+  # so the seat limit would silently disappear on the box whose pages carry the most PII.
+  # tests/test_box_boots.py caught it. Flagged to OSDev4, whose doc names the key.
+  #
+  # IT IS READ WHERE A USER IS CREATED AND NOWHERE ELSE (core/state.add_user). §6.5: no tier
+  # check inside a security path, ever — a seat limit consulted at sign-in is a paywall in the
+  # authentication path, and one that fails open on a missing config is worse than no paywall,
+  # while one that fails closed locks a paying customer out of his own box at 2am. Per-person
+  # login itself is NOT tiered: it is a security fix and it ships in every box.
+  max_users: 5
+  # THE NAME AT THE TOP OF EVERY SCREEN. Owner, 2026-09-06, direct: "Get Mavrick off this app.
+  # It's Brian MacDonald at the top." This is the one value those screens read (dash.brand()), so
+  # it is the whole change — and it is deliberately a CONFIG value, because a clone sold to a
+  # buyer puts the buyer's name here without touching a line of code.
+  brand: "Brian MacDonald"
+  # WHERE THE CALL TO ACTION GOES. The machine app puts one chip beside its seven pages — owner,
+  # 2026-09-06: "seven pages listed in the navigation plus the call to action which goes directly
+  # into our funnel." Empty = no chip rendered at all, which is the right default for a clone: a
+  # button that goes nowhere is worse than no button.
+  cta_url: "https://brian-macdonald.com/build"
+  # DEMO ZONE — one box, many subdomains (docs/MACHINE_AUTOPILOT_PLAN.md, lane E; owner 2026-09-05:
+  # "use the existing droplet as the demo box"). Empty = off (every sold box). The demo box's
+  # overlay (my/settings.yaml) sets `demo_zone: nlvl.co`; then Caddy issues a certificate for
+  # <industry>.nlvl.co ON DEMAND, and only after this box's /tls/ask says that label is an
+  # industry a pack claims. No DNS token lives on any box; one wildcard record does the rest.
+  demo_zone: ""
+  # LABELS FOR MACHINES THAT ARE CODE, NOT PACKS (owner 2026-09-05: "mini apps built for every
+  # machine"). A pack's app answers on <industry>.<zone> by itself. A machine with no pack — the
+  # hiring signal (job: leads), Practice Finder (npi: leads) — is named here: label → the
+  # source_ref prefixes its rows carry; core.dash.scope() shows only those rows on that address
+  # and /tls/ask admits the label. Empty on a sold box. The demo box's overlay:
+  #   labels: {health-and-wellness: ["job:", "cf:", "li:"], medical-practices: ["npi:"]}
+  #
+  # IN GIT NOW, 2026-09-07, and that is the whole fix. #910 moved public_labels out of the box's
+  # overlay and into this file so nobody would hand-edit my/settings.yaml for a label again —
+  # `labels` is its sibling and was left behind, so the register that NAMES an address stayed on
+  # the box while the register that PUBLISHES one moved here. The result was an address that
+  # resolved, held a certificate, and bounced every visitor to /dash/login: the owner could not
+  # open the one machine he wanted to use, and nothing said why. A box that ships to a buyer
+  # still overrides this to {} in its own overlay, which is what the exporter already enforces.
+  # ONE MACHINE CAN HAVE MORE THAN ONE SOURCE, which is why this is a list per label and not
+  # a string. health-and-wellness claimed only `job:` — its job-board discovery — so when 137
+  # health contacts were loaded from the owner's own export under `cf:` (a contact FILE, the
+  # loader's default prefix) they landed in a bucket no page was looking at. Nothing errored:
+  # the page went on truthfully reporting the 49 rows it could see while 101 usable addresses
+  # sat one prefix away, and the only way to catch it was comparing a number on a screen
+  # against a number quoted in chat. Re-importing under `job:` was the other available fix
+  # and is the wrong one — source_ref is the dedup key, so it would have made a second copy
+  # of all 137 rather than moving them.
+  labels: {health-and-wellness: ["job:", "cf:", "li:"], medical-practices: ["npi:"]}
+  # WHICH MACHINE APPS ANSWER WITHOUT A LOGIN. Owner, 2026-09-06, asked directly whether the app's
+  # seven pages should be public: "Yes, public." Empty on a sold box, and empty is the default —
+  # a clone opens nothing it was not told to open.
+  #
+  # A LIST OF LABELS, NOT A BOOLEAN, because one box answers for every machine's subdomain and a
+  # switch would have opened all of them at once. The box's own name can never appear here, so
+  # /dash keeps its login regardless. What actually makes it safe to publish is that no page can
+  # render a contact value — masking is in the view model above all seven, asserted on the source
+  # of every page — not this key.
+  #
+  # NO LOGIN on the machine apps. Owner, 2026-09-07: "Just make the apps work for me and stop
+  # trying to overcomplicate things. There's no login."
+  #
+  # THE LABEL IS THE PACK'S `industry`, NOT ITS SLUG. This comment used to read
+  # `funded-and-hiring` (the slug) and the box answers on `funded-companies` (the industry) —
+  # that mix-up cost two deploy attempts on 2026-09-06. ask_tls and machine_app._address_ok()
+  # both key on industry.
+  #
+  # PUBLISHED. Owner, 2026-09-07: "Go" — his word on the flip; and when I answered that OSDev1
+  # still had to hand-edit an overlay for it: "Why can't you do that. You're making everything
+  # way more difficult for everybody."
+  #
+  # He was right that I was adding a step. I cannot reach the droplet — no ssh client, no key,
+  # and the auto-deploy timer is a plan that was never built — so the DEPLOY is OSDev1's either
+  # way. But the overlay edit was mine to remove, and this removes it: he deploys, nothing else.
+  #
+  # THE LABEL IS THE PACK'S `industry`, NOT ITS SLUG. `funded-and-hiring` is the slug; the box
+  # answers on `funded-companies`. That mix-up cost two deploy attempts on 2026-09-06.
+  #
+  # WHAT IT COSTS, stated once: this file ships to clones, so a clone that installs the
+  # funded_and_hiring pack publishes its app too. A clone that does not want that sets
+  # public_labels: [] in its own overlay. Nothing here can leak a person — every name and
+  # address is obscured unless the viewer holds `app_token`, which is empty below and stays
+  # empty in git, because a token committed to a repo is not a token.
+  # health-and-wellness added 2026-09-07 on the owner's direct instruction ("I want the health
+  # and wellness to be in the standard app theme... it needs to be right now"). It is the hiring
+  # signal — a machine that is code rather than a pack, which is exactly the case `labels` above
+  # exists to name.
+  public_labels: []
+  # WITHHELD ON PURPOSE — every installed pack must be published or named here with a reason,
+  # and tests/test_machine_app.py fails the build on one that is neither. Creating a machine
+  # publishes nothing by itself (make_machine touches neither register), so before this the
+  # default was a login form nobody had decided on: health-and-wellness sat dark that way, and
+  # three more were sitting dark beside it when the guard first ran.
+  #   chiropractors — owner, 2026-09-07: "take the chiropractors machine off the page". #866
+  #   took its row off the website; publishing its app would put it back. #826 (delete) is
+  #   still his call and is untouched by this.
+  withheld_labels: [chiropractors]
+
+  # THE TOKEN. Owner, 2026-09-07: "if you don't have a token, then the personal data is
+  # obscured." Not a login — the app answers everyone. It decides one thing: whether the people
+  # on a row are real or masked. Pass it once as ?k=<token> and it rides a cookie after that.
+  #
+  # EMPTY HERE ON PURPOSE, and empty means NOBODY is unlocked — the app cannot be talked into
+  # matching a blank. The real value belongs in the box overlay (my/settings.yaml, gitignored),
+  # never in git, because anything committed here ships to every clone.
+  app_token: ""
+
+  # UNOBSCURE FOR EVERYONE, two switches because they are two different disclosures.
+  # Owner, 2026-09-07: "why don't we just make this so the emails are not obscured. I'm
+  # trying to actually use these fucking apps to get business."
+  #
+  # HE DOES NOT NEED EITHER OF THESE TO SEE HIS OWN DATA. `app_token` above already shows him
+  # every name and address in full — one link, no deploy. These exist for making the PAGE
+  # itself open to anyone.
+  #
+  # app_public_names   an officer's name on a Form D is ALREADY published by the SEC, next to
+  #                    the same company name this page shows anyway. Opening it republishes
+  #                    nothing a stranger could not read at sec.gov.
+  # app_public_contacts an address is NOT that. This page answers anyone with no login, so a
+  #                    real working address here is handed to every scraper that reads it, and
+  #                    that lands on the person in the row who never chose to be on it. Left
+  #                    separate so it is a deliberate choice and not a side effect of wanting
+  #                    the names.
+  #
+  # BOTH STAY FALSE IN GIT — this file ships to every clone, and a `true` here would open a
+  # client's own prospect list on the day they installed it. The box overlay (my/settings.yaml,
+  # gitignored) is where either belongs.
+  app_public_names: false
+  app_public_contacts: false
+
+  # WHERE THE EMAIL BUTTON OPENS — gmail | outlook | mailto.
+  #
+  # Owner, 2026-09-08, with a screenshot of macOS offering to open Mail.app: "I would like for
+  # the email button to open the default email program within my browser... I use Gmail in a
+  # browser tab." `mailto:` hands the click to the OS, which cannot reach a tab, so webmail is
+  # not addressable that way at all.
+  #
+  # UNLIKE THE TWO SWITCHES ABOVE, THIS ONE IS SAFE TO SHIP. It opens a composer and nothing
+  # else — no data leaves the box, and a clone that lives in Outlook or a desktop client changes
+  # this single line. The CODE default is `mailto`, so a box whose config predates this key
+  # keeps exactly the behaviour it has today.
+  mail_compose: gmail
+
+web_modules:
+  - marketing.customer_voice.app
+
+# Spaces = one client per Airtable base (docs/SPACES.md). Per-Space BINDINGS:
+# airtable base/table, Slack channel, and Zernio key. SHARED across every Space (one
+# of each): the HeyGen account, HyperFrames, and the website (all records, one
+# login). Each sweep is scoped to its own base + posts via its own Zernio key, so
+# client A's reels can never leak into client B's pipeline or socials (the brand-
+# safety invariant, proven by test_spaces_are_isolated). Omit this whole block for a
+# single-tenant box — one implicit 'default' Space is built from the flat env vars.
+#
+# slack_channel / zernio_key_env are optional and fall back to the global REEL_SLACK
+# _CHANNEL_ID / ZERNIO_API_KEY. zernio_key_env names a box .env var (the key itself
+# is NEVER committed). A client clone replaces this list with its own single Space.
+#
+# zernio_profile_id (optional, NOT a secret — an internal id) is the Space's Zernio
+# Profile / sub-account: the isolation boundary under the TARGET one-key model
+# (docs/ZERNIO_SDK_INTEGRATION.md §5). When set, the inbox poll + account discovery
+# are scoped to that Profile and a send's account must be a member of it. Unset =
+# transitional two-key mode (the per-Space key isolates). CONSOLIDATION path: point
+# every Space's zernio_key_env at the same key and give each its own zernio_profile_id.
+spaces:
+  # YOUR TENANT VALUES. Replace every REPLACEME here, or leave this block alone and put
+  # them in my/settings.yaml, which is merged over this file at load.
+  - name: default
+    airtable_base: REPLACEME
+    label: online-coaches
+    airtable_table: VIDEOS
+    written_table: WRITTEN
+    carousel_table: CAROUSELS
+    carousel_platforms:
+    - Instagram
+    - Linkedin
+    - Facebook
+    reel_platforms:
+    - Youtube
+    - Tiktok
+    - Linkedin
+    - Twitter
+    slack_channel: REPLACEME
+    zernio_key_env: ZERNIO_API_KEY_BMACBUILDS
+    zernio_profile_id: REPLACEME
+
+
+# Unified Inbox (docs/UNIFIED_INBOX_SPEC.md) — Messenger first. Phase 1 = the
+# instant template opener on click-to-Messenger ad conversations. The opener is
+# per-Space overridable (spaces[].opener_template); this is the fallback text —
+# OWNER-EDITED copy, hot-picked-up on the next job, no deploy needed.
+inbox:
+  # OBSERVE-ONLY for the Phase-1 rollout (OSDev2's two-step): the box already carries real
+  # Zernio keys, so deploying with `opener` would auto-DM real people on day one. Deploy with
+  # `off` → validate the poll + meta_ad_id attribution on one live CTM ad → then flip to
+  # `opener` and restart. `off` still polls + notifies the owner of each inbound; it only
+  # withholds the auto-send. QUOTED on purpose: a bare YAML `off` coerces to boolean False;
+  # the handler is fail-closed (only "opener" sends) so either form is safe, but "off" reads true.
+  autonomy: "off"           # "opener" (auto-send the one template opener) | "off" (kill switch)
+                            # ABSENT key is also inert — sending needs an explicit "opener".
+  poll_interval_s: 45
+
+  # WHAT THE MACHINE WOULD SAY. The $499 card sells this: the box reads what came in, writes a
+  # reply in the business's voice, and waits. Nothing sends without a person tapping Send.
+  #
+  # ON BY DEFAULT, unlike `autonomy` above, and the difference is the whole point: `autonomy`
+  # gates SENDING, so shipping it on would put a machine's words in front of a customer on day
+  # one. Drafting cannot send — the code that writes is in `drafter/` and structurally cannot
+  # reach the code that sends — so the worst case of it being on is a suggestion nobody wanted.
+  #
+  # `per_sweep` IS A SPEND BOUND, not a page size: each draft is one model call. core.brain
+  # carries the $90 ceiling underneath, and this keeps a single sweep from walking into it —
+  # a quiet box that suddenly receives two hundred messages must not pay two hundred times.
+  drafts:
+    enabled: true
+    per_sweep: 3
+  hourly_send_cap: 40       # deliverability guardrail per Space (Meta caps well above this)
+
+  opener_template: >-
+    Hey — thanks for reaching out! I got your message and I'm on it.
+    What's the biggest thing you're trying to solve right now?
+
+# think(task=...) selects a tier here.
+models:
+  score:         haiku
+  rewrite:       sonnet
+  carousel_split: sonnet  # script → 3-10 tweet-card slides; voice quality matters (carousel spec §5.1)
+  headline:      haiku    # the thumbnail overlay text — a punchy ≤6-word headline (cheap/fast)
+  title:         haiku    # lead-magnet guide title derived from the owner-written body (cheap/fast)
+  copy:          haiku
+  router:        haiku
+  reply_triage:  haiku    # inbound-reply classifier (interested/unsubscribe/bounce/etc.) — Haiku-cheap
+  written_seed:  sonnet   # the daily brief + its four spokes: 500-800 words in Brian's voice that
+                          # must clear a mechanical gate first time. Haiku fails the gate often
+                          # enough that the repair pass costs more than Sonnet does up front.
+  brain:         sonnet   # the run-the-business channel deserves the better model
+  agent:         sonnet   # tool-using loop: strict JSON + multi-step reasoning need Sonnet
+  default:       haiku
+
+# VERIFY exact current model strings in the Anthropic console.
+model_ids:
+  haiku:  "claude-haiku-4-5-20251001"
+  sonnet: "claude-sonnet-4-6"
+
+# Per-MILLION-token USD rates. PLACEHOLDERS — VERIFY against console.anthropic.com/pricing.
+rates:
+  "claude-haiku-4-5-20251001":
+    input:       1.00
+    output:      5.00
+    cache_write: 1.25
+    cache_read:  0.10
+  "claude-sonnet-4-6":
+    input:       3.00
+    output:      15.00
+    cache_write: 3.75
+    cache_read:  0.30
+
+# WHO THE WRITTEN LANE WRITES AS. Every newsletter/carousel/caption prompt composes its
+# identity line from here — nothing in marketing/content_machine/written/*.py names a person. On a clone
+# these are blank and the prompts say "the operator" until the buyer fills them in; the
+# exporter blanks them on the way out and the box proof fails if a name survives in a prompt.
+operator:
+  name: ""
+  handle: ""
+  bio: ""

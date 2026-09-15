@@ -1,0 +1,36 @@
+[project]
+name = "aios"
+version = "0.1.0"
+description = "AIOS — single-tenant AI operating system (kernel)"
+requires-python = ">=3.12"
+dependencies = [
+  "anthropic>=0.40",
+  "flask>=3.0",
+  "gunicorn>=22.0",
+  "pyyaml>=6.0",
+  "requests>=2.31",
+  "python-dotenv>=1.0",
+  "slack_sdk>=3.27",
+  "pillow>=10.0",             # Carousel slide renderer (impl B — bold-run rich text layout).
+                              # Pure wheels, ms-per-slide on the 1 vCPU box. Owner-approved
+                              # dep (carousel spec §1 decision 5); Chromium impl A stays the
+                              # fallback seam if the golden-image test rejects Pillow output.
+  "zernio-sdk==1.4.551",      # Zernio official SDK, wrapped by the core.vendors.zernio gateway.
+                              # EXACT pin (enterprise install): every clone builds the same bytes;
+                              # core.vendors.zernio.verify_sdk() asserts version+signatures at boot.
+                              # Bump = a reviewed PR that updates BOTH this pin and zernio.verify.PINNED_SDK.
+]
+
+[project.optional-dependencies]
+# Render-box extras (the $12 droplet running reel produce). Installed by
+# scripts/provision_render.sh via:  pip install -e ".[render]"
+# faster-whisper supplies word-timing ANCHORS only — caption TEXT always comes
+# from our script (captions.py falls back to proportional timing without it).
+render = ["faster-whisper>=1.0", "boto3>=1.34"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["core*", "marketing*", "sales*", "finance*", "operations*"]

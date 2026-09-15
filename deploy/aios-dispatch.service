@@ -1,0 +1,30 @@
+[Unit]
+Description=AIOS dispatch (single inbound endpoint + dashboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aios
+EnvironmentFile=/opt/aios/.env
+# Loopback only: nothing listens on the public interface until a TLS proxy
+# (Caddy) terminates HTTPS in front — the spec's TLS-only-inbound invariant.
+# Until then, access is via SSH tunnel.
+# gthread, NOT sync: a <video> element pins its request for the whole playback
+# (browsers throttle buffering), and gunicorn SIGKILLs sync requests at --timeout
+# ("WORKER TIMEOUT") — with 2 sync workers, two players froze the entire app and
+# died at 60s (live-found: dashboard videos would not play). gthread heartbeats
+# from the worker loop, so long media streams neither starve the app nor get
+# killed; 2x8 threads ≈ 16 concurrent requests on the 1 vCPU box for ~0 extra RAM.
+ExecStart=/opt/aios/.venv/bin/gunicorn --worker-class gthread --workers 2 \
+  --threads 8 --timeout 120 --keep-alive 5 --bind 127.0.0.1:8000 \
+  --access-logfile - --error-logfile - core.dispatch:app
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

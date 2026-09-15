@@ -1,0 +1,34 @@
+# Litestream — continuous off-box replication of the AIOS SQLite database.
+# Installed to /opt/aios/deploy/litestream.yml; read by aios-litestream.service.
+#
+# Litestream expands ${ENV} at load time, and the unit's EnvironmentFile is the
+# same /opt/aios/.env every other service reads — one secrets file, no new store.
+# Works with any S3-compatible bucket: Cloudflare R2 (free tier), Backblaze B2,
+# DO Spaces, AWS S3. Set in .env:
+#   OBJECT_STORE_BUCKET    bucket name
+#   OBJECT_STORE_ENDPOINT  e.g. https://<account>.r2.cloudflarestorage.com
+#   OBJECT_STORE_KEY       access key id
+#   OBJECT_STORE_SECRET    secret access key
+#
+# Why Litestream over the nightly snapshot alone: snapshots live ON the box
+# (same disk, same blast radius). Litestream streams every WAL segment off-box
+# continuously — restore-to-point-in-time, ~seconds of data loss instead of up
+# to 24h, and the GTM suppression registry (a legal retention obligation)
+# survives a dead droplet. The nightly local snapshot stays as defense in depth.
+
+dbs:
+  - path: /opt/aios/aios.db
+    replicas:
+      - type: s3
+        bucket: ${OBJECT_STORE_BUCKET}
+        path: litestream/aios-db
+        endpoint: ${OBJECT_STORE_ENDPOINT}
+        access-key-id: ${OBJECT_STORE_KEY}
+        secret-access-key: ${OBJECT_STORE_SECRET}
+        # Generic S3-compatible endpoints (R2/B2/Spaces) want a region string
+        # but don't validate it; us-east-1 is the conventional placeholder.
+        region: us-east-1
+        # Keep ~3 days of point-in-time history off-box; snapshots hourly.
+        retention: 72h
+        snapshot-interval: 1h
+        sync-interval: 10s

@@ -1,0 +1,12 @@
+[Unit]
+Description=AIOS morning ideas drop (enqueue the daily scrape sweep)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aios
+EnvironmentFile=/opt/aios/.env
+ExecStart=/opt/aios/.venv/bin/python scripts/morning_scrape.py
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

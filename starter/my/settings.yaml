@@ -1,0 +1,23 @@
+# my/settings.yaml — YOUR values, merged over config/aios.config.yaml at load.
+#
+# This file is yours. An update from us never touches it, and nothing in here is a secret —
+# secrets live in .env at the top of the box. Anything you set here wins over the shipped
+# config, so you can take our updates without ever editing the tracked file.
+#
+# Uncomment what you need. An empty file is valid and changes nothing.
+
+# spaces:
+#   - name: default
+#     airtable_base: appYOURBASEID
+#     slack_channel: C0YOURCHANNEL
+#     zernio_profile_id: your-profile-id
+
+# cost:
+#   monthly_ceiling_usd: 90.0      # the number the whole box stops at
+#   billing_cycle_day: 1           # match your Anthropic console reset day
+#   timezone: "UTC"
+
+# operator:                        # who the content lanes write as
+#   name: ""
+#   handle: ""
+#   bio: ""

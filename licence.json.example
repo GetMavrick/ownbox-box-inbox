@@ -1,0 +1,8 @@
+{
+  "product": "lead-machine",
+  "licence_version": 1,
+  "buyer": "REPLACE — name or company as it appears on the order",
+  "order": "REPLACE — payment reference",
+  "issued": "REPLACE — ISO date",
+  "configs_included": "all"
+}

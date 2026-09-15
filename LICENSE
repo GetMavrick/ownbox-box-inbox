@@ -1,0 +1,18 @@
+AIOS PRODUCT LINE (AIOS · Lead Machine · Content Machine) — Single-Buyer Licence (v1, 2026-09-03)
+
+Copyright (c) 2026 Brian MacDonald / Mavrick.
+
+1. GRANT. On payment, the buyer named in licence.json receives a perpetual, non-exclusive,
+   NON-TRANSFERABLE licence to install and run this software on hardware the buyer controls,
+   for the buyer's own business, with every industry configuration included in the box.
+2. NOT PERMITTED. Reselling, sublicensing, redistributing, or hosting the software for third
+   parties. Removing or altering this licence, licence.json, or the attribution printed on
+   first run.
+3. THE BUYER'S KEYS. The software runs on the buyer's own API keys and spend. No subscription
+   token, key, or credential of the licensor ships with it or is granted by it.
+4. NO WARRANTY. Provided as-is. The honest limits of each machine are stated on its page and
+   in README.md; they are part of what was sold.
+5. TERMINATION. Breach of §2 ends the grant. Sections 3–4 survive.
+
+Attribution: "Built on the Lead Machine by Mavrick" in any public output is appreciated, not
+required.

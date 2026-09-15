@@ -1,0 +1,12 @@
+[Unit]
+Description=AIOS watchdog (health probes, orphan reaper, spend line)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aios
+EnvironmentFile=/opt/aios/.env
+ExecStart=/opt/aios/.venv/bin/python -m core.watchdog
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

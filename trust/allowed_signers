@@ -1,0 +1,15 @@
+# WHO MAY PUT CODE ON A BOX. OpenSSH allowed-signers format, read by core/release/verify.py.
+#
+# Every box carries this file (scripts/export_box.sh ships trust/), and verifies each release tag against
+# the copy from the release it ALREADY RUNS — never against the candidate being judged.
+#
+# root-*  keys are held OFFLINE by the owner. Only a release signed by a root key may change this file.
+# ci@     is the everyday key in the GitHub "release" environment, used by .github/workflows/release.yml.
+#         It can ship code; it cannot change who is trusted, so a stolen CI key cannot promote itself.
+#
+# One key, one principal: a key listed twice is refused (a root name for the everyday key would make
+# "is this a root key?" depend on line order — measured 2026-09-15, see core/release/verify.py).
+# Retire a key with valid-before="YYYYMMDD" rather than deleting its line, so old releases stay explainable.
+root-active@ownbox namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIC1NZ2q5FHsK19+zVPvkYzfJgFLjvE+wnC7ZC725f5I
+root-recovery@ownbox namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGuzlyuBqIJ1iLEoWRjANs5+QAnjiLg4v6bdJ09TL5t3
+ci@ownbox namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMD9uVBvrE5bRmhIaCHpBvM5M9Qp4tfawB13i0eJXapU
