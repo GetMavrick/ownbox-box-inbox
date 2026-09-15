@@ -127,14 +127,40 @@ def test_the_three_names_of_a_channel_are_kept_apart():
     # must not queue behind the one that is guaranteed to fail.
     ok("Messenger is swept first — the channel with live leads never waits on a new one",
        channels.POLLED[0].key == "messenger")
-    # The label fallback is the bug this function replaced: a default that names a channel
-    # is how an Instagram notification ends up saying "Messenger".
+    # EVERY POLLED CHANNEL HAS A WRITTEN NAME. The fallback title-cases the stored key, which
+    # is fine for a channel nobody has met yet and wrong for one we ingest on every sweep:
+    # "Sms" and "Whatsapp" are what a product looks like when nobody read its own screen.
+    unnamed = [c.key for c in channels.POLLED if c.key not in channels.NAMES]
+    ok("every polled channel has a name written for it", not unnamed, str(unnamed))
+    # The fallback is the bug this table replaced: a default that names a channel is how an
+    # Instagram notification ends up telling the owner it was a Messenger one.
     ok("an unknown channel's label NEVER borrows a known channel's name",
        channels.label("whatsapp") not in ("Messenger", "Instagram")
        and channels.label("") not in ("Messenger", "Instagram")
        and channels.label(None) not in ("Messenger", "Instagram"))
     ok("...and the known ones still read like themselves",
        channels.label("instagram") == "Instagram" and channels.label("messenger") == "Messenger")
+    # ONE TABLE, TWO WORDS FOR EMPTY, neither inherited by accident: `name` has no default
+    # fallback, so a caller cannot forget to say which sentence it is writing.
+    ok("the empty fallback is the CALLER's word, not a shared default",
+       channels.name("", fallback="Unknown") == "Unknown"
+       and channels.label("") == "this channel")
+    # ASSERTED ON THE SIGNATURE, because "the caller must choose" is a property of the
+    # function and not of any one call: checking a call that passes `fallback` still passes
+    # the day someone gives the parameter a default, and from then on the caller that forgot
+    # silently inherits the other one's word for empty. That is the whole design claim here,
+    # so it is held where it can actually break.
+    import inspect
+    ok("`name` REFUSES to pick a fallback for you — it has no default",
+       inspect.signature(channels.name).parameters["fallback"].default
+       is inspect.Parameter.empty)
+    try:
+        channels.name("")
+        ok("...and calling it without one is an error, not a guess", False, "no TypeError")
+    except TypeError:
+        ok("...and calling it without one is an error, not a guess", True)
+    ok("...and a named channel reads the same whichever caller asks",
+       channels.name("sms", fallback="Unknown") == channels.label("sms") == "SMS")
 
 
 # ── 2. the pairing guard ─────────────────────────────────────────────────────────────

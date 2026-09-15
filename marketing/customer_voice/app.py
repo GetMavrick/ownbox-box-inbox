@@ -688,17 +688,21 @@ def _thread_href(zcid: str) -> str:
     return "/voice/inbox/" + _q(str(zcid), safe="")
 
 
-# A NAME A PERSON USES, for a value the vendor spells its own way. Unknown platforms fall through
-# to the stored string rather than to "Other": a channel this box is receiving and cannot name is
-# a thing to SHOW and fix, not to hide behind a bucket.
-_CHANNEL_NAMES = {"messenger": "Messenger", "instagram": "Instagram", "email": "Email",
-                  "sms": "SMS", "whatsapp": "WhatsApp", "review": "Reviews",
-                  "comment": "Comments"}
-
-
 def _channel(value: str) -> str:
-    v = str(value or "").strip().lower()
-    return _CHANNEL_NAMES.get(v, v.title() if v else "Unknown")
+    """A name a person uses, for a value the vendor spells its own way.
+
+    THE TABLE LIVES IN `inbox/channels.py` AND NOT HERE. It used to live in both, and the two
+    copies were one edit apart from disagreeing: the worker told the owner "New Messenger
+    message" from its own literal while this screen read a map that already knew about six
+    other channels. A channel's name is one fact, and the file that decides which channels get
+    polled is the file that should hold it.
+
+    "Unknown" IS THIS SCREEN'S WORD FOR EMPTY, not the shared default — a heading over a thread
+    has to say something, and Slack's sentence form wants "this channel" instead. `channels.name`
+    makes the caller say which, precisely so neither one silently borrows the other's.
+    """
+    from marketing.customer_voice.inbox import channels as _ch
+    return _ch.name(value, fallback="Unknown")
 
 
 def _chips(space: str, current: str) -> str:

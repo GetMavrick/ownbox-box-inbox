@@ -456,15 +456,52 @@ def test_the_phone_app_is_self_contained():
        any(m == "core.dash" or m.startswith("core.") for m in imported), str(sorted(imported)))
 
 
+def test_the_screen_and_the_worker_name_a_channel_the_same_way():
+    """ONE NAME TABLE. The screen kept its own `_CHANNEL_NAMES` while the worker wrote the word
+    "Messenger" into Slack as a literal, and the two were one edit apart from disagreeing about
+    what a channel is called — which is not a cosmetic failure when the thing being named is
+    which rulebook a reply is sent under. Both now read `inbox/channels.NAMES`.
+
+    The two callers DO differ on one thing and it is deliberate: a heading over a thread with no
+    channel has to say something ("Unknown"), and a Slack sentence wants "this channel" instead.
+    `channels.name` has no default fallback at all, so neither caller can silently inherit the
+    other's word for empty."""
+    import pathlib
+    from marketing.customer_voice import app as _app
+    from marketing.customer_voice.inbox import channels as _ch
+    ok("the screen no longer carries its own copy of the table",
+       "_CHANNEL_NAMES" not in pathlib.Path("marketing/customer_voice/app.py").read_text())
+    for key, want in _ch.NAMES.items():
+        ok(f"the screen renders {key!r} as {want!r}", _app._channel(key) == want,
+           _app._channel(key))
+    # Not derivable from the key: .title() gives "Sms" and "Whatsapp".
+    ok("...including the ones a title-case rule would get wrong",
+       _app._channel("sms") == "SMS" and _app._channel("whatsapp") == "WhatsApp")
+    ok("a channel we cannot name shows ITSELF, never a bucket and never another channel's name",
+       _app._channel("carrier-pigeon") == "Carrier-Pigeon")
+    ok("empty reads 'Unknown' on the screen", _app._channel("") == "Unknown")
+    ok("...and 'this channel' in the worker's sentence, from the same table",
+       _ch.label("") == "this channel" and _ch.label("sms") == _app._channel("sms"))
+
+
 def test_ci_actually_runs_this_file():
     """A SUITE CI NEVER RUNS IS WORSE THAN NO SUITE, because it reports green. The workflow keeps a
     HAND-MAINTAINED list of suite names — the same silent-skip hazard as `test_machine_app`'s
     runner tuple, one level up — so this file has to be named in it, and this is the assertion that
     notices if a rename ever separates the two."""
     import pathlib
-    wf = pathlib.Path(".github/workflows/tests.yml").read_text()
+    wf = pathlib.Path(".github/workflows/tests.yml")
+    if not wf.is_file():
+        # A SOLD BOX HAS NO CI AND THIS SUITE SHIPS INTO ONE. Inside a box the read raised
+        # FileNotFoundError and took the whole file down with it, so a buyer running their own
+        # suites saw this one crash — the identical defect `test_customer_voice.py` already
+        # documents and that took our CI red once: a check that is meaningful only in the repo
+        # has to SAY SO where it doesn't apply, rather than assume the repo is the only place
+        # it runs. Skipped, not silently passed: the box has no workflow to be missing from.
+        print("  --   no workflow here — this box is not the repo, nothing to be listed in")
+        return
     me = pathlib.Path(__file__).stem
-    ok(f"{me} is in the workflow's suite list", me in wf,
+    ok(f"{me} is in the workflow's suite list", me in wf.read_text(),
        "CI would skip this file and still print green")
 
 
@@ -481,6 +518,7 @@ if __name__ == "__main__":
                test_the_icons_are_real_pngs_drawn_without_a_dependency,
                test_the_worker_can_never_push_silently,
                test_the_phone_app_is_self_contained,
+               test_the_screen_and_the_worker_name_a_channel_the_same_way,
                test_ci_actually_runs_this_file):
         print(fn.__name__)
         fn()

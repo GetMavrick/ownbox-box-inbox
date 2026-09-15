@@ -10,7 +10,7 @@ bug this module exists to prevent is a place where two of them were assumed equa
             screen filters on, what `window._RULES` is keyed by, and what a chip
             renders from. NOT the vendor token: the store has said "messenger" since
             the first row and rewriting history to say "facebook" buys nothing.
-  `label`   what a human reads, in Slack and on the screen.
+  `label`   what a human reads, in Slack and on the screen — `NAMES` below.
 
 WHY THIS IS A MODULE AND NOT THREE STRING LITERALS. Instagram is the second channel,
 and the first one never needed a translation because a single channel cannot
@@ -36,7 +36,18 @@ from typing import NamedTuple
 class Channel(NamedTuple):
     vendor: str          # Zernio's `platform=` token
     key: str             # stored in inbox_conversations.platform; keys window._RULES
-    label: str           # what a person reads
+
+
+# THE NAMES COVER MORE THAN THE POLLED CHANNELS, and that is the point. The screen renders
+# whatever `platform` values the box has rows for — reviews and comments arrive by other
+# machines entirely, and email/SMS are channels the inbox is growing into — so a name table
+# scoped to what the poller polls would render half the screen in raw column values. The
+# poller's list is `POLLED`; this is every channel this system can SAY.
+#
+# Not derivable, either: `.title()` gives "Sms" and "Whatsapp", which is how a product looks
+# when nobody read its own screen.
+NAMES = {"messenger": "Messenger", "instagram": "Instagram", "email": "Email",
+         "sms": "SMS", "whatsapp": "WhatsApp", "review": "Reviews", "comment": "Comments"}
 
 
 # THE SWEEP ORDER IS THIS ORDER. Messenger stays first: it is the channel with live
@@ -44,22 +55,38 @@ class Channel(NamedTuple):
 # let an Instagram outage (or a box with no IG account connected, which errors every
 # single sweep) delay the intake that is already carrying real leads.
 POLLED: tuple[Channel, ...] = (
-    Channel("facebook", "messenger", "Messenger"),
-    Channel("instagram", "instagram", "Instagram"),
+    Channel("facebook", "messenger"),
+    Channel("instagram", "instagram"),
 )
 
-_BY_KEY = {c.key: c for c in POLLED}
+
+def name(key: str | None, *, fallback: str) -> str:
+    """The human name for a stored `platform` value.
+
+    `fallback` IS REQUIRED AND HAS NO DEFAULT, deliberately. What to say when the value
+    is empty is genuinely different in the two places this is called from — a heading
+    over a thread says "Unknown", a Slack sentence says "this channel" — and a function
+    that quietly picked one of them would be right in one caller and wrong in the other
+    with nothing at the call site to show it. Making it a required argument is what
+    keeps one name table serving both without either one lying.
+
+    A value WE DO NOT KNOW falls through to itself, title-cased, never to a named
+    channel. A default that names a specific channel is how a notification about an
+    Instagram thread ends up telling the owner it was a Messenger thread — the exact bug
+    this table was pulled out of two files to remove, not one to re-introduce as a
+    fallback. And a channel the box is receiving that we cannot name is a thing to SHOW
+    and go fix, not to hide inside an "Other" bucket.
+    """
+    v = str(key or "").strip()
+    if not v:
+        return fallback
+    return NAMES.get(v.lower(), v.title())
 
 
 def label(key: str | None) -> str:
-    """A human-readable channel name for a stored `platform` value.
+    """The SENTENCE form — "New {label} message", for Slack and the worker's logs.
 
-    FALLS BACK TO THE RAW VALUE, TITLE-CASED, rather than to "Messenger". A default
-    that names a specific channel is how a notification about an Instagram thread
-    ends up telling the owner it was a Messenger thread — the bug this function was
-    written to remove, not a bug to re-introduce as a fallback. A channel this file
-    has not met yet reads slightly plainly; it never reads wrongly.
+    A thin wrapper on purpose: the sentence fallback belongs in one place too, or the
+    next notification to need it invents its own wording.
     """
-    key = (key or "").strip()
-    ch = _BY_KEY.get(key.lower())
-    return ch.label if ch else (key.title() or "this channel")
+    return name(key, fallback="this channel")
