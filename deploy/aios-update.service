@@ -1,0 +1,16 @@
+[Unit]
+Description=AIOS self-update: install the newest VERIFIED release, or stay put (scripts/box_update.sh)
+After=network-online.target
+Wants=network-online.target
+
+# THE SAME UPDATER /deploy RUNS, NOTHING ELSE. box_update.sh installs only a release tag that verifies
+# against the trust file of the release this box already runs, exits 0 when there is nothing newer,
+# serializes with a flock, snapshots the database first and rolls back a release that does not come up.
+# Runs as root and unhardened on purpose: it rewrites installed unit files and restarts services, which
+# ProtectSystem=full would forbid — the same environment /deploy gives it through systemd-run.
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aios
+EnvironmentFile=/opt/aios/.env
+ExecStart=/bin/bash /opt/aios/scripts/box_update.sh
+TimeoutStartSec=30min

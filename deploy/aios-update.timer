@@ -1,0 +1,13 @@
+[Unit]
+Description=Check once a day for a newer verified AIOS release
+
+# ONCE A DAY, SPREAD ACROSS THE FLEET. 08:00 UTC is 1 AM Pacific and 4 AM Eastern; the three-hour
+# random delay keeps every box from asking GitHub in the same minute. Persistent catches a day the
+# box was off.
+[Timer]
+OnCalendar=*-*-* 08:00:00 UTC
+RandomizedDelaySec=3h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

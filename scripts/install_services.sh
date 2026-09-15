@@ -87,6 +87,8 @@ install -m 644 deploy/aios-morning.timer    /etc/systemd/system/
 install -m 644 deploy/aios-slack.service    /etc/systemd/system/
 install -m 644 deploy/aios-backup.service   /etc/systemd/system/
 install -m 644 deploy/aios-backup.timer     /etc/systemd/system/
+install -m 644 deploy/aios-update.service   /etc/systemd/system/
+install -m 644 deploy/aios-update.timer     /etc/systemd/system/
 systemctl daemon-reload
 
 # 4. Enable + (re)start. restart not reload: gunicorn must re-read .env via systemd.
@@ -94,6 +96,18 @@ systemctl daemon-reload
 systemctl enable --now aios-dispatch aios-worker aios-watchdog.timer \
   aios-morning.timer aios-backup.timer aios-slack
 systemctl restart aios-dispatch aios-worker aios-slack
+
+# A SOLD BOX UPDATES ITSELF; THE OPERATOR'S BOX DOES NOT. Measured 2026-09-15: box_update.sh's only caller
+# was POST /deploy, and Ownbox holds no box's bearer, so a sold box would never install a release and a
+# security fix would never reach a customer. The daily timer runs the same verified updater. It is enabled
+# only on a checkout of a box repository (the same test scripts/box_update_key.sh uses), so a monorepo
+# checkout like the operator's box keeps its gated, backup-first deploys.
+origin=$(git -C "$AIOS" remote get-url origin 2>/dev/null) || origin=""
+if printf '%s' "$origin" | grep -Eq '^git@github\.com:GetMavrick/ownbox-box-[a-z0-9-]+\.git$'; then
+  systemctl enable --now aios-update.timer && echo "aios-update.timer: enabled (this box installs verified releases daily)"
+else
+  echo "aios-update.timer: not enabled (origin is not a box repository: ${origin:-none})"
+fi
 
 # 5. Verify.
 sleep 2

@@ -116,5 +116,32 @@ ok("the updater still refuses to install over local drift — the verifier's dir
 ok("the updater still snapshots the database before migrations", "backup" in body.lower())
 ok("the updater still serializes with a lock", "flock" in body)
 
+# ── A SOLD BOX UPDATES ITSELF (2026-09-15) ────────────────────────────────────────────────────────────
+# box_update.sh's only caller was POST /deploy, and Ownbox holds no box's bearer: a sold box would never
+# install a release. The daily timer runs the same verified updater, only on a box-repository checkout.
+svc = (ROOT / "deploy/aios-update.service").read_text()
+tmr = (ROOT / "deploy/aios-update.timer").read_text()
+inst = (ROOT / "scripts/install_services.sh").read_text()
+key = (ROOT / "scripts/box_update_key.sh").read_text()
+ok("the update service runs the one updater, from /opt/aios, as a oneshot",
+   "ExecStart=/bin/bash /opt/aios/scripts/box_update.sh" in svc and "WorkingDirectory=/opt/aios" in svc
+   and "Type=oneshot" in svc)
+ok("...unhardened like /deploy's systemd-run, since it rewrites unit files (ProtectSystem would forbid it)",
+   not re.search(r"^ProtectSystem=", svc, re.M))
+ok("the timer fires once a day, spread across the fleet, and catches a day the box was off",
+   re.search(r"^OnCalendar=\*-\*-\* \d\d:\d\d:\d\d UTC$", tmr, re.M) is not None
+   and re.search(r"^RandomizedDelaySec=\d+h$", tmr, re.M) is not None and "Persistent=true" in tmr)
+ok("install_services.sh installs both units",
+   "deploy/aios-update.service" in inst and "deploy/aios-update.timer" in inst)
+rx = re.search(r"grep -Eq '(\^git@github[^']+)'", inst)
+key_rx = re.search(r"grep -Eq '(\^git@github[^']+)'", key)
+ok("...and enables the timer only when origin is a box repository, by the same test the update key uses",
+   rx is not None and key_rx is not None and rx.group(1) == key_rx.group(1)
+   and "systemctl enable --now aios-update.timer" in inst.split(rx.group(0), 1)[1].split("else", 1)[0])
+ok("...never in the fixed list every box enables, so the operator's monorepo box keeps gated deploys",
+   "aios-update.timer" not in inst.split("systemctl enable --now aios-dispatch", 1)[1].split("\n\n", 1)[0])
+ok("the updater exits 0 when there is nothing newer, so a daily run on a current box changes nothing",
+   "UP TO DATE" in body and re.search(r"UP TO DATE[^\n]*\n\s*exit 0", body) is not None)
+
 print(f"\n{_failed} FAILED" if _failed else "\nall ok")
 sys.exit(1 if _failed else 0)
