@@ -177,6 +177,42 @@ CREATE TABLE IF NOT EXISTS users (
   UNIQUE (email)
 );
 
+-- ── THE BOX IS CLAIMED ONCE, BY THE PERSON WHO BOUGHT IT (docs/SPEC_OWNBOX_DELIVERY.md) ──
+-- SCHEMA, not MIGRATIONS: a brand-new table needs no version number (the rule above).
+--
+-- THE PROBLEM THIS SOLVES: a delivered box had no way in. Provisioning builds a droplet, points
+-- a subdomain at it and emails the buyer — and then the buyer meets a password box holding a
+-- password only we know. Handing him one in the email would mean Ownbox mints a box secret and
+-- keeps a copy, which the delivery design refuses outright. So the box hands ITSELF over, once,
+-- to whoever can prove they hold the order it was built from.
+--
+-- CHECK (id = 1) IS THE WHOLE "ONCE" GUARANTEE, and it is here rather than in a caller because
+-- that is the difference between a rule and a hope. "Refuse every later claim for good" written
+-- as an `if` in a route is two concurrent POSTs away from two owners; written as a primary key
+-- constraint, the second INSERT fails inside SQLite and there is no window at all. Same shape as
+-- `claim_opener` and the send ledger's UNIQUE idem_key — this codebase has paid for the lesson
+-- that a read followed by a write is not a claim.
+--
+-- pw_hash IS A HASH AND THE PASSWORD IS NEVER STORED. scrypt from hashlib — stdlib, no new
+-- dependency on a 1-vCPU box, and not hand-rolled (owner, 2026-09-12: "Never hand roll
+-- anything"). The parameters travel IN the string, so raising them later cannot strand a box
+-- whose owner set his password under the old ones.
+--
+-- order_id IS RECORDED, NOT COMPARED LATER. It is the audit answer to "which order became this
+-- box", and it is already on disk in /opt/aios/provision.json; keeping it here means the answer
+-- survives a droplet rebuild that loses the file. It is a Stripe Checkout Session id, not a
+-- card, not a secret worth stealing — and the moment this row exists it opens nothing.
+CREATE TABLE IF NOT EXISTS box_claim (
+  id          INTEGER PRIMARY KEY CHECK (id = 1),  -- exactly one row on this box, ever
+  claimed_at  TEXT NOT NULL,
+  order_id    TEXT NOT NULL,   -- the Stripe Checkout Session id the box was built from
+  user_id     TEXT NOT NULL,   -- the owner row this claim created
+  email       TEXT NOT NULL,   -- what he signs in as
+  pw_hash     TEXT NOT NULL,   -- scrypt$n$r$p$salt$hash — never the password
+  ip          TEXT,            -- who claimed it, for the audit line
+  user_agent  TEXT
+);
+
 -- ── CONNECTOR SEATS (docs/PLAN_AIOS_CONNECTOR.md section 6 step 2) ────────────────────────
 -- SCHEMA, not MIGRATIONS: a brand-new table needs no version number (the rule above).
 --

@@ -27,6 +27,7 @@ from urllib.parse import quote
 
 from flask import Blueprint, make_response, redirect, request
 
+from core import claim as _claim
 from core import state
 from core.config import get_config, settings
 from core.logging import get_logger
@@ -635,6 +636,56 @@ def _clear_failures(ip: str) -> None:
     _fails.pop(ip, None)
 
 
+# WHERE A PERSON LANDS WHEN THEY HAVE JUST SIGNED IN AND NAMED NO DESTINATION.
+#
+# MEASURED, NOT ASSUMED, AND THE MEASUREMENT IS THE WHOLE POINT. A customer_voice box ships
+# NEITHER `/dash/home` (lead_machine.dash) NOR `/dash` (content_machine.reel.dashboard):
+# `export_box.sh:53` sets MODULES to customer_voice alone and `:302` filters web_modules to it.
+# Both login and claim fell back to `/dash`, so on the box we are actually selling, a $499 buyer
+# set their password and landed on a 404. Found by OSDev4, confirmed against an exported tree —
+# 29 routes, `/voice/` present, both dashboards absent.
+#
+# WHICH PAGES EXIST IS A PER-BOX FACT, NEVER A CONSTANT. That is why this reads the LIVE url_map
+# instead of a list of paths we believe in: the same binary ships as four different products, and
+# any hard-coded landing is right for one of them and a 404 for the rest.
+#
+# THE ORDER PUTS THE DASHBOARDS FIRST, and that is a correction to my own first attempt rather
+# than the order OSDev1 sketched on the wall. He asked for `/voice/` first; I built that, and CI
+# answered with `test_client_home::test_login_lands_on_the_home` — an existing suite that asserts
+# a box WITH a client home lands a bare login on it. That is not a preference I get to overrule
+# from inside a 404 fix: it is a product decision someone already made and wrote a guard for.
+#
+# Dashboards-first satisfies both and costs nothing:
+#   inbox box   — ships neither dashboard, falls through to /voice/   (the 404 is fixed)
+#   lead box    — has /dash/home, lands there                          (contract preserved)
+#   everything  — has /dash/home, lands there                          (owner's box unchanged)
+#
+# THE INBOX OUTRANKS THE REEL DASHBOARD in the fall-through, which is OSDev1's order and not my
+# first one. I had `/dash` second. On a box with the reel operator dashboard but no client home,
+# that lands a BUYER on an operator screen; his order lands them on the inbox, which is the
+# machine they bought. `/dash` stays last as the thing you reach only when nothing better exists.
+#
+# The defect was never "we land on the wrong page on a box that has one". It was "we land on a
+# page this box does not serve". Only the fall-through had to change.
+_LANDINGS = ("/dash/home", "/voice/", "/dash")
+
+
+def landing() -> str:
+    """The first of `_LANDINGS` this box actually serves; never a path that 404s."""
+    from flask import current_app
+    have = {str(r) for r in current_app.url_map.iter_rules()}
+    for path in _LANDINGS:
+        if path in have:
+            return path
+    # A box serving NONE of them has shipped no UI at all, which is a build fault rather than a
+    # routing one. The login page is the only page guaranteed to exist here (this blueprint owns
+    # it) and it renders rather than redirecting, so this terminates instead of looping — and the
+    # error line is how anyone finds out, because a person would otherwise just see a login form
+    # again and assume their password failed.
+    log.error("dash.no_landing_route", candidates=list(_LANDINGS))
+    return "/dash/login"
+
+
 # ── the login, for every host on the box ─────────────────────────────────────
 
 def safe_next(value: str) -> str:
@@ -690,6 +741,92 @@ def login_form():
     return page("Login", "narrow", body, title=f"{brand()} · Login")
 
 
+# ── first login: the box hands itself over, once (core/claim.py) ─────────────────
+#
+# NO `require_session()` ON EITHER OF THESE, and that is the whole point rather than an
+# oversight: nobody can sign in to a box that has never been claimed, so a claim page behind
+# the session gate is a door locked from the inside. It is safe precisely because it can be
+# used ONCE — `box_claim.id` is `CHECK (id = 1)`, so the second claim fails inside SQLite.
+
+def _claim_page(body: str, code: int = 200):
+    return page("Set up your box", "narrow", body, title=f"{brand()} · Set up"), code
+
+
+def _claim_states():
+    """(already claimed?, is this box even sellable?) — read once per render."""
+    return _claim.claimed() is not None, _claim.provisioned_order() is not None
+
+
+@blueprint.get("/claim")
+def claim_form():
+    done, sellable = _claim_states()
+    if done:
+        # SAYS NOTHING ABOUT THE CODE. A claimed box answers identically to a stranger with the
+        # right code and a stranger with the wrong one, because the only thing either of them
+        # can still do here is learn whether they guessed right.
+        return _claim_page('<p class="val">This box has already been set up. '
+                           '<a class="dlink" href="/dash/login">Sign in</a>.</p>')
+    if not sellable:
+        # The ordinary answer on the owner's own machine or a hand-installed box: there is no
+        # purchase behind it, so there is nothing to claim and no form that could ever succeed.
+        return _claim_page('<p class="val">This box was not set up by a purchase, so there is '
+                           'nothing to claim here. Sign in with your dashboard password.</p>')
+    # THE CODE IS CARRIED IN A HIDDEN FIELD, NOT RE-READ FROM THE QUERY ON SUBMIT, so the
+    # address bar is the only place it ever appears and a mistyped POST cannot half-work.
+    code = html.escape(str(request.args.get("c", ""))[:220])
+    body = f"""
+<section style="max-width:420px">
+  <label class="lbl mb">Set up your box</label>
+  <p class="val">Choose how you will sign in. This happens once.</p>
+  <form method="post" action="/claim">
+    <input type="hidden" name="c" value="{code}">
+    <input type="email" name="email" placeholder="your email" autocomplete="username"
+           required style="margin-bottom:10px">
+    <input type="password" name="password" placeholder="a password ({_claim.MIN_PASSWORD}+ characters)"
+           autocomplete="new-password" required style="margin-bottom:10px">
+    <button class="btn-primary" type="submit">Set up</button>
+  </form>
+</section>"""
+    return _claim_page(body)
+
+
+@blueprint.post("/claim")
+def claim_submit():
+    # THE SAME PER-IP THROTTLE THE LOGIN USES, on purpose and shared with it. Both answer the
+    # question "is this stranger guessing a credential for this box", and an attacker who
+    # exhausts one would otherwise simply move to the other. It is per-IP and short for the
+    # reason written at `_note_failure`: a global counter would let one stranger lock the buyer
+    # out of the box he just paid for, which is worse than the guessing.
+    ip = _client_ip()
+    wait = _block_seconds(ip)
+    if wait:
+        log.warning("claim.throttled", ip=ip, wait_s=wait)
+        resp = make_response(_claim_page(
+            f'<p class="val">Too many attempts. Try again in {wait}s.</p>', 429))
+        resp.headers["Retry-After"] = str(wait)
+        return resp
+    try:
+        owner = _claim.claim_box(code=request.form.get("c", ""),
+                                 email=request.form.get("email", ""),
+                                 password=request.form.get("password", ""),
+                                 ip=ip, user_agent=request.headers.get("User-Agent", ""))
+    except _claim.ClaimRefused as e:
+        # EVERY refusal counts against the throttle, including a too-short password. Separating
+        # "bad code" from "bad password" here would hand an attacker a free oracle for the code:
+        # submit any password, read which complaint comes back.
+        _note_failure(ip)
+        log.warning("claim.refused", ip=ip)
+        return _claim_page(f'<p class="val">{html.escape(str(e))} '
+                           '<a class="dlink" href="/claim">Try again</a></p>', 400)
+    _clear_failures(ip)
+    # STRAIGHT IN. He has just proved he holds the order and chosen his password; sending him to
+    # a login form to type it again is a door that opens onto another door.
+    resp = make_response(redirect(landing()))
+    resp.set_cookie(COOKIE, new_session(owner["id"]), max_age=SESSION_DAYS * 86400,
+                    httponly=True, samesite="Lax", secure=request.is_secure)
+    return resp
+
+
 @blueprint.post("/dash/login")
 def login():
     # THE DASH PASSWORD, WHICH IS NOT THE COMMAND CREDENTIAL (#748). settings.dash_token
@@ -710,7 +847,21 @@ def login():
         return resp
     token = settings.dash_token
     provided = request.form.get("token", "")
-    if not token or not hmac.compare_digest(provided, token):
+    # TWO CREDENTIALS, AND THE SECOND ONLY EVER ADDS A WAY IN. A box the buyer has claimed
+    # (`/claim`, core/claim.py) carries a password HE chose, hashed; DASH_TOKEN keeps working
+    # exactly as it always has, because the owner's standing rule (2026-09-07) is "I don't ever
+    # wanna be locked out of these machines" and a delivery flow is the worst possible place to
+    # start taking doors away. On an unclaimed box `password_ok` is False before it looks at
+    # anything, so every existing box behaves identically.
+    #
+    # DASH_TOKEN IS TRIED FIRST because it is a compare_digest against a string already in
+    # memory, while the claimed password is a deliberately expensive scrypt. A wrong guess
+    # therefore costs one hash, not zero — which is the cost that makes guessing unattractive —
+    # but the owner's own correct token costs none.
+    ok = bool(token) and hmac.compare_digest(provided, token)
+    if not ok:
+        ok = _claim.password_ok(provided)
+    if not ok:
         _note_failure(ip)
         log.warning("dash.login_failed", ip=ip)
         return page("Login", "narrow",
@@ -722,14 +873,12 @@ def login():
     # home existed, a LEAD-ONLY box logged in straight into a 404: /dash belongs to the
     # reel dashboard, which that box does not ship. Checked against the live url_map
     # rather than assumed, because which pages exist is a per-box fact, not a constant.
-    from flask import current_app
-    has_home = any(str(r) == "/dash/home" for r in current_app.url_map.iter_rules())
     # BACK WHERE HE CAME FROM when the form carried a place, validated by `safe_next` — an
     # unvalidated one here would be an open redirect on the one page that answers everybody.
     # Falls through to the normal landing when there is none, so every existing caller is
     # unchanged.
-    landing = safe_next(request.form.get("next", "")) or ("/dash/home" if has_home else "/dash")
-    resp = make_response(redirect(landing))
+    where = safe_next(request.form.get("next", "")) or landing()
+    resp = make_response(redirect(where))
     # THE TOKEN LOGIN IS THE OWNER'S, and it mints HIS session — the same row migration 47
     # created and backfilled every older session to. Owner, 2026-09-07: "I don't ever wanna be
     # locked out of these machines"; §4.4: DASH_TOKEN keeps working, unchanged, forever.
