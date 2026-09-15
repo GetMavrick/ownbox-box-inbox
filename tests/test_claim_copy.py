@@ -386,6 +386,48 @@ def test_no_refusal_kind_is_ever_visible_text():
                _visible(html)[:180])
     unclaim()
     _dash._fails.clear()
+def test_the_front_door_wears_the_product_not_the_operator_dashboard():
+    print("test_the_front_door_wears_the_product_not_the_operator_dashboard")
+    # FOUND BY RENDERING IT, not by reading the markup. The words were already right and the page
+    # still said the wrong thing: /claim came through the operator shell — dark, a breadcrumb
+    # reading "<operator> / Set up your box", a purple button, "Powered by <operator>" in the
+    # footer. The first screen a paying customer sees, looking like an internal admin tool with
+    # somebody else's name on it.
+    unclaim()
+    provision()
+    html = page(f"/claim?c={ORDER}")
+
+    # THE OPERATOR'S NAME IS THE TEST. `brand()` is whatever this box is branded as, and on the
+    # claim screen it is the one name that must not appear: the buyer has never heard of them.
+    from core.dash import brand
+    ok("the operator's name is nowhere on the buyer's first screen",
+       brand().lower() not in html.lower(), brand())
+    ok("...and neither is the dashboard's footer", "powered by" not in html.lower())
+    ok("...nor its breadcrumb", "crumb" not in html.lower())
+
+    # ASSERTED ON THE BUTTON, not on the stylesheet. The first version looked for the accent
+    # anywhere in the page and passed with the button turned dashboard-purple — the accent was
+    # still present in the focus ring and the link colour. The one element a buyer reads as "this
+    # is the product" is the thing they are about to press.
+    import re as _re
+    btn = _re.search(r"button\{[^}]*\}", html)
+    ok("the button carries the product's accent, not the dashboard's",
+       bool(btn) and "#e05d38" in btn.group(0), btn.group(0)[:90] if btn else "no button rule")
+    ok("it paints its own background rather than borrowing a host's",
+       "background:#eff2f4" in html.replace(" ", ""))
+    ok("it is a page in its own right", html.lstrip().startswith("<!doctype html"))
+    ok("...that fits a phone", "width=device-width" in html)
+    ok("...and is never indexed — a claim link is not a public page",
+       "noindex" in html)
+
+    # A REAL LABEL, NOT A PLACEHOLDER. A placeholder disappears the moment someone starts typing,
+    # which is exactly when a person checks what a field wanted. The render showed both at once,
+    # saying the same words twice; the label is the half that survives focus.
+    ok("every field has a label bound to it",
+       'for="claim-email"' in html and 'id="claim-email"' in html
+       and 'for="claim-pw"' in html and 'id="claim-pw"' in html)
+    ok("...and does not repeat itself as a placeholder",
+       'placeholder="Your email address"' not in html)
 
 
 if __name__ == "__main__":
@@ -397,5 +439,6 @@ if __name__ == "__main__":
     test_a_short_password_is_a_typo_not_a_failed_claim()
     test_a_mistyped_address_never_shows_the_buyer_an_internal_name()
     test_no_refusal_kind_is_ever_visible_text()
+    test_the_front_door_wears_the_product_not_the_operator_dashboard()
     print("\nall ok" if not _failed else f"\n{_failed} FAILED")
     sys.exit(1 if _failed else 0)

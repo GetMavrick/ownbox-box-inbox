@@ -769,8 +769,70 @@ def login_form():
 # the session gate is a door locked from the inside. It is safe precisely because it can be
 # used ONCE — `box_claim.id` is `CHECK (id = 1)`, so the second claim fails inside SQLite.
 
+# THE FRONT DOOR WEARS THE PRODUCT, NOT THE OPERATOR DASHBOARD.
+#
+# WHAT WAS WRONG, seen only by rendering it: /claim came through `page()`, which is the operator
+# shell — dark, a breadcrumb reading "<operator> / Set up your box", a purple button, and
+# "Powered by <operator>" in the footer. That is the FIRST SCREEN A PAYING CUSTOMER EVER SEES on
+# the box they just bought, and it looked like an internal admin tool with somebody else's name
+# on it. The words were already right by then (§1) and the page still said the wrong thing.
+#
+# SELF-CONTAINED, AND THAT IS NOT LAZINESS. /claim is a CORE route: it ships on every box, and a
+# Lead box has no `marketing/customer_voice` to borrow a shell from. Importing one machine's app
+# into a core door would also invert the dependency — core would depend on a department. So the
+# tokens are declared here.
+#
+# WHERE THE TOKENS COME FROM, because a copied hex with no lineage is how a design language
+# drifts: they are the INBOX's, which are Kinso's, taken under the owner's ruling (2026-09-15)
+# to start from the competitor's design exactly and put our own touches on it as a later pass.
+# Kinso is the reference for tokens and design language — owner, 2026-09-15 — and OUR MARKETING
+# SITE IS NOT: it is being re-skinned, so anything matched to it today is matched to something
+# that is about to change. The buyer meets this screen and then the inbox; those two agreeing is
+# the whole point, and the site is not in that path.
+#
+# LIGHT ONLY, DELIBERATELY. Every other screen in the product carries a dark toggle; this one is
+# seen once, before any preference exists to read, and a front door that guesses wrong in a dark
+# room is worse than one that simply looks like itself. It still paints its own background, so it
+# never borrows a host ground.
+_CLAIM_CSS = """
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:#eff2f4;color:#1a1d1f;min-height:100dvh;display:flex;align-items:center;
+  justify-content:center;padding:24px 20px;
+  font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{width:100%;max-width:420px}
+.card{background:#fff;border-radius:18px;padding:26px 24px 24px;
+  box-shadow:0 1px 2px rgba(16,24,32,.05),0 8px 24px -12px rgba(16,24,32,.18)}
+h1{font-size:25px;line-height:1.2;font-weight:640;letter-spacing:-.015em;margin:0 0 8px;
+  text-wrap:balance}
+p{margin:0 0 16px;color:#6e7478}
+p.tight{margin-bottom:18px}
+label{display:block;font-size:13px;font-weight:560;color:#6e7478;margin:0 0 6px}
+input{width:100%;font:inherit;font-size:16px;padding:12px 14px;border:1px solid #e5eaed;
+  border-radius:12px;background:#fff;color:#1a1d1f;margin-bottom:14px}
+input:focus{outline:2px solid rgba(224,93,56,.45);outline-offset:1px;border-color:#e05d38}
+button{width:100%;font:inherit;font-size:16px;font-weight:600;padding:13px 16px;border:0;
+  border-radius:999px;background:#e05d38;color:#fff;cursor:pointer;min-height:48px}
+button:hover{background:#cf5330}
+button:focus-visible{outline:2px solid #1a1d1f;outline-offset:2px}
+.small{font-size:13.5px;color:#9ba1a6;margin:16px 0 0}
+.bad{color:#c0392b;background:#fdecea;border-radius:10px;padding:10px 12px;margin:0 0 14px;
+  font-size:14.5px}
+a{color:#e05d38}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+"""
+
+
 def _claim_page(body: str, code: int = 200):
-    return page("Set up your box", "narrow", body, title=f"{brand()} · Set up"), code
+    """The claim screens, in their own shell. `_CLAIM_CSS` above says why it is not `page()`."""
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            f'<meta name="viewport" content="width=device-width,initial-scale=1,'
+            f'viewport-fit=cover">'
+            f'<meta name="theme-color" content="#eff2f4">'
+            f'<meta name="robots" content="noindex,nofollow">'
+            f'<title>Set up your box</title><style>{_CLAIM_CSS}</style></head>'
+            f'<body><div class="wrap"><div class="card">{body}</div></div></body></html>'), code
 
 
 def _claim_states():
@@ -858,14 +920,13 @@ def claim_form():
         # NOTHING about the code: a claimed box answers a stranger with the right code exactly as
         # it answers one with the wrong code, because guessing is the only thing left to do here.
         return _claim_page(
-            '<label class="lbl mb">This box has already been claimed.</label>'
-            '<p class="val">Someone created the login for this box. If that was you, sign in '
-            'below. If it was not, reply to your welcome email now and we will help.</p>'
-            '<p><a class="btn-primary" href="/dash/login">Sign in</a></p>')
+            '<h1>This box has already been claimed.</h1>'
+            '<p>Someone created the login for this box. If that was you, sign in below. If it '
+            'was not, reply to your welcome email now and we will help.</p>'
+            '<a href="/dash/login"><button type="button">Sign in</button></a>')
     if not sellable:
         h1, body = _CLAIM_REFUSALS["not_sellable"]
-        return _claim_page(f'<label class="lbl mb">{html.escape(h1)}</label>'
-                           f'<p class="val">{html.escape(body)}</p>')
+        return _claim_page(f'<h1>{html.escape(h1)}</h1><p>{html.escape(body)}</p>')
     # THE CODE IS CARRIED IN A HIDDEN FIELD, NOT RE-READ FROM THE QUERY ON SUBMIT, so the
     # address bar is the only place it ever appears and a mistyped POST cannot half-work.
     code = html.escape(str(request.args.get("c", ""))[:220])
@@ -894,26 +955,23 @@ def _claim_form_body(code: str, *, email: str = "", problem: str = "") -> str:
     # from MIN_PASSWORD, so the screen cannot disagree with the box about the number — which is
     # the failure §2.7 says it nearly shipped, specifying 10 in prose against a rule of 12. No h1,
     # no strength meter, no "for your security": §2.7 asks for the string and nothing around it.
-    note = (f'<p class="val" style="color:var(--bad,#c0392b)">{html.escape(problem)}</p>'
-            if problem else "")
+    note = f'<p class="bad">{html.escape(problem)}</p>' if problem else ""
     body = f"""
-<section style="max-width:420px">
-  <label class="lbl mb">Your box is ready.</label>
-  <p class="val">{whose}</p>
+  <h1>Your box is ready.</h1>
+  <p class="tight">{whose}</p>
   {note}
   <form method="post" action="/claim">
     <input type="hidden" name="c" value="{code}">
-    <input type="email" name="email" placeholder="Your email address"
-           aria-label="Your email address" autocomplete="username"
-           value="{html.escape(email)}" required style="margin-bottom:10px">
-    <input type="password" name="password" placeholder="Choose a password"
-           aria-label="Choose a password" autocomplete="new-password"
-           required style="margin-bottom:10px">
-    <button class="btn-primary" type="submit">Create my login</button>
+    <label for="claim-email">Your email address</label>
+    <input id="claim-email" type="email" name="email" autocomplete="username"
+           value="{html.escape(email)}" required>
+    <label for="claim-pw">Choose a password</label>
+    <input id="claim-pw" type="password" name="password"
+           autocomplete="new-password" required>
+    <button type="submit">Create my login</button>
   </form>
-  <p class="val" style="margin-top:12px">This link works once. After you use it nobody else can
-     claim this box — including us.</p>
-</section>"""
+  <p class="small">This link works once. After you use it nobody else can claim this box
+     — including us.</p>"""
     return body
 
 
@@ -931,8 +989,8 @@ def claim_submit():
         # a fault, it stops reading like the box is broken at the moment the buyer is most anxious.
         log.warning("claim.throttled", ip=ip, wait_s=wait)
         resp = make_response(_claim_page(
-            '<label class="lbl mb">Too many tries.</label>'
-            '<p class="val">Wait a minute, then try again. This is here so nobody can guess '
+            '<h1>Too many tries.</h1>'
+            '<p>Wait a minute, then try again. This is here so nobody can guess '
             'their way into your box.</p>', 429))
         resp.headers["Retry-After"] = str(wait)
         return resp
@@ -961,9 +1019,8 @@ def claim_submit():
             log.error("claim.refusal_has_no_copy", kind=e.kind)
         h1, body = _CLAIM_REFUSALS.get(e.kind, _UNKNOWN_REFUSAL)
         return _claim_page(
-            f'<label class="lbl mb">{html.escape(h1)}</label>'
-            f'<p class="val">{html.escape(body)}</p>'
-            '<p><a class="dlink" href="/claim">Try again</a></p>', 400)
+            f'<h1>{html.escape(h1)}</h1><p>{html.escape(body)}</p>'
+            '<p><a href="/claim">Try again</a></p>', 400)
     _clear_failures(ip)
     # STRAIGHT IN. He has just proved he holds the order and chosen his password; sending him to
     # a login form to type it again is a door that opens onto another door.

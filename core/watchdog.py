@@ -181,7 +181,9 @@ def _alert(key: str, ok: bool, detail: str) -> bool:
             # DM. A real recovery carries a substantive detail, not a "skip (...)".
             return True
         if prev == "FAIL":
-            sent = slack.send_dm(dm, f":white_check_mark: {key} recovered ({detail})")
+            sent = slack.send_dm(dm, (f":white_check_mark: *A customer's box is handled* — {detail}"
+                                      if key.startswith("ownbox_order:") else
+                                      f":white_check_mark: {key} recovered ({detail})"))
             state.set_alert(key, "OK", bump_alert_ts=True)
             return sent
         state.set_alert(key, "OK")
@@ -193,7 +195,12 @@ def _alert(key: str, ok: bool, detail: str) -> bool:
             # No operator to page → the Slack DM is a silent no-op. Make the FAIL edge LOUD in
             # structured logs so a probe failure is never invisible on an operator-unset box.
             log.error("watchdog.probe_failed_operator_unset", key=key, detail=detail[:200])
-        sent = slack.send_dm(dm, f":warning: {key} FAILED: {detail}")
+        # A CUSTOMER'S ORDER READS AS ONE, not as a probe key. Measured 2026-09-15: the first real order alert
+        # reached the owner's phone as ":warning: ownbox_order:cs_test_… FAILED: …" and he read past it among the
+        # morning drip and the reel counts. A person waiting on a box they paid for cannot look like a metric.
+        sent = slack.send_dm(dm, (f":rotating_light: *A customer's box needs you* — {detail}"
+                                  if key.startswith("ownbox_order:") else
+                                  f":warning: {key} FAILED: {detail}"))
         state.set_alert(key, "FAIL", bump_alert_ts=True)
         return sent
 
