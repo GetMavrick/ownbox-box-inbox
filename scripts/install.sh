@@ -112,6 +112,12 @@ mint UNSUB_SIGNING_KEY     "keep it forever: opt-out links are signed with it"
 # login form refuses every password. The buyer's first act after install was failing the login
 # of the thing they had just bought, with nothing on screen saying why.
 mint DISPATCH_BEARER_TOKEN "the box's own API key — /dispatch, and the dashboard login"
+# A SEPARATE DASHBOARD PASSWORD, so the box can admit a second person (docs/DESIGN_PER_PERSON_LOGIN.md).
+# core/config falls back to the bearer when DASH_TOKEN is unset, and core/state.add_user REFUSES to add
+# anyone while the dashboard password IS the box's API key: signing an employee in would hand them the
+# credential that drives the whole box. Minted here, every fresh box can invite people from day one; the
+# owner signs in with the email and password he chose at /claim, and this stays in .env as his break-glass.
+mint DASH_TOKEN            "the owner's break-glass dashboard password, never the API key"
 
 say "3/6 licence"
 if [ -f licence.json ]; then echo "   licence.json exists — kept"; else

@@ -208,6 +208,7 @@ def claim_box(*, code: str, email: str, password: str,
     # sessions pointing at the wrong one. Claiming gives that row the buyer's address.
     owner = state.owner_user()
     now = state._now()
+    pw_hash = hash_password(password)
     with state.connect() as c:
         # THE INSERT IS THE CLAIM. `CHECK (id = 1)` makes a second one fail inside SQLite, so
         # two simultaneous submits cannot both succeed — the check at the top of this function
@@ -216,13 +217,15 @@ def claim_box(*, code: str, email: str, password: str,
             c.execute(
                 "INSERT INTO box_claim (id, claimed_at, order_id, user_id, email, pw_hash, "
                 "ip, user_agent) VALUES (1,?,?,?,?,?,?,?)",
-                (now, provisioned_order(), owner["id"], email, hash_password(password),
+                (now, provisioned_order(), owner["id"], email, pw_hash,
                  str(ip or "")[:64], str(user_agent or "")[:200]))
         except Exception as e:              # noqa: BLE001 — the loser of a race, almost surely
             log.warning("claim.refused_second", error=type(e).__name__)
             raise ClaimRefused("This box has already been set up. Sign in instead.") from e
-        c.execute("UPDATE users SET email = ?, role = 'owner', active = 1 WHERE id = ?",
-                  (email, owner["id"]))
+        # ONE CREDENTIAL STORE (migration 49): the owner signs in like everyone else, by email and the
+        # password on his own row. box_claim keeps the same hash only as the record of the claim.
+        c.execute("UPDATE users SET email = ?, role = 'owner', active = 1, pw_hash = ? WHERE id = ?",
+                  (email, pw_hash, owner["id"]))
     # THE AUDIT LINE. Who took this box, when, from where. It carries the order id and never the
     # password or the code — `core/logging` would scrub a key-ish value anyway, and a claim code
     # in a journal that survives the claim is a thing to not write rather than to redact.
@@ -237,7 +240,10 @@ def password_ok(password: str) -> bool:
     The login's other credential is DASH_TOKEN and it is checked separately and still works —
     this only ever ADDS a way in (owner, 2026-09-07: "I don't ever wanna be locked out").
     """
-    row = claimed()
-    if not row:
+    if not claimed():
         return False
-    return verify_password(str(password or ""), str(row.get("pw_hash") or ""))
+    # THE OWNER'S ROW IS WHERE HIS PASSWORD LIVES since migration 49 (it moved there from box_claim),
+    # so a password-only sign-in on a claimed box keeps working for the person who claimed it.
+    owner = state.get_user(state.OWNER_USER_ID) or {}
+    found = state.password_hash_for(owner.get("email", ""))
+    return bool(found) and verify_password(str(password or ""), found[1])

@@ -121,6 +121,67 @@ def platforms_present(space: str) -> list[dict]:
     return [{"platform": r["platform"], "n": int(r["n"])} for r in rows]
 
 
+def search_conversations(space: str, query: str, *, limit: int = 50,
+                         offset: int = 0, platform: str | None = None) -> list[dict]:
+    """Conversations whose MESSAGES or participant match `query`, newest inbound first.
+
+    THE CARD SELLS THIS AND THE BOX DID NOT HAVE IT. `$499` bullet 6 is "Search everything", and
+    until now the only retrieval on this screen was `list_conversations` — fifty most-recent rows
+    filtered by channel (docs/AUDIT_499_CARD.md §6). A person looking for what a customer said
+    last month had no way to ask.
+
+    SEARCHES THE MESSAGE BODIES, NOT JUST THE HEADER. Matching only `participant` would answer
+    "who" and never "what", and "what did they say about the leak" is the question somebody
+    actually has with an inbox open. So this joins to `inbox_messages` and matches `body`, with
+    the participant name as a second way in for when the name IS the thing remembered.
+
+    ONE ROW PER CONVERSATION. The join can match many messages in one thread; `EXISTS` keeps the
+    result a list of conversations rather than a list of hits, so the screen renders the same
+    shape `list_conversations` gives it and a thread with forty matches does not bury nine others.
+
+    THE QUERY IS A BOUND PARAMETER AND THE WILDCARDS ARE OURS. It arrives from a query string, so
+    it is never interpolated — and the `%` and `_` a person might type are escaped with an
+    explicit ESCAPE clause, because unescaped they are wildcards: a search for `100%` would
+    otherwise match every row in the box and read as "search is broken". `\` is escaped first,
+    or escaping the others would double-escape it.
+
+    SPACE IS NOT OPTIONAL, for the same reason `list_conversations` says so: a reader that could
+    be talked into searching another client's conversations is the worst bug available in this
+    file, and it arrives as a convenience default. There is no all-Spaces variant.
+
+    AN EMPTY QUERY RETURNS NOTHING, not everything. A blank box is a person who has not asked yet;
+    answering it with the whole inbox would make the screen flicker between two meanings of empty.
+    """
+    q = str(query or "").strip()
+    if not q:
+        return []
+    # `\` FIRST. Escaping `%` and `_` before `\` would turn the escape characters this function
+    # just inserted into literals on the next pass.
+    esc = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like = f"%{esc}%"
+    where, args = "k.space = ?", [space]
+    if platform:
+        where += " AND k.platform = ?"
+        args.append(str(platform))
+    args += [like, space, like, int(limit), int(offset)]
+    with state.connect() as c:
+        rows = c.execute(
+            "SELECT k.*, "
+            "       (SELECT COUNT(*) FROM inbox_messages m "
+            "         WHERE m.space = k.space "
+            "           AND m.zernio_conversation_id = k.zernio_conversation_id) AS message_count "
+            "  FROM inbox_conversations k "
+            f" WHERE {where} "
+            "   AND ( COALESCE(k.participant, '') LIKE ? ESCAPE '\\' "
+            "      OR EXISTS (SELECT 1 FROM inbox_messages m "
+            "                  WHERE m.space = ? "
+            "                    AND m.zernio_conversation_id = k.zernio_conversation_id "
+            "                    AND COALESCE(m.body, '') LIKE ? ESCAPE '\\') ) "
+            " ORDER BY (k.last_inbound_at IS NULL), k.last_inbound_at DESC, k.id ASC "
+            " LIMIT ? OFFSET ?", tuple(args)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def messages_for(space: str, zcid: str, *, limit: int = 200) -> list[dict]:
     """One conversation's messages, oldest first — the way a person reads a thread.
 

@@ -74,10 +74,25 @@ _CAPABILITY = re.compile(r"^(read|write):[a-z][a-z0-9_]{2,39}$")
 # that is deliberate — the filtering is proven here, on a rail where a mistake costs nothing,
 # rather than on the day somebody registers the first tool that returns a person's contact
 # details. Opening it is B3's per-seat grant and a deliberate act on the customer's own box.
+# WHAT EACH ROLE MAY REACH. A capability nobody grants is a capability nobody can use: tools
+# carrying it register fine and `visible_to` hides them from every seat, so the feature is DARK
+# and its registration test still passes. That happened — `read:inbox` shipped on three tools in
+# #1205 with no role holding it, and `tools/list` kept answering four (OSDev1, 2026-09-15).
+# Adding a capability here is therefore part of adding one anywhere.
+#
+# WHY `read:inbox` IS GRANTED AT ALL, and to these two. Every seat on a box is minted by that
+# box's owner, with `scripts/seat.py`, for their own assistant — there is no seat a stranger
+# holds, and the inbox is the thing the box was bought to read. A `read` seat that cannot read
+# the inbox is the product's headline feature withheld from the only person who could have
+# created the credential.
+#
+# `read:leads_pii` STAYS UNGRANTED, and the contrast is the point: it is not an oversight that
+# some capability has no holder, it is how a capability is kept for a decision nobody has made
+# yet. This list is where that decision gets made, visibly.
 _ROLE_CAPABILITIES = {
-    "read":    frozenset({"read:manifest", "read:reports"}),
-    "act":     frozenset({"read:manifest", "read:reports", "write:proposals"}),
-    "service": frozenset({"read:manifest", "read:reports", "write:proposals"}),
+    "read":    frozenset({"read:manifest", "read:reports", "read:inbox"}),
+    "act":     frozenset({"read:manifest", "read:reports", "read:inbox", "write:proposals"}),
+    "service": frozenset({"read:manifest", "read:reports", "read:inbox", "write:proposals"}),
 }
 
 

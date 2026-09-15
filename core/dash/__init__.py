@@ -750,11 +750,13 @@ def login_form():
     hidden = (f'<input type="hidden" name="next" value="{html.escape(nxt)}">' if nxt else "")
     body = f"""
 <section style="max-width:380px">
-  <label class="lbl mb">Operator login</label>
+  <label class="lbl mb">Sign in</label>
   <form method="post" action="/dash/login">
-    {hidden}<input type="password" name="token" placeholder="dashboard token" autofocus
+    {hidden}<input type="email" name="email" placeholder="email" autocomplete="username" autofocus
            style="margin-bottom:10px">
-    <button class="btn-primary" type="submit">Enter</button>
+    <input type="password" name="token" placeholder="password" autocomplete="current-password"
+           style="margin-bottom:10px">
+    <button class="btn-primary" type="submit">Sign in</button>
   </form>
 </section>"""
     return page("Login", "narrow", body, title=f"{brand()} · Login")
@@ -1002,14 +1004,25 @@ def login():
     # memory, while the claimed password is a deliberately expensive scrypt. A wrong guess
     # therefore costs one hash, not zero — which is the cost that makes guessing unattractive —
     # but the owner's own correct token costs none.
-    ok = bool(token) and hmac.compare_digest(provided, token)
-    if not ok:
-        ok = _claim.password_ok(provided)
-    if not ok:
+    who = state.owner_user() if bool(token) and hmac.compare_digest(provided, token) else None
+    # A PERSON WITH THEIR OWN PASSWORD (docs/DESIGN_PER_PERSON_LOGIN.md). Email and password, checked
+    # against that person's row. AN UNKNOWN ADDRESS COSTS THE SAME HASH AND GETS THE SAME ANSWER as a
+    # wrong password: a form that answers faster, or differently, for addresses nobody holds is a
+    # list of who works at the business.
+    email = str(request.form.get("email", "") or "").strip().lower()
+    if who is None and email:
+        found = state.password_hash_for(email)
+        if found and _claim.verify_password(provided, found[1]):
+            who = found[0]
+        elif not found:
+            _claim.verify_password(provided, _dummy_hash())
+    if who is None and not email and _claim.password_ok(provided):
+        who = state.owner_user()          # a claimed box's owner typing only his own password
+    if who is None:
         _note_failure(ip)
         log.warning("dash.login_failed", ip=ip)
         return page("Login", "narrow",
-                     '<p class="val">Invalid token. <a class="dlink" '
+                     '<p class="val">That email and password do not match. <a class="dlink" '
                      'href="/dash/login">Try again</a></p>',
                      title=f"{brand()} · Login"), 401
     _clear_failures(ip)
@@ -1026,7 +1039,194 @@ def login():
     # THE TOKEN LOGIN IS THE OWNER'S, and it mints HIS session — the same row migration 47
     # created and backfilled every older session to. Owner, 2026-09-07: "I don't ever wanna be
     # locked out of these machines"; §4.4: DASH_TOKEN keeps working, unchanged, forever.
-    resp.set_cookie(COOKIE, new_session(state.owner_user()["id"]), max_age=SESSION_DAYS * 86400,
+    resp.set_cookie(COOKIE, new_session(who["id"]), max_age=SESSION_DAYS * 86400,
+                    httponly=True, samesite="Lax", secure=request.is_secure)
+    log.info("auth.signed_in", user=who["id"], role=who.get("role"), ip=ip)
+    return resp
+
+
+_DUMMY = {}
+
+
+def _dummy_hash() -> str:
+    """A real scrypt hash of nothing anyone holds, so an unknown address costs what a known one does."""
+    if "h" not in _DUMMY:
+        _DUMMY["h"] = _claim.hash_password(secrets.token_urlsafe(24))
+    return _DUMMY["h"]
+
+
+# ── the people who may sign in: the owner invites, revokes and restores (DESIGN_PER_PERSON_LOGIN) ──
+#
+# OWNER ONLY, decided by the session's own row and nothing else. A member who could open this page
+# could invite a friend; the app token (`viewer_is_owner`) does not count here either, because a
+# link shared to read a report must never be a way to add a person to the box.
+def _owner_session():
+    who = session_user(request)
+    return who if who and who.get("role") == "owner" else None
+
+
+def _people_page(body: str, code: int = 200):
+    return page("People", "narrow", body, title=f"{brand()} · People"), code
+
+
+def _people_list(notice: str = "") -> str:
+    rows = []
+    for u in state.list_users():
+        status = ("owner" if u.get("role") == "owner" else
+                  "removed" if not u.get("active") else
+                  "signed up" if u.get("has_password") else "invited, not joined yet")
+        uid = html.escape(str(u["id"]))
+        actions = ""
+        if u.get("role") != "owner":
+            if u.get("active"):
+                actions = (f'<form method="post" action="/dash/people/{uid}/invite" style="display:inline">'
+                           f'<button class="btn" type="submit">New link</button></form> '
+                           f'<form method="post" action="/dash/people/{uid}/remove" style="display:inline">'
+                           f'<button class="btn" type="submit">Remove</button></form>')
+            else:
+                actions = (f'<form method="post" action="/dash/people/{uid}/restore" style="display:inline">'
+                           f'<button class="btn" type="submit">Restore</button></form>')
+        rows.append(f'<tr><td>{html.escape(str(u.get("email") or ""))}</td>'
+                    f'<td>{html.escape(status)}</td><td>{actions}</td></tr>')
+    cap = state.max_users()
+    seats = f"{state.count_active_users()} of {cap} people" if cap else f"{state.count_active_users()} people"
+    return f"""{notice}
+<section style="max-width:560px">
+  <label class="lbl mb">People who can sign in · {html.escape(seats)}</label>
+  <table>{''.join(rows)}</table>
+  <label class="lbl mb" style="margin-top:18px">Invite someone</label>
+  <form method="post" action="/dash/people/invite">
+    <input type="email" name="email" placeholder="their email" required style="margin-bottom:10px">
+    <button class="btn-primary" type="submit">Create invite link</button>
+  </form>
+  <p class="val">You send the link yourself. It works once, for {state.INVITE_DAYS} days, and they choose their own password.</p>
+</section>"""
+
+
+def _invite_notice(email: str, token: str) -> str:
+    link = f"{request.host_url.rstrip('/')}/join?t={quote(token, safe='')}"
+    return (f'<p class="val">Invite link for {html.escape(email)} — shown once, copy it now:<br>'
+            f'<code style="word-break:break-all">{html.escape(link)}</code></p>')
+
+
+@blueprint.get("/dash/people")
+def people():
+    if not session_ok(request):
+        return redirect("/dash/login?next=/dash/people")
+    if not _owner_session():
+        return _people_page('<p class="val">Only the box owner manages who can sign in.</p>', 403)
+    return _people_page(_people_list())
+
+
+@blueprint.post("/dash/people/invite")
+def people_invite():
+    owner = _owner_session()
+    if not owner:
+        return _people_page('<p class="val">Only the box owner manages who can sign in.</p>', 403)
+    email = str(request.form.get("email", "") or "").strip().lower()
+    try:
+        person = state.add_user(email, role="member")
+    except state.SeatsFull:
+        return _people_page(_people_list(f'<p class="val">This box is set up for {state.max_users()} people. '
+                                         'Remove someone first.</p>'), 409)
+    except state.SharedPasswordRefused as e:
+        return _people_page(_people_list(f'<p class="val">{html.escape(str(e))}</p>'), 409)
+    except ValueError:
+        return _people_page(_people_list('<p class="val">Enter the email address of the person to invite.</p>'), 400)
+    if person.get("role") == "owner":
+        return _people_page(_people_list('<p class="val">That is the owner\'s own address.</p>'), 400)
+    token = state.create_invite(person["id"], created_by=owner["id"])
+    log.info("auth.invite_created", user=person["id"], by=owner["id"])
+    return _people_page(_people_list(_invite_notice(person["email"], token)))
+
+
+@blueprint.post("/dash/people/<uid>/<action>")
+def people_action(uid: str, action: str):
+    owner = _owner_session()
+    if not owner:
+        return _people_page('<p class="val">Only the box owner manages who can sign in.</p>', 403)
+    person = state.get_user(uid)
+    if not person or person.get("role") == "owner" or action not in ("invite", "remove", "restore"):
+        return _people_page(_people_list('<p class="val">That person is not on this box.</p>'), 404)
+    if action == "remove":
+        state.set_user_active(uid, False)        # every session they hold stops at its next request
+        log.info("auth.revoked", user=uid, by=owner["id"])
+        return _people_page(_people_list(f'<p class="val">{html.escape(person["email"])} can no longer sign in.</p>'))
+    if action == "restore":
+        try:
+            state.add_user(person["email"], role="member")   # reactivation goes through the seat check
+        except state.SeatsFull:
+            return _people_page(_people_list(f'<p class="val">This box is set up for {state.max_users()} people. '
+                                             'Remove someone first.</p>'), 409)
+        log.info("auth.restored", user=uid, by=owner["id"])
+        return _people_page(_people_list(f'<p class="val">{html.escape(person["email"])} can sign in again.</p>'))
+    if not person.get("active"):
+        return _people_page(_people_list('<p class="val">Restore that person before sending a new link.</p>'), 409)
+    token = state.create_invite(uid, created_by=owner["id"])
+    log.info("auth.invite_created", user=uid, by=owner["id"], reissued=True)
+    return _people_page(_people_list(_invite_notice(person["email"], token)))
+
+
+# ── joining from an invite link: the invited person chooses their own password ────────────────
+_JOIN_REFUSED = ('<p class="val">This invite link can\'t be used. It may have been used already, or it '
+                 'expired. Ask the person who invited you for a new one.</p>')
+
+
+def _join_page(body: str, code: int = 200):
+    return page("Join", "narrow", body, title=f"{brand()} · Join"), code
+
+
+def _join_form(token: str, email: str, problem: str = "") -> str:
+    note = f'<p class="val">{html.escape(problem)}</p>' if problem else ""
+    return f"""{note}
+<section style="max-width:380px">
+  <label class="lbl mb">Choose your password</label>
+  <p class="val">You'll sign in as {html.escape(email)}.</p>
+  <form method="post" action="/join">
+    <input type="hidden" name="t" value="{html.escape(token)}">
+    <input type="password" name="password" placeholder="a password ({_claim.MIN_PASSWORD}+ characters)"
+           autocomplete="new-password" required style="margin-bottom:10px">
+    <button class="btn-primary" type="submit">Join</button>
+  </form>
+</section>"""
+
+
+@blueprint.get("/join")
+def join_form():
+    token = str(request.args.get("t", "") or "")[:200]
+    person = state.invite_user(token)
+    if not person:
+        return _join_page(_JOIN_REFUSED, 404)
+    return _join_page(_join_form(token, person["email"]))
+
+
+@blueprint.post("/join")
+def join_submit():
+    ip = _client_ip()
+    wait = _block_seconds(ip)
+    if wait:
+        resp = make_response(_join_page(f'<p class="val">Too many attempts. Try again in {wait}s.</p>', 429))
+        resp.headers["Retry-After"] = str(wait)
+        return resp
+    token = str(request.form.get("t", "") or "")[:200]
+    person = state.invite_user(token)
+    if not person:
+        _note_failure(ip)
+        log.warning("auth.invite_refused", ip=ip)
+        return _join_page(_JOIN_REFUSED, 404)
+    password = request.form.get("password", "")
+    problem = _claim.password_problem(password, email=person["email"])
+    if problem:
+        # A TYPO, NOT A GUESS: the link is valid, so a short password is not counted against the throttle.
+        return _join_page(_join_form(token, person["email"], problem), 400)
+    joined = state.redeem_invite(token, _claim.hash_password(password))
+    if not joined:
+        _note_failure(ip)
+        return _join_page(_JOIN_REFUSED, 404)
+    _clear_failures(ip)
+    log.info("auth.invite_used", user=joined["id"], ip=ip)
+    resp = make_response(redirect(landing()))
+    resp.set_cookie(COOKIE, new_session(joined["id"]), max_age=SESSION_DAYS * 86400,
                     httponly=True, samesite="Lax", secure=request.is_secure)
     return resp
 

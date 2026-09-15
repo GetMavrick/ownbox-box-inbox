@@ -5,6 +5,7 @@ WAL + busy_timeout so the dispatch app, the worker, and the watchdog can all wri
 without 'database is locked'. Keep write transactions short — the context manager
 commits and closes immediately. Back this file up with Litestream (see spec §5/§9).
 """
+import hashlib
 import json
 import secrets
 import sqlite3
@@ -35,7 +36,7 @@ MISSING = object()
 # creates them, means the next person to add a secret-bearing table adds it to a list that sits
 # in front of them — and the exporter also redacts credential-NAMED columns in every other table
 # as a second rule, for the table nobody classified.
-SECRET_TABLES = frozenset({"box_secrets", "box_claim"})
+SECRET_TABLES = frozenset({"box_secrets", "box_claim", "user_invites"})
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS spend_ledger (
@@ -224,6 +225,27 @@ CREATE TABLE IF NOT EXISTS box_claim (
   pw_hash     TEXT NOT NULL,   -- scrypt$n$r$p$salt$hash — never the password
   ip          TEXT,            -- who claimed it, for the audit line
   user_agent  TEXT
+);
+
+-- ── AN INVITATION TO SIGN IN, ISSUED BY THE BOX'S OWNER (docs/DESIGN_PER_PERSON_LOGIN.md) ──
+-- SCHEMA, not MIGRATIONS: a brand-new table needs no version number (the rule above).
+--
+-- A SECOND PERSON NEEDS A CREDENTIAL, AND NOBODY CAN BE TRUSTED TO TYPE ONE IN FOR THEM. The owner
+-- invites; the link is shown to the owner ONCE; the invited person sets their own password on it.
+-- No self-registration exists anywhere, for the same reason the claim link is single-use.
+--
+-- token_hash IS A HASH. The token in the link is 32 random bytes and is never stored: a copy of this
+-- table (a backup, a restore, an export that forgot the rule) cannot be turned back into a link.
+-- ONCE, AND FOR SEVEN DAYS: `used_at` is set in the same statement that checks it is still NULL, so
+-- two submits cannot both set a password, and an invite nobody used goes dead on its own.
+CREATE TABLE IF NOT EXISTS user_invites (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  token_hash  TEXT NOT NULL UNIQUE,  -- sha256 of the link's token, never the token
+  created_by  TEXT,                  -- the owner's user id, for the audit trail
+  created_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,
+  used_at     TEXT                   -- set once: redeemed, or retired by a newer invite
 );
 
 -- ── THE BOX'S OWN SECRETS, set from a screen rather than from .env ───────────────────
@@ -528,7 +550,7 @@ def _replay_machine(conn, machine: str, upto: int) -> None:
 # concurrent migrators: worker, dispatch, and watchdog can all boot and call init_db;
 # exactly one runs the steps, the rest wait on the lock then see the bumped version.
 
-SCHEMA_VERSION = 48
+SCHEMA_VERSION = 49
 
 
 def _migration_1(c) -> None:
@@ -1416,6 +1438,28 @@ def _migration_46(c) -> None:
                       "ON CONFLICT(machine) DO UPDATE SET version=excluded.version, "
                       "updated_at=excluded.updated_at", (machine, level, _now()))
 
+def _migration_49(c) -> None:
+    """A PASSWORD PER PERSON (docs/DESIGN_PER_PERSON_LOGIN.md). The $499 card sells "up to 5 people,
+    each with their own login", and until this every session on every box was the owner's: `users`
+    held identities that nothing could authenticate as.
+
+    ONE CREDENTIAL STORE. A box already claimed (#1172) holds its owner's password in
+    `box_claim.pw_hash`; it moves onto the owner's row here, so sign-in reads one place. The claim
+    row stays, whole, as the audit of who took the box.
+
+    NULL MEANS NO PASSWORD YET, which is exactly an invited person who has not joined. The owner row
+    on an unclaimed box stays NULL too: DASH_TOKEN is its way in, unchanged.
+    """
+    # RE-RUNNABLE, because a kernel step is replayed whenever a box's user_version is behind its tables
+    # (tests/test_schema_integrity pins a box at 32 and restarts it): the column is added only if absent.
+    if "pw_hash" not in {r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()}:
+        c.execute("ALTER TABLE users ADD COLUMN pw_hash TEXT")
+    if _table_exists(c, "box_claim"):
+        row = c.execute("SELECT pw_hash, user_id FROM box_claim WHERE id = 1").fetchone()
+        if row and row[0]:
+            c.execute("UPDATE users SET pw_hash = ? WHERE id = ? AND pw_hash IS NULL", (row[0], row[1]))
+
+
 MIGRATIONS = {
     46: _migration_46,   # the schema split's bootstrap (kernel step)
     1: _migration_1, 2: _migration_2, 3: _migration_3, 4: _migration_4,
@@ -1430,7 +1474,8 @@ MIGRATIONS = {
               37: _migration_37, 38: _migration_38,
               39: _migration_39, 40: _migration_40, 41: _migration_41,
               42: _migration_42, 43: _migration_43, 44: _migration_44,
-              45: _migration_45, 47: _migration_47, 48: _migration_48}
+              45: _migration_45, 47: _migration_47, 48: _migration_48,
+              49: _migration_49}
 
 
 # init_db IS SAFE TO CALL FROM MANY THREADS AND PROCESSES AT ONCE. Main went red on 2026-09-06
@@ -1614,7 +1659,7 @@ def add_user(email: str, *, name: str | None = None, role: str = "member") -> di
                 if cap and int(n) >= cap:
                     raise SeatsFull(f"this box is configured for {cap} people")
                 c.execute("UPDATE users SET active = 1 WHERE id = ?", (row["id"],))
-            return dict(row) | {"active": 1}
+            return _person(row) | {"active": 1}
         cap = max_users()
         n = c.execute("SELECT COUNT(*) AS n FROM users WHERE active = 1").fetchone()["n"]
         if cap and int(n) >= cap:
@@ -1658,12 +1703,24 @@ def owner_user() -> dict:
     return get_user(OWNER_USER_ID)
 
 
+def _person(row) -> dict:
+    """A user row as the rest of the box may see it: EVERYTHING BUT THE PASSWORD HASH.
+
+    `users.pw_hash` arrived in migration 49 and every reader here is `SELECT *`, so without this a
+    hash would ride out of `get_user` into a template, a JSON response or a log line the first time
+    someone printed a user. Sign-in reads the hash through `password_hash_for` and nothing else does.
+    """
+    d = dict(row)
+    d.pop("pw_hash", None)
+    return d
+
+
 def get_user(user_id: str) -> dict | None:
     if not user_id:
         return None
     with connect() as c:
         row = c.execute("SELECT * FROM users WHERE id = ?", (str(user_id),)).fetchone()
-    return dict(row) if row else None
+    return _person(row) if row else None
 
 
 def user_by_email(email: str) -> dict | None:
@@ -1672,7 +1729,7 @@ def user_by_email(email: str) -> dict | None:
         return None
     with connect() as c:
         row = c.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-    return dict(row) if row else None
+    return _person(row) if row else None
 
 
 def set_user_active(user_id: str, active: bool) -> None:
@@ -1689,6 +1746,110 @@ def set_user_active(user_id: str, active: bool) -> None:
     with connect() as c:
         c.execute("UPDATE users SET active = ? WHERE id = ?",
                   (1 if active else 0, str(user_id)))
+
+
+# ── a password per person, and the only way to get one: an invite (DESIGN_PER_PERSON_LOGIN.md) ──
+INVITE_DAYS = 7
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
+def list_users() -> list[dict]:
+    """Everyone who has ever been let in, owner first, with whether they have set a password —
+    never the hash itself."""
+    with connect() as c:
+        rows = c.execute("SELECT *, (pw_hash IS NOT NULL) AS has_password FROM users "
+                         "ORDER BY (role = 'owner') DESC, created_at").fetchall()
+    return [_person(r) for r in rows]
+
+
+def password_hash_for(email: str) -> tuple[dict, str] | None:
+    """(person, hash) for an ACTIVE person with a password, or None. The one reader of pw_hash.
+
+    Revoked people and invited-but-not-joined people both return None, so sign-in cannot tell them
+    apart from an address nobody holds — and must not, or the form becomes a list of who works here.
+    """
+    email = str(email or "").strip().lower()
+    if not email:
+        return None
+    with connect() as c:
+        row = c.execute("SELECT * FROM users WHERE email = ? AND active = 1 AND pw_hash IS NOT NULL",
+                        (email,)).fetchone()
+    return (_person(row), str(row["pw_hash"])) if row else None
+
+
+def set_password(user_id: str, pw_hash: str) -> None:
+    """Give a person a (new) password and END EVERY SESSION THEY ALREADY HOLD.
+
+    A password is changed because the old one may be known to someone else; a session that
+    survives the change would keep that someone signed in. Sessions are ended by expiring them,
+    not deleting rows (standing owner rule: nothing is deleted).
+    """
+    now = _now()
+    with connect() as c:
+        c.execute("UPDATE users SET pw_hash = ? WHERE id = ?", (str(pw_hash), str(user_id)))
+        c.execute("UPDATE sessions SET expires_at = ? WHERE user_id = ? AND expires_at > ?",
+                  (now, str(user_id), now))
+
+
+def create_invite(user_id: str, *, created_by: str | None = None) -> str:
+    """Mint a single-use sign-up link token for an ACTIVE person. Returns the token; stores its hash.
+
+    A NEW INVITE RETIRES EVERY EARLIER UNUSED ONE for the same person. An owner re-invites because a
+    link went to the wrong place or was lost, and the old link must stop working when he does.
+    """
+    who = get_user(user_id)
+    if not who or not who.get("active"):
+        raise ValueError("an invite needs an active person")
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    with connect() as c:
+        c.execute("UPDATE user_invites SET used_at = ? WHERE user_id = ? AND used_at IS NULL",
+                  (now.isoformat(), str(user_id)))
+        c.execute("INSERT INTO user_invites (id, user_id, token_hash, created_by, created_at, "
+                  "expires_at) VALUES (?,?,?,?,?,?)",
+                  ("inv_" + secrets.token_hex(8), str(user_id), _token_hash(token), created_by,
+                   now.isoformat(), (now + timedelta(days=INVITE_DAYS)).isoformat()))
+    return token
+
+
+_INVITE_OPEN = ("FROM user_invites i JOIN users u ON u.id = i.user_id "
+                "WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? AND u.active = 1")
+
+
+def invite_user(token: str) -> dict | None:
+    """The person a still-usable invite is for, or None. Never says WHY it is unusable."""
+    if not str(token or "").strip():
+        return None
+    with connect() as c:
+        row = c.execute("SELECT u.* " + _INVITE_OPEN, (_token_hash(token), _now())).fetchone()
+    return _person(row) if row else None
+
+
+def redeem_invite(token: str, pw_hash: str) -> dict | None:
+    """Use an invite ONCE: set that person's password and end their other sessions. None if unusable.
+
+    THE UPDATE IS THE CHECK. `used_at IS NULL` is re-tested in the statement that sets it, so of two
+    concurrent submits exactly one changes a row; the other gets None and sets nothing.
+    """
+    if not str(token or "").strip():
+        return None
+    now = _now()
+    with connect() as c:
+        row = c.execute("SELECT i.id AS invite_id, u.id AS user_id " + _INVITE_OPEN,
+                        (_token_hash(token), now)).fetchone()
+        if not row:
+            return None
+        used = c.execute("UPDATE user_invites SET used_at = ? WHERE id = ? AND used_at IS NULL",
+                         (now, row["invite_id"]))
+        if used.rowcount != 1:
+            return None
+        c.execute("UPDATE users SET pw_hash = ? WHERE id = ?", (str(pw_hash), row["user_id"]))
+        c.execute("UPDATE sessions SET expires_at = ? WHERE user_id = ? AND expires_at > ?",
+                  (now, row["user_id"], now))
+    return get_user(row["user_id"])
 
 
 def touch_user(user_id: str) -> None:

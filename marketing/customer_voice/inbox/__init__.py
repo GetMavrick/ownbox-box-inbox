@@ -39,3 +39,24 @@ if _sdk_ok:
                       name="inbox_poll")
 else:
     log.error("inbox.disabled_sdk_drift", detail=_sdk_detail)
+
+# THE READ TOOLS REGISTER EITHER WAY, and that placement is the decision. Everything above is
+# fail-closed on the vendor SDK, correctly: polling and sending on an SDK nobody can verify is the
+# failure that gate exists for. `tools` touches no vendor — it reads rows already on this box's own
+# disk — so sharing the poller's fate would mean a customer whose SDK drifted also loses the
+# ability to read their own conversations through the connector. Intake stops; reading does not.
+#
+# IT MUST NEVER TAKE THE DEPARTMENT DOWN. A duplicate tool name raises from `tools.register`, and
+# an unguarded import here would turn that into a worker that cannot load the inbox at all. The
+# connector already has a word for this: the tools are absent, the reason is recorded, and the box
+# keeps answering (core/dispatch.py does the same for core.report_tools).
+try:
+    from . import tools as _inbox_tools  # noqa: F401
+except Exception as _tools_err:          # noqa: BLE001
+    log.error("inbox.tools_import_failed", error=f"{type(_tools_err).__name__}: {_tools_err}")
+    try:
+        from core.connector import tools as _ctools
+        _ctools.note_absent("marketing.customer_voice.inbox.tools",
+                            f"{type(_tools_err).__name__}: {_tools_err}")
+    except Exception:                    # noqa: BLE001 — bookkeeping never breaks the loader
+        pass
