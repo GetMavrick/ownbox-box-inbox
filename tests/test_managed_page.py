@@ -89,9 +89,13 @@ ok("...and the page names Stripe as the one that knows the CURRENT state, not th
    "current state" in html and "already cancelled, Stripe will say so" in html, html[-500:])
 ok("NO CREDENTIAL OF OURS IS ON THE PAGE — the customer has root on this machine",
    not any(t in html for t in ("sk_live", "sk_test", "rk_live", "Bearer ")), html[-400:])
+ok("EVERY BOX SHIPS WITH THE DOOR ALREADY OPEN — a cancel path is not something a box can be missing",
+   (lambda d: d.startswith("https://billing.stripe.com/p/login/"))(
+       __import__("core.config", fromlist=["settings"]).settings.__class__.managed_portal_url),
+   "the shipped default is not a Stripe portal login URL")
 settings.managed_portal_url = ""
 html = body()
-ok("with none configured it gives a real instruction, not a dead button",
+ok("...and if it were ever blanked, it gives a real instruction rather than a dead button",
    "reply to your welcome email" in html and "billing.stripe.com" not in html, html[-500:])
 ok("...and never renders an empty link", 'href=""' not in html)
 

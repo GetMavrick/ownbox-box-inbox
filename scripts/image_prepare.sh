@@ -97,6 +97,30 @@ verify() {
   [ ! -f "$root/trust/allowed_signers" ] && { echo "  ✗ no trust/allowed_signers — a clone could never verify an update, so it could never safely take one"; bad=1; }
   [ ! -x "$root/.venv/bin/python" ] && { echo "  ✗ no .venv at $root — the clone would pay for it on first boot"; bad=1; }
   [ ! -f "$root/image.json" ] && { echo "  ✗ no image.json — a clone must be able to say which image it came from"; bad=1; }
+  # THE VENDOR SDK IS CHECKED HERE, WHERE A BAD IMAGE COSTS NOTHING. The box already verifies the Zernio
+  # SDK's pin and its real signatures at worker boot, and honours the answer — but that is the CUSTOMER'S
+  # first boot. An image baked with a drifted SDK would be snapshotted, pointed at by the provisioner, and
+  # then fail on every box built from it, one buyer at a time. Asking the same question at the cut turns
+  # that into a build that refuses. Run with the baked venv (the one a clone will actually use) and with
+  # verify.py loaded BY PATH, so importing it cannot drag core.config in and freeze settings at import.
+  if [ -x "$root/.venv/bin/python" ] && [ -f "$root/core/vendors/zernio/verify.py" ]; then
+    local sdk
+    sdk=$("$root/.venv/bin/python" - "$root/core/vendors/zernio/verify.py" <<'SDKPY' 2>&1
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("_zv", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+ok_, detail = m.verify_sdk()
+print(detail)
+sys.exit(0 if ok_ else 1)
+SDKPY
+)
+    # shellcheck disable=SC2181
+    if [ $? -ne 0 ]; then
+      echo "  ✗ the baked SDK is not the pinned one: $sdk — every clone of this image would fail at boot"; bad=1
+    else
+      echo "  ✓ $sdk"
+    fi
+  fi
   # ── AN IMAGE IS A SIGNED CHECKOUT OF ITS BOX REPOSITORY (image v2) ─────────────────────────────
   # Image #1 was an exported tarball: it booted, and it could never take an update, because /deploy
   # has nothing to fetch into a tree with no repository. A sold box now updates the way this box does

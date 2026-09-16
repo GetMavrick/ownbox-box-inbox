@@ -59,7 +59,7 @@ customer_voice:
     # still SHOWN — hiding a real competitor would be worse — but it takes no position, and the
     # page says why. A stated floor, not a weighting curve somebody has to reverse-engineer.
     min_reviews: 5
-    self: ""                   # e.g. "Brian MacDonald, Halifax NS"
+    self: ""                   # e.g. "Your Company, Halifax NS"
     roster: []                 # e.g. ["Acme Consulting, Halifax NS", "Beta Studio, Halifax NS"]
 
   # THE RAILS THIS BUSINESS ACTUALLY HAS, his answer and nobody's inference. A rail he has not
@@ -244,10 +244,10 @@ dash:
   # login itself is NOT tiered: it is a security fix and it ships in every box.
   max_users: 5
   # THE NAME AT THE TOP OF EVERY SCREEN. Owner, 2026-09-06, direct: "Get Mavrick off this app.
-  # It's Brian MacDonald at the top." This is the one value those screens read (dash.brand()), so
+  # It's Your Company at the top." This is the one value those screens read (dash.brand()), so
   # it is the whole change — and it is deliberately a CONFIG value, because a clone sold to a
   # buyer puts the buyer's name here without touching a line of code.
-  brand: "Brian MacDonald"
+  brand: ""
   # WHERE THE CALL TO ACTION GOES. The machine app puts one chip beside its seven pages — owner,
   # 2026-09-06: "seven pages listed in the navigation plus the call to action which goes directly
   # into our funnel." Empty = no chip rendered at all, which is the right default for a clone: a

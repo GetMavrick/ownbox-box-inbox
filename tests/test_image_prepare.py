@@ -97,6 +97,40 @@ base = clean_tree()
 r = verify(base)
 ok("a tree with a venv and a stamp passes", r.returncode == 0, r.stdout + r.stderr)
 
+print("\n— the SDK baked into the image is the pinned one, checked HERE and not at a customer's first boot —")
+
+
+def tree_with_sdk_verdict(ok_: bool, detail: str) -> pathlib.Path:
+    """A tree whose baked venv answers the SDK question the way we want, so the gate itself is tested
+    rather than the real SDK. The venv python is a shell script: it ignores the loader we hand it and
+    prints/exits the verdict, which is exactly the surface image_prepare depends on."""
+    d = clean_tree()
+    (d / "core" / "vendors" / "zernio").mkdir(parents=True, exist_ok=True)
+    (d / "core" / "vendors" / "zernio" / "verify.py").write_text("def verify_sdk():\n    return True, 'x'\n")
+    py = d / ".venv" / "bin" / "python"
+    py.write_text(f"#!/bin/sh\necho '{detail}'\nexit {0 if ok_ else 1}\n")
+    py.chmod(0o755)
+    return d
+
+
+good = tree_with_sdk_verdict(True, "zernio-sdk 1.4.551 (pinned, signatures verified)")
+r = verify(good)
+ok("an image whose baked SDK verifies is an image", r.returncode == 0, r.stdout + r.stderr)
+ok("...and it says so, so the cut records what it checked",
+   "signatures verified" in (r.stdout + r.stderr), r.stdout + r.stderr)
+
+drifted = tree_with_sdk_verdict(False, "zernio-sdk version drift: installed 1.4.400, pinned 1.4.551")
+r = verify(drifted)
+ok("AN IMAGE WITH A DRIFTED SDK IS REFUSED — one build fails instead of every box built from it",
+   r.returncode != 0, r.stdout + r.stderr)
+ok("...and the refusal names the drift, not just 'failed'",
+   "1.4.400" in (r.stdout + r.stderr) and "every clone" in (r.stdout + r.stderr), r.stdout + r.stderr)
+
+# A tree from before this check existed (no verify.py) must still pass: the gate is additive, and an
+# older box type that never carried the vendor module is not thereby a broken image.
+older = clean_tree()
+ok("a tree with no vendor verifier at all is unaffected", verify(older).returncode == 0)
+
 print("\n— each identity file, alone, is refused —")
 # One file at a time, because a check that only fires on the whole set is a check that misses the
 # one file somebody forgot. The message must NAME the path: a refusal you cannot act on is noise.

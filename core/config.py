@@ -158,7 +158,13 @@ class Settings:
     # back a link — so cancelling needs NO credential of ours on a box its customer has root on, and no
     # service of ours in the path at all. Unset, the Managed page says to reply to the welcome email
     # instead, which is honest rather than a dead button.
-    managed_portal_url     = os.environ.get("MANAGED_PORTAL_URL", "")
+    # THE SAME DOOR FOR EVERY BOX, so it ships as a default rather than a setting each box must be told.
+    # It is Ownbox's Stripe customer portal, not a per-customer value and not a secret: a public login
+    # page that mails the buyer a link. Env-overridable for a test account. Empty would mean every sold
+    # box shows "reply to your welcome email" instead of a cancel button, which is the one thing a
+    # subscription that renews itself must never do.
+    managed_portal_url     = os.environ.get(
+        "MANAGED_PORTAL_URL", "https://billing.stripe.com/p/login/fZufZb9028iOeWhao62Ry00")
     # Cockpit Post trigger: set this Airtable single-select to the trigger value on a
     # READY reel to publish it. Schedule field set → Zernio holds + releases on that date;
     # else it fires immediately (autopost_default_mode = "now"). Defaults match the owner's

@@ -247,11 +247,28 @@ select,input[type=text]{width:100%}
 def brand() -> str:
     """The name on every screen, from ONE config value. These screens get filmed for the shop and
     for buyer handovers, so the mark has to change in one edit; it was hardcoded in ten places
-    across two files. Absent = the mark it always printed."""
+    across two files.
+
+    ON A SOLD BOX THE NAME IS THE BUYER'S. An explicit `dash.brand` still wins — an operator who set
+    one meant it — but where config is silent a PROVISIONED box answers with the company it was built
+    for, not with ours. Rendering an exported box showed the operator's name in the inbox header twice
+    a page (OSDev5, 2026-09-16), on a machine whose whole pitch is that the customer owns it.
+
+    THE OLD FALLBACK WAS A SECOND BUG WAITING. It printed "Mavrick", a mark the owner ruled off this
+    app entirely — so a box with no config and no provision.json advertised the wrong company. Now the
+    last resort is the product's own name, which is true on any box in any state.
+    """
     try:
-        return str((get_config().get("dash") or {}).get("brand") or "").strip() or "Mavrick"
-    except Exception:
-        return "Mavrick"
+        configured = str((get_config().get("dash") or {}).get("brand") or "").strip()
+    except Exception:                       # noqa: BLE001 — unreadable config is simply no brand
+        configured = ""
+    if configured:
+        return configured
+    try:
+        bought_for = _claim.provisioned_buyer()
+    except Exception:                       # noqa: BLE001 — a box with no provision.json has no buyer
+        bought_for = ""
+    return bought_for or "Ownbox"
 
 
 def scope() -> list[str] | None:

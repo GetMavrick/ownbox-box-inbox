@@ -16,12 +16,20 @@ deployment where someone has already made a deliberate choice. This only ever fi
 """
 from __future__ import annotations
 
+import json
+
 from core import state
 from core.logging import get_logger
 
 log = get_logger(__name__)
 
 ANTHROPIC = "anthropic_api_key"
+# THE BUYER'S MAILBOX, FOR READING (SPEC #1226). Three values useless apart, so they are stored and
+# replaced as ONE row: a half-updated credential is an auth failure nobody can explain.
+EMAIL = "email_imap"
+# Written by the poller when Google refuses, read by the screen. Never holds a credential.
+EMAIL_STATUS = "email_imap_status"
+EMAIL_DETAIL = "email_imap_detail"
 
 
 def get(name: str) -> str:
@@ -49,6 +57,71 @@ class SecretRejected(ValueError):
 # an email, a URL, a password, half a key with the front chewed off by a copy.
 _ANTHROPIC_SHAPE = ("sk-ant-", 40)
 
+# WHAT A GOOGLE APP PASSWORD LOOKS LIKE: sixteen letters, which Google DISPLAYS as four groups of four.
+# People paste it with the spaces in, every time, because that is how it is shown to them. Stripping
+# them is not leniency — rejecting the format Google itself renders would be our bug dressed up as
+# their mistake. Same rule as the key above: catch the wrong thing entirely, never judge validity.
+_APP_PASSWORD_LEN = 16
+
+
+def _clean_app_password(value: str) -> str:
+    return "".join(str(value or "").split())
+
+
+def email_credential() -> dict:
+    """This box's mailbox credential as {host, user, password}, or {} when none is set.
+
+    Returning {} rather than raising is deliberate: "not connected" is an ordinary state."""
+    raw = get(EMAIL)
+    if not raw:
+        return {}
+    try:
+        got = json.loads(raw)
+    except ValueError:
+        return {}
+    return got if isinstance(got, dict) and got.get("user") and got.get("password") else {}
+
+
+def put_email(*, host: str, user: str, password: str, user_id: str | None = None) -> None:
+    """Store the mailbox credential as one row. Raises SecretRejected with a sentence for the buyer."""
+    host = str(host or "").strip() or "imap.gmail.com"
+    user = str(user or "").strip()
+    password = _clean_app_password(password)
+    if not user or "@" not in user:
+        raise SecretRejected("Put in the full email address of the mailbox you want read.")
+    if not password:
+        raise SecretRejected("Paste the app password Google gave you.")
+    if len(password) != _APP_PASSWORD_LEN or not password.isalnum():
+        # The mistake people actually make is pasting their ACCOUNT password — the one thing that must
+        # never reach this table. It is far broader than the box needs, and it would keep working after
+        # they revoked the thing they believed they had given us.
+        raise SecretRejected("That looks like your Google password, not an app password. An app "
+                             "password is 16 letters, shown as four groups of four.")
+    put(EMAIL, json.dumps({"host": host, "user": user, "password": password}), user_id=user_id)
+    put(EMAIL_STATUS, "connected", user_id=user_id)
+
+
+def email_state() -> dict:
+    """WHAT A SCREEN BINDS TO, and nothing a screen should not have: never the password.
+
+    `status` is one of: not_connected | connected | needs_reauth | admin_disabled. The last two exist
+    because Google revokes an app password whenever the account password changes, and because a
+    Workspace administrator can switch them off entirely — both arrive as the same opaque IMAP refusal,
+    and a buyer told "authentication failed" learns nothing they can act on."""
+    cred = email_credential()
+    if not cred:
+        return {"status": "not_connected", "user": None, "detail": ""}
+    return {"status": get(EMAIL_STATUS) or "connected", "user": cred.get("user"),
+            "detail": get(EMAIL_DETAIL)}
+
+
+def note_email_status(status: str, detail: str = "", *, user_id: str | None = None) -> None:
+    """The poller says WHY it could not sign in, so the screen can say something a person can act on."""
+    if status not in ("needs_reauth", "admin_disabled", "connected"):
+        raise ValueError(f"unknown email status {status!r}")
+    put(EMAIL_STATUS, status, user_id=user_id)
+    put(EMAIL_DETAIL, detail[:300] if detail else " ", user_id=user_id)
+
 
 def validate(name: str, value: str) -> str:
     """The cleaned value, or raise `SecretRejected` saying what to fix.
@@ -62,6 +135,13 @@ def validate(name: str, value: str) -> str:
     value = str(value or "").strip()
     if not value:
         raise SecretRejected("Paste the key from your AI account, then turn drafts on.")
+    # THE NO-WHITESPACE RULE IS ABOUT PASTED KEYS, NOT EVERY ROW IN THIS TABLE. It exists because a key
+    # with a stray newline fails at the vendor with an opaque error. Two kinds of value here are not
+    # keys and legitimately contain spaces: the mailbox credential, stored as one JSON object so it can
+    # never be half-updated, and the status detail, which is a SENTENCE written for the buyer. Applying
+    # the key rule to those would reject them at runtime, inside the poller, where nobody is looking.
+    if name in (EMAIL, EMAIL_DETAIL):
+        return value
     if any(ch.isspace() for ch in value):
         # A pasted key with a newline or a stray space fails at the vendor with an opaque
         # error; caught here it is one sentence at the moment they can fix it.

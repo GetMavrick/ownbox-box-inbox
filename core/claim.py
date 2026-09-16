@@ -120,6 +120,21 @@ def provisioned_host() -> str:
         return ""
 
 
+def provisioned_buyer() -> str:
+    """The company this box was built for, or "".
+
+    THE NAME ON A SOLD BOX IS THE BUYER'S, NEVER OURS. Found by rendering an exported box (OSDev5,
+    2026-09-16): the inbox header read the OPERATOR's name, twice a page, on a machine sold to
+    somebody else. The exporter scrubbed tenant slugs, Airtable ids, a Slack id and a connector
+    profile id, and left the one string a customer actually reads.
+    """
+    try:
+        with open(PROVISION_JSON, encoding="utf-8") as fh:
+            return str(json.load(fh).get("buyer") or "").strip()
+    except Exception:                       # noqa: BLE001 — absent or unreadable is simply no name
+        return ""
+
+
 def provisioned_managed_until() -> str:
     """The day this box's free three months of Managed end, or "" when it has no Managed service.
 
