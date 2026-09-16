@@ -309,6 +309,53 @@ h1 .chan{vertical-align:middle}
   color:var(--dim);background:var(--bg);border-radius:7px;padding:3px 8px;font-size:12px;
   font-weight:560;letter-spacing:.01em;white-space:nowrap}
 
+/* ── the search field ──────────────────────────────────────────────────────────────────────
+   THE CARD SOLD THIS AND THE SCREEN DID NOT HAVE IT. `store.search_conversations` has been
+   finished for weeks — space-bound, LIKE-escaped, searching message BODIES and not just the
+   name — and its only caller was the connector tool. The assistant could search the buyer's
+   inbox and the buyer could not.
+
+   16px ON THE INPUT IS NOT A STYLE CHOICE. Mobile Safari zooms the whole page when a field
+   smaller than 16px takes focus, and it does not zoom back out — so a 15px search box leaves a
+   person on a phone looking at a magnified inbox they have to pinch their way out of. */
+.find{display:flex;align-items:center;gap:9px;margin:12px 0 2px;background:var(--surface);
+  border-radius:13px;padding:0 13px;box-shadow:var(--lift)}
+.find svg{flex:none;display:block;color:var(--dimmer)}
+.find input{flex:1;min-width:0;border:0;background:transparent;color:var(--ink);font:inherit;
+  font-size:16px;padding:13px 0;-webkit-appearance:none}
+/* NOT `outline:none`. Written that way first, and test_inbox_design refused it by name — this
+   app's accessibility floor is that focus is never removed, only redrawn. Same two lines the
+   reply box already uses, so the two fields focus identically. */
+.find input:focus{outline:2px solid var(--accent-line);outline-offset:1px;border-radius:4px}
+.find input::placeholder{color:var(--dimmer)}
+.find input::-webkit-search-decoration,.find input::-webkit-search-cancel-button{
+  -webkit-appearance:none}
+.find button{flex:none;border:0;background:transparent;color:var(--accent);font:inherit;
+  font-size:14.5px;font-weight:600;padding:8px 0 8px 4px;cursor:pointer}
+/* QUIETER THAN THE RESULTS IT COUNTS. Set at 14.5px first and the "Show everything" link wrapped
+   onto its own line reading like a call to action — the loudest thing on a screen whose job is
+   the rows underneath it. */
+.found{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:11px 2px 0;
+  color:var(--dim);font-size:13.5px;font-variant-numeric:tabular-nums}
+.found a{color:var(--accent);font-weight:540}
+
+/* ── Older and Newer ───────────────────────────────────────────────────────────────────────
+   AT THE BOTTOM, WHERE HE RUNS OUT OF ROWS, because that is where a person is when they want
+   the next page. `space-between` and not a centred pair: with one control it sits on its own
+   side — Newer left, Older right — so the direction is in the position and not only the word.
+   44px tall for the same reason the rows are. */
+.pager{display:flex;justify-content:space-between;gap:10px;margin:14px 0 4px}
+/* ONLY `Older` GETS PUSHED RIGHT. Written first as `.pg:only-child{margin-left:auto}`, which
+   fires for whichever control is alone — so the LAST page rendered a lone "← Newer" hard right,
+   its arrow pointing away from it, and the comment above this block claimed the opposite was
+   happening. Rendered page three and there it was. The direction has to be in the class, not in
+   how many siblings there happen to be. */
+.pager .pg.next:only-child{margin-left:auto}
+.pg{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:12px;
+  background:var(--surface);box-shadow:var(--lift);color:var(--accent);font-size:15px;
+  font-weight:580}
+.pg:focus-visible{outline:2px solid var(--accent-line);outline-offset:2px}
+
 /* ── channel chips ─────────────────────────────────────────────────────────────────────────
    Kinso's LEFT RAIL is a desktop idiom; on a phone the same job is a scrolling row. */
 .chips{display:flex;gap:8px;margin:12px 0 2px;overflow-x:auto;padding:2px 0 6px;
@@ -949,12 +996,20 @@ def _acts(k: dict, *, who: str, channel: str) -> str:
             f'<div class="menu">{links}</div></details>')
 
 
-def _chips(space: str, current: str) -> str:
+def _chips(space: str, current: str, *, q: str = "") -> str:
     """All, then one chip per channel THIS BOX ACTUALLY HAS. Never a menu of hopes.
 
     ONE CHANNEL IS NOT A CHOICE, so a box with only Messenger renders no chip row at all — a
     filter offering a single option is a control that cannot change anything, and this app keeps
     deleting those rather than shipping them greyed out.
+
+    THE CHIPS CARRY THE QUERY, because a filter that silently throws away what he typed is worse
+    than no filter: he taps Instagram to narrow a search and gets the whole Instagram inbox back.
+
+    AND THE COUNT COMES OFF WHILE HE IS SEARCHING. `platforms_present` counts the WHOLE inbox,
+    not the matches, so "Messenger 4" beside a search that found one is simply a wrong number on
+    the screen. Scoping it needs a store this screen does not have, and the honest move is to
+    stop answering a question nobody asked mid-search rather than answer it incorrectly.
     """
     try:
         from marketing.customer_voice.inbox import store as _store
@@ -964,14 +1019,128 @@ def _chips(space: str, current: str) -> str:
         return ""
     if len(present) < 2:
         return ""
-    from urllib.parse import quote as _q
-    out = [f'<a class="chip{"" if current else " on"}" href="/voice/inbox">All</a>']
+    # NO `page` ON A CHIP, and that is the whole reason these go through `_url`. Changing the
+    # channel changes WHICH conversations there are, so page 7 of the old filter is not page 7
+    # of the new one — it is a page that may not exist. Every chip lands on page one.
+    out = [f'<a class="chip{"" if current else " on"}" href="{_esc(_url(q=q))}">All</a>']
     for row in present:
         pid = str(row["platform"] or "")
         on = " on" if pid == current else ""
-        out.append(f'<a class="chip{on}" href="/voice/inbox?channel={_esc(_q(pid, safe=""))}">'
-                   f'{_esc(_channel(pid))} <span class="n">{row["n"]}</span></a>')
+        n = "" if q else f' <span class="n">{row["n"]}</span>'
+        out.append(f'<a class="chip{on}" href="{_esc(_url(q=q, channel=pid))}">'
+                   f'{_esc(_channel(pid))}{n}</a>')
     return f'<div class="chips">{"".join(out)}</div>'
+
+
+def _find(q: str, channel: str) -> str:
+    """The search field. A plain GET form, so it works before any script has run.
+
+    THE CHANNEL RIDES ALONG AS A HIDDEN FIELD. Searching inside a channel filter is the obvious
+    thing to want and it is one input; dropping it would quietly widen a search he had narrowed.
+    """
+    # THE CHANNEL RIDES, THE PAGE DOES NOT. A new search is a new set of results and page one
+    # is the only page it can be on — carrying the old `page` in a hidden field is how a person
+    # searches for "boiler", gets a blank screen, and concludes search is broken.
+    chan = (f'<input type="hidden" name="channel" value="{_esc(channel)}">' if channel else "")
+    return ('<form class="find" method="get" action="/voice/inbox" role="search">'
+            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="1.9" stroke-linecap="round" aria-hidden="true">'
+            '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.2 4.2"/></svg>'
+            # THE PLACEHOLDER FITS, AND THE FIRST ONE DID NOT. "Search everything anyone has
+            # said" rendered as "Search everything anyone ha…" at 390px — the app's own copy cut
+            # off inside the control that exists to invite him to type. This is the card's own
+            # phrase, and the longer explanation belongs on the no-match screen, which is the
+            # moment he wonders whether it read the messages or only the names.
+            f'{chan}<input type="search" name="q" id="q" value="{_esc(q)}" '
+            'placeholder="Search everything" autocomplete="off" '
+            'autocapitalize="none" spellcheck="false" enterkeyhint="search" '
+            'aria-label="Search every conversation">'
+            '<button type="submit">Search</button></form>')
+
+
+PAGE = 50            # what the store is asked for, and what a page holds
+
+
+def _url(*, q: str = "", channel: str = "", page: int = 1) -> str:
+    """Every link on this screen, built in ONE place.
+
+    THE CHIPS ALREADY LOST THE QUERY ONCE. Each control here — a chip, Clear, Older, Newer —
+    carries the two the reader is not changing and drops the one they are, and every one of them
+    was hand-assembling its own query string. That is three places to forget `page` in, and the
+    forgetting is silent: the link still works, it just quietly puts him back on page one.
+
+    A DEFAULT IS NEVER WRITTEN INTO THE URL. `/voice/inbox` and `/voice/inbox?page=1` are the
+    same screen, and only one of them is worth showing a person.
+    """
+    from urllib.parse import quote as _qt
+    bits = []
+    if q:
+        bits.append(f'q={_qt(q, safe="")}')
+    if channel:
+        bits.append(f'channel={_qt(channel, safe="")}')
+    if page > 1:
+        bits.append(f"page={int(page)}")
+    return "/voice/inbox" + ("?" + "&".join(bits) if bits else "")
+
+
+def _clear(channel: str) -> str:
+    """Back out of a search WITHOUT backing out of the channel he chose — or the page he is on.
+
+    THE PAGE GOES. That is the point of Clear: page 4 of a search is meaningless once the search
+    is gone, and landing on page 4 of everything is not what he asked for.
+    """
+    return _url(channel=channel)
+
+
+def _pager(*, q: str, channel: str, page: int, more: bool) -> str:
+    """Older and Newer — and NEITHER of them when there is nowhere to go.
+
+    A CONTROL THAT CANNOT SUCCEED IS THE ONE THIS APP KEEPS DELETING, and a greyed-out Older on
+    a box with forty conversations is exactly that. `more` is not a guess: the reader asks the
+    store for ONE ROW MORE than a page holds, and the presence of that row is the whole answer.
+    Counting instead would be a second query to learn something the first one already knew.
+    """
+    if page <= 1 and not more:
+        return ""
+    out = []
+    if page > 1:
+        out.append(f'<a class="pg prev" href="{_esc(_url(q=q, channel=channel, page=page - 1))}" '
+                   f'rel="prev">&larr; Newer</a>')
+    if more:
+        out.append(f'<a class="pg next" href="{_esc(_url(q=q, channel=channel, page=page + 1))}" '
+                   f'rel="next">Older &rarr;</a>')
+    return f'<div class="pager">{"".join(out)}</div>'
+
+
+def _hits(q: str, channel: str, n: int, *, page: int, more: bool) -> str:
+    """Where he is, and a way out. Nothing at all when he is not searching and is on page one.
+
+    IT STILL NEVER CLAIMS A TOTAL IT DID NOT COUNT, and now it does not have to hedge either.
+    Before paging, a full page could only say "the 50 most recent" — true, but a dead end. With
+    a next page the honest sentence is a RANGE, which says exactly what is on the screen and
+    implies nothing about what is past it:
+
+      one page   →  "3 conversations matching leak"          (a real count; the page IS the set)
+      more pages →  "Conversations 51-100 matching leak"     (a position, never a total)
+
+    A RANGE IS ALSO THE ONLY THING THAT ANSWERS "where am I". Two identical-looking pages of
+    fifty rows with no marker between them is how a person loses their place and starts again.
+    """
+    if not q and page <= 1:
+        return ""
+    lo = (page - 1) * PAGE + 1
+    hi = lo + max(n, 1) - 1
+    where = f" on {_channel(channel)}" if channel else ""
+    if q:
+        what = "conversation" if n == 1 else "conversations"
+        said = (f"Conversations {lo}-{hi} matching" if (more or page > 1)
+                else f"{n} {what} matching")
+        body = f'<span>{_esc(said)} <b>{_esc(q)}</b>{_esc(where)}</span>'
+        out = f'<a href="{_esc(_clear(channel))}">Show everything</a>'
+    else:
+        body = f'<span>Conversations {lo}-{hi}{_esc(where)}</span>'
+        out = f'<a href="{_esc(_url(channel=channel))}">Back to the top</a>'
+    return f'<div class="found">{body}{out}</div>'
 
 
 @blueprint.get("/voice/inbox")
@@ -981,9 +1150,33 @@ def r_inbox():
     # THE CHIP THE READER IS ON. Passed to the store as a bound predicate, never interpolated;
     # an unknown value simply matches no rows, which is the honest answer to a hand-typed URL.
     channel = (request.args.get("channel") or "").strip().lower()[:40]
+    # WHAT HE TYPED. Clamped, then handed to the store as a bound parameter like everything else
+    # — `search_conversations` escapes LIKE's own wildcards before binding, so a query of `%`
+    # asks for a percent sign rather than for every conversation in the box.
+    q = (request.args.get("q") or "").strip()[:120]
+    # WHICH PAGE. Anything that is not a page number is page one — a hand-typed `page=banana`
+    # or `page=-3` is a person who has not asked for anything in particular, and the answer to
+    # that is the top of the list, not a 500 and not a negative OFFSET.
+    try:
+        page = max(1, int(request.args.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
     try:
         from marketing.customer_voice.inbox import store as _store
-        convs = _store.list_conversations(space, limit=50, platform=channel or None)
+        # ONE ROW MORE THAN A PAGE HOLDS, and that extra row is the entire pagination design.
+        # Its presence says "there is a next page" without a second query, and a COUNT(*) here
+        # would be a whole extra scan of the messages table to learn something this result set
+        # already knows. The row is dropped before anything renders it.
+        ask = PAGE + 1
+        off = (page - 1) * PAGE
+        if q:
+            convs = _store.search_conversations(space, q, limit=ask, offset=off,
+                                                platform=channel or None)
+        else:
+            convs = _store.list_conversations(space, limit=ask, offset=off,
+                                              platform=channel or None)
+        more = len(convs) > PAGE
+        convs = convs[:PAGE]
     except Exception as e:                       # noqa: BLE001 — a page, never a stack trace
         log.warning("voice.inbox_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
         return _shell('<h1>Inbox</h1><div class="quiet">The inbox could not be read on this box. '
@@ -997,11 +1190,37 @@ def r_inbox():
         # has ever arrived" and "nothing has arrived ON INSTAGRAM" look identical and mean
         # opposite things — the second one still has a working inbox one tap away, and a person
         # shown the first message would reasonably conclude the box is broken.
-        if channel:
-            body = (f'<h1>Inbox</h1>{_chips(space, channel)}'
+        #
+        # AND A THIRD EMPTY ARRIVED WITH SEARCH, which is the one most easily mistaken for a
+        # broken box: "nothing matches `boiler`" is not "you have no messages", and showing the
+        # first-week welcome to a person who has 200 conversations and mistyped a word would be
+        # the worst reading of all three.
+        #
+        # AND A FOURTH ARRIVED WITH PAGING, which is the one a person reaches by ACCIDENT — a
+        # stale bookmark, a back button, a hand-typed number — and it is the empty most likely
+        # to be read as data loss. "You have run off the end of the list" and "you have no
+        # messages" are opposite facts, and this box may hold two hundred conversations.
+        if page > 1:
+            body = (f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel, q=q)}'
+                    f'<div class="quiet">There is no page {page}'
+                    + (f' of conversations matching <b>{_esc(q)}</b>' if q else "")
+                    + '. Nothing has been lost — the list simply ends before here. '
+                    f'<a href="{_esc(_url(q=q, channel=channel))}" style="color:var(--accent)">'
+                    'Back to the top</a></div>')
+        elif q:
+            body = (f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel, q=q)}'
+                    f'<div class="quiet">Nothing matches <b>{_esc(q)}</b>'
+                    + (f' on {_esc(_channel(channel))}' if channel else "")
+                    + '. This searches what people wrote, not just their names. '
+                    f'<a href="{_esc(_clear(channel))}" style="color:var(--accent)">'
+                    'Show everything</a></div>')
+        elif channel:
+            body = (f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel)}'
                     f'<div class="quiet">Nothing on {_esc(_channel(channel))} yet. '
                     'Other channels may have messages — tap <b>All</b>.</div>')
         else:
+            # NO SEARCH BOX ON A BOX THAT HAS NEVER RECEIVED ANYTHING. A field offering to search
+            # an empty inbox is the control that cannot succeed this app keeps deleting.
             body = ('<h1>Inbox</h1><div class="quiet">No conversations yet. '
                     'The first person who messages you appears here, and you will get a '
                     'notification once this is installed on your phone.</div>')
@@ -1030,8 +1249,10 @@ def r_inbox():
                     f'<span class="mk">{_mark(plat)}'
                     f'<span class="vh">{_esc(_channel(plat))}</span></span></a>'
                     f'{_acts(k, who=who, channel=channel)}</div>')
-    return _shell(f'<h1>Inbox</h1>{_chips(space, channel)}'
-                  f'<div class="card">{"".join(rows)}</div>'), 200
+    return _shell(f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel, q=q)}'
+                  f'{_hits(q, channel, len(convs), page=page, more=more)}'
+                  f'<div class="card">{"".join(rows)}</div>'
+                  f'{_pager(q=q, channel=channel, page=page, more=more)}'), 200
 
 
 @blueprint.get("/voice/inbox/<path:zcid>")

@@ -175,8 +175,13 @@ ok("...and 'system' CLEARS the preference instead of storing a third value",
    "delete_cookie(THEME_COOKIE" in SRC)
 
 print("\ntest_the_accessibility_floor_holds")
-ok("focus is never removed — outline:none appears nowhere",
-   not re.search(r"outline\s*:\s*none", CSS))
+# READ AS RULES, NOT AS TEXT — the same reason the prefers-color-scheme check above strips
+# comments. This one matched a COMMENT that said "NOT `outline:none`", i.e. it failed the CSS for
+# writing down the rule it obeys. That is not a weaker guard: a declaration removes focus and a
+# comment removes nothing, so stripping comments is the difference between measuring the rule and
+# measuring the prose around it. The theme guard had this exact fix for this exact reason.
+ok("focus is never removed — outline:none appears in no declaration",
+   not re.search(r"outline\s*:\s*none", _CSS_NO_COMMENTS))
 ok("...and focus is drawn with an offset so it reads against the surface",
    "outline:2px" in CSS.replace(" ", "") and "outline-offset" in CSS)
 ok("a conversation row is a 44px tap target",
