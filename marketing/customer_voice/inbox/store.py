@@ -19,6 +19,26 @@ from core.logging import get_logger
 log = get_logger(__name__)
 
 
+# WAITING ON A PERSON, AS ONE SQL FRAGMENT SHARED BY EVERY READER. Written once because they must
+# agree: a morning page saying four conversations are waiting, over a screen that tags three, is
+# worse than neither — he stops trusting the number, and then he stops reading the page.
+#
+# CORRELATED, NOT A GROUP-BY JOIN. It reads as the sentence it means — "the newest message on this
+# conversation came IN" — and it walks the (space, conversation, created_at) shape the messages
+# index already serves. `m.id DESC` breaks a tie on identical timestamps so the answer is stable
+# between two runs rather than whichever row the planner happened to reach first.
+# COALESCE BECAUSE A CONVERSATION WITH NO MESSAGES ANSWERS NULL, NOT 0. The poller knows about
+# rows it has never heard a word on; the subquery returns NULL there, `NULL = 'in'` is NULL, and a
+# screen handed NULL for a yes/no column has to know that NULL means no. It is falsy either way in
+# Python, which is exactly why it would have survived review and then surprised somebody writing
+# `if row["awaiting_reply"] is False`. The column answers 0 or 1, always.
+_NEWEST_IS_INBOUND = (
+    "COALESCE((SELECT m.direction FROM inbox_messages m "
+    "           WHERE m.space = k.space "
+    "             AND m.zernio_conversation_id = k.zernio_conversation_id "
+    "           ORDER BY m.created_at DESC, m.id DESC LIMIT 1) = 'in', 0)")
+
+
 def upsert_conversation(*, space: str, zcid: str, platform: str = "messenger",
                         ad_meta_id: str | None = None, ad_title: str | None = None,
                         participant: str | None = None,
@@ -96,7 +116,14 @@ def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
             "SELECT k.*, "
             "       (SELECT COUNT(*) FROM inbox_messages m "
             "         WHERE m.space = k.space "
-            "           AND m.zernio_conversation_id = k.zernio_conversation_id) AS message_count "
+            "           AND m.zernio_conversation_id = k.zernio_conversation_id) AS message_count, "
+            # THE ROW TAG THE SCREEN ASKED FOR IN A COMMENT. app.py could not compute "waiting on
+            # you" without the direction of the newest message and would not pay a query per row,
+            # so it left the note for this file. Selected in the same pass as the count, for the
+            # same reason: fifty rows must cost one query, not fifty-one. BOTH READERS GET IT —
+            # the list and the search — because a row that is waiting does not stop waiting
+            # because somebody typed a name into a box.
+            f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply "
             "  FROM inbox_conversations k "
             f" WHERE {where} "
             " ORDER BY (k.last_inbound_at IS NULL), k.last_inbound_at DESC, k.id ASC "
@@ -169,7 +196,14 @@ def search_conversations(space: str, query: str, *, limit: int = 50,
             "SELECT k.*, "
             "       (SELECT COUNT(*) FROM inbox_messages m "
             "         WHERE m.space = k.space "
-            "           AND m.zernio_conversation_id = k.zernio_conversation_id) AS message_count "
+            "           AND m.zernio_conversation_id = k.zernio_conversation_id) AS message_count, "
+            # THE ROW TAG THE SCREEN ASKED FOR IN A COMMENT. app.py could not compute "waiting on
+            # you" without the direction of the newest message and would not pay a query per row,
+            # so it left the note for this file. Selected in the same pass as the count, for the
+            # same reason: fifty rows must cost one query, not fifty-one. BOTH READERS GET IT —
+            # the list and the search — because a row that is waiting does not stop waiting
+            # because somebody typed a name into a box.
+            f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply "
             "  FROM inbox_conversations k "
             f" WHERE {where} "
             "   AND ( COALESCE(k.participant, '') LIKE ? ESCAPE '\\' "
@@ -415,3 +449,64 @@ def set_watermark(space: str, zcid: str, *, last_seen_msg_id: str | None,
             "last_seen_msg_id = excluded.last_seen_msg_id, "
             "last_activity = excluded.last_activity, updated_at = excluded.updated_at",
             (space, zcid, last_seen_msg_id, last_activity, state._now()))
+
+
+def awaiting_reply(space: str) -> int:
+    """How many conversations are WAITING ON A PERSON — their message was the last one.
+
+    THE ONE NUMBER THE PRODUCT IS FOR, and until now nothing in the box could answer it. The
+    inbox screen wanted it as a row tag and said so in a comment rather than computing it,
+    because asking per row is the N+1 its own docstring refuses by name; the morning page wanted
+    it as the only line on the segment that is an instruction. One query answers both.
+
+    "WAITING" IS ABOUT DIRECTION, NOT ABOUT A CLOCK. A conversation whose newest message is
+    inbound is waiting whether that arrived a minute or a month ago — an old one is worse, not
+    resolved. So this counts the newest message per conversation and asks which way it was going,
+    rather than comparing `last_inbound_at` to anything.
+
+    OPTED-OUT ROWS ARE EXCLUDED. Somebody who said STOP is not waiting for a reply, and counting
+    them would put a number on the morning page that a person cannot act on and must not act on.
+
+    A CONVERSATION WITH NO MESSAGES IS NOT WAITING EITHER. The poller knows about rows it has
+    never heard a word on; `MAX(created_at)` over an empty set is NULL and the join drops them,
+    which is the right answer rather than a lucky one.
+    """
+    with state.connect() as c:
+        row = c.execute(
+            "SELECT COUNT(*) n FROM inbox_conversations k "
+            " WHERE k.space = ? AND k.opted_out = 0 "
+            f"   AND {_NEWEST_IS_INBOUND}", (space,)).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def day_counts(space: str, lo: str, hi: str) -> dict:
+    """What the inbox did in one day — for the morning page. One connection, four counts.
+
+    COUNTED OVER `created_at`, WHICH IS THE VENDOR'S CLOCK for a message and ours for a draft.
+    That is the honest reading for both: "messages that arrived today" means the customer wrote
+    today, not that we polled today, and a box that was off overnight must not report its catch-up
+    sweep as a busy morning.
+
+    `new_people` IS CONVERSATIONS THAT STARTED TODAY, not contacts that are new to the business —
+    the box cannot know the second, and reporting the first as the second is the sort of claim
+    this segment exists not to make.
+    """
+    with state.connect() as c:
+        def n(sql: str, args: tuple) -> int:
+            r = c.execute(sql, args).fetchone()
+            return int(r["n"]) if r else 0
+
+        inbound = n("SELECT COUNT(*) n FROM inbox_messages "
+                    " WHERE space = ? AND direction = 'in' "
+                    "   AND created_at >= ? AND created_at < ?", (space, lo, hi))
+        replied = n("SELECT COUNT(*) n FROM inbox_messages "
+                    " WHERE space = ? AND direction = 'out' "
+                    "   AND created_at >= ? AND created_at < ?", (space, lo, hi))
+        new_people = n("SELECT COUNT(*) n FROM inbox_conversations "
+                       " WHERE space = ? AND created_at >= ? AND created_at < ?", (space, lo, hi))
+        # DISMISSED DRAFTS ARE NOT READY. He said no to those, and counting them as waiting would
+        # send him back to a queue he has already been through.
+        drafts = n("SELECT COUNT(*) n FROM inbox_drafts "
+                   " WHERE space = ? AND dismissed_at IS NULL "
+                   "   AND created_at >= ? AND created_at < ?", (space, lo, hi))
+    return {"inbound": inbound, "replied": replied, "new_people": new_people, "drafts": drafts}

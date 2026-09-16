@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,8 +61,12 @@ class FakeIMAP:
 
     instances: list["FakeIMAP"] = []
 
-    def __init__(self, host):
-        self.host = host
+    def __init__(self, host, **kw):
+        # **kw BECAUSE THE REAL `IMAP4_SSL` TAKES MORE THAN A HOST. `core.vendors.mailbox` passes
+        # `timeout=` so a person pasting a password is not left watching a spinner for a server
+        # that will never answer; a fake with a narrower signature than the thing it stands in for
+        # turns that into a TypeError that surfaces, three layers up, as "unreachable".
+        self.host, self.kw = host, kw
         self.commands: list[str] = []
         self.readonly = None
         self.uidvalidity = b"100"
@@ -108,8 +113,8 @@ def install(**kw) -> FakeIMAP:
     FakeIMAP.instances.clear()
     holder = {}
 
-    def factory(host):
-        f = FakeIMAP(host)
+    def factory(host, **kwargs):
+        f = FakeIMAP(host, **kwargs)
         for k, v in kw.items():
             setattr(f, k, v)
         holder["f"] = f
@@ -127,6 +132,10 @@ def quiet(fn, *a, **k):
     return out
 
 
+# A SERVER HAS TO BE STANDING BEFORE THE CREDENTIAL IS SAVED. `put_email` signs in now rather than
+# counting characters (core.vendors.mailbox), so storing one is itself a connection — the suite
+# cannot seed a mailbox credential without a mailbox to open.
+install()
 quiet(bs.put_email, host="imap.gmail.com", user=OWNER, password=APP_PW)
 
 print("\n— THE BUYER'S OWN INBOX IS NEVER MARKED READ —")
@@ -200,13 +209,20 @@ with state.connect() as _c:
     _c.execute("DELETE FROM box_secrets WHERE name = ?", (bs.EMAIL,))
 ok("a box with no credential reads nothing and raises nothing", quiet(ec.sweep, SPACE) == (0, 0))
 
-print("\n— built, and deliberately not switched on —")
-# THE MACHINE IS READY AND THE CHANNEL IS NOT POLLED, ON PURPOSE. test_inbox_instagram requires a
-# send rule beside every polled channel so that auto-reply can never arrive by accident; the email
-# rule is OSDev1's half. Adding Channel(IMAP, "email") to POLLED is the whole activation, and this
-# pins the pairing so the two land together rather than one shipping without the other.
-ok("email is NOT polled yet, because window._RULES has no email rule",
-   not any(c.key == "email" for c in channels.POLLED) and "email" not in window._RULES)
+print("\n— switched on, WITH the rule it was waiting for —")
+# THIS ASSERTION IS THE INVERSE OF THE ONE IT REPLACES, AND THAT IS THE POINT. It used to pin
+# "not polled, because no rule exists" so the two could only land together. They have landed
+# together, so it now pins the other half of the same pairing: polled AND ruled. Flipping it to
+# "polled" alone, without the rule clause, is what would quietly undo the guarantee.
+ok("email is polled, and a send rule is written beside it",
+   any(c.key == "email" for c in channels.POLLED) and "email" in window._RULES)
+# AND THE RULE SAYS NOTHING AUTO-SENDS. Ingesting a mailbox is not permission to answer from it:
+# there is no SMTP path in this repository and send policy is the owner's word, so the rule blocks
+# and says why. A future dev who makes email sendable has to change this line on purpose.
+ok("...and that rule REFUSES to send, however fresh the message",
+   window.decide("email", datetime.now(timezone.utc).isoformat())["decision"] == window.BLOCKED)
+ok("...for the box's reason, not a closed clock",
+   window.decide("email", datetime.now(timezone.utc).isoformat()).get("no_send_lane") is True)
 ok("...and the vendor constant is named once, for the poller and the suites to share",
    channels.IMAP == "imap")
 ok("...while the reader itself is proven above, so activation is one line",

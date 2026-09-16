@@ -27,6 +27,34 @@ def _secret(env_name: str | None) -> str | None:
     return (os.environ.get(env_name) or "").strip() or None
 
 
+def _own_binding() -> tuple[str | None, str | None]:
+    """The buyer's OWN Zernio binding, pasted into this box: (key, profile_id), or (None, None).
+
+    BRING-YOUR-OWN-KEY (owner, 2026-09-16). It wins over `settings.zernio_api_key` because that env
+    value is whatever the provisioner wrote at first boot — a key scoped to a profile on OWNBOX's
+    Zernio bill. The moment a buyer connects their own account, theirs is the one that should be
+    used, and nothing of theirs should touch ours again.
+
+    RETURNS THE PAIR, NEVER THE KEY ALONE, and that is the whole point of this function. A Zernio
+    profile id is only meaningful inside the account that minted it. Take the buyer's key from here
+    and the profile id from `settings.zernio_profile_id` — the obvious way to write it — and the box
+    sends the buyer's own credential at a folder id belonging to OUR account: the connect screen
+    would ask a person to grant their Instagram into somebody else's folder. So when the buyer's key
+    is in play, their profile id travels with it, and OUR provisioned id is not consulted at all.
+
+    NEVER RAISES AND NEVER IMPORTS AT MODULE LOAD. This resolver runs everywhere, including before
+    the database exists; a box_secrets lookup that threw here would take down every Space in the
+    system rather than fall back to the env values it is only preferring over."""
+    try:
+        from core import box_secrets
+        key = box_secrets.zernio_key() or None
+        if not key:
+            return None, None
+        return key, (box_secrets.zernio_profile() or None)
+    except Exception:                                    # noqa: BLE001 — a store that cannot answer
+        return None, None                                # is "no own key", never a crash
+
+
 def _norm(s: dict) -> dict:
     """A config block → a resolved Space. Only `airtable_base` is required (read with
     .get so one malformed block can't crash every Space's resolution); the Slack
@@ -38,17 +66,24 @@ def _norm(s: dict) -> dict:
     B's key env var were ever missing. Only a Space with no `zernio_key_env` at all
     (single-tenant) inherits the global key."""
     key_env = s.get("zernio_key_env")
+    own_key, own_profile = _own_binding()
     return {
         "name": s.get("name") or DEFAULT,
         "airtable_base": s.get("airtable_base"),
         "airtable_table": s.get("airtable_table") or settings.airtable_videos_table,
         "slack_channel": s.get("slack_channel") or settings.reel_slack_channel_id,
-        "zernio_key": (_secret(key_env) if key_env else settings.zernio_api_key),
+        "zernio_key": (_secret(key_env) if key_env
+                       else (own_key or settings.zernio_api_key)),
         # The Space's Zernio Profile (sub-account) id — the isolation boundary under
         # the target ONE-key model (docs/ZERNIO_SDK_INTEGRATION.md §5). Optional and
         # NOT a secret (an internal id, referenced inline). Unset = transitional
         # two-key mode: the per-Space key isolates and profile scoping is a no-op.
-        "zernio_profile_id": s.get("zernio_profile_id"),
+        # THE PROFILE IS PART OF THE KEY'S BINDING, so it is resolved from whichever account that
+        # key belongs to and never blended across two. A Space naming its own key keeps the config's
+        # id (our multi-tenant shape); a Space on the buyer's OWN key takes the buyer's id, because a
+        # config id was written for our account and names nothing in theirs.
+        "zernio_profile_id": (s.get("zernio_profile_id") if (key_env or not own_key)
+                              else own_profile),
         # Carousel machine (spec §4): the Space's CAROUSELS table binding. ABSENT = the
         # carousel machine is completely inert for this Space — no sweep, no commands act.
         # Same-base second table, so isolation rides the existing base binding.
@@ -86,16 +121,19 @@ def _norm(s: dict) -> dict:
 
 def _default_space() -> dict:
     """The implicit single-tenant Space from the flat env (no `spaces:` block)."""
+    own_key, own_profile = _own_binding()
     return {
         "name": DEFAULT,
         "airtable_base": settings.airtable_base_id,
         "airtable_table": settings.airtable_videos_table,
         "slack_channel": settings.reel_slack_channel_id,
-        "zernio_key": settings.zernio_api_key,
+        "zernio_key": own_key or settings.zernio_api_key,
         # Single-tenant: the key isolates, so this stayed None — but a box WE built now posts as a profile
         # of its own, and the client needs the id as well (it sends profileId on its own calls). Set by
         # scripts/connector_handoff.py at first boot; None everywhere else, exactly as before.
-        "zernio_profile_id": settings.zernio_profile_id or None,
+        # THE PAIR MOVES TOGETHER: once the buyer has connected their OWN account, the provisioned id
+        # names a folder in OUR account and must not be handed to their key. See _own_binding.
+        "zernio_profile_id": (own_profile if own_key else (settings.zernio_profile_id or None)),
         "carousel_table": None,        # opt-in per Space (spec §4)
         "written_table": None,         # opt-in per Space (owner 2026-07-30)
         "label": None,                 # opt-in per Space (owner 2026-09-05): no label, no subdomain

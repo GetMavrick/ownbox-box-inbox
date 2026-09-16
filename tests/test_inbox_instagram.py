@@ -195,8 +195,14 @@ def test_an_instagram_dm_reaches_the_box_stamped_as_instagram():
                               "zc-ig": [_msg("m-ig", "how much for a cleaning?", now)]}
 
     res = poller.poll_sweep()
+    # THE VENDOR CHANNELS, NOT ALL OF POLLED. Email is polled now and arrives over IMAP with a
+    # credential of its own, so it makes no call to this vendor at all — comparing against every
+    # polled channel would assert that the Zernio client is asked for a mailbox. The property this
+    # line was written for is unchanged: every channel the VENDOR serves is asked for by name,
+    # rather than one of them riding the client's Messenger default.
+    _vendor_polled = [c.vendor for c in channels.POLLED if c.vendor != channels.IMAP]
     ok("the sweep asks the vendor for BOTH channels",
-       INBOX.calls == [c.vendor for c in channels.POLLED], str(INBOX.calls))
+       INBOX.calls == _vendor_polled, f"{INBOX.calls} != {_vendor_polled}")
     ok("both threads are ingested in one sweep", res["enqueued"] == 2, str(res))
 
     ig = store.get_conversation(SPACE, "zc-ig")

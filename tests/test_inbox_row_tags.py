@@ -56,8 +56,15 @@ def _ago(hours):
 SEED = [
     ("zc-new",    "Dana Whitfield",  "messenger", 1,    None,           "acct-1", 1, False,
      ["New"]),
-    ("zc-norule", "Terrence Hall",   "email",     2,    None,           "acct-1", 2, False,
+    # WHATSAPP, NOT EMAIL, IS THE RULELESS CHANNEL NOW. Email was this suite's stand-in for "no
+    # policy written" and it stopped being one the moment the email rule landed: it is written,
+    # cited, and refuses because this box has no SMTP path. Swapping in a channel that genuinely
+    # has no rule keeps the state covered instead of quietly deleting it — and the email row below
+    # covers the state that replaced it.
+    ("zc-norule", "Terrence Hall",   "whatsapp",  2,    None,           "acct-1", 2, False,
      ["No reply rule"]),
+    ("zc-mail",   "Aurelia Bench",   "email",     2,    None,           "acct-1", 2, False,
+     ["Send in your mail app"]),
     ("zc-ad",     "Sofia Marchetti", "instagram", 3,    "Roof repair",  "acct-1", 2, False,
      ["From Roof repair"]),
     ("zc-out",    "Joanna Reyes",    "messenger", 5,    None,           "acct-1", 3, True,
@@ -180,7 +187,13 @@ def test_a_channel_with_no_written_policy_gets_no_reply_box():
     c = _seeded()
     t = c.get("/voice/inbox/zc-norule").get_data(as_text=True)
     ok("no reply box on a channel with no send rule", 'id="reply"' not in t)
-    ok("...and it says so in the buyer's words, not ours", "no reply rule for Email" in t)
+    ok("...and it says so in the buyer's words, not ours", "no reply rule for WhatsApp" in t)
+    # THE OTHER WRITTEN-DOWN REFUSAL, which must not be reported as the same thing. Email's rule
+    # exists; what is missing is an SMTP path, and the sentence says where the reply goes instead.
+    m = c.get("/voice/inbox/zc-mail").get_data(as_text=True)
+    ok("no reply box on email either", 'id="reply"' not in m)
+    ok("...but it is NOT called a missing rule", "no reply rule for Email" not in m)
+    ok("...it says where the send actually happens", "your own mail app" in m)
     ok("...while still showing him everything that arrived", "message 0" in t)
     # THE OTHER HALF: a channel that DOES have a rule still gets its box, or this guard has
     # quietly deleted the product.
@@ -198,8 +211,13 @@ def test_the_rule_probe_answers_from_window_and_not_from_a_second_table():
     from marketing.customer_voice import app as voice
     from marketing.customer_voice.inbox import window
     for key in sorted(window._RULES):
+        # EVERY WRITTEN RULE IS FOUND, INCLUDING ONE THAT REFUSES. This loop used to hold that a
+        # rule is written iff a fresh message is FREEFORM, which was true only while every rule
+        # carried a window. Email's does not — it is written, cited, and blocks because the box
+        # has no SMTP path — so the probe asks whether a rule EXISTS, and `_no_send_lane` carries
+        # the second, different fact.
         ok(f"a written rule is found for {key}", voice._has_send_rule(key))
-    ok("a channel with no rule is refused", not voice._has_send_rule("email"))
+    ok("a channel with no rule is refused", not voice._has_send_rule("whatsapp"))
     ok("...and so is one nobody has ever heard of", not voice._has_send_rule("carrier-pigeon"))
     ok("...and so is an empty platform", not voice._has_send_rule(""))
     # READ AS CODE, NOT AS TEXT. `"_RULES" in src` was the first version and it failed on this
@@ -222,7 +240,7 @@ def test_no_row_can_say_two_things_that_contradict_each_other():
     saying both that it has never heard from someone and that they are new."""
     c = _seeded()
     seen = _rows(c.get("/voice/inbox").get_data(as_text=True))
-    exclusive = {"Opted out", "No reply rule", "No inbound yet",
+    exclusive = {"Opted out", "No reply rule", "Send in your mail app", "No inbound yet",
                  "Window closed", "Tagged reply only", "Limited replies"}
     for who, (tags, _menu) in seen.items():
         n = len(exclusive.intersection(tags))
@@ -252,10 +270,20 @@ def test_the_row_is_still_one_link_with_the_menu_beside_it():
 
 def test_ci_actually_runs_this_file():
     wf = pathlib.Path(__file__).resolve().parents[1] / ".github/workflows/tests.yml"
-    if not wf.exists():
-        ok("workflow present", False, "no .github/workflows/tests.yml")
-        return
     me = pathlib.Path(__file__).stem
+    if not wf.is_file():
+        # A SOLD BOX HAS NO CI AND THIS SUITE SHIPS INTO ONE. The read used to raise
+        # FileNotFoundError and take the whole file down with it, so a buyer running their own
+        # suites watched this one crash.
+        #
+        # Reported, not asserted, and deliberately so. The hazard this guards is a HAND-MAINTAINED
+        # list in tests.yml drifting away from a filename. In a box there is no list, so there is
+        # nothing that could have drifted — the box runs whatever is in tests/. Writing an ok()
+        # here would mean inventing a condition that is true by construction, which is the shape
+        # of a check that proves nothing. The line says why it did not run instead.
+        print(f"  --   no workflow here — this box is not the repo, so {me} has no list to be "
+              "missing from")
+        return
     ok(f"{me} is in the workflow's suite list", me in wf.read_text(),
        "CI would skip this file and still print green")
 

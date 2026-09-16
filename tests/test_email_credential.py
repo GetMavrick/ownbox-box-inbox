@@ -52,6 +52,66 @@ def quiet(fn, *a, **kw):
     return out, buf.getvalue()
 
 
+# ── a mail server to actually sign in to ────────────────────────────────────────────────────
+# THE CONTRACT CHANGED, SO THE SUITE HAS TO. `put_email` used to store a credential after counting
+# sixteen characters; it now SIGNS IN first (OSDev5 found the gap, 2026-09-16: a revoked app
+# password read as "Connected" and the buyer learned otherwise hours later from an empty inbox).
+# Every case below therefore needs a server to answer, and the ones that used to prove "a
+# well-formed password is stored" now prove "a password the server ACCEPTS is stored" — which is
+# the assertion that was always meant.
+import imaplib  # noqa: E402
+
+
+class FakeIMAP:
+    last: "FakeIMAP | None" = None
+
+    def __init__(self, host, **kw):
+        self.host, self.kw = host, kw
+        self.commands: list[str] = []
+        self.readonly = None
+        self.fail_login: str | None = None
+        self.fail_select = False
+        FakeIMAP.last = self
+
+    def login(self, user, password):
+        self.commands.append("LOGIN")
+        if self.fail_login:
+            raise imaplib.IMAP4.error(self.fail_login)
+        return ("OK", [b""])
+
+    def select(self, folder, readonly=False):
+        self.commands.append(f"SELECT readonly={readonly}")
+        self.readonly = readonly
+        if self.fail_select:
+            raise imaplib.IMAP4.error("SELECT failed")
+        return ("OK", [b"1"])
+
+    def store(self, *a):
+        raise AssertionError("STORE issued — verifying must never mark a buyer's mail as read")
+
+    def logout(self):
+        self.commands.append("LOGOUT")
+        return ("BYE", [b""])
+
+
+def _server(**kw):
+    """Install a fake IMAP server for the next connection. `None` makes the box unreachable."""
+    def factory(host, **kwargs):
+        f = FakeIMAP(host, **kwargs)
+        for k, v in kw.items():
+            setattr(f, k, v)
+        return f
+    imaplib.IMAP4_SSL = factory                                   # type: ignore[assignment]
+
+
+def _unreachable():
+    def factory(host, **kwargs):
+        raise OSError("Network is unreachable")
+    imaplib.IMAP4_SSL = factory                                   # type: ignore[assignment]
+
+
+_server()
+
 print("\n— the four states a screen has to render —")
 ok("a box nobody has connected is not_connected, with no user and no error",
    bs.email_state() == {"status": "not_connected", "user": None, "detail": ""}, str(bs.email_state()))
@@ -103,8 +163,69 @@ for kw, why, expect in (
     except bs.SecretRejected as e:
         ok(f"{why} is refused, and says what to fix", expect in str(e), str(e))
 
+print("\n— IT SIGNS IN. A shape is not a credential. —")
+# OSDev5, 2026-09-16: this wrote `status = connected` after counting sixteen characters and never
+# opened the mailbox. Google revokes every app password whenever the account password changes, so
+# the commonest wrong paste is a WELL-FORMED one — exactly what a shape check cannot catch.
+_server()
+quiet(bs.put_email, host="imap.gmail.com", user="owner@acme.com", password=APP_PW)
+ok("a credential the server ACCEPTS is stored", bs.email_state()["status"] == "connected")
+ok("...and it really signed in, rather than trusting the shape",
+   "LOGIN" in (FakeIMAP.last.commands if FakeIMAP.last else []), str(FakeIMAP.last))
+ok("...and opened the mailbox READ-ONLY — verifying must not mark anyone's mail as read",
+   FakeIMAP.last.readonly is True, str(FakeIMAP.last.commands))
+ok("...and logged out after itself", "LOGOUT" in FakeIMAP.last.commands, str(FakeIMAP.last.commands))
+
+_before = bs.email_credential()
+_server(fail_login="AUTHENTICATIONFAILED Invalid credentials (Failure)")
+try:
+    quiet(bs.put_email, host="imap.gmail.com", user="revoked@acme.com", password=APP_PW)
+    ok("A REVOKED APP PASSWORD IS REFUSED, not stored as connected", False, "it stored it")
+except bs.SecretRejected as e:
+    ok("A REVOKED APP PASSWORD IS REFUSED, not stored as connected", "password changed" in str(e),
+       str(e))
+ok("...and the working credential is untouched", bs.email_credential() == _before)
+
+_server(fail_login="Application-specific password required / disabled by administrator")
+try:
+    quiet(bs.put_email, host="imap.gmail.com", user="locked@acme.com", password=APP_PW)
+    ok("an admin who switched app passwords off gets a DIFFERENT sentence", False, "it stored it")
+except bs.SecretRejected as e:
+    ok("an admin who switched app passwords off gets a DIFFERENT sentence",
+       "administrator" in str(e), str(e))
+
+# A NETWORK PROBLEM IS NOT A BAD PASSWORD. Told "Google refused your app password" when the box
+# simply could not reach Gmail, a person throws away a working credential and makes a new one.
+_unreachable()
+try:
+    quiet(bs.put_email, host="imap.gmail.com", user="owner@acme.com", password=APP_PW)
+    ok("an unreachable server does not store a credential", False, "it stored it")
+except bs.SecretRejected as e:
+    ok("AN UNREACHABLE SERVER IS NOT A REFUSED PASSWORD — it says try again",
+       "try again" in str(e) and "refused" not in str(e), str(e))
+ok("...and does not condemn the stored one either",
+   bs.email_state()["status"] == "connected", str(bs.email_state()))
+
+# A LOGIN THAT WORKS BUT CANNOT OPEN THE MAILBOX is not a connected mailbox.
+_server(fail_select=True)
+try:
+    quiet(bs.put_email, host="imap.gmail.com", user="nobox@acme.com", password=APP_PW)
+    ok("a credential that logs in but cannot open INBOX is refused", False, "it stored it")
+except bs.SecretRejected:
+    ok("a credential that logs in but cannot open INBOX is refused", True)
+
+# AND A RECONNECT CLEARS THE OLD COMPLAINT.
+_server()
+bs.note_email_status("needs_reauth", "Google refused the app password.")
+ok("a failure leaves a sentence behind", bs.email_state()["detail"].strip() != "")
+quiet(bs.put_email, host="imap.gmail.com", user="owner@acme.com", password=APP_PW)
+ok("...and reconnecting CLEARS it, rather than leaving it under a row saying Connected",
+   bs.email_state()["detail"].strip() == "" and bs.email_state()["status"] == "connected",
+   str(bs.email_state()))
+
 print("\n— the credential is ONE row, so it can never be half-updated —")
 before = bs.email_credential()
+_server()
 try:
     quiet(bs.put_email, host="imap.gmail.com", user="new@acme.com", password="bad")
 except bs.SecretRejected:

@@ -316,7 +316,11 @@ def main():
         poller.poll_sweep()
     # ONE WARNING PER CHANNEL, not one per sweep: each polled channel makes its own list
     # call and carries its own throttle, so three sweeps over two channels warn twice total.
-    n_chan = len(poller.channels.POLLED)
+    # COUNTED OVER THE VENDOR CHANNELS. Email polls over IMAP with its own credential and never
+    # touches `INBOX.list`, so it cannot produce this warning; an unconnected mailbox does not even
+    # count as a failure (poller._sweep_email). Counting it here would demand a warning nothing
+    # emits.
+    n_chan = len([c for c in poller.channels.POLLED if c.vendor != poller.channels.IMAP])
     ok("repeated poll failure warns once PER CHANNEL (throttled)",
        sum(1 for m in warns if m == "inbox.poll_list_failed") == n_chan)
     ok("suppressed repeats still counted",

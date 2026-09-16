@@ -101,6 +101,36 @@ _RULES = {
         # Not a window fact, but it governs whether this lane may exist for a given buyer at all.
         "region_blocked": ("EEA", "Switzerland", "UK"),
     },
+
+    # ── email ────────────────────────────────────────────────────────────────────────────
+    # EMAIL HAS NO PLATFORM WINDOW, and that is the finding rather than a gap in the research.
+    # Nobody revokes your right to answer an email: there is no 24-hour clock and no tag lane,
+    # because there is no platform sitting between two mailboxes to impose one. The law that does
+    # apply is about CONTENT, not timing — CAN-SPAM's requirements attach to a message whose
+    # "primary purpose" is commercial advertisement, and it exempts a transactional or
+    # relationship message, which is what a reply to somebody's own inbound enquiry is.
+    #   16 CFR Part 316 (the Primary Purpose rule) — https://www.ecfr.gov/current/title-16/part-316
+    #   15 U.S.C. 7702(17) defines "transactional or relationship message".
+    #
+    # SO WHY IS IT BLOCKED. Not the clock — THE BOX. There is no SMTP path anywhere in this
+    # repository: `inbox/reply.py` sends through the social vendor and nothing else, and
+    # `email_channel.py` opens the mailbox read-only with BODY.PEEK. A rule saying FREEFORM would
+    # describe a lane that does not exist, and `handler.py` would open its opener door onto a send
+    # that cannot happen. Written down here, with its reason, so that switching email on INGESTS
+    # AND DRAFTS without ever implying the box can put something in anyone's outbox.
+    #
+    # AND SEND POLICY IS THE OWNER'S WORD (CLAUDE.md), never a value a dev picks while wiring up a
+    # channel. When SMTP lands and he has ruled, this entry loses `no_send_lane` and keeps
+    # `free_hours: None`, and nothing else in this file changes.
+    "email": {
+        "free_hours": None, "tag_hours": None, "no_send_lane": True,
+        "cite": "https://www.ecfr.gov/current/title-16/part-316",
+        # Carried as data so it survives a refactor that drops comments, exactly as Instagram's
+        # `tag_unconfirmed` is.
+        "no_send_lane_why": "email has no platform send window; this box has no SMTP path at all, "
+                            "and the owner has not ruled on an email send policy. The box reads "
+                            "and drafts; a person sends from their own mail app.",
+    },
 }
 
 # Channels that are deliberately absent, so nobody reads their absence as an oversight:
@@ -139,7 +169,34 @@ def decide(platform: str, last_inbound_at: str | None, now: datetime | None = No
         return {"decision": BLOCKED,
                 "reason": f"no send rule is written for {platform!r}; nothing sends on a platform "
                           f"whose policy nobody has read",
+                # THE FLAG RIDES THE RESULT so a caller can tell this apart from a rule that IS
+                # written and refuses. Both are BLOCKED and they are completely different facts:
+                # this one is a gap in our work, and telling a buyer it is theirs to wait out —
+                # or that a finished decision is an unfinished one — is how a screen lies with
+                # true words. The alternative is a caller reading `_RULES`, which is the second
+                # reader this module refuses to have.
+                "no_rule": True,
                 "remaining": None}
+
+    if rule.get("no_send_lane"):
+        # A RULE IS WRITTEN, AND IT SAYS NOT FROM HERE. Distinct from the branch above, which is
+        # "nobody has read this platform's policy" — this one has been read, and the answer is
+        # that the send happens somewhere else. The flag rides the RESULT so a caller can tell the
+        # two apart without reading `_RULES`, which is the screen's standing rule about this
+        # module and a good one: a second reader of the private table is a second thing to drift.
+        return {"decision": BLOCKED, "reason": rule["no_send_lane_why"],
+                "remaining": None, "no_send_lane": True, "cite": rule.get("cite")}
+
+    if rule.get("free_hours") is None:
+        # DOCUMENTED AT THE TOP OF THIS FILE AND NEVER IMPLEMENTED — "None = no window is
+        # documented for this channel". Every rule so far carried a number, so the first entry
+        # that did not would have reached `timedelta(hours=None)` and raised a TypeError INSIDE
+        # the compliance spine, where an exception is the one thing `decide` promises never to do
+        # ("Always a dict, never an exception"). Refusing is the only safe reading: no documented
+        # window is not evidence that one is open.
+        return {"decision": BLOCKED,
+                "reason": f"no send window is documented for {platform!r}",
+                "remaining": None, "cite": rule.get("cite")}
 
     last = _parse(last_inbound_at)
     if last is None:

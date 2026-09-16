@@ -388,16 +388,17 @@ web_modules:
 # safety invariant, proven by test_spaces_are_isolated). Omit this whole block for a
 # single-tenant box — one implicit 'default' Space is built from the flat env vars.
 #
-# slack_channel / zernio_key_env are optional and fall back to the global REEL_SLACK
-# _CHANNEL_ID / ZERNIO_API_KEY. zernio_key_env names a box .env var (the key itself
-# is NEVER committed). A client clone replaces this list with its own single Space.
+# slack_channel is optional and falls back to the global REEL_SLACK_CHANNEL_ID.
 #
+# THIS BOX USES YOUR OWN CONNECTOR KEY, the one you paste on the set-up screen — there is
+# no key to name here and nothing to add. (Our multi-tenant build binds a per-Space key
+# with `zernio_key_env`; a Space that names one gets THAT key or none, so adding it to
+# your box would stop your own key being used, silently.)
 # zernio_profile_id (optional, NOT a secret — an internal id) is the Space's Zernio
 # Profile / sub-account: the isolation boundary under the TARGET one-key model
 # (docs/ZERNIO_SDK_INTEGRATION.md §5). When set, the inbox poll + account discovery
 # are scoped to that Profile and a send's account must be a member of it. Unset =
 # transitional two-key mode (the per-Space key isolates). CONSOLIDATION path: point
-# every Space's zernio_key_env at the same key and give each its own zernio_profile_id.
 spaces:
   # YOUR TENANT VALUES. Replace every REPLACEME here, or leave this block alone and put
   # them in my/settings.yaml, which is merged over this file at load.
@@ -417,7 +418,6 @@ spaces:
     - Linkedin
     - Twitter
     slack_channel: REPLACEME
-    zernio_key_env: ZERNIO_API_KEY_BMACBUILDS
     zernio_profile_id: REPLACEME
 
 

@@ -101,6 +101,40 @@ def _sweep_email(space: str, ch) -> tuple[int, int, bool]:
     return (scanned, stored, True)
 
 
+def _note_zernio_health(ok: bool, detail: str = "") -> None:
+    """Keep the CONNECT SCREEN honest about the buyer's own social account.
+
+    WITHOUT THIS THE SCREEN LIES BY DEFAULT. `zernio_state()` reports "connected" for as long as a
+    key is stored, so a revoked key or an account that hit its plan limit leaves Settings saying
+    "Connected. New messages arrive on their own." while nothing arrives at all — the exact silent
+    failure the connect surface was built to end, moved one screen over.
+
+    ONLY WHEN THE BUYER'S OWN KEY IS IN PLAY. A box whose Space names its key in config (the
+    owner's) has no stored key, and a status row about a credential the screen does not manage
+    would be a fact nobody can act on.
+
+    402 IS ITS OWN ANSWER, not an auth failure. The vendor caps an account until a payment method
+    is on it and says so with a 402; a buyer told "authentication failed" re-pastes a perfectly
+    good key forever."""
+    if not box_secrets.zernio_key():
+        return
+    try:
+        if ok:
+            if (box_secrets.zernio_state().get("status") or "connected") != "connected":
+                box_secrets.note_zernio_status("connected")
+            return
+        low = detail.lower()
+        if "402" in detail or "payment" in low or "billing" in low:
+            box_secrets.note_zernio_status("payment_required", detail)
+        elif "401" in detail or "403" in detail or "unauthor" in low or "invalid api key" in low:
+            box_secrets.note_zernio_status("needs_reauth", detail)
+        # ANYTHING ELSE IS LEFT ALONE, DELIBERATELY. A 500 or a timeout is the vendor having a bad
+        # minute, not the buyer's account being wrong, and telling them to re-connect over a blip
+        # would send them to redo something that was never broken.
+    except Exception:                            # noqa: BLE001 — a status row is never worth
+        pass                                     # breaking a sweep over
+
+
 def _spaces() -> list[dict]:
     """Spaces this sweep has anything to read for — reuse the proven reel resolver.
 
@@ -348,8 +382,10 @@ def poll_sweep() -> dict:
                 # Throttled warning — one channel never blocks the other, and one
                 # tenant never blocks another.
                 _note_poll_failure(space, ch.key, str(e))
+                _note_zernio_health(False, str(e))
                 continue
             _note_poll_success(space, ch.key)   # clears throttle + logs recovery
+            _note_zernio_health(True)
             ok_channels += 1
             ch_scanned, ch_enqueued = _sweep_channel(sp, z, ch, page)
             scanned += ch_scanned

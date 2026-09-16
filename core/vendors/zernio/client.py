@@ -598,3 +598,89 @@ class ScopedClient:
     @property
     def comments(self) -> _CommentsResource:
         return _CommentsResource(self)
+
+    @property
+    def connect(self) -> "_ConnectResource":
+        return _ConnectResource(self)
+
+
+class _ConnectResource:
+    """Where a person hands one of their own social accounts to their own box (B1).
+
+    THE ONLY CONSENT SURFACE IN THE PRODUCT. Everything else this gateway does with a connected
+    account is a read or a draft; this is the one call that asks a human being to grant access to
+    something of theirs. So it is the one place where a wrong profile id is not a failed request
+    but a misdirected grant, and the two calls below exist to make that impossible rather than
+    unlikely.
+
+    BRING-YOUR-OWN-KEY (owner, 2026-09-16): under BYO the key opens the BUYER's Zernio account, so
+    the profile this resource works in is discovered there — never the id the provisioner wrote at
+    first boot, which names a folder in ours (`core.spaces._own_binding`).
+    """
+
+    def __init__(self, scoped: "ScopedClient"):
+        self._s = scoped
+
+    def profiles(self) -> list:
+        """Every Profile in the account this key opens → [{"id":…, "name":…}].
+
+        NOT profile-scoped, unlike every other read in this gateway, and deliberately: the caller
+        is choosing WHICH profile to work in, so scoping the question to a profile would beg it.
+        Safe because a BYO key opens only the buyer's own account — there is no other tenant in it
+        to leak. On a shared key this returns OUR folders, which is why the only caller (the box's
+        own connect screen) runs when the buyer's own key is set."""
+        s = self._s
+        r = transport.call(
+            "profiles.list",
+            lambda: transport.raw_client(s.key).profiles.list_profiles())
+        out = []
+        for p in model.items(r, "profiles", "data", "items"):
+            pid = model.obj_id(p)
+            if pid:
+                out.append({"id": pid, "name": str(model.field(p, "name") or "")})
+        return out
+
+    def create_profile(self, name: str) -> str:
+        """A Profile in the buyer's own account, for this box's accounts to hang under.
+
+        MUTATING, SO RETRIES ARE OFF (transport.py): the SDK retries POSTs on timeout by default,
+        and under that a single call can leave the buyer with two identically named folders and no
+        way to tell which one their Instagram landed in."""
+        s = self._s
+        r = transport.call(
+            "profiles.create",
+            lambda: transport.raw_client(s.key, max_retries=1).profiles.create_profile(
+                str(name or "Ownbox")[:100]),
+            mutating=True)
+        pid = model.obj_id(model.field(r, "profile") or r)
+        if not pid:
+            raise ZernioError("zernio profiles.create: no profile id in the response")
+        return str(pid)
+
+    def url(self, platform: str, *, redirect_url: str) -> str:
+        """The vendor's consent URL for one platform, to send a person to.
+
+        REFUSES WITHOUT A PROFILE rather than letting the SDK send a None through. `profile_id` is
+        a positional argument there, so an unresolved profile would be serialised into the request
+        and the grant would attach wherever the vendor decided — which, on an account with folders
+        already in it, is a customer's Instagram in the wrong one.
+
+        `login_method` is pinned for Instagram exactly as the provisioner pins it: a Business or
+        Creator account with no Facebook Page. Passed explicitly so a future SDK default cannot
+        move it underneath us."""
+        s = self._s
+        if not s.profile_id:
+            raise ZernioError("zernio connect: refused — no profile resolved for this Space")
+        kw = {"redirect_url": redirect_url}
+        if platform == "instagram":
+            kw["login_method"] = "instagram_login"
+        r = transport.call(
+            f"connect.{platform}",
+            lambda: transport.raw_client(s.key).connect.get_connect_url(
+                platform, s.profile_id, **kw))
+        url = str(model.field(r, "authUrl", "auth_url", "url") or "")
+        if not url.startswith("https://"):
+            # A non-https answer is never a URL worth sending a person to, and the vendor has
+            # answered 200-with-no-url before. Fail loudly here, not in the browser.
+            raise ZernioError(f"zernio connect.{platform}: no https authUrl in the response")
+        return url

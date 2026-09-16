@@ -53,3 +53,33 @@ def verify_sdk() -> tuple[bool, str]:
     except Exception as e:  # noqa: BLE001
         return False, f"zernio-sdk signature check failed: {e}"
     return True, f"zernio-sdk {got} (pinned, signatures verified)"
+
+
+def verify_key(key: str) -> tuple[bool, str]:
+    """Ask Zernio whether this key works. Returns (ok, a sentence for the buyer).
+
+    WHY THE VENDOR AND NOT A REGEX. A Zernio key has no published prefix, so any shape rule here
+    would be invented — and an invented rule rejects a valid key with a message blaming the person
+    who pasted it. One round trip at the moment a person is present answers it exactly, and catches
+    what a shape check cannot: a well-formed key that has been revoked.
+
+    NEVER RAISES. This runs behind a form; a vendor outage must read as "we could not check right
+    now", not as a stack trace, and must not be mistaken for a bad key.
+    """
+    from . import transport
+    if not str(key or "").strip():
+        return (False, "Paste the API key from your Zernio account.")
+    try:
+        data = transport.raw_client(key).api_keys.verify_credential()
+    except Exception as e:                                   # noqa: BLE001 — single answer point
+        msg = str(e)
+        if "401" in msg or "403" in msg or "invalid" in msg.lower():
+            return (False, "Zernio did not recognise that key. Copy it again from your Zernio "
+                           "account, or make a new one.")
+        if "402" in msg:
+            # NOT a bad key, and the difference matters: they would re-paste a good one forever.
+            return (False, "That key works, but your Zernio account needs a payment method before "
+                           "it can connect another account. Add one in Zernio, then try again.")
+        return (False, "Could not reach Zernio to check that key just now. Try again in a minute.")
+    valid = bool(data.get("valid")) if isinstance(data, dict) else False
+    return (True, "") if valid else (False, "Zernio did not recognise that key.")

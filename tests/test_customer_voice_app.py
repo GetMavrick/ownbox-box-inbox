@@ -288,14 +288,25 @@ def test_the_inbox_screen_shows_the_conversation_and_says_who_spoke():
 
 def test_a_quiet_inbox_says_so_rather_than_looking_broken():
     """An empty screen reads as a broken app — the defect the lead app spent two days removing from
-    every branch. A business with no messages yet is the normal first week, not a fault."""
+    every branch. A business with no messages yet is the normal first week, not a fault.
+
+    THE BOX IS MADE TO BE LISTENING FIRST, and that stub is the point rather than scaffolding.
+    "Quiet is not broken" is only true of a box something can actually reach; on a box with no
+    channel connected the screen now says so instead, which is a different sentence covered by
+    `test_an_inbox_nothing_can_reach_says_so_instead_of_promising`. Left unstubbed, this test
+    passed on a developer machine that happened to hold a connector key and failed on CI, which
+    is the bare box — so the precondition is asserted into place, not inherited from whoever ran it.
+    """
     import core.config as cfg
     from core.config import settings
+    from core import box_secrets
     from marketing.customer_voice.inbox import store
     real, real_list = cfg.get_config, store.list_conversations
+    real_cred = box_secrets.email_credential
     try:
         app, c = _client(token="")
         c.post("/dash/login", data={"token": settings.dash_token})
+        box_secrets.email_credential = lambda: {"user": "a@b.c", "password": "x"}
         store.list_conversations = lambda space, **kw: []
         body = c.get("/voice/inbox").get_data(as_text=True)
         ok("a quiet inbox says it is quiet", "No conversations yet" in body)
@@ -312,6 +323,7 @@ def test_a_quiet_inbox_says_so_rather_than_looking_broken():
         ok("...and never shows a stack trace", "Traceback" not in b2)
     finally:
         store.list_conversations, cfg.get_config = real_list, real
+        box_secrets.email_credential = real_cred
 
 
 def test_the_install_files_are_public_and_carry_nothing():
@@ -532,6 +544,91 @@ def test_the_tab_bar_is_three_live_destinations_with_distinct_marks():
         cfg.get_config = real
 
 
+def test_an_inbox_nothing_can_reach_says_so_instead_of_promising():
+    """"The first person who messages you appears here" is a PROMISE, and on a box with no
+    channel connected it is one the box cannot keep — nobody is coming, because nothing is
+    listening.
+
+    MEASURED ON A CLAIMED BOX, not inferred: before any connect screen existed, not one screen in
+    the product named Instagram, Messenger or Gmail, so a buyer could sit in front of that
+    sentence indefinitely and conclude the product was broken. That is the opposite of what the
+    sentence is for — it exists to say "quiet is not broken".
+
+    THE CALM SENTENCE IS KEPT FOR THE CASE IT WAS WRITTEN FOR: a box that IS listening and has
+    simply heard nothing yet. Both are asserted here, because a fix that replaced one empty with
+    another would just move the lie.
+    """
+    import core.config as cfg
+    from core.config import settings
+    from core import box_secrets, spaces
+    from marketing.customer_voice.inbox import store
+    real, real_spaces = cfg.get_config, spaces.all_spaces
+    real_cred, real_list = box_secrets.email_credential, store.list_conversations
+    try:
+        app, c = _client(token="")
+        c.post("/dash/login", data={"token": settings.dash_token})
+        # AN EMPTY INBOX IS THE WHOLE SUBJECT, and earlier tests in this file seed rows into the
+        # same box — so the emptiness is forced rather than hoped for, exactly as the quiet-inbox
+        # test above does.
+        store.list_conversations = lambda space, **kw: []
+        spaces.all_spaces = lambda: [{"name": "default"}]            # a sold box on day one:
+        box_secrets.email_credential = lambda: {}                    # no connector, no mailbox
+        body = c.get("/voice/inbox").get_data(as_text=True)
+        ok("a box nothing can reach says exactly that", "Nothing can reach you yet" in body)
+        ok("...and does not promise someone is coming",
+           "The first person who messages you appears here" not in body)
+        ok("...and gives him the one thing he can do", 'class="btn"' in body)
+
+        # NO PHRASE TWICE IN ONE CARD. Rendered, the card read "Connect a channel" as its title
+        # AND as its button — three words, twice, inside one small box. Nothing in the code said
+        # so; it took looking at the page. Asserted generically so the next edit cannot re-do it.
+        import re as _re2
+        card = _re2.search(r'<div class="card">.*?</div></div></div>', body)
+        ok("...in a card that does not say the same thing twice", bool(card), "no card rendered")
+        if card:
+            words = _re2.findall(r"[A-Za-z']+", _re2.sub(r"<[^>]+>", " ", card.group(0)))
+            three = [" ".join(words[i:i + 3]).lower() for i in range(len(words) - 2)]
+            dupes = sorted({p for p in three if three.count(p) > 1})
+            ok("......no phrase repeated inside it", not dupes, str(dupes))
+
+        # THE BUTTON MUST NEVER BE A 404. Which pages exist is a per-box fact — the same binary
+        # ships as four products — so the link is resolved from the live url_map, exactly as
+        # core.dash.landing() does. A connect button that 404s in a buyer's first five minutes
+        # would be worse than no button.
+        import re as _re
+        routes = {str(r) for r in app.url_map.iter_rules()}
+        targets = _re.findall(r'class="btn" href="([^"?#]+)', body)
+        ok("...pointing only at routes THIS box serves",
+           targets and all(t in routes for t in targets), f"{targets} vs the url_map")
+
+        # NOW IT IS LISTENING, and the calm sentence comes back.
+        box_secrets.email_credential = lambda: {"user": "a@b.c", "password": "x"}
+        listening = c.get("/voice/inbox").get_data(as_text=True)
+        ok("a box that IS listening keeps the calm empty state",
+           "No conversations yet" in listening)
+        ok("...and stops offering a connect button", "Nothing can reach you yet" not in listening)
+    finally:
+        cfg.get_config, spaces.all_spaces = real, real_spaces
+        box_secrets.email_credential, store.list_conversations = real_cred, real_list
+
+
+def test_the_install_page_shows_no_markup_to_the_buyer():
+    """It read: "or &lt;b&gt;Add to Home screen&lt;/b&gt; on older versions" — angle brackets and
+    all — on the screen that tells a buyer how to keep notifications working. The step TITLE is
+    inserted raw and the DETAIL is escaped, so markup in a detail renders as text."""
+    import core.config as cfg
+    from core.config import settings
+    real = cfg.get_config
+    try:
+        app, c = _client(token="")
+        c.post("/dash/login", data={"token": settings.dash_token})
+        body = c.get("/voice/install").get_data(as_text=True)
+        ok("no escaped markup is shown to the buyer", "&lt;b&gt;" not in body)
+        ok("...and the step is still there", "Add to Home screen" in body)
+    finally:
+        cfg.get_config = real
+
+
 def test_ci_actually_runs_this_file():
     """A SUITE CI NEVER RUNS IS WORSE THAN NO SUITE, because it reports green. The workflow keeps a
     HAND-MAINTAINED list of suite names — the same silent-skip hazard as `test_machine_app`'s
@@ -568,6 +665,8 @@ if __name__ == "__main__":
                test_the_phone_app_is_self_contained,
                test_the_screen_and_the_worker_name_a_channel_the_same_way,
                test_the_tab_bar_is_three_live_destinations_with_distinct_marks,
+               test_an_inbox_nothing_can_reach_says_so_instead_of_promising,
+               test_the_install_page_shows_no_markup_to_the_buyer,
                test_ci_actually_runs_this_file):
         print(fn.__name__)
         fn()

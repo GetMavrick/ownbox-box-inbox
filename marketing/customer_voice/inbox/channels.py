@@ -63,12 +63,15 @@ NAMES = {"messenger": "Messenger", "instagram": "Instagram", "email": "Email",
 POLLED: tuple[Channel, ...] = (
     Channel("facebook", "messenger"),
     Channel("instagram", "instagram"),
-    # EMAIL IS BUILT AND DELIBERATELY NOT POLLED YET. `email_channel.py` reads a mailbox and its
-    # suite is green, but `test_inbox_instagram` requires every polled channel to have a send rule
-    # written beside it — deliberately, so auto-reply on a new channel can never be accidental.
-    # Until the `email` rule exists in `window._RULES`, adding the line below is what switches the
-    # channel on, and nothing else is needed:
-    #     Channel(IMAP, "email"),
+    # EMAIL IS ON. The rule it was waiting for is written (`window._RULES["email"]`, with its
+    # citations), so the pairing `test_inbox_instagram` enforces is satisfied and this line is the
+    # switch the comment here promised it would be.
+    #
+    # THE RULE SAYS NOTHING AUTO-SENDS, and that is why turning it on is safe rather than merely
+    # permitted. Email has no platform window at all — the reason it is blocked is that this box
+    # has no SMTP path anywhere, and send policy is the owner's word. So the channel ingests, the
+    # drafter writes (it never consults the window), and a person sends from their own mail app.
+    Channel(IMAP, "email"),
 )
 
 

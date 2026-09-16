@@ -30,6 +30,7 @@ import imaplib
 from datetime import datetime, timezone
 
 from core import box_secrets
+from core.vendors import mailbox as _core_mailbox
 from core.logging import get_logger
 
 from . import store
@@ -56,18 +57,13 @@ class EmailAuthError(RuntimeError):
 def _classify_auth_failure(msg: str) -> EmailAuthError:
     """Turn an opaque IMAP refusal into something a buyer can act on.
 
-    Google returns the same shape whether the app password was revoked (which happens automatically
-    whenever the account password changes) or a Workspace administrator switched app passwords off
-    for the whole domain. A person told "authentication failed" learns nothing they can do."""
-    low = (msg or "").lower()
-    if "disabled" in low or "not enabled" in low or "administrator" in low:
-        return EmailAuthError("admin_disabled",
-                              "Your Google administrator has turned off app passwords for your "
-                              "organisation. Ask them to allow them, then reconnect.")
-    return EmailAuthError("needs_reauth",
-                          "Google refused the app password. This usually means the Google account "
-                          "password changed, which revokes app passwords. Make a new one and "
-                          "paste it in again.")
+    THE SENTENCES LIVE IN `core.vendors.mailbox` AND THERE IS ONE COPY. They are read in two very
+    different moments — by the person pasting a password into the connect screen, and by this
+    poller weeks later when Google revokes it — and two copies would drift, with the drifted half
+    being whichever one somebody is reading while they try to fix something. This keeps the
+    machine's own exception type (the sweep catches it by name) and takes the wording from core."""
+    err = _core_mailbox.classify_auth_failure(msg)
+    return EmailAuthError(err.status, err.detail)
 
 
 def _header(msg, name: str) -> str:

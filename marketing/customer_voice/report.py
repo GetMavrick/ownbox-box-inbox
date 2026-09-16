@@ -14,6 +14,7 @@ from core import state
 from core.report import register_reporter, window
 
 from . import rails
+from .inbox import store as inbox_store
 from .competitors import roster as competitors
 from .seo import health
 
@@ -58,6 +59,23 @@ LABEL = {
 
 def _n(c, sql: str, args: tuple = ()) -> int:
     return int(c.execute(sql, args).fetchone()[0] or 0)
+
+
+def _space_name() -> str:
+    """The Space this box's morning page reports for.
+
+    THE BOX'S OWN, NOT "ALL OF THEM". Every count below is scoped to one Space because the store
+    refuses an all-Spaces read on purpose (the tenant boundary), and summing across tenants on a
+    page is how one client's numbers end up in another's morning. A sold box has exactly one
+    Space, so this is the whole answer there; on the owner's multi-Space box it is the first,
+    which is the same scope the rest of this segment's machines already use.
+
+    NEVER RAISES. A reporter that threw would take the whole morning page down over a count."""
+    try:
+        from core import spaces
+        return str((spaces.all_spaces() or [{}])[0].get("name") or spaces.DEFAULT)
+    except Exception:                            # noqa: BLE001 — a page is worth more than a count
+        return "default"
 
 
 def _rail_line(rail: str, st: str) -> dict | None:
@@ -172,6 +190,50 @@ def report(day: date) -> dict:
             watch.append({"text": f"Competitors — {len(thin)} shown but not ranked, "
                                   f"under {competitors.min_reviews()} reviews", "state": rails.OK})
 
+    # ── the inbox ────────────────────────────────────────────────────────────────────────
+    # THE PRODUCT'S OWN SEGMENT, AND IT WAS NOT HERE. This page reported uptime, PageSpeed and
+    # competitors on a box whose headline is a unified inbox — measured 2026-09-16, and flagged by
+    # OSDev0 at 02:30 as one of the live homepage's overstated claims ("morning page: zero inbox
+    # data"). A morning review of a messaging product that never mentions the messages is the
+    # dashboard equivalent of the empty reply box: it works, and it does not do the thing.
+    #
+    # IT IS NOT A RAIL, AND THAT IS WHY IT IS UNCONDITIONAL. `rails` are optional things a
+    # business may or may not have — a website to watch, competitors to name. The inbox is what
+    # the box IS. Gating it behind `owned` would hide it on every box, since no rail is named
+    # `inbox` and none should be.
+    #
+    # SILENT ON A BOX WITH NO CONVERSATIONS. A new box, or one polled before its first message,
+    # adds nothing here rather than a row of zeroes — the same rule as a rail nobody owns. Zeroes
+    # on the first morning read as a broken machine, which is exactly what the module header says
+    # this page exists not to do.
+    inbox_space = _space_name()
+    counts = inbox_store.day_counts(inbox_space, lo, hi)
+    waiting = inbox_store.awaiting_reply(inbox_space)
+    if counts["inbound"] or waiting or counts["new_people"]:
+        if counts["inbound"]:
+            happened.append({"text": "messages came in", "value": counts["inbound"]})
+        if counts["new_people"]:
+            happened.append({"text": "people wrote for the first time", "value": counts["new_people"]})
+        if counts["drafts"]:
+            happened.append({"text": "replies written for you", "value": counts["drafts"]})
+        figures["inbox_waiting"] = {"value": waiting, "label": "waiting on you"}
+        if counts["inbound"]:
+            figures["inbox_today"] = {"value": counts["inbound"], "label": "messages today"}
+        if waiting:
+            # THE SECOND INSTRUCTION ON THIS PAGE, and it belongs beside the first. A customer who
+            # wrote and has not been answered is the same shape of problem as a front door that
+            # did not open, and it is the one thing on this segment a person can act on in a
+            # minute. `awaiting_reply` is about DIRECTION, not a clock, so an old one counts —
+            # being ignored for a week is worse than being ignored since breakfast, not resolved.
+            noun = "conversation is" if waiting == 1 else "conversations are"
+            needs_you.append({"text": f"{waiting} {noun} waiting on your reply",
+                              "href": "/voice/inbox"})
+            watch.append({"text": f"Inbox — {waiting} waiting on you", "state": rails.WARN})
+        elif counts["inbound"]:
+            # ANSWERED, SAID PLAINLY. The good state has to be visible or the segment only ever
+            # appears when something is wrong, and a page that only nags is a page nobody opens.
+            watch.append({"text": "Inbox — everyone has been answered", "state": rails.OK})
+
     # Every rail he owns gets a line when it is waiting on him or failing. A rail he does not own
     # is absent — no line, no zero, no nag.
     for rail in rails.ALL:
@@ -186,9 +248,16 @@ def report(day: date) -> dict:
     if not owned:
         # A BOX THAT OWNS NO RAIL IS NOT A BROKEN ONE. It renders as a machine waiting to be
         # told what this business has, which is a setup step and reads like one.
-        headline, label = 0, "rails set up"
-        watch = [{"text": "Nothing set up yet — say which of these this business has",
-                  "state": rails.CONNECT}]
+        #
+        # BUT A SOLD BOX OWNS NO RAIL AND STILL HAS AN INBOX, which is the common case and not the
+        # empty one: the buyer connected Instagram and never named a website to watch. Writing
+        # `watch = [...]` here would have DELETED the inbox line this segment just added, on
+        # exactly the boxes the product is sold to — so the setup prompt is APPENDED to what is
+        # already there, and it only becomes the whole page when there is nothing else to say.
+        headline, label = (waiting, "waiting on you") if counts["inbound"] or waiting \
+            else (0, "rails set up")
+        watch = watch + [{"text": "Nothing set up yet — say which of these this business has",
+                          "state": rails.CONNECT}]
 
     return {"title": TITLE,
             "headline": {"value": headline, "label": label},

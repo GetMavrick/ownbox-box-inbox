@@ -216,6 +216,16 @@ h1 .chan{vertical-align:middle}
 .row:last-child{border-bottom:0}
 .row .n{font-variant-numeric:tabular-nums;font-weight:650;min-width:2.2em}
 .row .t{color:var(--dim);font-size:15px}
+/* A ROW THAT GOES SOMEWHERE LOOKS LIKE ONE. Same row, made an <a>: no underline, no link blue —
+   the whole row is the target, exactly as a conversation row already is, with a chevron so the
+   affordance is visible rather than discovered by tapping. 44px is kept by the row's own padding.
+   `text-decoration:none` alone would leave it indistinguishable from the rows that go nowhere. */
+a.row{text-decoration:none;color:inherit}
+a.row .t{flex:1}
+a.row::after{content:"";width:7px;height:7px;flex:none;align-self:center;
+  border-right:2px solid var(--dimmer);border-top:2px solid var(--dimmer);
+  transform:rotate(45deg);margin-left:2px}
+a.row:active{background:var(--hair);border-radius:10px}
 .needs{background:var(--bad-soft);box-shadow:none;border:1px solid var(--bad)}
 .needs .t{color:var(--ink)}
 .figs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
@@ -632,15 +642,56 @@ def _shell(body: str, *, day: str = "", here: str = "") -> str:
 
 # ── Today ───────────────────────────────────────────────────────────────────────────────────
 def _rows(items: list, *, needs: bool = False) -> str:
-    """A list of {text, value?} as rows. NO INVENTED NUMBER: an item with no `value` renders as a
-    sentence, not as a zero — the same rule the morning review keeps, because "0" and "nothing to
-    report" are different claims and a dashboard that conflates them starts lying quietly."""
+    """A list of {text, value?, href?} as rows. NO INVENTED NUMBER: an item with no `value` renders
+    as a sentence, not as a zero — the same rule the morning review keeps, because "0" and "nothing
+    to report" are different claims and a dashboard that conflates them starts lying quietly.
+
+    AN `href` IS A LINK, and this is the half that was missing. The report writes "3 conversations
+    are waiting on your reply" into `needs_you` WITH `href: /voice/inbox` — and this function
+    rendered `text` and `value` only, so the one instruction on the first screen a buyer opens
+    landed as dead text beside a number. The row he most needs to act on was the row he could not
+    tap.
+
+    RESOLVED AGAINST THE LIVE URL MAP, never trusted. The href arrives from a REPORTER, which is a
+    different module with no idea which pages this box serves — and a reporter is the kind of
+    producer that outlives the screen it was written for. An unserved path renders as the plain
+    row it was before, which is exactly what it should degrade to.
+    """
     out = []
     for it in items:
         n = it.get("value")
         cell = f'<span class="n">{_esc(n)}</span>' if n is not None else ""
-        out.append(f'<div class="row">{cell}<span class="t">{_esc(it.get("text"))}</span></div>')
+        inner = f'{cell}<span class="t">{_esc(it.get("text"))}</span>'
+        go = _live(str(it.get("href") or "")) if it.get("href") else ""
+        out.append(f'<a class="row go" href="{_esc(go)}">{inner}</a>' if go
+                   else f'<div class="row">{inner}</div>')
     return f'<div class="card{" needs" if needs else ""}">{"".join(out)}</div>'
+
+
+def _first_run() -> str:
+    """TODAY, ON A BOX NOTHING CAN REACH — the set-up, not a report.
+
+    Measured by rendering it on a bare box (2026-09-16): a customer who had just bought a unified
+    inbox was greeted with a website uptime report — a dash for the headline, "— of checks answered
+    today", "0 checks on your site", and two rails asking for a web address. Not one word about
+    messages. The report is not wrong; it is not what this person came for, and this is the screen
+    the app opens on.
+
+    THE SAME TEST AND THE SAME BUTTON AS THE EMPTY INBOX, deliberately: two screens that disagree
+    about whether the box is listening, or about where to send him, is worse than either being
+    wrong on its own. The button is absent when this box serves nowhere to put it.
+    """
+    go = _connect_href()
+    return ('<h1>Today</h1><div class="head">'
+            '<div class="v">Your box is running.</div>'
+            '<div class="l">Nothing is connected to it yet, so there is nothing here to report. '
+            'Connect one and this screen fills itself.</div></div>'
+            + (f'<div class="card"><div class="setrow">'
+               '<b>What lands here once you do</b>'
+               '<span>Every message anyone sends you, in one list — and each morning, what came '
+               'in overnight and who is still waiting on you.</span>'
+               f'<p style="margin:10px 0 0"><a class="btn" href="{go}">{_connect_verb(go)}</a>'
+               '</p></div></div>' if go else ""))
 
 
 @blueprint.get("/voice/")
@@ -664,15 +715,43 @@ def r_today():
         v = _report(day)
     except Exception as e:                       # noqa: BLE001 — the front page outranks the cause
         log.warning("voice.report_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
-        body = ('<h1>Today</h1><div class="head"><div class="v">—</div>'
+        # A BOX NOTHING CAN REACH LEADS WITH THE SET-UP HERE TOO — and STILL SAYS THE REPORT
+        # COULD NOT BE READ. My first version replaced the sentence, and CI was right to refuse
+        # it: an unreadable report is a real fault, and a screen that swallows one because the
+        # buyer has nothing connected yet is how a broken box looks fine to everybody. What was
+        # wrong was the ORDER, not the sentence. On a bare box the fault is not his first screen
+        # and not the headline; it sits under the set-up, where it belongs — true for him, still
+        # there for whoever is debugging the box.
+        fault = ('<div class="quiet">Today\'s report could not be read on this box. '
+                 'Nothing has been lost; the next poll writes it again.</div>')
+        body = (_first_run() + fault if _nothing_arrives_yet() else
+                '<h1>Today</h1><div class="head"><div class="v">—</div>'
                 '<div class="l">Today\'s report could not be read on this box. '
                 'Nothing has been lost; the next poll writes it again.</div></div>')
         return _shell(body, day=label), 200
 
-    head = v.get("headline") or {}
-    parts = [f'<h1>Today</h1><div class="head">'
-             f'<div class="v">{_esc(head.get("value") or "—")}</div>'
-             f'<div class="l">{_esc(head.get("label") or "")}</div></div>']
+    # ── THE FIRST SCREEN A BUYER EVER SEES ──────────────────────────────────────────────
+    # MEASURED ON A BARE BOX, 2026-09-16, by rendering it: Today greeted a customer who had just
+    # bought a unified inbox with a WEBSITE UPTIME REPORT — a dash for the headline, "— of checks
+    # answered today", "0 checks on your site", and two rails asking for a web address. Not one
+    # word about messages, which is the product. The report is not wrong; it is simply not what
+    # this person came for, and it is the screen the app opens on.
+    #
+    # SO ON A BOX NOTHING CAN REACH, TODAY IS THE SET-UP. `_nothing_arrives_yet()` is the same
+    # test the empty inbox uses, and the same button — resolved from the live url_map — so the two
+    # screens can never disagree about whether this box is listening or about where to send him.
+    #
+    # NOTHING IS DELETED, ONLY RE-ORDERED. Everything the report produced still renders below
+    # this: a buyer who HAS named a website still sees it. What changes is what is at the top on
+    # the day he arrives, and a headline of "0 rails set up" is not it.
+    first_run = _nothing_arrives_yet()
+    if first_run:
+        parts = [_first_run()]
+    else:
+        head = v.get("headline") or {}
+        parts = [f'<h1>Today</h1><div class="head">'
+                 f'<div class="v">{_esc(head.get("value") or "—")}</div>'
+                 f'<div class="l">{_esc(head.get("label") or "")}</div></div>']
 
     # ORDER IS THE MESSAGE: what needs him, then what happened, then what to keep an eye on. The
     # report already ranks them that way for the 8am send and this screen does not re-sort them.
@@ -694,14 +773,23 @@ def r_today():
     # A QUIET DAY SAYS SO, ONCE. An empty screen reads as a broken app, which is the single most
     # expensive thing a page like this can do — it is the defect the lead app spent two days
     # removing from every one of its branches.
-    if not any(v.get(k) for k in ("needs_you", "happened", "watch")) and not figs:
+    if (not any(v.get(k) for k in ("needs_you", "happened", "watch")) and not figs
+            and not first_run):
+        # NOT ON A FIRST RUN, because there it is the wrong of the two true sentences. "The rails
+        # you own are being polled" is reassurance for a box that is listening and has heard
+        # nothing; said to a box with nothing connected it promises a poll that will never find
+        # anything — the same lie the empty inbox screen was just fixed for telling.
         parts.append('<div class="quiet">Nothing has come through yet today. '
                      'The rails you own are being polled; the first thing they find appears here.'
                      '</div>')
 
-    parts.append('<div class="foot">Every figure here is read from your own rails. '
-                 'This is the same report that goes out at 8am, on the screen instead of in an '
-                 'inbox.</div>')
+    # THE FOOTER EXPLAINS FIGURES, so it only belongs under some. "Every figure here is read from
+    # your own rails" under a screen carrying no figure is the same small untruth this app keeps
+    # deleting — and on a first run that is exactly what it was.
+    if figs or v.get("happened"):
+        parts.append('<div class="foot">Every figure here is read from your own rails. '
+                     'This is the same report that goes out at 8am, on the screen instead of in '
+                     'an inbox.</div>')
     return _shell("".join(parts), day=label), 200
 
 # ── time a person can read ──────────────────────────────────────────────────────────────────
@@ -866,6 +954,52 @@ def _drafts_row() -> str:
             '</div>')
 
 
+def _channels_row() -> str:
+    """B1 — the row that connects the accounts the inbox reads FROM.
+
+    THE PRODUCT HAD NO SUCH ROW UNTIL NOW, and that is the whole of why this exists. Measured
+    2026-09-16: the only connect link in the system was minted by the provisioner and surfaced on
+    the build page while an order was still building. A buyer who closed that tab, or who arrived
+    after it, owned a box with no way to connect anything to it — Settings offered an AI key, a
+    theme, an install guide and a paragraph about polling, and the inbox stayed empty forever with
+    nothing on any screen saying why.
+
+    NO NETWORK CALL FROM SETTINGS. This row reads the stored status only. Settings is the page a
+    worried buyer opens, and a page that has to reach a vendor before it can paint is a page that
+    hangs when the vendor is slow. The live account list lives one click away, on /voice/connect,
+    where a person has said they want to look."""
+    from core import box_secrets
+    st = box_secrets.zernio_state()
+    status = st.get("status")
+    if status == "not_connected":
+        return ('<div class="setrow"><b>Your channels</b>'
+                '<span>Ownbox reads your Instagram and Messenger for you and keeps every '
+                'conversation in one place. Connect them with your own social account — it stays '
+                'yours, and you can take it back any day.</span>'
+                '<p style="margin:10px 0 0"><a class="btn" href="/voice/connect">'
+                'Connect your channels</a></p></div>')
+    if status == "payment_required":
+        # THE ONE FAILURE A BUYER CAN ACTUALLY FIX, so it gets its own sentence instead of the
+        # word the API uses. Told "authentication failed" they re-paste a perfectly good key.
+        return ('<div class="setrow"><b>Your channels</b>'
+                '<span>Your social account needs a payment method before it will connect any '
+                'more channels. Add one there, then come back — nothing here needs changing.'
+                '</span>'
+                '<p style="margin:10px 0 0"><a class="btn" href="/voice/connect">'
+                'Check your channels</a></p></div>')
+    if status == "needs_reauth":
+        return ('<div class="setrow"><b>Your channels</b>'
+                '<span>Ownbox can no longer reach your social account, so nothing new is '
+                'arriving. Re-connect it and the inbox catches up on its own.</span>'
+                '<p style="margin:10px 0 0"><a class="btn" href="/voice/connect">'
+                'Re-connect</a></p></div>')
+    return ('<div class="setrow"><b>Your channels</b>'
+            '<span>Connected. New messages arrive on their own.</span>'
+            '<span style="margin-top:8px">'
+            '<a href="/voice/connect" style="color:var(--accent)">Add or remove a channel</a>'
+            '</span></div>')
+
+
 # ── what a row can tell you before you open it ──────────────────────────────────────────────
 # Owner, 2026-09-16: "we're also going to add some different tags on each conversation and an
 # action button menu on hover."
@@ -900,12 +1034,39 @@ def _has_send_rule(platform: str) -> bool:
     public answer is enough: a message that arrived THIS INSTANT is inside any free window that
     exists, so FREEFORM means a rule is written and BLOCKED means there is none.
 
+    ASKED AS "IS ONE WRITTEN", NOT "IS ONE OPEN", and the difference arrived with email. Every
+    rule used to carry a window, so "a message that arrived this instant is FREEFORM" was the same
+    question — it is not any more. Email's rule is written, cited, and refuses: there is no
+    platform window at all, and this box has no SMTP path. Reading FREEFORM as "a rule exists"
+    would report that written decision as a gap in our work.
+
     CACHED, because a rule is code and not data — it cannot change between two rows of one page.
     """
     from datetime import datetime, timezone
     from marketing.customer_voice.inbox import window as _w
     now = datetime.now(timezone.utc)
-    return _w.decide(platform, now.isoformat(), now)["decision"] == _w.FREEFORM
+    return not _w.decide(platform, now.isoformat(), now).get("no_rule")
+
+
+@functools.lru_cache(maxsize=64)
+def _no_send_lane(platform: str) -> bool:
+    """Is this a channel whose policy IS written, and says the send happens somewhere else?
+
+    THE DIFFERENCE MATTERS TO A PERSON, which is the only reason it is worth a second function.
+    "No reply rule" means nobody has read this channel's policy and the box refuses out of
+    caution — a gap, and it reads like one. Email is not that: it has no platform window at all,
+    the rule is written with its citation, and the reason nothing goes out from here is that this
+    box has no SMTP path and the owner has not ruled on an email send policy. Told the first
+    sentence about the second situation, a buyer waits for us to finish something that is already
+    finished.
+
+    ASKED THROUGH `window.decide` LIKE ITS SIBLING, never by reading `_RULES` — the flag rides the
+    RESULT for exactly this caller. Cached for the same reason: a rule is code, not data.
+    """
+    from datetime import datetime, timezone
+    from marketing.customer_voice.inbox import window as _w
+    now = datetime.now(timezone.utc)
+    return bool(_w.decide(platform, now.isoformat(), now).get("no_send_lane"))
 
 
 def _tag_list(k: dict) -> list:
@@ -920,6 +1081,12 @@ def _tag_list(k: dict) -> list:
     if k.get("opted_out"):
         # THE ONE MISTAKE THIS SCREEN CAN HELP HIM MAKE is replying to someone who said STOP.
         out.append(("Opted out", "stop"))
+    elif _no_send_lane(plat):
+        # NOT A FAULT, SO NOT RED, and checked before the branch below because it is the more
+        # specific fact. The rule for this channel IS written and says the send happens in the
+        # person's own mail app — email has no platform window, and this box has no SMTP path.
+        # "No reply rule" here would report a gap where there is a finished decision.
+        out.append(("Send in your mail app", "warn"))
     elif not _has_send_rule(plat):
         # NOT A WINDOW PROBLEM, AND IT MUST NOT READ AS ONE. Nothing sends on a channel whose
         # policy nobody has written — `window.decide`'s most important branch — and "Window
@@ -974,7 +1141,11 @@ def _acts(k: dict, *, who: str, channel: str) -> str:
     href = _thread_href(k.get("zernio_conversation_id"))
     plat = str(k.get("platform") or "")
     items = []
-    if (not k.get("opted_out") and _has_send_rule(plat)
+    # THE SAME FOUR QUESTIONS `_compose` ASKS, IN THE SAME ORDER. `_no_send_lane` is the newest
+    # of them and it arrived with email: a channel whose rule is written and says the send happens
+    # in the person's own mail app shows no box, so it must offer no Reply either. Adding a gate
+    # to `_compose` and not to this list is precisely the drift the suite beside this catches.
+    if (not k.get("opted_out") and not _no_send_lane(plat) and _has_send_rule(plat)
             and (k.get("last_inbound_at") or "")
             and (k.get("account_id") or "").strip()):
         items.append((f"{href}#reply", "Reply"))
@@ -994,6 +1165,80 @@ def _acts(k: dict, *, who: str, channel: str) -> str:
             'aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/>'
             '<circle cx="19" cy="12" r="1.7"/></svg></summary>'
             f'<div class="menu">{links}</div></details>')
+
+
+def _live(*paths: str) -> str:
+    """The first of `paths` THIS BOX ACTUALLY SERVES, or "" when it serves none of them.
+
+    ASKS THE LIVE URL MAP, exactly as `core.dash.landing()` does and for the same reason it gives:
+    "WHICH PAGES EXIST IS A PER-BOX FACT, NEVER A CONSTANT. The same binary ships as four
+    different products, and any hard-coded landing is right for one of them and a 404 for the
+    rest." A link to a route this box does not serve is the dead control this app keeps deleting,
+    and on the first screen it would be a 404 handed to somebody in their first five minutes.
+
+    IT IS A HELPER AND NOT A CONSTANT because two different callers now need it: the connect
+    button on an empty inbox, and any row the morning report hands up with an `href` on it.
+    """
+    try:
+        from flask import current_app
+        have = {str(r) for r in current_app.url_map.iter_rules()}
+    except Exception:                            # noqa: BLE001 — no app context, no link
+        return ""
+    for path in paths:
+        if path in have:
+            return path
+    return ""
+
+
+def _connect_verb(go: str) -> str:
+    """WHAT THE BUTTON SAYS, decided by WHERE IT LANDS — because the two must agree.
+
+    "Connect a channel" promises a choice. On a box that serves the hub (`/voice/connect`) there
+    is one. On a box that does not, this button reaches the MAILBOX screen, which offers exactly
+    one thing — and a buyer who pressed "Connect a channel" expecting to pick Instagram and
+    arrived at a Gmail form has been told something that was not true of his box.
+
+    A LABEL AND A DESTINATION THAT DISAGREE is the same defect as a link that 404s, only quieter:
+    nothing breaks, and he simply believes the product is not what he was shown.
+    """
+    return {"/voice/setup": "Set up your box",
+            "/voice/connect": "Connect a channel",
+            "/voice/mailbox": "Connect your inbox"}.get(go, "Finish setting up")
+
+
+def _connect_href() -> str:
+    """Where a buyer with nothing connected should be sent — or "" when this box has nowhere.
+
+    ORDER IS "THE MOST IT CAN DO FOR HIM, ON THIS BOX". `/voice/connect` is the hub when a box
+    serves one; `/voice/mailbox` connects the one channel that needs no vendor account at all;
+    `/voice/settings` is the last resort, and on a bare box it offers an AI key, a theme and an
+    install guide — nothing that connects anything. It was where this button led for a day.
+    """
+    return _live("/voice/setup", "/voice/connect", "/voice/mailbox", "/voice/settings")
+
+
+def _nothing_arrives_yet() -> bool:
+    """Is there NO channel that could deliver a message to this box?
+
+    THE EMPTY INBOX SAYS "The first person who messages you appears here." That is a promise, and
+    on a box with nothing connected it is one the box cannot keep — nobody is coming, because
+    nothing is listening. Measured on a claimed box before any connect screen existed: a buyer
+    could sit in front of that sentence indefinitely and conclude the product was broken, which
+    is the opposite of what the sentence is for.
+
+    ASKED THE WAY THE POLLER DECIDES WHETHER TO SWEEP AT ALL (`poller._spaces`), so the screen and
+    the worker cannot disagree about whether this box is listening. A Zernio key OR a mailbox
+    credential is enough — `poller._spaces` was widened for exactly that case, "a buyer who
+    connects Gmail and nothing else is a box with no Zernio key at all".
+    """
+    try:
+        from core import box_secrets, spaces as _sp
+        if box_secrets.email_credential():
+            return False
+        return not any(s.get("zernio_key") for s in _sp.all_spaces())
+    except Exception as e:                       # noqa: BLE001 — never a 500 on an empty screen
+        log.warning("voice.channels_unreadable", extra={"error": type(e).__name__})
+        return False                             # say nothing rather than say something wrong
 
 
 def _chips(space: str, current: str, *, q: str = "") -> str:
@@ -1218,6 +1463,24 @@ def r_inbox():
             body = (f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel)}'
                     f'<div class="quiet">Nothing on {_esc(_channel(channel))} yet. '
                     'Other channels may have messages — tap <b>All</b>.</div>')
+        elif _nothing_arrives_yet():
+            # NOTHING IS LISTENING. "The first person who messages you appears here" is a promise,
+            # and here it is one the box cannot keep: nobody is coming. This is the only empty
+            # state with something for him to DO, so it is the only one carrying a button — and
+            # the button appears only on a box that serves somewhere to send him.
+            go = _connect_href()
+            body = ('<h1>Inbox</h1><div class="quiet">Nothing can reach you yet, because no '
+                    'channel is connected. Connect one and everything people send you lands '
+                    'here.</div>'
+                    # THE TITLE SAYS WHAT HE GETS, THE BUTTON SAYS WHAT HE DOES. Both read
+                    # "Connect a channel" until this was rendered — the same three words twice
+                    # inside one small card, which reads as a template that was never finished.
+                    + (f'<div class="card"><div class="setrow">'
+                       '<b>Your inbox fills itself after this</b>'
+                       '<span>It takes about a minute, and it is the only step nobody can do '
+                       'for you.</span><p style="margin:10px 0 0">'
+                       f'<a class="btn" href="{go}">{_connect_verb(go)}</a></p></div></div>'
+                       if go else ""))
         else:
             # NO SEARCH BOX ON A BOX THAT HAS NEVER RECEIVED ANYTHING. A field offering to search
             # an empty inbox is the control that cannot succeed this app keeps deleting.
@@ -1336,6 +1599,14 @@ def _compose(zcid: str, conv: dict) -> str:
     """
     if conv.get("opted_out"):
         return ""
+    if _no_send_lane(str(conv.get("platform") or "")):
+        # A WRITTEN RULE THAT SAYS THE SEND HAPPENS ELSEWHERE. Checked before the no-rule branch
+        # below because it is the more specific fact: both hide the compose box, and only this one
+        # can tell the person where their reply actually goes.
+        return ('<div class="card"><div class="row"><span class="t quiet">Ownbox reads your '
+                + _esc(_channel(str(conv.get("platform") or ""))) + ' and writes the reply, but '
+                'it does not send mail — you send it from your own mail app, from your own '
+                'address. Copy the draft across.</span></div></div>')
     if not _has_send_rule(str(conv.get("platform") or "")):
         # FOUND BY RENDERING, 2026-09-16. A seeded box on a channel with NO send rule written —
         # `email`, today — drew a full reply box with a Send button under it, and the send would
@@ -1523,6 +1794,45 @@ ICON_FG = (125, 211, 252)
 # laptop, more on the one-vCPU box) on a route that is deliberately unauthenticated; a browser
 # caches it for a day, but a stranger fetching it in a loop should not be able to buy CPU.
 # ── settings, and the light/dark switch ─────────────────────────────────────────────────────
+def _mailbox_row() -> str:
+    """The Settings row that makes /voice/mailbox reachable AFTER it has been set up.
+
+    A DEAD END I BUILT, found by reading the rendered Settings rather than the code: every link
+    to the mailbox screen lived on an EMPTY state, so connecting an inbox deleted the only way
+    back to it. And the way back is not a nicety — Google revokes an app password whenever the
+    account password changes, which is the single most likely reason a buyer needs this screen
+    again, and by then the empty states are gone.
+
+    IT SAYS THE STATE, because "is it still reading my mail" is the question this row is for. It
+    never carries the password; `email_state()` is documented not to return one.
+
+    ABSENT WHEN THE BOX DOES NOT SERVE THE SCREEN — same rule as every other link in this app.
+    """
+    go = _live("/voice/mailbox")
+    if not go:
+        return ""
+    from core import box_secrets
+    st = box_secrets.email_state()
+    status, who = st.get("status"), st.get("user") or ""
+    if status == "needs_reauth":
+        said = (f'Google is refusing the app password for <b>{_esc(who)}</b> — nothing from this '
+                'inbox is arriving until it is replaced.')
+        verb = "Fix it"
+    elif status == "admin_disabled":
+        said = ('Your Google administrator has switched app passwords off, so this inbox cannot '
+                'be read.')
+        verb = "What to do"
+    elif who:
+        said = f'Ownbox is reading <b>{_esc(who)}</b>. It never sends and never marks a message read.'
+        verb = "Change or stop it"
+    else:
+        said = ('Ownbox can read the mail your customers send you and draft replies. Nothing is '
+                'connected yet.')
+        verb = "Connect your inbox"
+    return (f'<div class="setrow"><b>Your inbox</b><span>{said} '
+            f'<a href="{go}" style="color:var(--accent)">{verb}</a>.</span></div>')
+
+
 @blueprint.get("/voice/settings")
 def r_settings():
     """The third tab. It exists because the switch needs somewhere to live that is not a thread.
@@ -1544,7 +1854,13 @@ def r_settings():
     body = (
       '<h1>Settings</h1>'
       '<div class="card">'
-      + _drafts_row() +
+      # INBOX, THEN CHANNELS, THEN DRAFTS — the owner's own order (2026-09-16): "the first item
+      # on the screen is the Gmail setup fields and instructions, and the second area should be
+      # the zernio key field along with instructions". It is also the order a buyer does them in.
+      # Reading the mail is what the box IS; the channels widen what it reads; drafting is what it
+      # does with what it read, and a row for the last above the first asks somebody to configure
+      # an answer to a question nothing is yet asking.
+      + _mailbox_row() + _channels_row() + _drafts_row() +
       '<div class="setrow"><b>Appearance</b>'
       '<span>System follows your phone, including its own light and dark schedule.</span>'
       f'{switch}</div>'
@@ -1787,6 +2103,584 @@ def r_drafts():
     return _shell(body, here="/voice/settings"), 200
 
 
+# ── the mailbox ─────────────────────────────────────────────────────────────────────────────
+# NUMBERED, BECAUSE THE BUYER IS IN A DIFFERENT TAB. Every one of these is a place in Google's
+# own settings, and the order is not cosmetic: App passwords is HIDDEN until 2-Step Verification
+# is on, so a buyer sent looking for it first finds nothing and concludes the product is wrong.
+# The wording is OSDev1's, from `core.box_secrets.SETUP_STEPS` in #1250 — kept identical here
+# rather than reworded, so that when that contract lands this screen renders it unchanged.
+def _step_spec(key: str) -> dict:
+    """One entry of `box_secrets.SETUP_STEPS` by key, or {} on a box too old to have it.
+
+    THE COPY HAS ONE SOURCE NOW. This file carried its own tuple of Gmail instructions, written
+    to match #1250's word for word, which is the arrangement that stays identical right up until
+    somebody edits one of them. The set-up screen and this screen render the SAME entry.
+    """
+    try:
+        from core import box_secrets
+        for step in box_secrets.SETUP_STEPS:
+            if step["key"] == key:
+                return step
+    except Exception:                            # noqa: BLE001 — a missing contract is not a 500
+        pass
+    return {}
+
+
+_MAILBOX_STEPS = tuple(_step_spec("email").get("steps") or ())
+_MAILBOX_ADMIN = ("If App passwords is missing, your Google administrator has switched it off "
+                  "for your organisation — ask them to allow it.")
+
+
+def _mailbox_form(*, user: str = "", note: str = "", verb: str = "Start reading this inbox") -> str:
+    """The two fields and the button. THE PASSWORD IS NEVER PRE-FILLED and never echoed back —
+    the address is, because retyping it after a rejected password is a punishment for their
+    typo in the other field."""
+    field = ('font:inherit;font-size:16px;padding:12px 14px;width:100%;'
+             'border:1px solid var(--line);border-radius:12px;'
+             'background:var(--card);color:var(--ink)')
+    return (note +
+            '<form class="compose" method="post" action="/voice/mailbox" '
+            'style="display:flex;flex-direction:column;gap:10px;align-items:stretch">'
+            f'<input type="email" name="user" value="{_esc(user)}" autocomplete="email" '
+            'spellcheck="false" aria-label="The email address to read" '
+            f'placeholder="you@yourcompany.com" style="{field}">'
+            '<input type="password" name="password" autocomplete="off" spellcheck="false" '
+            'aria-label="App password" placeholder="sixteen letters from Google" '
+            f'style="{field}">'
+            f'<button class="btn" type="submit">{_esc(verb)}</button></form>')
+
+
+def _mailbox_steps() -> str:
+    items = "".join(f'<div class="row"><span class="n">{i}</span>'
+                    f'<span class="t">{_esc(t)}</span></div>'
+                    for i, t in enumerate(_MAILBOX_STEPS, 1))
+    return (f'<div class="card">{items}</div>'
+            f'<p class="quiet">{_esc(_MAILBOX_ADMIN)}</p>')
+
+
+# ── the set-up screen ───────────────────────────────────────────────────────────────────────
+_SET_STATUS = {                                  # what a buyer reads, per status, per step
+    "connected":        ("Connected", "good"),
+    "needs_reauth":     ("Needs a new password", "warn"),
+    "admin_disabled":   ("Switched off by your administrator", "warn"),
+    "payment_required": ("Needs a payment method on your Zernio account", "warn"),
+    "not_connected":    ("Not connected yet", "dim"),
+}
+
+
+# WHICH BROWSER HINT GOES WITH WHICH INPUT TYPE — a table, not a branch inside the renderer.
+# It is keyed by the HTML type the CONTRACT gives, never by which step is being drawn.
+_AUTOCOMPLETE = {"email": "email"}
+
+
+def _setup_field(f: dict, value: str = "") -> str:
+    """One field from the contract. THE CONTRACT DECIDES THE TYPE, never this file — a password
+    rendered as a text input is a credential shown over somebody's shoulder."""
+    style = ('font:inherit;font-size:16px;padding:12px 14px;width:100%;'
+             'border:1px solid var(--line);border-radius:12px;'
+             'background:var(--card);color:var(--ink)')
+    kind = str(f.get("type") or "text")
+    return (f'<label style="display:block;margin-top:10px">'
+            f'<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
+            f'{_esc(f.get("label"))}</span>'
+            f'<input type="{_esc(kind)}" name="{_esc(f.get("name"))}" '
+            f'value="{_esc(value) if kind != "password" else ""}" '
+            f'placeholder="{_esc(f.get("placeholder") or "")}" '
+            f'autocomplete="{_AUTOCOMPLETE.get(kind, "off")}" spellcheck="false" '
+            f'style="{style}"></label>')
+
+
+def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None) -> str:
+    """ONE ENTRY, RENDERED THE SAME WAY WHATEVER IT IS. This is the whole point of the contract:
+    two vendors, two kinds of secret, one shape — a number, a title, why it is wanted, what is
+    set, the instructions, the fields, and whatever the buyer can press."""
+    typed = typed or {}
+    label, tone = _SET_STATUS.get(e.get("status"), _SET_STATUS["not_connected"])
+    who = e.get("who") or ""
+    said = f'{label} — {who}' if (who and e.get("status") != "not_connected") else label
+    steps = "".join(f'<div class="row"><span class="n">{i}</span>'
+                    f'<span class="t">{_esc(t)}</span></div>'
+                    for i, t in enumerate(e.get("steps") or (), 1))
+    fields = "".join(_setup_field(f, typed.get(f.get("name"), "")) for f in e.get("fields") or ())
+    verb = "Save" if e.get("status") == "not_connected" else "Replace it"
+
+    link = e.get("link") or {}
+    if link and link.get("enabled"):
+        # A NEW TAB, because the consent lives on the vendor's screens and the buyer should keep
+        # this page. `rel=noopener` is not optional on a target=_blank we did not write.
+        out = (f'<p style="margin:12px 0 0"><a class="btn" href="{_esc(link.get("url"))}" '
+               f'{"target=_blank rel=noopener" if link.get("new_tab") else ""}>'
+               f'{_esc(link.get("label"))}</a></p>'
+               f'<p class="quiet" style="margin-top:8px">{_esc(link.get("after") or "")}</p>')
+    elif link:
+        # DRAWN, AND PLAINLY DEAD. A button that silently does nothing is worse than no button;
+        # one that says why it is waiting is an instruction. `aria-disabled` and no href, because
+        # a disabled <a> is not a thing the platform has.
+        out = (f'<p style="margin:12px 0 0"><span class="btn" aria-disabled="true" '
+               f'style="opacity:.45;pointer-events:none;display:inline-block">'
+               f'{_esc(link.get("label"))}</span></p>'
+               f'<p class="quiet" style="margin-top:8px">'
+               f'{_esc(link.get("disabled_because") or "")}</p>')
+    else:
+        out = ""
+
+    return (f'<section id="{_esc(e.get("key"))}" style="margin-top:26px">'
+            f'<h1 style="font-size:19px">{n}. {_esc(e.get("title"))}</h1>'
+            f'<p class="quiet" style="margin:2px 0 0">{_esc(e.get("why"))}</p>'
+            f'<p class="quiet" style="margin:6px 0 0"><b class="{_esc(tone)}">{_esc(said)}</b>'
+            + (f' — {_esc(e.get("detail"))}' if e.get("detail") else "") + '</p>'
+            + (f'<div class="card">{steps}</div>' if steps else "")
+            + (f'<p class="quiet">{_esc(e.get("note"))}</p>' if e.get("note") else "")
+            + note
+            + (f'<form class="compose" method="post" action="/voice/setup" '
+               'style="display:flex;flex-direction:column;gap:2px;align-items:stretch">'
+               f'<input type="hidden" name="step" value="{_esc(e.get("key"))}">'
+               f'{fields}<p style="margin:12px 0 0">'
+               f'<button class="btn" type="submit">{verb}</button></p></form>' if fields else "")
+            + out + '</section>')
+
+
+# NOT `@blueprint.post`. tests/test_customer_voice.py scans this department for a CALL named
+# `post`, and a decorator is a call — the same two extra characters r_drafts spends.
+@blueprint.route("/voice/setup", methods=["GET", "POST"])
+def r_setup():
+    """EVERY CREDENTIAL THE BUYER SUPPLIES, ON ONE SCREEN, IN THE OWNER'S ORDER.
+
+    Assigned by OSDev1 (2026-09-16): render `box_secrets.setup_state()` as a LOOP — Gmail first,
+    Zernio second, the link out drawn disabled until the key is in — rather than three bespoke
+    flows that drift apart. The data is his, from #1250, carried word for word; this file decides
+    only how a step LOOKS, and it looks the same whichever step it is.
+
+    NOTHING HERE KNOWS WHAT A STEP IS. There is no `if key == "zernio"` in the renderer, and that
+    is the property worth keeping: a third credential is a new entry in the contract and no change
+    at all on this screen.
+
+    THE WRITE IS THE ONLY PLACE THE KEYS DIFFER, because the stores genuinely differ — one takes
+    three values and one takes a key that is verified with the vendor before it is believed. Both
+    raise `SecretRejected` carrying a sentence for the person in front of the screen, and that
+    sentence is shown against the step it came from rather than at the top of the page, where a
+    buyer with two forms open cannot tell which one it is about.
+    """
+    from core import box_secrets
+    gate = _gate()
+    if gate is not None:
+        return gate
+    try:
+        _u = dash.session_user(request) or {}
+    except Exception:                            # noqa: BLE001 — an unreadable session decides
+        _u = {}                                  # only whose name the audit line carries
+    whoami = _u.get("id")
+
+    notes: dict = {}
+    typed: dict = {}
+    if request.method == "POST":
+        which = str(request.form.get("step") or "")
+        typed = {k: str(v) for k, v in request.form.items() if k != "step"}
+        try:
+            if which == "email":
+                box_secrets.put_email(host="imap.gmail.com",
+                                      user=str(request.form.get("user") or ""),
+                                      password=str(request.form.get("password") or ""),
+                                      user_id=whoami)
+            elif which == "zernio":
+                box_secrets.put_zernio(str(request.form.get("key") or ""), user_id=whoami)
+            else:
+                raise box_secrets.SecretRejected("That form is not one this screen knows.")
+            return redirect(f"/voice/setup#{which}")
+        except box_secrets.SecretRejected as e:
+            notes[which] = (f'<p class="quiet" style="color:var(--accent);margin-top:10px">'
+                            f'{_esc(str(e))}</p>')
+        # A PASSWORD IS NEVER PUT BACK IN THE PAGE, whatever else is. The address they typed is,
+        # because retyping it after the other field was rejected is a punishment for their typo.
+        typed = {k: v for k, v in typed.items() if k != "password" and k != "key"}
+
+    try:
+        steps = box_secrets.setup_state()
+    except Exception as e:                       # noqa: BLE001 — the set-up page outranks the cause
+        log.warning("voice.setup_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
+        return _shell('<h1>Set-up</h1><div class="quiet">This box could not read its own set-up '
+                      'list. Nothing you have already connected is affected.</div>',
+                      here="/voice/settings"), 200
+
+    done = sum(1 for e in steps if e.get("status") == "connected")
+    head = ('<h1>Set up your box.</h1><p class="quiet">Two things only you can do. Your box is '
+            'already running — this is what tells it where to listen.</p>'
+            if done < len(steps) else
+            '<h1>You are set up.</h1><p class="quiet">Everything below is connected. Change any '
+            'of it whenever you like.</p>')
+    body = head + "".join(_setup_step(i, e, note=notes.get(e.get("key"), ""), typed=typed)
+                          for i, e in enumerate(steps, 1))
+    body += ('<p style="margin-top:22px"><a href="/voice/settings" '
+             'style="color:var(--accent)">← Settings</a></p>')
+    return _shell(body, here="/voice/settings"), 200
+
+
+# NOT `@blueprint.post`. tests/test_customer_voice.py scans this department for a CALL named
+# `post`, and a decorator is a call — the same two extra characters r_drafts spends.
+@blueprint.route("/voice/mailbox", methods=["GET", "POST"])
+def r_mailbox():
+    """WHERE A BUYER CONNECTS THEIR INBOX, and until now there was nowhere.
+
+    `box_secrets.put_email()` shipped with EXACTLY ONE OCCURRENCE IN THE REPOSITORY — its own
+    definition. Measured across every live branch, 2026-09-16: no screen, no route and no script
+    ever called it, so the mailbox credential could not be set by anyone without a shell, and the
+    buyer has no shell. Meanwhile a bare box's Settings offered an AI key, a theme and an install
+    guide: three things, none of which connect anything.
+
+    THE PASSWORD IS WRITTEN AND NEVER READ BACK, exactly as the AI key is. `email_state()` is what
+    a screen may see — a status, an address, and a sentence — and it is documented never to carry
+    the password. The form is empty on every render, including when a credential is set.
+
+    "SAVED" IS NOT "CONNECTED", AND THIS SCREEN WILL NOT CONFLATE THEM. `put_email` writes
+    `status=connected` after a successful WRITE, not a successful LOGIN — nothing has spoken to
+    Google at that point. So a fresh save says the box will try it, and the poller's own verdict
+    (`note_email_status`) is what turns this screen into a claim about Google. A screen that said
+    "Connected" the instant a password was pasted would be wrong for every typo.
+    """
+    from core import box_secrets
+    gate = _gate()
+    if gate is not None:
+        return gate
+    try:
+        _u = dash.session_user(request) or {}
+    except Exception:                            # noqa: BLE001 — an unreadable session decides
+        _u = {}                                  # only whose name the audit line carries
+    whoami = _u.get("id")
+
+    if request.args.get("off"):
+        # STOPPING IS AS REAL A CONTROL AS STARTING. The status row goes with the credential: a
+        # left-behind "connected" would have this screen reporting on a mailbox it no longer reads.
+        box_secrets.clear(box_secrets.EMAIL, user_id=whoami)
+        box_secrets.clear(box_secrets.EMAIL_STATUS, user_id=whoami)
+        box_secrets.clear(box_secrets.EMAIL_DETAIL, user_id=whoami)
+        return redirect("/voice/mailbox")
+
+    note, typed = "", ""
+    if request.method == "POST":
+        typed = str(request.form.get("user") or "")
+        try:
+            # VALIDATED IN THE STORE, NOT HERE, so the rule is the same whoever writes one. This
+            # screen's job is to show the sentence the store wrote for the person in front of it.
+            box_secrets.put_email(host="imap.gmail.com", user=typed,
+                                  password=str(request.form.get("password") or ""),
+                                  user_id=whoami)
+            return redirect("/voice/mailbox?saved=1")
+        except box_secrets.SecretRejected as e:
+            note = (f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>')
+
+    st = box_secrets.email_state()
+    status, who = st.get("status"), st.get("user") or ""
+    detail = str(st.get("detail") or "").strip()
+
+    if status == "needs_reauth":
+        body = ('<h1>Google is refusing that password.</h1>'
+                f'<p class="quiet">Ownbox cannot sign in to <b>{_esc(who)}</b> any more. Google '
+                'revokes an app password whenever the account password changes, so this is '
+                'usually what happened — make a new one and paste it here.</p>'
+                + (f'<p class="quiet">Google said: {_esc(detail)}</p>' if detail else "")
+                + _mailbox_steps()
+                + _mailbox_form(user=who, note=note, verb="Use this password instead")
+                + '<p style="margin-top:14px"><a href="/voice/settings" '
+                  'style="color:var(--accent)">← Settings</a></p>')
+    elif status == "admin_disabled":
+        body = ('<h1>Your administrator has switched this off.</h1>'
+                '<p class="quiet">App passwords are turned off for your Google organisation, so '
+                'nobody in it can make one. An administrator can allow them again in the Google '
+                'Admin console; until then Ownbox cannot read this inbox, and nothing else about '
+                'your box is affected.</p>'
+                + (f'<p class="quiet">Google said: {_esc(detail)}</p>' if detail else "")
+                + '<p style="margin-top:14px"><a href="/voice/settings" '
+                  'style="color:var(--accent)">← Settings</a></p>')
+    elif who:
+        saved = request.args.get("saved")
+        body = ('<h1>Your inbox is set.</h1>'
+                f'<p class="quiet">Ownbox is set to read <b>{_esc(who)}</b>. '
+                + ("It will try that password on the next check — if Google refuses it, this "
+                   "screen says so and tells you what to do."
+                   if saved else
+                   "If Google ever refuses the password, this screen says so and tells you what "
+                   "to do.")
+                + ' Ownbox only reads: it never sends anything and never marks a message read.'
+                  '</p>'
+                '<div class="card"><div class="setrow"><b>Change the password</b>'
+                '<span>Make a new app password in Google and paste it here. The address stays '
+                'the same unless you change it too.</span></div></div>'
+                + _mailbox_form(user=who, note=note, verb="Save this password")
+                + '<p style="margin-top:16px"><a href="/voice/mailbox?off=1" '
+                  'style="color:var(--accent)">Stop reading this inbox</a></p>'
+                '<p style="margin-top:14px"><a href="/voice/settings" '
+                'style="color:var(--accent)">← Settings</a></p>')
+    else:
+        body = ('<h1>Connect your inbox.</h1>'
+                '<p class="quiet">Ownbox reads the mail your customers send you, and drafts '
+                'replies. It never sends anything and it never marks a message as read.</p>'
+                '<p class="quiet">Google will not take your ordinary password for this, and it '
+                'should not — an <b>app password</b> is sixteen letters that only Ownbox uses and '
+                'that you can revoke on its own, without changing anything else.</p>'
+                + _mailbox_steps()
+                + _mailbox_form(user=typed, note=note)
+                + '<p style="margin-top:14px"><a href="/voice/settings" '
+                  'style="color:var(--accent)">← Settings</a></p>')
+    return _shell(body, here="/voice/settings"), 200
+
+
+# ── B1: where a buyer connects the accounts the inbox reads from ────────────────────────────
+# THE PRODUCT SHIPPED WITHOUT THIS. Until today the only connect link in the system was minted by
+# the provisioner and shown on the build page while the order was still building; a delivered box
+# had no connect surface of any kind. That is the gap this closes.
+#
+# NOT `@blueprint.post` and not `@blueprint.get` on the POST route, for the same reason r_drafts
+# spends the same two characters: tests/test_customer_voice.py bans a CALL named `post` in this
+# department, which is the structural guarantee that Customer Voice reads and drafts but cannot
+# publish. A decorator is a false positive on that scan and the guard is worth more than the
+# characters.
+
+# WHAT A PERSON CAN CONNECT HERE, and it is deliberately the channels the box actually INGESTS
+# rather than everything the vendor supports. Offering a person a channel the poller never reads
+# is a button that appears to work, takes a real OAuth grant, and delivers silence.
+# `channels.POLLED` is the authority; these are its vendor tokens with a human name each.
+_CONNECTABLE = (("instagram", "Instagram"), ("facebook", "Messenger"))
+
+
+def _connect_space():
+    """The Space this box connects FOR, as a resolved binding — key and profile together."""
+    from core import spaces
+    return spaces.space_by_name(_space()) or {}
+
+
+def _connect_return(platform: str) -> str:
+    """Where the vendor sends the person back to: THIS box, on this host.
+
+    NOT ownbox.io/building. That is the provisioner's redirect and it is a live 404 (measured
+    2026-09-16, OSDev4/OSDev1 on the wall) — but even once it exists it is the wrong destination
+    for this flow, because a person who is signed into their own box should come back to their own
+    box, not to a build page for an order that finished weeks ago."""
+    root = str(request.host_url or "").rstrip("/")
+    return f"{root}/voice/connect?connected={platform}"
+
+
+def _resolve_profile(z, brand_name: str):
+    """The Profile inside the BUYER's account that this box's channels hang under.
+
+    (profile_id, choices) — `choices` is non-empty ONLY when the account holds more than one and
+    a person has to say which. We do not guess in that case: a Zernio account with several folders
+    is one being used for something else too, and picking the first would file the buyer's own
+    Instagram under a folder they keep for a client.
+
+    ONE FOLDER OR NONE IS THE ORDINARY CASE and needs no question — a fresh account has one, and
+    an empty account gets one made, named for their brand so it is recognisable when they look at
+    it from the vendor's own screen."""
+    from core import box_secrets
+    found = z.connect.profiles()
+    if len(found) == 1:
+        pid = found[0]["id"]
+        box_secrets.put_zernio_profile(pid)
+        return pid, []
+    if not found:
+        pid = z.connect.create_profile(brand_name or "Ownbox")
+        box_secrets.put_zernio_profile(pid)
+        return pid, []
+    return None, found
+
+
+@blueprint.route("/voice/connect", methods=["GET", "POST"])
+def r_connect():
+    """Connect a social account to this box — or say, in one sentence, why it did not work.
+
+    EVERY VENDOR FAILURE LANDS AS A SENTENCE ON THIS PAGE, never as a 500 and never as silence.
+    A person is standing here having just clicked something; the one thing that must not happen
+    is a blank page that leaves them unable to tell whether it worked."""
+    from core import box_secrets
+    from core.vendors import zernio
+    gate = _gate()
+    if gate is not None:
+        return gate
+    try:
+        _u = dash.session_user(request) or {}
+    except Exception:                            # noqa: BLE001 — an unreadable session is not a
+        _u = {}                                  # reason to refuse a buyer their own account
+    whoami = _u.get("id")
+
+    if request.args.get("off"):
+        # Disconnect. The key AND the profile resolved with it — `clear_zernio` is one call for
+        # exactly that reason: a profile id left behind would be handed to the NEXT key pasted in.
+        box_secrets.clear_zernio(user_id=whoami)
+        return redirect("/voice/settings", code=303)
+
+    note = ""
+    if request.method == "POST":
+        try:
+            box_secrets.put_zernio(str(request.form.get("key") or ""), user_id=whoami)
+            return redirect("/voice/connect", code=303)
+        except box_secrets.SecretRejected as e:
+            # Never an echo of what they pasted. Same discipline as the AI key form.
+            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
+
+    if not box_secrets.is_set(box_secrets.ZERNIO):
+        return _shell(_connect_key_form(note), here="/voice/settings"), 200
+
+    # ── connected: show what is on, and what can still be added ──────────────────────────────
+    sp = _connect_space()
+    z = zernio.client(sp)
+    try:
+        brand = str(dash.brand() or "")          # a str, not a dict — core/dash/__init__.py:247
+    except Exception:                            # noqa: BLE001 — the name is a nicety here; it
+        brand = ""                               # only labels a folder the buyer will recognise
+    chosen = request.args.get("profile")
+    if chosen:
+        box_secrets.put_zernio_profile(chosen, user_id=whoami)
+        return redirect("/voice/connect", code=303)
+
+    try:
+        pid, choices = (sp.get("zernio_profile_id"), [])
+        if not pid:
+            pid, choices = _resolve_profile(z, brand)
+        if choices:
+            return _shell(_connect_profile_chooser(choices), here="/voice/settings"), 200
+        sp = dict(sp, zernio_profile_id=pid)
+        z = zernio.client(sp)
+        live = z.accounts.discover()
+    except zernio.ZernioError as e:
+        # `payment_required` is recorded so SETTINGS can say it too, without a network call.
+        detail = str(e)
+        if "402" in detail or "payment" in detail.lower():
+            box_secrets.note_zernio_status("payment_required", detail, user_id=whoami)
+            return _shell(_connect_trouble(
+                "Your social account needs a payment method before it will connect any more "
+                "channels. Add one there, then come back — nothing here needs changing."),
+                here="/voice/settings"), 200
+        log.warning("connect.discover_failed", extra={"err": detail[:200]})
+        return _shell(_connect_trouble(
+            "Ownbox could not reach your social account just now. Nothing is lost — try again "
+            "in a minute."), here="/voice/settings"), 200
+
+    just = request.args.get("connected") or ""
+    return _shell(_connect_page(live, just), here="/voice/settings"), 200
+
+
+@blueprint.get("/voice/connect/<platform>")
+def r_connect_start(platform: str):
+    """Send the person to the vendor's consent screen for ONE platform.
+
+    THE URL IS MINTED SERVER-SIDE AND NEVER RENDERED INTO THE PAGE. A consent URL is scoped to
+    this box's profile and lives for a while; rendering a dozen of them into HTML puts them in
+    history, in a screenshot, and in whatever the browser syncs. This route makes exactly one,
+    for the button that was actually pressed, and redirects straight into it."""
+    from core.vendors import zernio
+    gate = _gate()
+    if gate is not None:
+        return gate
+    if platform not in {p for p, _ in _CONNECTABLE}:
+        # An unknown platform is never passed through to the vendor. The allow-list is the
+        # channels the poller reads; anything else would grant access nothing ever collects.
+        return redirect("/voice/connect", code=303)
+    sp = _connect_space()
+    if not sp.get("zernio_key") or not sp.get("zernio_profile_id"):
+        return redirect("/voice/connect", code=303)
+    try:
+        url = zernio.client(sp).connect.url(platform, redirect_url=_connect_return(platform))
+    except zernio.ZernioError as e:
+        log.warning("connect.url_failed", extra={"platform": platform, "err": str(e)[:200]})
+        return _shell(_connect_trouble(
+            "That channel would not start just now. Nothing is lost — try again in a minute."),
+            here="/voice/settings"), 200
+    return redirect(url, code=303)
+
+
+def _connect_key_form(note: str) -> str:
+    """State one: no social account connected yet.
+
+    SAME SHAPE AS THE AI KEY FORM ON PURPOSE. A buyer who has done one of these already should
+    recognise the second on sight, and the sentence underneath is the same promise in both places:
+    the account is theirs, on their bill, and they can take it back."""
+    return (
+      '<h1>Connect your channels.</h1>'
+      '<div class="card"><div class="setrow">'
+      '<span>Ownbox reads your Instagram and Messenger through your own social account, so the '
+      'connection stays yours and you can take it back any day without asking us.</span>'
+      # THE SITE ROOT, NOT A GUESSED DEEP LINK. scripts/doctor.py:154 says "zernio.com → API key"
+      # and that is the whole of what we actually know; a made-up /settings/api path that 404s in
+      # front of a buyer at the exact moment they are trying to find something is worse than one
+      # extra click.
+      '<p style="margin:10px 0 0"><a href="https://zernio.com" target="_blank" '
+      'rel="noopener" style="color:var(--accent)">Where to find your key &rarr;</a></p>'
+      '</div></div>'
+      + note +
+      '<form class="compose" method="post" action="/voice/connect">'
+      '<input type="password" name="key" autocomplete="off" spellcheck="false"'
+      ' aria-label="Paste your key" placeholder="Paste your key" '
+      'style="width:100%;font:inherit;font-size:16px;padding:12px 14px;'
+      'border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)">'
+      '<button class="btn" type="submit">Continue</button>'
+      '</form>'
+      '<p class="quiet" style="margin-top:12px">Checked with your provider before it is saved, '
+      'so you find out here if it is wrong — not tomorrow, from an empty inbox.</p>'
+      '<p style="margin-top:14px"><a href="/voice/settings" style="color:var(--accent)">'
+      '&larr; Settings</a></p>')
+
+
+def _connect_profile_chooser(choices: list) -> str:
+    """The rare state: their account already holds several folders, so they say which one."""
+    rows = "".join(
+        f'<p style="margin:10px 0 0"><a class="btn" '
+        f'href="/voice/connect?profile={_esc(c["id"])}">{_esc(c["name"] or "Untitled")}</a></p>'
+        for c in choices)
+    return (
+      '<h1>Which one is this business?</h1>'
+      '<div class="card"><div class="setrow">'
+      '<span>Your social account keeps more than one workspace. Pick the one this box is for — '
+      'Ownbox will only ever read the channels inside it.</span>'
+      f'{rows}</div></div>'
+      '<p style="margin-top:14px"><a href="/voice/settings" style="color:var(--accent)">'
+      '&larr; Settings</a></p>')
+
+
+def _connect_page(live: dict, just: str) -> str:
+    """State two: connected, with a row per channel saying on or off.
+
+    IT SAYS WHAT IS ON BEFORE IT OFFERS WHAT IS NOT. A person arriving back from a consent screen
+    has one question — did that work — and the answer is the first thing on the page."""
+    done = ""
+    if just:
+        label = dict(_CONNECTABLE).get(just, just.title())
+        # LIVE, NOT THE QUERY STRING. A `?connected=` in the URL is whatever the browser was
+        # handed; the only honest confirmation is the account list the vendor just returned.
+        done = ('<p class="quiet" style="color:var(--accent)">'
+                + _esc(f"{label} is connected. New messages start arriving on the next check.")
+                + '</p>') if live.get(just) else (
+                '<p class="quiet">' + _esc(f"{label} did not finish connecting. Try it again.")
+                + '</p>')
+    rows = []
+    for vendor_token, label in _CONNECTABLE:
+        if live.get(vendor_token):
+            rows.append(f'<div class="setrow"><b>{_esc(label)}</b>'
+                        '<span>Connected. Messages arrive on their own.</span></div>')
+        else:
+            rows.append(f'<div class="setrow"><b>{_esc(label)}</b>'
+                        '<span>Not connected yet.</span>'
+                        '<p style="margin:10px 0 0"><a class="btn" '
+                        f'href="/voice/connect/{_esc(vendor_token)}">Connect {_esc(label)}</a>'
+                        '</p></div>')
+    return (
+      '<h1>Your channels.</h1>'
+      + done +
+      '<div class="card">' + "".join(rows) + '</div>'
+      '<p class="quiet" style="margin-top:12px">Connected with your own social account. '
+      '<a href="/voice/connect?off=1" style="color:var(--accent)">Disconnect it</a> and Ownbox '
+      'stops reading immediately — nothing you have already received is deleted.</p>'
+      '<p style="margin-top:14px"><a href="/voice/settings" style="color:var(--accent)">'
+      '&larr; Settings</a></p>')
+
+
+def _connect_trouble(sentence: str) -> str:
+    """One sentence a person can act on, and a way back. Never a stack trace, never a code."""
+    return ('<h1>Your channels.</h1>'
+            f'<div class="card"><div class="setrow"><span>{_esc(sentence)}</span></div></div>'
+            '<p style="margin-top:14px"><a href="/voice/connect" style="color:var(--accent)">'
+            'Try again</a> · <a href="/voice/settings" style="color:var(--accent)">Settings</a>'
+            '</p>')
+
+
 @blueprint.route("/voice/installed", methods=["POST"])
 def r_installed():
     """A device reported that it is running installed.
@@ -1828,7 +2722,11 @@ def r_install():
     ]
     steps_android = [
         ("Tap the <b>⋮</b> menu", "top right of Chrome"),
-        ("Tap <b>Install app</b>", "or <b>Add to Home screen</b> on older versions"),
+        # THE DETAIL IS ESCAPED AND THE TITLE IS NOT (see `block` below), so markup in a detail
+        # renders as visible &lt;b&gt; tags. It did: the install page read "or <b>Add to Home
+        # screen</b> on older versions", angle brackets and all, on the screen that tells a buyer
+        # how to keep their notifications working.
+        ("Tap <b>Install app</b>", "or Add to Home screen on older versions"),
         ("Tap <b>Install</b>", "it appears in your app drawer"),
     ]
 
