@@ -23,17 +23,27 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
+import pathlib
 import stat
 import sys
+
+# THE REPO ROOT ON THE PATH BEFORE core IS IMPORTED. bootstrap.sh runs this as
+# `python3 scripts/connector_handoff.py`, so the interpreter puts scripts/ on sys.path and not the
+# root above it; without this line the import below raises ModuleNotFoundError and first boot
+# reports the handoff as failed on every box.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 PROVISION_JSON = os.environ.get("AIOS_PROVISION_JSON", "/opt/aios/provision.json")
 ENV_PATH = os.environ.get("AIOS_ENV_PATH", "/opt/aios/.env")
 
 # The same shapes the provisioner validated before it wrote them; checked again here because a file is not
 # an argument, and the half that trusts is the half that gets a shell metacharacter in a key one day.
-_PROFILE_ID = re.compile(r"^[0-9a-f]{24}$")
-_KEY = re.compile(r"^[A-Za-z0-9_\-]{16,256}$")
+# IMPORTED RATHER THAN RESTATED, so "the same shapes" is enforced instead of asserted in a comment —
+# core/handoff_shape.py says why, and imports nothing but `re` — which this script needs, because
+# bootstrap.sh runs it under the system python3 before the venv exists, and because importing
+# core.config here would freeze every setting merely by importing this module.
+from core.handoff_shape import KEY as _KEY, PROFILE_ID as _PROFILE_ID, \
+    VENDOR as _VENDOR  # noqa: E402
 KEY_VAR, PROFILE_VAR = "ZERNIO_API_KEY", "ZERNIO_PROFILE_ID"
 
 
@@ -53,7 +63,7 @@ def connector_from(path: str = PROVISION_JSON) -> dict | None:
         return None
     vendor = str(block.get("vendor") or "")
     profile_id, key = str(block.get("profile_id") or ""), str(block.get("key") or "")
-    if vendor != "zernio":
+    if vendor != _VENDOR:
         raise HandoffError(f"unknown connector vendor {vendor!r}: this box was built for one it does not have")
     if not _PROFILE_ID.match(profile_id):
         raise HandoffError("the connector profile id is not a Zernio profile id")

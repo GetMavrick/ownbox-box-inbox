@@ -163,6 +163,54 @@ implicit = spaces._default_space()
 ok("the single-tenant Space posts as the profile this box was given",
    implicit.get("zernio_profile_id") == PROFILE and implicit.get("zernio_key") == KEY, str(implicit))
 
+# ── the handoff's shape is defined once ──────────────────────────────────────────────
+print("\n— one definition of what a handoff block looks like —")
+# THREE PLACES CHECK THIS BLOCK and each is right to: they run on different machines, minutes or
+# months apart. What they must not do is check against three DIFFERENT patterns — widen one and
+# leave the others, and the provisioner mints a key the box silently refuses, surfacing as an
+# Instagram that never connects rather than as an error anybody can read.
+#
+# THE SOURCE CHECK BELOW IS THE ONE THAT ENFORCES THIS, and the identity checks are weaker than
+# they look. I first wrote them claiming identity beats equality because "two separately-compiled
+# regexes with the same source are different objects". THAT IS FALSE: `re.compile` caches by
+# pattern and flags, so two independent `re.compile(r"^[0-9a-f]{24}$")` calls return the SAME
+# object. Found by probing — restating the pattern in the box script left all three identity
+# assertions green and only the source check went red. They are kept because they do fail the
+# moment two patterns differ in text, which is the drift being guarded; they simply do not prove
+# the import, so the check that a second copy is not present is doing the real work.
+import re  # noqa: E402
+from core import handoff_shape  # noqa: E402
+ok("the box script validates with the shared profile-id pattern", ch._PROFILE_ID is handoff_shape.PROFILE_ID)
+ok("...and the shared key pattern", ch._KEY is handoff_shape.KEY)
+ok("...and the shared vendor name", ch._VENDOR == handoff_shape.VENDOR)
+_hsrc = (ROOT / "scripts/connector_handoff.py").read_text(encoding="utf-8")
+ok("...and carries no second copy of the pattern", 'r"^[0-9a-f]{24}$"' not in _hsrc)
+# The provisioner's end is asserted in tests/test_provisioner_connector.py, which is allowed to
+# import provisioner/. THIS suite must not: export_box.sh refuses to ship any file that does, and
+# a suite that cannot run inside a built box is not guarding the box.
+# CHECKED WITH THE EXPORTER'S OWN RULE, not a substring of the file. The first version of this
+# line searched for "import provisioner" anywhere and failed on the COMMENT above it — the same
+# false positive test_suite_integrity hit when it read a filename out of a comment. A check that
+# fires on prose is one somebody eventually deletes.
+_imports_provisioner = re.compile(r"^\s*(?:from|import)\s+provisioner\b", re.M)
+ok("this suite stays shippable, so it runs where the handoff runs",
+   not _imports_provisioner.search((ROOT / "tests/test_connector_handoff.py").read_text(encoding="utf-8")))
+
+# AND THE SHAPE STAYS CHEAP TO IMPORT. bootstrap.sh runs the handoff under the SYSTEM python3,
+# before the venv exists, so the shape may not drag in a third-party package. It must also not
+# reach core.config, whose Settings captures os.environ AT IMPORT: putting the shape in
+# core/claim.py (which imports core.state, which imports core.config) made merely importing the
+# handoff script freeze every setting on the box, and broke the two assertions above this block.
+_before = set(sys.modules)
+import importlib  # noqa: E402
+importlib.reload(handoff_shape)
+_pulled = {m.split(".")[0] for m in set(sys.modules) - _before}
+ok("importing the shape reaches no third-party package",
+   not (_pulled - set(sys.stdlib_module_names) - {"core"}), str(sorted(_pulled)))
+_shape_src = (ROOT / "core/handoff_shape.py").read_text(encoding="utf-8")
+ok("...and imports nothing from core, so it can never reach core.config",
+   "from core" not in _shape_src and "import core" not in _shape_src, _shape_src[:0])
+
 print()
 if FAILS:
     print(f"{len(FAILS)} FAILED:"); [print("   -", f) for f in FAILS]; sys.exit(1)
