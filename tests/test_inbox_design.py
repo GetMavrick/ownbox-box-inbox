@@ -70,23 +70,32 @@ def _tokens(decls):
             for m in re.finditer(r"--([a-z][a-z0-9-]*)\s*:\s*([^;}]+)", decls)}
 
 
-# The three declaration sites, matched by their own selectors so a renamed block fails loudly
+# The two declaration sites, matched by their own selectors so a renamed block fails loudly
 # rather than silently scoring zero tokens.
 LIGHT_M = re.search(r"(?<!\])\n:root\{([^}]*)\}", CSS)
-MEDIA_M = re.search(r'@media\s*\(prefers-color-scheme:\s*dark\)\s*\{\s*'
-                    r':root:not\(\[data-theme="light"\]\)\{([^}]*)\}', CSS)
 STAMP_M = re.search(r':root\[data-theme="dark"\]\{([^}]*)\}', CSS)
 
-print("test_the_three_declaration_sites_are_all_present")
-ok("the LIGHT base is declared on a bare :root — the un-stamped default", LIGHT_M is not None)
-ok("dark is declared under prefers-color-scheme", MEDIA_M is not None)
-ok("...guarded so an explicit LIGHT choice still beats a dark operating system",
-   MEDIA_M is not None and ':not([data-theme="light"])' in CSS)
-ok("dark is declared again for the stamp, so the switch wins in both directions",
-   STAMP_M is not None)
+print("test_white_is_the_default_and_dark_is_only_ever_chosen")
+# OWNER, 2026-09-16: "we want white screens first and foremost... and then we'll probably have a
+# dark toggle later." THIS SUITE USED TO ASSERT THE OPPOSITE — it required a
+# `prefers-color-scheme: dark` block and checked it agreed with the stamped one. That rule came
+# from this file's own comment ("light is the target, dark as the toggle") being implemented as
+# "follow the OS", so a buyer whose laptop is in dark mode opened a dark product having never
+# asked for one. The assertions are inverted rather than deleted: the property is still checked,
+# it is just the property he actually asked for.
+ok("the LIGHT base is declared on a bare :root — the default, whatever the OS says",
+   LIGHT_M is not None)
+# READ AS A RULE, NOT AS A SUBSTRING. The first version searched the raw CSS for the phrase and
+# failed on the COMMENT that explains this very change — the same false positive this repo has
+# now hit in a suite guard, an export guard and a shippability check. Comments are stripped and
+# the actual at-rule is what is looked for.
+_CSS_NO_COMMENTS = re.sub(r"/\*.*?\*/", " ", CSS, flags=re.S)
+ok("the product NEVER darkens itself from the operating system",
+   not re.search(r"@media[^{]*prefers-color-scheme", _CSS_NO_COMMENTS),
+   "a prefers-color-scheme at-rule is back in the app's CSS")
+ok("dark is still reachable, by the switch and only by the switch", STAMP_M is not None)
 
 LIGHT = _tokens(LIGHT_M.group(1)) if LIGHT_M else {}
-MEDIA = _tokens(MEDIA_M.group(1)) if MEDIA_M else {}
 STAMP = _tokens(STAMP_M.group(1)) if STAMP_M else {}
 ok(f"the light palette has tokens to check ({len(LIGHT)})", len(LIGHT) >= 10, str(sorted(LIGHT)))
 
@@ -96,18 +105,10 @@ print("\ntest_no_token_exists_in_only_one_theme")
 # A TOKEN THE OTHER THEME NEVER REDEFINES INHERITS THE LIGHT VALUE. On a dark ground that is a
 # light-theme colour on a dark surface — unreadable, and invisible to whoever added it, because
 # they were looking at the theme they wrote.
-missing_dark = sorted(set(LIGHT) - set(MEDIA))
-ok("every light token is redefined under prefers-color-scheme: dark"
-   + (f" — MISSING: {missing_dark}" if missing_dark else ""), not missing_dark)
 missing_stamp = sorted(set(LIGHT) - set(STAMP))
 ok("every light token is redefined for the explicit dark stamp"
    + (f" — MISSING: {missing_stamp}" if missing_stamp else ""), not missing_stamp)
-# AND THE TWO DARK BLOCKS MUST AGREE. If they drift, the app looks one way when the OS asks for
-# dark and a different way when he taps Dark, which is the same bug wearing two hats.
-drift = sorted(k for k in set(MEDIA) | set(STAMP) if MEDIA.get(k) != STAMP.get(k))
-ok("the two dark blocks declare identical values — the toggle and the OS cannot disagree"
-   + (f" — DRIFT: {drift}" if drift else ""), not drift)
-stray = sorted((set(MEDIA) | set(STAMP)) - set(LIGHT))
+stray = sorted(set(STAMP) - set(LIGHT))
 ok("dark introduces no token light has never heard of"
    + (f" — ONLY IN DARK: {stray}" if stray else ""), not stray)
 
@@ -127,12 +128,12 @@ def _rgb(h):
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
-decl = "".join(m.group(1) for m in (LIGHT_M, MEDIA_M, STAMP_M) if m)
+decl = "".join(m.group(1) for m in (LIGHT_M, STAMP_M) if m)
 palette = {_rgb(h) for h in re.findall(r"#[0-9a-fA-F]{6}\b", decl)}
 palette |= {tuple(int(x) for x in t.replace(" ", "").split(","))
             for t in re.findall(r"rgba?\(\s*(\d+\s*,\s*\d+\s*,\s*\d+)", decl)}
 body = CSS
-for m in (LIGHT_M, MEDIA_M, STAMP_M):
+for m in (LIGHT_M, STAMP_M):
     if m:
         body = body.replace(m.group(1), "")
 ok(f"the palette's own colours were read ({len(palette)})", len(palette) >= 8)
@@ -167,7 +168,7 @@ ok("the title bar itself clears the notch",
 ok("...and the page reserves room for the fixed bar, so the last row is never under it",
    re.search(r"body\{[^}]*padding-bottom:calc\([^)]*safe-area-inset-bottom", CSS) is not None)
 ok("theme-color follows the theme rather than being pinned to one",
-   SRC.count("theme-color") >= 2 and "prefers-color-scheme: dark" in SRC)
+   SRC.count("theme-color") >= 2 and '_THEME_BG["light"]' in SRC)
 ok("the switch is a link that sets a cookie, not a script",
    "THEME_COOKIE" in SRC and "set_cookie(THEME_COOKIE" in SRC)
 ok("...and 'system' CLEARS the preference instead of storing a third value",

@@ -141,13 +141,18 @@ def _scrub_token_from_the_url():
 CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
 
-/* ── DUAL TOKEN SET, LIGHT FIRST ────────────────────────────────────────────────────────────
-   Owner, 2026-09-15: "Light product UI is the target, dark as the toggle." So the LIGHT palette
-   is the base on bare :root and dark only ever overrides it. Three states, not two, because the
-   viewer may also have expressed no preference at all:
-     :root                      → light, and the un-stamped default
-     prefers-color-scheme:dark  → the OS asked for dark and nobody overrode it
-     html[data-theme=dark|light]→ he used the switch, and the switch beats the OS both ways
+/* ── DUAL TOKEN SET, WHITE BY DEFAULT ───────────────────────────────────────────────────────
+   Owner, 2026-09-16, restating a ruling this file already quoted and did not follow: "we want
+   white screens first and foremost... and then we'll probably have a dark toggle later."
+
+   THE COMMENT SAID TOGGLE AND THE CODE FOLLOWED THE OS. A `prefers-color-scheme:dark` block sat
+   here, so a buyer whose laptop is in dark mode opened a dark product having never asked for one
+   — which is the opposite of "white first", and it is what he saw when I rendered these screens
+   for him. Dark is now reached ONLY by the switch. Two states:
+     :root                      → white. The default, whatever the OS says.
+     html[data-theme=dark]      → he used the switch, deliberately.
+   `data-theme="light"` is still honoured so an existing cookie keeps working and a future
+   three-way control ("System") has somewhere to go back to.
    Every colour on this page resolves through a token. A literal that only works in one theme is
    the classic unreadable-app bug, and tests/test_inbox_design.py refuses one. */
 :root{
@@ -159,18 +164,6 @@ CSS = """
   --bad:#c0392b; --bad-soft:#fdecea;
   --lift:0 1px 2px rgba(16,24,32,.05), 0 8px 24px -12px rgba(16,24,32,.18);
   --tab-bg:rgba(255,255,255,.88);
-}
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --bg:#0d0d0d; --surface:#171717; --raised:#1f1f1f;
-    --ink:#f5f3f1; --dim:#a8a29c; --dimmer:#6f6a66;
-    --line:#262523; --hair:rgba(255,255,255,.08);
-    --accent:#f08a5d; --accent-ink:#1a1008; --accent-soft:#2a1a12; --accent-line:rgba(240,138,93,.5);
-    --bubble-in:#1f1f1f; --bubble-out:#f08a5d; --bubble-out-ink:#1a1008;
-    --bad:#f0857a; --bad-soft:#2a1613;
-    --lift:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
-    --tab-bg:rgba(13,13,13,.88);
-  }
 }
 :root[data-theme="dark"]{
   --bg:#0d0d0d; --surface:#171717; --raised:#1f1f1f;
@@ -476,8 +469,8 @@ def _theme() -> str:
 
 def _shell(body: str, *, day: str = "", here: str = "") -> str:
     brand = dash.brand()
-    # HIS CHOICE IS STAMPED ON <html>, so the switch beats the OS in BOTH directions. No stamp at
-    # all is the honest third state: he has never chosen, so prefers-color-scheme decides.
+    # HIS CHOICE IS STAMPED ON <html>. No stamp means he has never chosen, and that renders
+    # WHITE — the OS is not consulted (owner, 2026-09-16: white screens first and foremost).
     th = _theme()
     stamp = f' data-theme="{th}"' if th else ""
     # THE STATUS BAR HAS TO MOVE TOO. Installed, iOS paints the area behind the clock with
@@ -486,8 +479,10 @@ def _shell(body: str, *, day: str = "", here: str = "") -> str:
     if th:
         tc = f'<meta name="theme-color" content="{_THEME_BG[th]}">'
     else:
-        tc = (f'<meta name="theme-color" media="(prefers-color-scheme: light)" content="{_THEME_BG["light"]}">'
-              f'<meta name="theme-color" media="(prefers-color-scheme: dark)" content="{_THEME_BG["dark"]}">')
+        # UNSTAMPED IS WHITE, not "ask the OS". Declaring the dark variant here would paint a
+        # black band above a white app on an installed iOS home-screen icon — the status bar
+        # following a preference the page itself no longer follows.
+        tc = f'<meta name="theme-color" content="{_THEME_BG["light"]}">'
     return f"""<!doctype html><html lang="en"{stamp}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
