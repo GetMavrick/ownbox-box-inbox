@@ -33,6 +33,12 @@ holds that pairing to the wall.
 from typing import NamedTuple
 
 
+# The transport for email. Not a Zernio `platform=` token — the poller branches on it, and the
+# suites that pair POLLED against the vendor filter on it. Named once, here, so the poller and the
+# tests cannot drift apart about what "not a Zernio channel" means.
+IMAP = "imap"
+
+
 class Channel(NamedTuple):
     vendor: str          # Zernio's `platform=` token
     key: str             # stored in inbox_conversations.platform; keys window._RULES
@@ -57,6 +63,12 @@ NAMES = {"messenger": "Messenger", "instagram": "Instagram", "email": "Email",
 POLLED: tuple[Channel, ...] = (
     Channel("facebook", "messenger"),
     Channel("instagram", "instagram"),
+    # EMAIL IS BUILT AND DELIBERATELY NOT POLLED YET. `email_channel.py` reads a mailbox and its
+    # suite is green, but `test_inbox_instagram` requires every polled channel to have a send rule
+    # written beside it — deliberately, so auto-reply on a new channel can never be accidental.
+    # Until the `email` rule exists in `window._RULES`, adding the line below is what switches the
+    # channel on, and nothing else is needed:
+    #     Channel(IMAP, "email"),
 )
 
 

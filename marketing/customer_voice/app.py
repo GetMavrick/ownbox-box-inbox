@@ -242,10 +242,61 @@ h1 .chan{vertical-align:middle}
   display:flex;align-items:baseline;gap:7px;min-width:0}
 .conv .w b{font-weight:590;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .conv .t{font-weight:400;font-size:13px;color:var(--dimmer);flex:none}
-.conv .s{grid-row:2;grid-column:2;color:var(--dim);font-size:14px;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.conv .s{grid-row:2;grid-column:2;display:flex;align-items:center;gap:6px;min-width:0;
+  flex-wrap:wrap;row-gap:5px;color:var(--dim);font-size:14px}
+/* A TAG NEVER TRUNCATES AND NEVER OVERLAPS — IT WRAPS. Written first as one non-wrapping line,
+   and a 390px render showed both failures at once: "2 messages" cut to "2 mess…" for no reason,
+   and a second tag sliding straight under the channel logo, because a `flex:none` pill cannot
+   shrink and simply overflowed its grid column. A half-shown tag is a half-shown fact, and
+   "Opted ou" is worse than not saying it. So a busy row grows a line instead of hiding one. */
+.conv .s .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .conv .mk{grid-row:1/3;grid-column:3;flex:none;display:flex;align-items:center}
 .conv.out .av{background:var(--bubble-in);color:var(--dimmer)}
+
+/* ── tags, and the menu that appears on hover ──────────────────────────────────────────────
+   Owner, 2026-09-16: "we're also going to add some different tags on each conversation and an
+   action button menu on hover."
+
+   THE ROW IS STILL ONE LINK AND THE MENU IS ITS SIBLING, never its child. An <a> inside an <a>
+   is invalid, and browsers recover from it by SPLITTING the outer one — which is how a "Reply"
+   button silently starts opening the thread instead. The wrapper carries the hairline so the
+   two of them read as a single row. */
+.convrow{position:relative;display:flex;align-items:center;gap:4px;
+  border-bottom:1px solid var(--hair)}
+.convrow:last-child{border-bottom:0}
+.convrow .conv{flex:1;min-width:0;border-bottom:0}
+
+/* FOUR MEANINGS, FOUR TREATMENTS, AND NOT ONE OF THEM CARRIED BY COLOUR ALONE — the words
+   differ too, because a red pill and a grey pill are the same pill to a colourblind reader
+   and this app already refuses colour-only meaning on the channel marks. */
+.tag{flex:none;display:inline-flex;align-items:center;border:1px solid transparent;
+  border-radius:6px;padding:1px 7px;font-size:11.5px;font-weight:620;letter-spacing:.015em;
+  line-height:1.6;white-space:nowrap}
+.tag.stop{color:var(--bad);background:var(--bad-soft);border-color:var(--bad-soft)}
+.tag.warn{color:var(--dim);background:var(--bg);border-color:var(--accent-line)}
+.tag.new{color:var(--accent);background:var(--accent-soft);border-color:var(--accent-soft)}
+.tag.ad{color:var(--dim);background:var(--bg);border-color:var(--line)}
+
+/* A <details> IS THE MENU. No library, no state in JS, keyboard-operable and open-able before
+   any script has run — the same reason the rest of this app is links and forms. */
+.acts{flex:none;position:relative}
+.acts>summary{list-style:none;display:flex;align-items:center;justify-content:center;
+  width:34px;height:34px;border-radius:9px;color:var(--dimmer);cursor:pointer}
+.acts>summary::-webkit-details-marker{display:none}
+.acts[open]>summary{background:var(--bg);color:var(--ink)}
+/* HOVER IS THE ENHANCEMENT, NOT THE DOOR. A phone has no hover at all and this is a phone app
+   first, so the button is permanently there on touch and only fades in on a real pointer. */
+@media (hover:hover) and (pointer:fine){
+  .acts>summary{opacity:0;transition:opacity .12s ease}
+  .convrow:hover .acts>summary,.acts[open]>summary,.acts>summary:focus-visible{opacity:1}
+}
+@media (prefers-reduced-motion:reduce){.acts>summary{transition:none}}
+.acts .menu{position:absolute;right:0;top:calc(100% + 4px);z-index:30;min-width:186px;
+  background:var(--raised);border:1px solid var(--line);border-radius:12px;padding:5px;
+  box-shadow:var(--lift);display:flex;flex-direction:column}
+.acts .menu a{padding:9px 11px;border-radius:8px;font-size:14.5px;font-weight:540;
+  white-space:nowrap}
+.acts .menu a:hover,.acts .menu a:focus-visible{background:var(--bg)}
 
 /* The channel mark. Why it is a logo and not a word: see `_mark`. */
 .mk svg{display:block}
@@ -363,6 +414,18 @@ JS = """
       (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
     if (installed && navigator.sendBeacon) { navigator.sendBeacon('/voice/installed'); }
   } catch (e) {}
+  // A <details> MENU DOES NOT CLOSE ITSELF. Native behaviour keeps it open until its own summary
+  // is clicked again, so a reader who taps the next row leaves one hanging over it. Escape and a
+  // click elsewhere close it, which is what every other menu on the phone does. This is the only
+  // thing on the screen that needs script, and the menu still OPENS without it.
+  function shut(except) {
+    var open = document.querySelectorAll('details.acts[open]');
+    for (var i = 0; i < open.length; i++) {
+      if (!except || !open[i].contains(except)) { open[i].open = false; }
+    }
+  }
+  document.addEventListener('click', function (e) { shut(e.target); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { shut(null); } });
 })();
 """
 
@@ -434,10 +497,28 @@ def _monogram(name: str) -> str:
 _TABS = (
   ("/voice/", "Today",
    "M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5"),
+  # THE TRAY IS THE ONE EVERY APP DRAWS; WHAT ARRIVES IN IT IS OURS. Owner, 2026-09-16: the
+  # fonts and "the inbox and settings icons" are the two places this product stops copying the
+  # competitor. A plain tray says mail; a tray with separate streams running into it says the
+  # thing the product actually is — messages from different places landing in one.
+  #
+  # NO COUNT IS ENCODED. Two strokes because two survive at 23px and three turn into a smudge
+  # (rendered at tab size and compared before choosing, alongside four other candidates) — not
+  # because the box polls two channels. An icon that meant "two" would be wrong the week email
+  # lands.
+  #
+  # AND IT IS DELIBERATELY NOT AN ARROW. A downward arrow into a tray is the download glyph on
+  # every platform there is, and the first draft of this icon was exactly that.
   ("/voice/inbox", "Inbox",
-   "M3 13.5h5l1.5 2.5h5L16 13.5h5M3 13.5 5.5 5h13L21 13.5V19H3z"),
+   "M3.5 12.5v5.6a1.4 1.4 0 0 0 1.4 1.4h14.2a1.4 1.4 0 0 0 1.4-1.4v-5.6h-4.3l-1.3 2.2H9.1"
+   "l-1.3-2.2zM7.6 4.3 9.9 9.6M16.4 4.3 14.1 9.6"),
+  # A COG IS A MACHINE'S ICON AND THIS IS NOT A MACHINE HE OPERATES. The old one was the
+  # standard 12-tooth gear — the single most-drawn glyph in software, and the exact "basic as
+  # hell" the owner named. Two sliders say what this screen is: a small number of his own
+  # choices, set where he wants them. It also reads at 23px, which the gear barely did.
   ("/voice/settings", "Settings",
-   "M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1v.3a2 2 0 1 1-4 0v-.2a1.6 1.6 0 0 0-2.8-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.2A1.6 1.6 0 0 0 4.3 6l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V2a2 2 0 1 1 4 0v.2a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7h.3a2 2 0 1 1 0 4h-.2a1.6 1.6 0 0 0-1.1 1.1z"),
+   "M4 8h9M17 8h3M4 16h1M9 16h11"
+   "M17 8a2 2 0 1 0-4 0 2 2 0 1 0 4 0M9 16a2 2 0 1 0-4 0 2 2 0 1 0 4 0"),
 )
 
 
@@ -738,6 +819,136 @@ def _drafts_row() -> str:
             '</div>')
 
 
+# ── what a row can tell you before you open it ──────────────────────────────────────────────
+# Owner, 2026-09-16: "we're also going to add some different tags on each conversation and an
+# action button menu on hover."
+#
+# EVERY TAG BELOW IS COMPUTED AND NONE IS TYPED. Each one comes from a column already on the
+# conversation row plus `window.decide` — the SAME function the send path consults — so a tag can
+# never promise a reply the box would then refuse to send. That is the whole point of putting
+# them here: the reader learns whether he can still answer someone BEFORE he opens the thread and
+# types, rather than after.
+#
+# THE BEST TAG IS THE ONE THAT IS MISSING, and it is missing honestly. "Waiting on you" — their
+# message was the last one — needs the direction of the newest message per conversation, which
+# `list_conversations` does not select; asking per row is the N+1 its own docstring refuses by
+# name. That is one subquery in `inbox/store.py`, another machine's file, and it is on the wall
+# for OSDev4 rather than reached into from here.
+_TAG_LIMIT = 3
+
+_WINDOW_TAG = {
+    "blocked": ("Window closed", "warn"),
+    "tagged":  ("Tagged reply only", "warn"),
+    "limited": ("Limited replies", "warn"),
+}
+
+
+@functools.lru_cache(maxsize=64)
+def _has_send_rule(platform: str) -> bool:
+    """Is a send policy WRITTEN for this channel, on this box?
+
+    ASKED THROUGH `window.decide`, NEVER BY READING ITS `_RULES`. The private table belongs to the
+    send path; a screen that imported it would be a second reader free to drift from it, and this
+    app already deleted one duplicated channel table for exactly that reason (see `_channel`). The
+    public answer is enough: a message that arrived THIS INSTANT is inside any free window that
+    exists, so FREEFORM means a rule is written and BLOCKED means there is none.
+
+    CACHED, because a rule is code and not data — it cannot change between two rows of one page.
+    """
+    from datetime import datetime, timezone
+    from marketing.customer_voice.inbox import window as _w
+    now = datetime.now(timezone.utc)
+    return _w.decide(platform, now.isoformat(), now)["decision"] == _w.FREEFORM
+
+
+def _tag_list(k: dict) -> list:
+    """The tags for one conversation, MOST CONSTRAINING FIRST.
+
+    Order is the message, the same rule the Today screen keeps: what stops him replying, then
+    whether this person is new, then where they came from. Capped at three — a row that wraps
+    into a wall of pills is the row he stops reading.
+    """
+    plat = str(k.get("platform") or "")
+    out = []
+    if k.get("opted_out"):
+        # THE ONE MISTAKE THIS SCREEN CAN HELP HIM MAKE is replying to someone who said STOP.
+        out.append(("Opted out", "stop"))
+    elif not _has_send_rule(plat):
+        # NOT A WINDOW PROBLEM, AND IT MUST NOT READ AS ONE. Nothing sends on a channel whose
+        # policy nobody has written — `window.decide`'s most important branch — and "Window
+        # closed" would quietly promise it reopens tomorrow.
+        out.append(("No reply rule", "stop"))
+    elif not k.get("last_inbound_at"):
+        # A ROW WE KNOW ABOUT AND HAVE NEVER HEARD FROM. Every channel here is reply-only, so
+        # there is no permission to answer — a different fact from a window that has shut.
+        out.append(("No inbound yet", "warn"))
+    else:
+        from marketing.customer_voice.inbox import window as _w
+        d = _w.decide(plat, k.get("last_inbound_at"))["decision"]
+        if d in _WINDOW_TAG:
+            out.append(_WINDOW_TAG[d])
+    if (k.get("message_count") or 0) == 1:
+        # EXACTLY ONE, NOT "AT MOST ONE". Written as `<= 1` first, and rendering a seeded box
+        # caught it immediately: a conversation with ZERO messages — a row the poller knows about
+        # and has never heard a word on — announced itself as New, right beside a tag saying
+        # nothing had ever come in. "New" means one message has arrived and nobody has answered
+        # it; it is not the empty state wearing a badge.
+        out.append(("New", "new"))
+    if k.get("ad_title"):
+        # IT USED TO BE PROSE IN THE GREY LINE, where it competed with the message count for the
+        # same characters and lost. Attribution is the one thing on this row that says what the
+        # conversation is WORTH.
+        out.append((f'From {k["ad_title"]}', "ad"))
+    return out[:_TAG_LIMIT]
+
+
+def _tags(k: dict) -> str:
+    return "".join(f'<span class="tag {c}">{_esc(t)}</span>' for t, c in _tag_list(k))
+
+
+def _acts(k: dict, *, who: str, channel: str) -> str:
+    """The hover menu on a row. EVERY ITEM GOES SOMEWHERE THIS BOX ALREADY SERVES.
+
+    Reply is the thread's own compose box; the channel item is the chip row the reader may never
+    have scrolled to. Nothing in here is a control that cannot succeed, which is the thing this
+    codebase keeps deleting by name — so the two obvious extras are NOT drawn in grey:
+
+    · "Mark as done" has no column to write to. Inventing one from the screen would make the
+      inbox's idea of finished disagree with the poller's the first time a message arrived on a
+      thread he had closed.
+    · An owner-side "Do not contact" would write the SAME `opted_out` flag a CONTACT sets by
+      saying STOP — quietly turning his mute into their refusal, in a field the send path trusts
+      and nothing can undo. Both are on the wall for OSDev4, whose machine owns that column.
+
+    REPLY APPEARS ON EXACTLY THE ROWS WHERE THE THREAD WILL SHOW A BOX, because it asks the two
+    fields `_compose` asks and no others. A menu item that lands on a thread with nowhere to type
+    is the same broken promise as a greyed-out one, just further away.
+    """
+    href = _thread_href(k.get("zernio_conversation_id"))
+    plat = str(k.get("platform") or "")
+    items = []
+    if (not k.get("opted_out") and _has_send_rule(plat)
+            and (k.get("last_inbound_at") or "")
+            and (k.get("account_id") or "").strip()):
+        items.append((f"{href}#reply", "Reply"))
+    if plat and channel:
+        items.append(("/voice/inbox", "All channels"))
+    elif plat:
+        from urllib.parse import quote as _q
+        items.append((f'/voice/inbox?channel={_esc(_q(plat, safe=""))}',
+                      f"Only {_channel(plat)}"))
+    if not items:
+        # NO BUTTON AT ALL rather than a button that opens an empty card.
+        return ""
+    links = "".join(f'<a href="{h}">{_esc(t)}</a>' for h, t in items)
+    return ('<details class="acts"><summary role="button" '
+            f'aria-label="Actions for {_esc(who)}">'
+            '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" '
+            'aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/>'
+            '<circle cx="19" cy="12" r="1.7"/></svg></summary>'
+            f'<div class="menu">{links}</div></details>')
+
+
 def _chips(space: str, current: str) -> str:
     """All, then one chip per channel THIS BOX ACTUALLY HAS. Never a menu of hopes.
 
@@ -801,25 +1012,24 @@ def r_inbox():
         who = (k.get("participant") or "").strip() or "Someone"
         n = k.get("message_count") or 0
         when = _ago(k.get("last_inbound_at"))
-        flags = []
-        if k.get("opted_out"):
-            # SAID SO ON THE ROW, because replying to someone who opted out is the one mistake
-            # this screen can help him make.
-            flags.append("opted out")
-        if k.get("ad_title"):
-            flags.append(f'from {k["ad_title"]}')
-        sub = " · ".join([f'{n} message' + ("" if n == 1 else "s")] + flags)
+        # THE FLAGS LEFT THIS SENTENCE AND BECAME TAGS. "opted out" and "from <ad>" used to be
+        # prose here, third and fourth in a line that truncates — so the two facts most worth
+        # seeing were the two most likely to be cut off. They are pills now, and pills do not
+        # truncate; what is left is the one thing a sentence says better than a badge.
+        sub = f'{n} message' + ("" if n == 1 else "s")
         # KINSO'S ROW, EXACTLY: avatar, name with the time beside it, one grey line under it, and
         # the channel's own logo far right. The mark is a SHAPE before it is a colour, so it still
         # separates in greyscale — and the channel's word is one tap away in the thread header, so
         # nothing here is carried by colour alone.
         plat = k.get("platform")
-        rows.append(f'<a class="conv" href="{_esc(_thread_href(k.get("zernio_conversation_id")))}">'
+        rows.append('<div class="convrow">'
+                    f'<a class="conv" href="{_esc(_thread_href(k.get("zernio_conversation_id")))}">'
                     f'<span class="av" aria-hidden="true">{_monogram(who)}</span>'
                     f'<span class="w"><b>{_esc(who)}</b><span class="t">{_esc(when)}</span></span>'
-                    f'<span class="s">{_esc(sub)}</span>'
+                    f'<span class="s"><span class="sub">{_esc(sub)}</span>{_tags(k)}</span>'
                     f'<span class="mk">{_mark(plat)}'
-                    f'<span class="vh">{_esc(_channel(plat))}</span></span></a>')
+                    f'<span class="vh">{_esc(_channel(plat))}</span></span></a>'
+                    f'{_acts(k, who=who, channel=channel)}</div>')
     return _shell(f'<h1>Inbox</h1>{_chips(space, channel)}'
                   f'<div class="card">{"".join(rows)}</div>'), 200
 
@@ -905,6 +1115,36 @@ def _compose(zcid: str, conv: dict) -> str:
     """
     if conv.get("opted_out"):
         return ""
+    if not _has_send_rule(str(conv.get("platform") or "")):
+        # FOUND BY RENDERING, 2026-09-16. A seeded box on a channel with NO send rule written —
+        # `email`, today — drew a full reply box with a Send button under it, and the send would
+        # have been refused by `window.decide` after he had typed. That branch is the one
+        # window.py calls the most important in the file: adding a platform string to the poller
+        # must never be enough, by itself, to authorise a send on it. A compose box IS that
+        # authorisation, granted by an oversight, one screen earlier.
+        #
+        # NARROW ON PURPOSE. This refuses a channel with NO POLICY AT ALL — a static property of
+        # the channel, not of the clock. It deliberately does NOT hide the box on a thread whose
+        # window has merely shut: that is a live, time-varying decision the send path owns, and
+        # taking it here would quietly delete the reply box from every conversation older than a
+        # day. Raised with OSDev4, whose machine owns the window.
+        return ('<div class="card"><div class="row"><span class="t quiet">Ownbox has no reply '
+                'rule for ' + _esc(_channel(str(conv.get("platform") or ""))) + ' yet, so it '
+                'will not send on it. You can read everything here; replies go out from the '
+                'channel itself for now.</span></div></div>')
+    if not (conv.get("last_inbound_at") or "").strip():
+        # THE SECOND HALF OF THE SAME RULE, and rendering found it the same way. Every channel
+        # here is reply-only, so a conversation with no inbound message on record has nothing to
+        # reply TO — `window.decide` refuses it outright, on every platform, at every hour.
+        #
+        # THE LINE THIS FILE DRAWS: the box is absent when the send is refused for a reason THE
+        # CLOCK CANNOT CHANGE — no policy for the channel, or nothing ever received on the row.
+        # It stays PRESENT when the refusal is the clock itself, a window that shut and reopens
+        # the moment they write again; that decision is the send path's, not this screen's, and
+        # taking it here would delete the reply box from every conversation older than a day.
+        return ('<div class="card"><div class="row"><span class="t quiet">Nothing has come in on '
+                'this conversation yet. Every channel here is reply-only, so there is nothing to '
+                'reply to until they write — and then the box appears.</span></div></div>')
     if not (conv.get("account_id") or "").strip():
         return ('<div class="card"><div class="row"><span class="t quiet">This thread was '
                 'mirrored before the box started recording which account owns it, so it cannot '
@@ -944,8 +1184,11 @@ def _compose(zcid: str, conv: dict) -> str:
     # `note` sits ABOVE the box because it introduces the draft inside it. `off_note` sits BELOW,
     # because §2.6 puts it there and the reason is the difference between the two: one labels
     # what is in the box, the other is an aside about what is not. Only one is ever present.
-    return ('<form class="compose" method="post" action="' + _esc(f"/voice/inbox/{zcid}/reply")
-            + '">'
+    # `id` IS LOAD-BEARING NOW, not decoration: the inbox row's Reply item links to `#reply`,
+    # and an anchor with no target scrolls nowhere and looks like a dead control. The two agree
+    # on when it exists because they test the same two fields — see `_acts`.
+    return ('<form class="compose" id="reply" method="post" '
+            'action="' + _esc(f"/voice/inbox/{zcid}/reply") + '">'
             f'<input type="hidden" name="n" value="{_esc(_reply.new_nonce())}">'
             + note +
             '<textarea name="text" rows="3" maxlength="1800" required '

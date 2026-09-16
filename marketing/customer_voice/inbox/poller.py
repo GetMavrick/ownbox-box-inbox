@@ -21,7 +21,7 @@ every lead is tied to the exact ad that produced it. Inert without a key.
 import json
 import time
 
-from core import state
+from core import box_secrets, state
 from core.logging import get_logger
 from core.queue import queue
 
@@ -76,11 +76,41 @@ def _note_poll_success(space: str, channel: str) -> None:
                  after_failures=st["count"])
 
 
+def _sweep_email(space: str, ch) -> tuple[int, int, bool]:
+    """One Space's mailbox. Returns (scanned, stored, listed_ok).
+
+    FAILS ALONE, like every other channel here. A revoked app password must not stop Messenger
+    intake on the same box, so an auth refusal is recorded for the screen and the sweep moves on.
+    An unconfigured mailbox is not a failure and is not counted as a success either — it is simply
+    a channel this buyer has not connected."""
+    from . import email_channel
+    try:
+        scanned, stored = email_channel.sweep(space)
+    except email_channel.EmailAuthError as e:
+        # THE BUYER IS TOLD, NOT THE JOURNAL. An opaque "authentication failed" in a log nobody
+        # tails is how a box stops reading mail for a month without anyone noticing.
+        box_secrets.note_email_status(e.status, e.detail)
+        _note_poll_failure(space, ch.key, f"{e.status}: {e.detail}")
+        return (0, 0, False)
+    except OSError as e:                      # network, TLS, DNS — transient, not the credential
+        _note_poll_failure(space, ch.key, str(e))
+        return (0, 0, False)
+    if not box_secrets.email_credential():
+        return (0, 0, False)                  # not connected: nothing read, nothing broken
+    _note_poll_success(space, ch.key)
+    return (scanned, stored, True)
+
+
 def _spaces() -> list[dict]:
-    """Spaces with a Zernio key — reuse the proven reel resolver (per-Space
-    key-or-nothing; the isolation contract test_airtable_sync already covers)."""
+    """Spaces this sweep has anything to read for — reuse the proven reel resolver.
+
+    A ZERNIO KEY IS NO LONGER THE ONLY REASON TO SWEEP. Email arrives over IMAP with a credential
+    of its own (core/box_secrets.email_credential), so a buyer who connects Gmail and nothing else
+    is a box with no Zernio key at all. Gating the whole sweep on that key would have meant email
+    silently never polling on exactly the box that bought it for email."""
     from core import spaces as reel_spaces
-    return [s for s in reel_spaces.all_spaces() if s.get("zernio_key")]
+    has_email = bool(box_secrets.email_credential())
+    return [s for s in reel_spaces.all_spaces() if s.get("zernio_key") or has_email]
 
 
 def _f(obj, *names):
@@ -296,8 +326,19 @@ def poll_sweep() -> dict:
         # The gateway client is scoped to this Space's key + Zernio Profile, so the
         # poll is profile-scoped (the primary isolation under a shared key — a shared
         # key would otherwise surface every Space's conversations). No-op in two-key mode.
-        z = zernio.client(sp)
+        # BUILT ONLY IF SOMETHING NEEDS IT. An email-only box has no Zernio key, and the transport
+        # is fail-closed on a falsy key by design — constructing it here would raise before the
+        # email channel ever got its turn.
+        z = zernio.client(sp) if sp.get("zernio_key") else None
         for ch in channels.POLLED:
+            if ch.vendor == channels.IMAP:
+                ch_scanned, ch_stored, ch_ok = _sweep_email(space, ch)
+                scanned += ch_scanned
+                enqueued += ch_stored
+                ok_channels += 1 if ch_ok else 0
+                continue
+            if z is None:
+                continue
             try:
                 # `platform` is PASSED, never left to the client default. The default is
                 # Messenger, and a sweep that relied on it saw exactly one channel no

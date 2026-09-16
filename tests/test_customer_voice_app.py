@@ -270,10 +270,16 @@ def test_the_inbox_screen_shows_the_conversation_and_says_who_spoke():
         ok("...with a way back to the list", 'href="/voice/inbox"' in thread)
 
         # OPTED OUT IS SAID ON THE ROW, because replying to someone who opted out is the one
-        # mistake this screen can help him make.
+        # mistake this screen can help him make. IT IS A TAG NOW, NOT PROSE — it used to be third
+        # in a grey sentence that truncates, so the fact most worth seeing was the one most likely
+        # to be cut off. Asserted as the pill it is, because "says so somewhere in the HTML" would
+        # still pass if it slid back into the line that can vanish.
         store.set_opted_out(sp, "zc-new")
         again = c.get("/voice/inbox").get_data(as_text=True)
-        ok("an opted-out conversation says so on the list", "opted out" in again)
+        ok("an opted-out conversation says so on the list",
+           '<span class="tag stop">Opted out</span>' in again)
+        ok("...and the row offers no Reply, because the thread will offer no box either",
+           again.count('href="/voice/inbox/zc-new#reply"') == 0)
         t2 = c.get("/voice/inbox/zc-new").get_data(as_text=True)
         ok("...and on the conversation itself", "has opted out" in t2)
     finally:
@@ -484,6 +490,48 @@ def test_the_screen_and_the_worker_name_a_channel_the_same_way():
        _ch.label("") == "this channel" and _ch.label("sms") == _app._channel("sms"))
 
 
+def test_the_tab_bar_is_three_live_destinations_with_distinct_marks():
+    """Installed to a home screen there is no browser chrome, so this bar IS the app's furniture.
+
+    OWNER, 2026-09-16: the fonts and "the inbox and settings icons" are where this product stops
+    copying the competitor. So the marks are drawn here rather than borrowed, and the one thing
+    worth pinning about a hand-drawn set is that the hands did not slip: three destinations that
+    all resolve, three marks that are actually different from one another, and no tab that thinks
+    it is the current page when it is not.
+
+    DISTINCTNESS IS NOT PEDANTRY. The cheapest way to add a tab is to copy the tuple above it,
+    and a bar with the same glyph twice is a bar nobody can navigate — it renders, it passes a
+    smoke test, and it is wrong on every screen.
+    """
+    import core.config as cfg
+    from core.config import settings
+    from marketing.customer_voice.app import _TABS
+    real = cfg.get_config
+    try:
+        app, c = _client(token="")
+        c.post("/dash/login", data={"token": settings.dash_token})
+        paths = [d for _h, _l, d in _TABS]
+        ok("every tab carries a mark", all(d.strip().startswith("M") for d in paths), str(paths))
+        ok("...and no two tabs share one", len(set(paths)) == len(paths))
+        # NOT A LENGTH. The first version of this line was `len(d) > 40` and it failed on the
+        # Today mark, which is 36 characters and perfectly complete — a threshold picked out of
+        # the air, measuring nothing. A drawing is a stub when it has nothing to draw, so count
+        # the commands: a lone move-to is a stub, a shape is not.
+        import re as _re
+        ok("...and none of them is a stub",
+           all(len(_re.findall(r"[MmLlHhVvCcSsQqTtAaZz]", d)) >= 3 for d in paths),
+           str([len(_re.findall(r"[MmLlHhVvCcSsQqTtAaZz]", d)) for d in paths]))
+        for href, label, d in _TABS:
+            r = c.get(href)
+            ok(f"{label} goes somewhere real", r.status_code == 200, str(r.status_code))
+            body = r.get_data(as_text=True)
+            ok(f"...and {label} is the one marked current",
+               body.count('aria-current="page"') == 1, body.count('aria-current="page"'))
+            ok(f"...and its own mark is on the page", d.split("M")[1][:12] in body)
+    finally:
+        cfg.get_config = real
+
+
 def test_ci_actually_runs_this_file():
     """A SUITE CI NEVER RUNS IS WORSE THAN NO SUITE, because it reports green. The workflow keeps a
     HAND-MAINTAINED list of suite names — the same silent-skip hazard as `test_machine_app`'s
@@ -519,6 +567,7 @@ if __name__ == "__main__":
                test_the_worker_can_never_push_silently,
                test_the_phone_app_is_self_contained,
                test_the_screen_and_the_worker_name_a_channel_the_same_way,
+               test_the_tab_bar_is_three_live_destinations_with_distinct_marks,
                test_ci_actually_runs_this_file):
         print(fn.__name__)
         fn()
