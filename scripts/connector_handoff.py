@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import stat
 import sys
 
@@ -127,12 +128,72 @@ def apply(conn: dict, *, env_path: str = ENV_PATH, force: bool = False) -> dict:
     return outcome
 
 
+# ── seats ───────────────────────────────────────────────────────────────────────────────────────
+# WHERE A SOLD BOX MAY KEEP A PER-BOX SETTING. `config/aios.config.yaml` is tracked, so a box that
+# edited its own copy would conflict with its own next `git pull`. `core.config.get_config` already
+# deep-merges an UNTRACKED overlay over the tracked file for exactly this, and that is the only
+# place a provisioned value belongs.
+SETTINGS_PATH = os.environ.get("AIOS_SETTINGS_PATH", "/opt/aios/my/settings.yaml")
+
+
+def tier_from(path: str = PROVISION_JSON) -> str:
+    """What this buyer paid for, or "" when the box was not sold (the owner's own machine)."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return str(json.load(fh).get("tier") or "").strip().lower()
+    except (OSError, ValueError):
+        return ""
+
+
+def apply_seats(tier: str, *, settings_path: str = SETTINGS_PATH) -> str:
+    """Give a Pro box the unlimited seats it paid for. Returns what happened, for the boot log.
+
+    OWNER, 2026-09-16: regular is three people, Pro is unlimited. Until now the tier never left the
+    orders table, so a $1,599 buyer booted on the same seat line as a $499 one.
+
+    ONLY EVER WIDENS, NEVER NARROWS. The base tier lives in the tracked config and this writes
+    nothing at all for it — so a box whose provision.json is missing, unreadable or says `ownbox`
+    keeps exactly what it shipped with. A bug here can fail to give somebody seats they bought,
+    which is a support ticket; the other direction would lock a paying customer out of their own
+    box, which is not.
+
+    WRITTEN AS YAML BY HAND, NOT WITH A LIBRARY. This runs under the system python3 during
+    bootstrap, before the venv exists, so pyyaml is not importable yet — the same constraint that
+    keeps `core.config` out of this file. Two lines of YAML do not need a parser.
+    """
+    if tier != "pro":
+        return "base tier, seats unchanged"
+    try:
+        os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+        existing = ""
+        if os.path.exists(settings_path):
+            with open(settings_path, encoding="utf-8") as fh:
+                existing = fh.read()
+        if re.search(r"^\s*max_users\s*:", existing, re.M):
+            return "seats already set, left alone"    # a human chose; never overwrite them
+        block = ("\n" if existing and not existing.endswith("\n") else "")
+        # 0 MEANS UNLIMITED (core.state.max_users), which is why Pro is a number and not a
+        # deletion: the overlay can only ADD to the tracked file, never remove a key from it.
+        block += "dash:\n  max_users: 0   # Ownbox Pro — unlimited people (provisioned)\n"
+        with open(settings_path, "a", encoding="utf-8") as fh:
+            fh.write(block)
+        return "Pro: unlimited seats"
+    except OSError as e:
+        # NEVER FATAL. A box that boots with the base seat count is a box somebody can be given
+        # more seats on in a minute; a box that refuses to finish first boot is a refund.
+        return f"could NOT set Pro seats ({e}) — box has the base tier"
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Copy this box's provisioned connector into its .env")
     ap.add_argument("--provision", default=PROVISION_JSON)
     ap.add_argument("--env", default=ENV_PATH)
     ap.add_argument("--force", action="store_true", help="replace a key this box already has (a rotation)")
+    ap.add_argument("--settings", default=SETTINGS_PATH)
     a = ap.parse_args(argv)
+    # SEATS FIRST, AND INDEPENDENT OF THE CONNECTOR. A box with no connector block still has a
+    # tier, and returning early below on `conn is None` would have silently skipped it.
+    print(f"   seats: {apply_seats(tier_from(a.provision), settings_path=a.settings)}")
     try:
         conn = connector_from(a.provision)
     except HandoffError as e:

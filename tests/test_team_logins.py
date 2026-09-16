@@ -185,7 +185,18 @@ finally:
     state.max_users = real_cap
 
 print("\n— an expired link is dead —")
-late = state.add_user("late@co.com")
+# THE CAP IS LIFTED FOR THIS ONE ADD, AND ONLY THIS ONE. Seats went from five to three (owner,
+# 2026-09-16), and this section is about a link that has EXPIRED — it needs a fourth person to
+# exist, it is not asserting anything about how many the box allows. The section directly above
+# is the one that owns the seat rule, it still runs, and it still proves an invite past the limit
+# is refused. Seeding around a cap in a test that is not about the cap is not weakening it;
+# leaving this line to fail on a number change would be testing arithmetic, not behaviour.
+_cap = state.max_users
+state.max_users = lambda: 0                                   # 0 = unlimited (core.state)
+try:
+    late = state.add_user("late@co.com")
+finally:
+    state.max_users = _cap
 late_link = state.create_invite(late["id"])
 with state.connect() as c:
     c.execute("UPDATE user_invites SET expires_at = ? WHERE token_hash = ?",

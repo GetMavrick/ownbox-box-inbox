@@ -227,8 +227,19 @@ dash:
   # HOW MANY PEOPLE MAY SIGN IN TO THIS BOX. 0 or absent = unlimited.
   #
   # THIS ONE LINE IS THE $499 / Pro DIFFERENCE (docs/PRICING_AND_PACKAGING_OWNBOX.md §6.1):
-  # $499 covers five people, Pro at $1,599 sells unlimited seats and custom roles. Config rather
-  # than a constant precisely so the tier is editable per box, by hand, without a release.
+  # $499 covers THREE people, Pro at $1,599 sells unlimited seats and custom roles.
+  #
+  # OWNER, 2026-09-16: "We are going to change regular to three users and pro to unlimited" —
+  # "Three users is plenty for the small operator." It was five, and Pro got five TOO, because
+  # `build_user_data` carried no tier so the order's tier never reached the box at all: every
+  # box booted on this line whatever was paid. Pro now gets its unlimited seats from the LOCAL
+  # OVERLAY written at first boot (scripts/connector_handoff.py), which is the only per-box
+  # config a sold box may carry — this file is tracked, and a box that edited it would conflict
+  # with its own next update.
+  #
+  # SO THIS VALUE IS THE BASE TIER, NOT A DEFAULT TO EDIT BY HAND. The old comment said the tier
+  # "has to be changeable per box, by editing a file, without a release" — nobody was ever going
+  # to edit it, because the provisioner builds boxes unattended and no human sees them.
   #
   # UNDER `dash:` AND NOT `inbox:`, WHICH IS WHERE §6.1 NAMES IT. Seats are a property of the
   # BOX, not of the inbox machine, and the config sections are split the same way: scripts/
@@ -242,7 +253,7 @@ dash:
   # authentication path, and one that fails open on a missing config is worse than no paywall,
   # while one that fails closed locks a paying customer out of his own box at 2am. Per-person
   # login itself is NOT tiered: it is a security fix and it ships in every box.
-  max_users: 5
+  max_users: 3
   # THE NAME AT THE TOP OF EVERY SCREEN. Owner, 2026-09-06, direct: "Get Mavrick off this app.
   # It's Your Company at the top." This is the one value those screens read (dash.brand()), so
   # it is the whole change — and it is deliberately a CONFIG value, because a clone sold to a

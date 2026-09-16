@@ -136,9 +136,24 @@ def _sent_at(msg) -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# HOW LONG THE SWEEP WAITS ON A SILENT MAIL SERVER. Without a timeout, `IMAP4_SSL` inherits the
+# socket default, which is NO timeout at all: a server that completes the TLS handshake and then
+# never answers holds this call open forever. That is not a hypothetical shape — it is what a
+# firewalled port, a hung server or a dropped NAT mapping looks like from the client side, and it
+# would hang `poll_sweep` itself, so Messenger and Instagram intake stop too. One buyer's mail
+# provider having a bad afternoon would silently take the whole box's inbox down.
+#
+# 30 SECONDS, CHOSEN AGAINST THE SWEEP CADENCE, not picked because it is a round number. The poll
+# runs every 45s (`inbox/__init__.py`, config `inbox.poll_interval_s`), so a timeout under that
+# means a stuck mailbox costs one sweep and the next one starts clean. Longer than the verifier's
+# 20s (`core.vendors.mailbox`) on purpose: nobody is standing in front of this one, so it can
+# afford more patience than a person pasting a password can.
+_SWEEP_TIMEOUT_S = 30
+
+
 def _connect(cred: dict):
     """An authenticated, READ-ONLY connection. Raises EmailAuthError when Google refuses."""
-    conn = imaplib.IMAP4_SSL(cred.get("host") or "imap.gmail.com")
+    conn = imaplib.IMAP4_SSL(cred.get("host") or "imap.gmail.com", timeout=_SWEEP_TIMEOUT_S)
     try:
         conn.login(cred["user"], cred["password"])
     except imaplib.IMAP4.error as e:

@@ -1596,11 +1596,19 @@ def max_users() -> int:
     whose owner edits this line and restarts a worker must not have one process disagreeing with
     another about how many seats it sold.
 
-    THE $499 / PRO DIFFERENCE IS THIS ONE LINE (PRICING_AND_PACKAGING_OWNBOX §6.1), which is why
-    it is config rather than a constant: the tier has to be changeable per box, by editing a
-    file, without a release. It lives under `dash` rather than the `inbox` that doc names,
-    because `export_box.sh` ships `dash` to every box and `inbox` only to customer_voice — and
-    an absent limit means UNLIMITED, so on a Lead box the seat cap would have vanished.
+    THE $499 / PRO DIFFERENCE IS THIS ONE LINE (PRICING_AND_PACKAGING_OWNBOX §6.1). It lives
+    under `dash` rather than the `inbox` that doc names, because `export_box.sh` ships `dash` to
+    every box and `inbox` only to customer_voice — and an absent limit means UNLIMITED, so on a
+    Lead box the seat cap would have vanished.
+
+    OWNER, 2026-09-16: regular is THREE people, Pro is unlimited. The tracked config carries the
+    base three; a Pro box gets `dash.max_users: 0` written into its untracked overlay at first
+    boot (`scripts/connector_handoff.apply_seats`), from the tier in `provision.json`.
+
+    "EDITABLE PER BOX, BY HAND" USED TO BE WRITTEN HERE AND IT WAS NEVER TRUE. The provisioner
+    builds boxes unattended and nobody ever opened that file — so for as long as the tier failed
+    to reach the droplet, every box booted on the base line and a $1,599 buyer got the $499 seat
+    count. A knob only a human can turn is not a tier; it is a bug with a comment on it.
     """
     from core.config import get_config
     try:

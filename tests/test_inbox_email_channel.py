@@ -228,6 +228,35 @@ ok("...and the vendor constant is named once, for the poller and the suites to s
 ok("...while the reader itself is proven above, so activation is one line",
    callable(email_channel_sweep))
 
+print("\n— A SILENT MAIL SERVER MUST NOT HANG THE WHOLE SWEEP —")
+# Without a timeout, `IMAP4_SSL` inherits the socket default, which is no timeout at all: a server
+# that completes the TLS handshake and then never answers holds the call open forever. That hangs
+# `poll_sweep` itself, so Messenger and Instagram intake stop too — one buyer's mail provider
+# having a bad afternoon would silently take the whole box's inbox down.
+install()
+quiet(ec._connect, {"host": "imap.gmail.com", "user": OWNER, "password": APP_PW})
+_last = FakeIMAP.instances[-1]
+ok("the sweep's connection carries a timeout at all", "timeout" in _last.kw, str(_last.kw))
+ok("...and it is under the 45s poll cadence, so a stuck mailbox costs ONE sweep",
+   0 < _last.kw.get("timeout", 0) < 45, str(_last.kw))
+ok("...and more patient than the verifier's, because nobody is standing in front of it",
+   _last.kw["timeout"] > 20, str(_last.kw))
+
+
+def _hangs(host, **kwargs):
+    raise TimeoutError("timed out")
+
+
+imaplib.IMAP4_SSL = _hangs                                        # type: ignore[assignment]
+try:
+    res = quiet(ec.sweep, SPACE)
+    ok("a timed-out mailbox returns rather than raising", res == (0, 0), str(res))
+except Exception as e:                                            # noqa: BLE001 — the assertion
+    ok("a timed-out mailbox returns rather than raising", False, repr(e))
+ok("A TIMEOUT IS NOT A BAD PASSWORD — the credential is not condemned",
+   bs.email_state()["status"] != "needs_reauth", str(bs.email_state()))
+install()
+
 print()
 if FAILS:
     print(f"{len(FAILS)} FAILED:"); [print("   -", f) for f in FAILS]; sys.exit(1)
