@@ -78,6 +78,49 @@ def load_modules() -> None:
             continue                                   # a config recipe: the host runs it by kind
         importlib.import_module(mod)
         log.info("worker.pack_loaded", slug=m["slug"], module=mod, host=m["host"])
+
+
+_REGISTRATIONS_IMPORTED = False
+
+
+def import_registrations() -> list[str]:
+    """Import this box's machine modules ONCE, in whichever process is asking, so the things
+    they register at import — set-up steps, health checks — exist here too. Returns the modules
+    that failed to import.
+
+    THE TRAP THIS EXISTS FOR, measured twice already. Registrations are MODULE-LEVEL GLOBALS and
+    a box runs several processes: the worker imports `modules:` (above), the web process imports
+    `web_modules:`, and the watchdog is its own `python -m core.watchdog` that imported neither.
+    A machine that registers a set-up step in its worker module would render nothing on a screen
+    served by the web process, and a probe it registers would never run in the watchdog — with
+    no error anywhere, because an empty registry looks exactly like a machine with nothing to
+    say. dispatch._load_packs documents the first time this bit (2026-09-06).
+
+    NOT `load_modules()`. The worker is right to crash on a bad import; a web page or a watchdog
+    pass is not — one machine's broken import must cost that machine its steps and checks, and
+    nothing else. So every failure is logged by name and skipped. Idempotent: importlib caches
+    modules, and the flag keeps pack discovery from re-scanning on every screen render.
+    """
+    global _REGISTRATIONS_IMPORTED
+    if _REGISTRATIONS_IMPORTED:
+        return []
+    _REGISTRATIONS_IMPORTED = True
+    import importlib
+    paths = [p for p in (get_config().get("modules") or []) if isinstance(p, str)]
+    try:
+        from core import packs
+        paths += [m["module"] for m in packs.discover() if m.get("module")]
+    except Exception as e:                          # noqa: BLE001 — discovery must not cost the page
+        log.error("worker.registrations_discover_failed", error=type(e).__name__, detail=str(e)[:200])
+    failed = []
+    for path in paths:
+        try:
+            importlib.import_module(path)
+        except Exception as e:                      # noqa: BLE001 — one machine, not the process
+            failed.append(path)
+            log.error("worker.registrations_import_failed", module=path, error=type(e).__name__,
+                      detail=str(e)[:200])
+    return failed
     for path, why in packs.invalid():
         log.warning("worker.pack_invalid", path=path, reason=why)
 

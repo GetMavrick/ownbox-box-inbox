@@ -40,12 +40,12 @@ WORKER_HEARTBEAT_MAX_AGE_S = 300          # worker beats every loop; stale => de
 DISPATCH_HEALTH_URL = os.environ.get("DISPATCH_HEALTH_URL", "http://127.0.0.1:8000/health")
 
 
-def _probe_anthropic() -> tuple[bool, str]:
+def _probe_anthropic(key: str | None = None) -> tuple[bool, str]:
     try:
         from anthropic import Anthropic
         # Tight timeout + one retry: a probe that can hang stalls the WHOLE watchdog
         # pass — the thing that's supposed to detect hangs.
-        Anthropic(api_key=settings.anthropic_api_key,
+        Anthropic(api_key=key if key is not None else settings.anthropic_api_key,
                   timeout=10.0, max_retries=1).models.list(limit=1)
         return True, "auth ok"
     except Exception as e:
@@ -212,6 +212,68 @@ def _alert(key: str, ok: bool, detail: str) -> bool:
     return True  # nothing sent from here
 
 
+_REGISTERED_PROBES: dict[str, dict] = {}
+
+
+def register_probe(key: str, fn, *, consequence: str, machine: str) -> None:
+    """A machine's health check, registered at import — the way it registers its jobs with
+    `worker.register_periodic`. `fn() -> (ok: bool, detail: str)`; local reads, never slow.
+
+    WHY THIS EXISTS (owner, 2026-09-16: "protect the base machine and keep it clean for modular
+    upgrades"). Every probe used to be hand-written into this file and listed by name in
+    run_once — 47 of them, 28 carrying a machine's vocabulary — so a machine's health lived in
+    core and shipped in every box, and adding a machine meant editing the watchdog.
+    tests/test_core_boundary.py now fails any NEW `_probe_` here; this is where one goes instead.
+
+    A key the watchdog already names is REFUSED here, and run_once refuses any other collision
+    when the pass is assembled — so a machine can never shadow `disk` or `worker` by picking the
+    same word, even for a built-in added after this was written. `consequence` is the
+    owner-worded cost of the failure, exactly what `_CONSEQUENCE` holds for the built-ins."""
+    if not key or not isinstance(key, str) or not key.replace("_", "").isalnum() or key != key.lower():
+        raise ValueError(f"probe key {key!r} must be a short lowercase slug")
+    if key in _CONSEQUENCE:
+        raise ValueError(f"probe key {key!r} belongs to the watchdog itself")
+    held = _REGISTERED_PROBES.get(key)
+    if held is not None and held["machine"] != machine:
+        raise ValueError(f"probe key {key!r} is already registered by {held['machine']!r}")
+    if not callable(fn) or not (consequence or "").strip() or not machine:
+        raise ValueError(f"probe {key!r} needs a callable, a consequence and the machine that owns it")
+    _REGISTERED_PROBES[key] = {"fn": fn, "consequence": consequence, "machine": machine}
+    log.info("watchdog.probe_registered", key=key, machine=machine)
+
+
+def _registered_probe_results() -> dict[str, tuple[bool, str]]:
+    """Run every machine-registered probe, in THIS process.
+
+    The watchdog is its own `python -m core.watchdog` and imports no machine, so it first imports
+    the box's registrations itself (worker.import_registrations) — otherwise the registry would
+    be empty here and every machine's health check would silently never run.
+
+    A probe that RAISES is reported as failing, with its machine named: a health check that cannot
+    run is not a healthy machine, and a quiet skip is how a broken check hides for a month. It
+    never sinks the pass for anyone else."""
+    from core import worker
+    worker.import_registrations()
+    out = {}
+    for key, p in sorted(_REGISTERED_PROBES.items()):
+        try:
+            ok, detail = p["fn"]()
+            out[key] = (bool(ok), str(detail)[:300])
+        except Exception as e:                      # noqa: BLE001 — one machine's check, not the pass
+            out[key] = (False, f"the {p['machine']} health check itself failed: {type(e).__name__}")
+            log.error("watchdog.registered_probe_raised", key=key, machine=p["machine"],
+                      error=type(e).__name__)
+    return out
+
+
+def _consequence(key: str) -> str:
+    """What a failing probe costs, for built-in and machine-registered probes alike."""
+    if key in _CONSEQUENCE:
+        return _CONSEQUENCE[key]
+    held = _REGISTERED_PROBES.get(key)
+    return held["consequence"] if held else key
+
+
 _DIGEST_KEY = "digest:standing"
 _DIGEST_INTERVAL_H = 24
 
@@ -313,7 +375,7 @@ def _standing_failure_digest() -> bool:
     for r in ranked:
         key, d = r["key"], _days_down(r.get("since_ts"))
         age = "today" if d < 1 else f"{int(d)} day{'s' if int(d) != 1 else ''}"
-        lines.append(f"• *{age}* — {_CONSEQUENCE.get(key, key)}  _({key})_")
+        lines.append(f"• *{age}* — {_consequence(key)}  _({key})_")
     worst = _days_down(ranked[0].get("since_ts"))
     head = (f":rotating_light: *{len(ranked)} still down* — worst has been broken for "
             f"{int(worst)} day{'s' if int(worst) != 1 else ''}")
@@ -334,9 +396,21 @@ def probe_backend() -> tuple[str, bool, str]:
     backend = (get_config().get("brain") or {}).get("backend", "api")
     if backend == "claude_code":
         return ("claude_code", *_probe_claude_code())
-    if settings.anthropic_api_key:
-        return ("anthropic_api", *_probe_anthropic())
-    return "anthropic_api", False, "no ANTHROPIC_API_KEY configured"
+    # THE KEY THE BRAIN ACTUALLY USES, NOT THE ONE IN SETTINGS. `core.brain` drafts with
+    # `box_secrets.anthropic_key()` — the environment first, then the key a buyer pastes on the
+    # set-up screen. This probe used to read `settings.anthropic_api_key` alone, so on every
+    # bring-your-own-key box it reported "no ANTHROPIC_API_KEY configured" at ERROR on every pass,
+    # FOREVER — including after onboarding, while the brain drafted perfectly well. Found by the
+    # image v8 clone-check (2026-09-16). Harmless on a box with no operator contact; a permanent
+    # false page on any box that has one, which is the Managed tier's whole job.
+    #
+    # One resolution rule, shared with the thing being probed — a second rule here is how the
+    # two disagreed in the first place.
+    from core import box_secrets
+    key = box_secrets.anthropic_key()
+    if key:
+        return ("anthropic_api", *_probe_anthropic(key))
+    return "anthropic_api", False, "no AI key yet — the buyer adds it on the set-up screen"
 
 
 def check_backend_now() -> bool:
@@ -1753,6 +1827,16 @@ def run_once() -> None:
     # pin a false perpetual FAIL and page forever. Probe exactly when the daemon actually runs.
     if settings.slack_app_token and settings.slack_bot_token:
         probes["slack_socket"] = _probe_heartbeat("slack_socket")
+    # MACHINE-REGISTERED HEALTH CHECKS (register_probe), merged LAST so every built-in key above
+    # already exists. A registered key that collides with one is refused, never allowed to
+    # overwrite it — a machine that could replace the `worker` probe with its own could hide a
+    # dead worker behind a green line.
+    for _key, _result in _registered_probe_results().items():
+        if _key in probes:
+            log.error("watchdog.registered_probe_shadows_builtin", key=_key,
+                      machine=_REGISTERED_PROBES[_key]["machine"])
+            continue
+        probes[_key] = _result
 
     # Safety-net reap, REQUEUE-ONLY (max_attempts=None): terminal-failing a job must
     # fire its module failure hook, and only the worker process has modules loaded —

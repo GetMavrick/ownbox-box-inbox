@@ -186,27 +186,43 @@ def _drives_exporter(path: pathlib.Path) -> bool:
     same PR is what makes it pass inside one), so obeying the guard would have deleted it from
     every sold box to satisfy a comment.
 
-    A guard that fires on prose teaches people to stop writing prose. Comments are stripped
-    here; everything else — string literals, docstrings, f-strings, any code path — still counts,
-    so the check stays conservative in the direction that matters. A real driver names the script
-    inside a string it hands to a subprocess, and that is untouched by this.
+    A guard that fires on prose teaches people to stop writing prose. Comments AND DOCSTRINGS are
+    stripped here; every string the code actually uses — literals, f-strings, any code path — still
+    counts. A real driver names the script inside a string it hands to a subprocess, and that is
+    untouched by this.
+
+    DOCSTRINGS USED TO COUNT, "to stay conservative", and they false-positived twice on 2026-09-16:
+    test_core_boundary and test_setup_screen_on_the_seam each EXPLAINED the exporter in a docstring,
+    and each was told to join the skip set — which would have removed a suite that must ship from
+    every box. A docstring cannot run a subprocess, so dropping it loses no true positive; it only
+    stops punishing the files that document why they exist.
     """
     try:
         src = path.read_text()
     except OSError:
         return False
     try:
-        code = "".join(
-            "" if tok.type == tokenize.COMMENT else tok.string
-            for tok in tokenize.generate_tokens(io.StringIO(src).readline))
-    except (tokenize.TokenError, IndentationError, SyntaxError):
-        code = src                      # unparseable: fall back to the old, stricter behaviour
-    return "export_box.sh" in code
+        tree = ast.parse(src)
+    except SyntaxError:
+        return "export_box.sh" in src   # unparseable: fall back to the old, stricter behaviour
+    # Blank every docstring — module, class and function — then read back the code alone:
+    # ast.unparse never emits comments, so what remains is exactly what can run.
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            first = node.body[0] if node.body else None
+            if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                    and isinstance(first.value.value, str)):
+                first.value.value = ""
+    return "export_box.sh" in ast.unparse(tree)
 
 
 # A file whose ONLY reference to the exporter is a comment, written out so the guard above can
 # prove it does not flag one. It is not a suite and never runs; it exists to be read.
 _TOKENIZE_PROBE = pathlib.Path(__file__).resolve().parent / "fixtures" / "mentions_exporter.py"
+# ...and one whose only reference is a DOCSTRING, the shape that false-positived twice in one day.
+_DOCSTRING_PROBE = pathlib.Path(__file__).resolve().parent / "fixtures" / "mentions_exporter_in_docstring.py"
+# ...and one that genuinely RUNS it, so stripping prose is proven not to blind the guard.
+_DRIVER_PROBE = pathlib.Path(__file__).resolve().parent / "fixtures" / "drives_exporter.py"
 
 
 def test_every_export_driving_suite_is_kept_home():
@@ -237,6 +253,10 @@ def test_every_export_driving_suite_is_kept_home():
     # …and must NOT see a suite that only talks about the exporter. See _drives_exporter.
     ok("a suite that only mentions the exporter in a comment is not a driver",
        _TOKENIZE_PROBE.exists() and not _drives_exporter(_TOKENIZE_PROBE))
+    ok("...nor one that only EXPLAINS it in a docstring — the shape that false-positived twice",
+       _DOCSTRING_PROBE.exists() and not _drives_exporter(_DOCSTRING_PROBE))
+    ok("...while a suite that RUNS it is still a driver, so stripping prose did not blind the guard",
+       _DRIVER_PROBE.exists() and _drives_exporter(_DRIVER_PROBE))
 
 
 def test_every_suite_is_actually_run_by_ci():

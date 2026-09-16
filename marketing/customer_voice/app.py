@@ -157,17 +157,37 @@ CSS = """
    the classic unreadable-app bug, and tests/test_inbox_design.py refuses one. */
 :root{
   --bg:#eff2f4; --surface:#ffffff; --raised:#ffffff;
-  --ink:#1a1d1f; --dim:#6e7478; --dimmer:#9ba1a6;
+  /* MEASURED, NOT CHOSEN BY EYE. Every one of these clears WCAG AA (4.5:1) against BOTH grounds
+     this app uses — the white card AND the grey page behind it — because a token that passes on
+     one and fails on the other is a token that fails wherever you forgot to check.
+     --dimmer was #9ba1a6: 2.61:1 on white, 2.32:1 on grey. It carried the timestamp on every
+     conversation, the sender line inside every thread, the counts on the channel chips and the
+     LABELS ON THE TAB BAR. Not a subtle failure — a bit over half the required contrast, on the
+     furniture a person navigates by. tests/test_inbox_contrast.py computes these now. */
+  --ink:#1a1d1f; --dim:#4e5155; --dimmer:#6a6d71;
   --line:#e5eaed; --hair:rgba(26,29,31,.07);
-  --accent:#e05d38; --accent-ink:#ffffff; --accent-soft:#fdefe9; --accent-line:rgba(224,93,56,.45);
-  --bubble-in:#f2f4f6; --bubble-out:#e05d38; --bubble-out-ink:#ffffff;
+  /* THE ACCENT IS DEEPER THAN THE BRAND ORANGE, and this is the one change here a person will
+     SEE rather than merely read more easily. #e05d38 carried white at 3.63:1 — which is the
+     label on every primary button and, worse, every reply this box has sent, because an outgoing
+     bubble is white on the accent. It is also used as link text throughout, at the same 3.63:1.
+     #b03f1c is the same hue, deepened until ONE value fixes all three: white on it 5.88:1, it as
+     text on white 5.88:1, and as the 'New' tag on its own soft ground 5.23:1.
+     THE ALTERNATIVE WAS TO KEEP #e05d38 AND PUT DARK INK ON IT (4.88:1), as dark mode already
+     does. That preserves the exact brand orange for fills but leaves it failing everywhere it is
+     used as text, which is most places. Flagged to the owner; one line to switch back. */
+  --accent:#b03f1c; --accent-ink:#ffffff; --accent-soft:#fdefe9; --accent-line:rgba(176,63,28,.45);
+  /* THE OUTGOING BUBBLE IS ITS OWN TOKEN and so it kept the old orange after the accent moved —
+     which is exactly the drift these tests exist to catch. It is the reply this box sent, i.e.
+     the message the owner most wants to be able to read back. */
+  --bubble-in:#f2f4f6; --bubble-out:#b03f1c; --bubble-out-ink:#ffffff;
   --bad:#c0392b; --bad-soft:#fdecea;
   --lift:0 1px 2px rgba(16,24,32,.05), 0 8px 24px -12px rgba(16,24,32,.18);
   --tab-bg:rgba(255,255,255,.88);
 }
 :root[data-theme="dark"]{
   --bg:#0d0d0d; --surface:#171717; --raised:#1f1f1f;
-  --ink:#f5f3f1; --dim:#a8a29c; --dimmer:#6f6a66;
+  /* Dark had the same hole, smaller: --dimmer was 3.35:1. Same rule, same test. */
+  --ink:#f5f3f1; --dim:#a6a2a0; --dimmer:#85817f;
   --line:#262523; --hair:rgba(255,255,255,.08);
   --accent:#f08a5d; --accent-ink:#1a1008; --accent-soft:#2a1a12; --accent-line:rgba(240,138,93,.5);
   --bubble-in:#1f1f1f; --bubble-out:#f08a5d; --bubble-out-ink:#1a1008;
@@ -253,7 +273,7 @@ a.row:active{background:var(--hair);border-radius:10px}
 .conv .w b{font-weight:590;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .conv .t{font-weight:400;font-size:13px;color:var(--dimmer);flex:none}
 .conv .s{grid-row:2;grid-column:2;display:flex;align-items:center;gap:6px;min-width:0;
-  flex-wrap:wrap;row-gap:5px;color:var(--dim);font-size:14px}
+  flex-wrap:wrap;row-gap:5px;color:var(--dim);font-size:15px}
 /* A TAG NEVER TRUNCATES AND NEVER OVERLAPS — IT WRAPS. Written first as one non-wrapping line,
    and a 390px render showed both failures at once: "2 messages" cut to "2 mess…" for no reason,
    and a second tag sliding straight under the channel logo, because a `flex:none` pill cannot
@@ -2158,13 +2178,98 @@ def _mailbox_steps() -> str:
             f'<p class="quiet">{_esc(_MAILBOX_ADMIN)}</p>')
 
 
+# ── where the steps come from ───────────────────────────────────────────────────────────────
+# #1273 gives core a plug-in point for set-up steps (`core.onboarding.register_step`) so that the
+# base box stops knowing which machines exist. It registers NOTHING itself — OSDev4 moves the
+# inbox's Gmail and Zernio steps onto it next, in his own machine. Between those two landings
+# `onboarding.steps()` is EMPTY, and a screen that rendered it unconditionally would show a paying
+# customer a set-up page with nothing on it and no way to connect anything.
+#
+# So the screen asks the seam first and falls back to the old contract while the seam is still
+# empty. DELETE THIS WHOLE SECTION once every step is registered: `_setup_source` collapses to
+# `onboarding.steps()` and `_setup_save` to `onboarding.save(...)`. Nothing above or below changes,
+# because nothing else knows which source it got — that is the point of the entries having one
+# shape.
+def _seam_keys() -> set:
+    """The step keys the seam actually holds — empty on a box whose machines have not moved yet."""
+    try:
+        from core import onboarding
+        return {str(e.get("key")) for e in onboarding.steps()}
+    except Exception:                            # noqa: BLE001 — a box too old for the seam
+        return set()
+
+
+def _setup_source() -> list:
+    """The steps to render. The seam when it has any, the old contract while it does not.
+
+    A seam that raises is not allowed to take the set-up page down with it: the old contract still
+    renders, and the failure is logged rather than shown. The reverse is not true — if the OLD
+    contract raises there is nothing left to draw, and `r_setup` turns that into a page that says
+    so, which is why this does not swallow it.
+    """
+    try:
+        from core import onboarding
+        live = [dict(e) for e in onboarding.steps()]
+        if live:
+            return live
+    except Exception as e:                       # noqa: BLE001 — the page outranks the seam
+        log.warning("voice.setup_seam_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
+    from core import box_secrets
+    return [dict(e) for e in box_secrets.setup_state()]
+
+
+def _setup_save(which: str, form, *, user_id: str | None) -> None:
+    """Store one step's values. Raises an error whose str() is a sentence for the buyer.
+
+    THROUGH THE SEAM WHEN THE STEP LIVES THERE, and that is worth more than tidiness: core hands
+    the machine only the fields the step DECLARED, so a hidden field posted from a crafted form
+    cannot reach a store that happens to read it.
+    """
+    from core import box_secrets
+    if which in _seam_keys():
+        from core import onboarding
+        onboarding.save(which, form, user_id=user_id)
+        return
+    # THE OLD WRITE — the only place in this file that knows a step by name, and it is dated.
+    if which == "email":
+        box_secrets.put_email(host="imap.gmail.com", user=str(form.get("user") or ""),
+                              password=str(form.get("password") or ""), user_id=user_id)
+    elif which == "zernio":
+        box_secrets.put_zernio(str(form.get("key") or ""), user_id=user_id)
+    else:
+        raise box_secrets.SecretRejected("That form is not one this screen knows.")
+
+
+def _setup_rejections() -> tuple:
+    """The two errors that carry a sentence for the buyer. Both subclass ValueError, and catching
+    ValueError itself would put a machine's genuine bug on the screen as if it were advice."""
+    from core.box_secrets import SecretRejected
+    try:
+        from core.onboarding import StepRejected
+        return (StepRejected, SecretRejected)
+    except Exception:                            # noqa: BLE001 — a box too old for the seam
+        return (SecretRejected,)
+
+
 # ── the set-up screen ───────────────────────────────────────────────────────────────────────
-_SET_STATUS = {                                  # what a buyer reads, per status, per step
-    "connected":        ("Connected", "good"),
-    "needs_reauth":     ("Needs a new password", "warn"),
-    "admin_disabled":   ("Switched off by your administrator", "warn"),
-    "payment_required": ("Needs a payment method on your Zernio account", "warn"),
-    "not_connected":    ("Not connected yet", "dim"),
+# WHAT A BUYER READS, PER STATUS: the sentence, the tone, and WHAT THE BUTTON SAYS. The verb
+# belongs in this table and not in a branch, because it is a claim about the world: "Replace it"
+# tells someone there is something stored to replace, and only some of these statuses know that.
+_SET_STATUS = {
+    "connected":        ("Connected", "good", "Replace it"),
+    "needs_reauth":     ("Needs a new password", "warn", "Replace it"),
+    "admin_disabled":   ("Switched off by your administrator", "warn", "Replace it"),
+    "payment_required": ("Needs a payment method on your Zernio account", "warn", "Replace it"),
+    "not_connected":    ("Not connected yet", "dim", "Save"),
+    # CORE'S OWN VERDICT, not a machine's: `onboarding._live_state` answers `unavailable` when a
+    # machine's state() raises or returns a status outside the closed set. It must NOT read as
+    # "not connected" — that sends someone to make a new App password they did not need. It is
+    # the box that could not look, and the sentence core supplies says so.
+    #
+    # AND THE BUTTON SAYS "Save", NOT "Replace it". We could not check, so we do not know that
+    # anything is stored; offering to replace a thing whose existence we just failed to establish
+    # is the same wrong claim in the other direction.
+    "unavailable":      ("Could not be checked just now", "warn", "Save"),
 }
 
 
@@ -2195,14 +2300,21 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None) -
     two vendors, two kinds of secret, one shape — a number, a title, why it is wanted, what is
     set, the instructions, the fields, and whatever the buyer can press."""
     typed = typed or {}
-    label, tone = _SET_STATUS.get(e.get("status"), _SET_STATUS["not_connected"])
+    label, tone, verb = _SET_STATUS.get(e.get("status"), _SET_STATUS["not_connected"])
     who = e.get("who") or ""
     said = f'{label} — {who}' if (who and e.get("status") != "not_connected") else label
+    # NEVER THE SAME THING TWICE IN ONE BREATH. The status line is a label plus the machine's
+    # sentence, and sometimes the sentence already IS the label — core's own `unavailable` text
+    # reads "This could not be checked just now…" under a label that says "Could not be checked
+    # just now". Rendered, that is a stutter. The sentence wins when it contains the label,
+    # because the sentence is the half that says what to do about it.
+    detail = str(e.get("detail") or "")
+    if detail and label.lower().rstrip(".") in detail.lower():
+        said, detail = detail, ""
     steps = "".join(f'<div class="row"><span class="n">{i}</span>'
                     f'<span class="t">{_esc(t)}</span></div>'
                     for i, t in enumerate(e.get("steps") or (), 1))
     fields = "".join(_setup_field(f, typed.get(f.get("name"), "")) for f in e.get("fields") or ())
-    verb = "Save" if e.get("status") == "not_connected" else "Replace it"
 
     link = e.get("link") or {}
     if link and link.get("enabled"):
@@ -2228,7 +2340,7 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None) -
             f'<h1 style="font-size:19px">{n}. {_esc(e.get("title"))}</h1>'
             f'<p class="quiet" style="margin:2px 0 0">{_esc(e.get("why"))}</p>'
             f'<p class="quiet" style="margin:6px 0 0"><b class="{_esc(tone)}">{_esc(said)}</b>'
-            + (f' — {_esc(e.get("detail"))}' if e.get("detail") else "") + '</p>'
+            + (f' — {_esc(detail)}' if detail else "") + '</p>'
             + (f'<div class="card">{steps}</div>' if steps else "")
             + (f'<p class="quiet">{_esc(e.get("note"))}</p>' if e.get("note") else "")
             + note
@@ -2246,22 +2358,21 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None) -
 def r_setup():
     """EVERY CREDENTIAL THE BUYER SUPPLIES, ON ONE SCREEN, IN THE OWNER'S ORDER.
 
-    Assigned by OSDev1 (2026-09-16): render `box_secrets.setup_state()` as a LOOP — Gmail first,
-    Zernio second, the link out drawn disabled until the key is in — rather than three bespoke
-    flows that drift apart. The data is his, from #1250, carried word for word; this file decides
-    only how a step LOOKS, and it looks the same whichever step it is.
+    Assigned by OSDev1 (2026-09-16): render the steps as a LOOP — Gmail first, Zernio second, the
+    link out drawn disabled until the key is in — rather than three bespoke flows that drift apart.
+    Then (17:20): render them from the seam, `core.onboarding.steps()`, with no step-specific code.
 
-    NOTHING HERE KNOWS WHAT A STEP IS. There is no `if key == "zernio"` in the renderer, and that
-    is the property worth keeping: a third credential is a new entry in the contract and no change
-    at all on this screen.
+    NOTHING IN THIS FUNCTION KNOWS WHAT A STEP IS — no key is named in it, and no key is named in
+    the renderer either. A machine that registers a third credential gets a screen for it with no
+    change at all here. The one remaining mention of a key by name lives in `_setup_save`'s legacy
+    arm, which is dated and exists only until every machine has moved onto the seam.
 
-    THE WRITE IS THE ONLY PLACE THE KEYS DIFFER, because the stores genuinely differ — one takes
-    three values and one takes a key that is verified with the vendor before it is believed. Both
-    raise `SecretRejected` carrying a sentence for the person in front of the screen, and that
-    sentence is shown against the step it came from rather than at the top of the page, where a
-    buyer with two forms open cannot tell which one it is about.
+    THE WRITE GOES THROUGH CORE, which hands the machine only the fields its step declared — so a
+    hidden field posted from a crafted form cannot reach a store. A rejection carries a sentence
+    for the person in front of the screen, and that sentence is shown against the step it came
+    from rather than at the top of the page, where a buyer with two forms open cannot tell which
+    one it is about.
     """
-    from core import box_secrets
     gate = _gate()
     if gate is not None:
         return gate
@@ -2277,17 +2388,9 @@ def r_setup():
         which = str(request.form.get("step") or "")
         typed = {k: str(v) for k, v in request.form.items() if k != "step"}
         try:
-            if which == "email":
-                box_secrets.put_email(host="imap.gmail.com",
-                                      user=str(request.form.get("user") or ""),
-                                      password=str(request.form.get("password") or ""),
-                                      user_id=whoami)
-            elif which == "zernio":
-                box_secrets.put_zernio(str(request.form.get("key") or ""), user_id=whoami)
-            else:
-                raise box_secrets.SecretRejected("That form is not one this screen knows.")
+            _setup_save(which, request.form, user_id=whoami)
             return redirect(f"/voice/setup#{which}")
-        except box_secrets.SecretRejected as e:
+        except _setup_rejections() as e:
             notes[which] = (f'<p class="quiet" style="color:var(--accent);margin-top:10px">'
                             f'{_esc(str(e))}</p>')
         # A PASSWORD IS NEVER PUT BACK IN THE PAGE, whatever else is. The address they typed is,
@@ -2295,7 +2398,7 @@ def r_setup():
         typed = {k: v for k, v in typed.items() if k != "password" and k != "key"}
 
     try:
-        steps = box_secrets.setup_state()
+        steps = _setup_source()
     except Exception as e:                       # noqa: BLE001 — the set-up page outranks the cause
         log.warning("voice.setup_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
         return _shell('<h1>Set-up</h1><div class="quiet">This box could not read its own set-up '
