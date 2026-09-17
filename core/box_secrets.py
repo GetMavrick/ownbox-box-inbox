@@ -161,7 +161,7 @@ def clear_zernio(*, user_id: str | None = None) -> None:
     THE PROFILE GOES WITH THE KEY. Leaving the id behind is how the next key pasted into this box
     would inherit a folder id from the previous account: the connect screen would then send a
     person's Instagram consent at a profile that is not theirs. Clearing is the whole of
-    disconnecting, the same contract as turning drafts off (`/voice/drafts?off=1`)."""
+    disconnecting, the same contract as turning drafts off (`/inbox/drafts?off=1`)."""
     for name in (ZERNIO, ZERNIO_PROFILE, ZERNIO_STATUS, ZERNIO_DETAIL):
         clear(name, user_id=user_id)
 

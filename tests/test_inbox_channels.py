@@ -58,7 +58,7 @@ print("test_the_chips_are_what_this_box_actually_has")
 store.upsert_conversation(space=SPACE, zcid="m1", platform="messenger",
                           participant="Dana", account_id="a1", last_inbound_at="2026-09-15T06:00:00Z")
 c = _client()
-_, html = _page(c, "/voice/inbox")
+_, html = _page(c, "/inbox/inbox")
 ok("one channel renders NO chip row — a filter with one option changes nothing",
    'class="chips"' not in html)
 # THE ROW STILL NAMES THE CHANNEL, and this assertion was rewritten when the row moved to the
@@ -80,7 +80,7 @@ ok("...and the mark is a shape, drawn as a path rather than a coloured blob",
 
 store.upsert_conversation(space=SPACE, zcid="i1", platform="instagram",
                           participant="Sam", account_id="a2", last_inbound_at="2026-09-15T07:00:00Z")
-_, html = _page(c, "/voice/inbox")
+_, html = _page(c, "/inbox/inbox")
 ok("a second channel brings the chip row with it", 'class="chips"' in html)
 ok("...with an All chip", ">All<" in html)
 ok("...and one chip per channel present", "Messenger" in html and "Instagram" in html)
@@ -97,14 +97,14 @@ only_ig = store.list_conversations(SPACE, platform="instagram")
 ok("filtering returns only that channel",
    [k["zernio_conversation_id"] for k in only_ig] == ["i1"], str(only_ig))
 ok("...and no filter returns everything", len(store.list_conversations(SPACE)) == 2)
-_, html = _page(c, "/voice/inbox?channel=instagram")
+_, html = _page(c, "/inbox/inbox?channel=instagram")
 ok("the screen honours the chip", "Sam" in html and "Dana" not in html)
 # THE VALUE COMES FROM A QUERY STRING. It is bound, never interpolated — so a fragment of SQL
 # is just a string that matches no platform, rather than a fragment of the query.
 nasty = "messenger' OR '1'='1"
 ok("a SQL fragment in the chip matches nothing instead of matching everything",
    store.list_conversations(SPACE, platform=nasty) == [], str(nasty))
-st, html = _page(c, "/voice/inbox?channel=" + nasty.replace(" ", "%20").replace("'", "%27"))
+st, html = _page(c, "/inbox/inbox?channel=" + nasty.replace(" ", "%20").replace("'", "%27"))
 ok("...and the page says so rather than 500ing", st == 200)
 ok("...telling him other channels exist, not that the inbox is empty",
    "tap" in html.lower() and "All" in html)
@@ -114,7 +114,7 @@ ok("...telling him other channels exist, not that the inbox is empty",
 print("test_the_thread_names_the_channel_and_the_person")
 store.record_message(space=SPACE, zcid="i1", zmid="in-1", direction="in",
                      sent_by="contact", body="are you open sunday")
-_, html = _page(c, "/voice/inbox/i1")
+_, html = _page(c, "/inbox/inbox/i1")
 ok("the thread header names the channel — replying to a DM as if it were email is the "
    "mistake this prevents", 'class="chan">Instagram' in html)
 
@@ -128,14 +128,14 @@ sent = [m for m in msgs if m.get("zernio_message_id") == "out-1"][0]
 ok("the reader joins the ledger to the message on the vendor id",
    sent.get("sender_user_id") == maria["id"], str(sent.get("sender_user_id")))
 ok("...and carries the name", sent.get("sender_name") == "Maria")
-_, html = _page(c, "/voice/inbox/i1")
+_, html = _page(c, "/inbox/inbox/i1")
 ok("the thread says WHO — 'Sent by Maria' is the point of having employees on the box",
    "Maria" in html)
 
 # THE NAME MUST SURVIVE REVOCATION. `active = 0` never deletes the row precisely so that a
 # message she sent last month still resolves to a person and not to a blank.
 state.set_user_active(maria["id"], False)
-_, html = _page(c, "/voice/inbox/i1")
+_, html = _page(c, "/inbox/inbox/i1")
 ok("...and it still says Maria after she is revoked — history keeps its names", "Maria" in html)
 
 # AN INBOUND MESSAGE HAS NO LEDGER ROW, and a LEFT JOIN that dropped it would empty the thread.
@@ -149,7 +149,7 @@ store.record_message(space=SPACE, zcid="m1", zmid="out-owner", direction="out",
                      sent_by="human", body="on my way")
 store.record_send(space=SPACE, zcid="m1", idem_key="reply:m1:owner", kind="reply",
                   status="ok", zernio_message_id="out-owner", user_id=None)
-_, html = _page(c, "/voice/inbox/m1")
+_, html = _page(c, "/inbox/inbox/m1")
 ok("an owner's own reply still reads 'you', not a blank", ">you ·" in html or "you ·" in html)
 
 
@@ -177,7 +177,7 @@ ok("listing this Space never returns another's row, filtered or not",
 ok("...and the chip counts are this Space's only",
    sum(p["n"] for p in store.platforms_present(SPACE)) == 2,
    str(store.platforms_present(SPACE)))
-_, html = _page(c, "/voice/inbox?channel=instagram")
+_, html = _page(c, "/inbox/inbox?channel=instagram")
 ok("...and no screen renders it", "NotYours" not in html)
 
 print(("FAILED " + str(_failed)) if _failed else "all ok")

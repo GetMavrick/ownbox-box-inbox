@@ -2,7 +2,7 @@
 
 WHAT WAS MEASURED ON 2026-09-16. The only connect link in the whole system was minted by the
 provisioner and surfaced on the build page while an order was still building. A buyer who closed
-that tab owned a box with no way to connect anything: /voice/settings offered an AI key, a theme
+that tab owned a box with no way to connect anything: /inbox/settings offered an AI key, a theme
 switch, an install guide and a paragraph about polling. The inbox stayed empty forever and no
 screen said why.
 
@@ -288,19 +288,19 @@ _c = flask_app.test_client()
 _c.set_cookie("aios_session", _dash.new_session(state.owner_user()["id"]), domain="localhost")
 
 bs.clear_zernio()
-r = _c.get("/voice/settings")
+r = _c.get("/inbox/settings")
 ok("settings renders with nothing connected", r.status_code == 200, str(r.status_code))
 body = r.get_data(as_text=True)
 ok("...and it now OFFERS a connect surface, which it never did before",
-   "/voice/connect" in body, "no link to /voice/connect on Settings")
+   "/inbox/connect" in body, "no link to /inbox/connect on Settings")
 ok("...above the drafts row, the order a buyer does them in",
    body.find("Your channels") < body.find("Drafts") if "Drafts" in body else False)
 
-r = _c.get("/voice/connect")
+r = _c.get("/inbox/connect")
 ok("the connect page renders for a box with no key", r.status_code == 200, str(r.status_code))
 ok("...and asks for the key", "Paste your key" in r.get_data(as_text=True))
 
-r = _c.post("/voice/connect", data={"key": ""})
+r = _c.post("/inbox/connect", data={"key": ""})
 ok("an empty paste is a sentence, not an error page", r.status_code == 200, str(r.status_code))
 ok("...that says what to do",
    "Paste the API key" in r.get_data(as_text=True), r.get_data(as_text=True)[:200])
@@ -320,24 +320,24 @@ class _Discovering(_FakeSDK):
 
 
 ztransport.raw_client = lambda key, **kw: _Discovering(_rows)     # type: ignore[assignment]
-r = _c.post("/voice/connect", data={"key": BUYERS_KEY}, follow_redirects=True)
+r = _c.post("/inbox/connect", data={"key": BUYERS_KEY}, follow_redirects=True)
 body = r.get_data(as_text=True)
 ok("a good key lands on the connected page", r.status_code == 200, str(r.status_code))
 ok("THE KEY IS NEVER RENDERED BACK", BUYERS_KEY not in body)
 ok("it says which channel is live", "Connected." in body, body[:300])
 ok("...and offers the one that is not", "Connect Messenger" in body, body[:300])
 
-r = _c.get("/voice/connect/instagram")
+r = _c.get("/inbox/connect/instagram")
 ok("pressing Connect redirects INTO the vendor, never renders the url",
    r.status_code == 303 and str(r.headers.get("Location", "")).startswith("https://"),
    f"{r.status_code} {r.headers.get('Location')}")
 
-r = _c.get("/voice/connect/tiktok")
+r = _c.get("/inbox/connect/tiktok")
 ok("A PLATFORM THE POLLER NEVER READS IS REFUSED — a grant that collects nothing",
-   r.status_code == 303 and "/voice/connect" in str(r.headers.get("Location", "")),
+   r.status_code == 303 and "/inbox/connect" in str(r.headers.get("Location", "")),
    f"{r.status_code} {r.headers.get('Location')}")
 
-r = _c.get("/voice/connect?off=1", follow_redirects=False)
+r = _c.get("/inbox/connect?off=1", follow_redirects=False)
 ok("disconnect returns to settings", r.status_code == 303, str(r.status_code))
 ok("...and the whole binding is gone",
    bs.zernio_key() == "" and bs.zernio_profile() == "",
@@ -346,7 +346,7 @@ ok("...and the whole binding is gone",
 # THE PAGE IS GATED. It holds a credential field and a consent launcher; an anonymous GET must
 # never reach either.
 _anon = flask_app.test_client()
-for path in ("/voice/connect", "/voice/connect/instagram"):
+for path in ("/inbox/connect", "/inbox/connect/instagram"):
     r = _anon.get(path)
     ok(f"anonymous {path} is refused", r.status_code in (302, 303, 401, 403), str(r.status_code))
 

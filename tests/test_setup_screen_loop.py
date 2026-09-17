@@ -99,10 +99,10 @@ def _reset():
 def test_the_screen_exists_and_is_shut_to_a_stranger():
     from core.dispatch import app
     ok("the box serves a set-up screen",
-       "/voice/setup" in {str(r) for r in app.url_map.iter_rules()})
+       "/inbox/setup" in {str(r) for r in app.url_map.iter_rules()})
     anon = app.test_client()
     for verb in ("get", "post"):
-        r = getattr(anon, verb)("/voice/setup")
+        r = getattr(anon, verb)("/inbox/setup")
         ok(f"an anonymous {verb.upper()} is refused",
            r.status_code in (302, 303) and "/dash/login" in (r.headers.get("Location") or ""),
            f"{r.status_code} {r.headers.get('Location')}")
@@ -113,7 +113,7 @@ def test_it_renders_the_contract_in_the_contract_s_order():
     """GMAIL FIRST, ZERNIO SECOND — and from the DATA, not from this screen's opinion."""
     _reset()
     app, c = _c()
-    words = _text(c.get("/voice/setup").get_data(as_text=True))
+    words = _text(c.get("/inbox/setup").get_data(as_text=True))
     titles = [s["title"] for s in bs.SETUP_STEPS]
     ok("every step in the contract is on the screen", all(t in words for t in titles), str(titles))
     # `.find`, NEVER `.index`. A missing substring RAISES and a raise ends the whole file — it
@@ -184,7 +184,7 @@ def test_the_link_out_is_dead_until_the_key_is_in_and_says_why():
     """Sending someone to connect accounts before the box can read them is a step they repeat."""
     _reset()
     app, c = _c()
-    body = c.get("/voice/setup").get_data(as_text=True)
+    body = c.get("/inbox/setup").get_data(as_text=True)
     z = [e for e in bs.setup_state() if e.get("link")][0]
     ok("the link out is drawn", _esc_in(body, z["link"]["label"]), z["link"]["label"])
     ok("...but not as a link", f'href="{z["link"]["url"]}"' not in body)
@@ -199,7 +199,7 @@ def test_a_refusal_is_shown_against_the_step_it_came_from():
     about. The store's sentence is rendered inside the section that produced it."""
     _reset()
     app, c = _c()
-    body = c.post("/voice/setup",
+    body = c.post("/inbox/setup",
                   data={"step": "email", "user": "owner@acme.com",
                         "password": "hunter2hunter2hunter2"}).get_data(as_text=True)
     ok("the store's sentence is shown", "not an app password" in _text(body))
@@ -216,13 +216,13 @@ def test_a_refusal_is_shown_against_the_step_it_came_from():
 def test_saving_redirects_to_the_step_so_a_refresh_does_not_re_post():
     _reset()
     app, c = _c()
-    r = c.post("/voice/setup", data={"step": "email", "user": "owner@acme.com",
+    r = c.post("/inbox/setup", data={"step": "email", "user": "owner@acme.com",
                                      "password": GOOD_PW})
     ok("a good credential redirects", r.status_code in (302, 303), str(r.status_code))
     ok("...back to its own step", (r.headers.get("Location") or "").endswith("#email"),
        r.headers.get("Location"))
     ok("...and it is stored", bs.email_credential().get("user") == "owner@acme.com")
-    body = c.get("/voice/setup").get_data(as_text=True)
+    body = c.get("/inbox/setup").get_data(as_text=True)
     ok("the step now reads connected, naming the mailbox",
        "Connected" in _text(body) and "owner@acme.com" in _text(body))
     ok("THE PASSWORD IS ON NO PAGE", FLAT_PW not in body and GOOD_PW not in body)
@@ -232,7 +232,7 @@ def test_an_unknown_form_is_refused_rather_than_guessed_at():
     """The POST is routed by a field the page itself wrote. Anything else is somebody probing."""
     _reset()
     app, c = _c()
-    r = c.post("/voice/setup", data={"step": "../../etc", "user": "a@b.c"})
+    r = c.post("/inbox/setup", data={"step": "../../etc", "user": "a@b.c"})
     ok("an unknown step does not redirect as though it worked", r.status_code == 200,
        str(r.status_code))
     ok("...and nothing is stored", not bs.email_credential() and not bs.zernio_key())
@@ -256,7 +256,7 @@ def test_an_unreadable_contract_is_a_page_not_a_500():
             raise RuntimeError("no such table: box_secrets")
         bs.setup_state = boom
         app, c = _c()
-        r = c.get("/voice/setup")
+        r = c.get("/inbox/setup")
         ok("it still renders", r.status_code == 200, str(r.status_code))
         ok("...saying what it could not do", "could not read its own set-up" in _text(r.get_data(as_text=True)))
         ok("...and never a stack trace", "Traceback" not in r.get_data(as_text=True))
@@ -276,11 +276,11 @@ def test_the_connect_button_now_reaches_the_set_up_screen():
                                   "happened": [], "watch": []}
         store.list_conversations = lambda space, **kw: []
         app, c = _c()
-        for path in ("/voice/", "/voice/inbox"):
+        for path in ("/inbox/", "/inbox/inbox"):
             got = re.findall(r'<a class="btn" href="([^"]+)">([^<]+)<',
                              c.get(path).get_data(as_text=True))
             ok(f"{path} sends him to the set-up screen",
-               got and got[0][0] == "/voice/setup", str(got))
+               got and got[0][0] == "/inbox/setup", str(got))
             ok(f"...and the words match where it goes",
                got and got[0][1] == "Set up your box", str(got))
     finally:

@@ -154,7 +154,7 @@ needs = _texts(seg, "needs_you")
 ok("IT IS AN INSTRUCTION, beside the one about the front door",
    any("2 conversations are waiting on your reply" == t for t in needs), str(needs))
 ok("...and it links to the inbox, not to a settings page",
-   any(x.get("href") == "/voice/inbox" for x in seg["needs_you"]), str(seg["needs_you"]))
+   any(x.get("href") == "/inbox/inbox" for x in seg["needs_you"]), str(seg["needs_you"]))
 ok("...and the watch list says it too", any(t == "Inbox — 2 waiting on you"
                                             for t in _texts(seg, "watch")), str(_texts(seg, "watch")))
 

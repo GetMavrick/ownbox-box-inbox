@@ -88,11 +88,11 @@ def _gate():
     resumes instead of restarting — `core.dash.require_session` does that part, and `safe_next`
     re-validates the path on the way back out.
 
-    FOUR PATHS ARE EXEMPT, by an explicit allow-list rather than a prefix or a pattern. A browser
+    FIVE PATHS ARE EXEMPT, by an explicit allow-list rather than a prefix or a pattern. A browser
     fetches a manifest WITHOUT cookies unless the link says otherwise, so a gated manifest fails
     to install and says nothing a person could act on. The exemption is safe because those four
     carry no customer data at all — a colour and a title, two icons drawn from constants in this
-    module, and our own worker — and `start_url` still points at `/voice/`, which is gated, so
+    module, our own worker, and the tombstone left at the old /voice/sw.js address — and `start_url` still points at `/inbox/`, which is gated, so
     opening the installed app asks for the password exactly as the browser does.
 
     AN ALLOW-LIST, NOT `startswith`. A prefix rule is how an exemption meant for four files ends
@@ -476,11 +476,11 @@ a.row:active{background:var(--hair);border-radius:10px}
 JS = """
 (function () {
   // EXPLICIT SCOPE, though the file's own location already implies it. MDN: a worker cannot claim
-  // a scope broader than where it is served, so /voice/sw.js controls /voice/ and nothing else —
+  // a scope broader than where it is served, so /inbox/sw.js controls /inbox/ and nothing else —
   // which is what we want. It is passed anyway because the failure mode is SILENT: registration
   // succeeds, reports success, and the worker never intercepts a thing.
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/voice/sw.js', { scope: '/voice/' }).catch(function () {});
+    navigator.serviceWorker.register('/inbox/sw.js', { scope: '/inbox/' }).catch(function () {});
   }
   // DID THE INSTALL ACTUALLY HAPPEN. Spec section 4: a buyer who never completes it has bought a
   // bookmark, so the completion rate is the number that says whether this feature worked at all.
@@ -489,7 +489,7 @@ JS = """
   try {
     var installed = (window.navigator.standalone === true) ||
       (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
-    if (installed && navigator.sendBeacon) { navigator.sendBeacon('/voice/installed'); }
+    if (installed && navigator.sendBeacon) { navigator.sendBeacon('/inbox/installed'); }
   } catch (e) {}
   // A <details> MENU DOES NOT CLOSE ITSELF. Native behaviour keeps it open until its own summary
   // is clicked again, so a reader who taps the next row leaves one hanging over it. Escape and a
@@ -572,7 +572,7 @@ def _monogram(name: str) -> str:
 # that hold the light/dark switch. A tab bar with a dead tab in it is the dead control this
 # codebase keeps deleting.
 _TABS = (
-  ("/voice/", "Today",
+  ("/inbox/", "Today",
    "M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5"),
   # THE TRAY IS THE ONE EVERY APP DRAWS; WHAT ARRIVES IN IT IS OURS. Owner, 2026-09-16: the
   # fonts and "the inbox and settings icons" are the two places this product stops copying the
@@ -586,14 +586,14 @@ _TABS = (
   #
   # AND IT IS DELIBERATELY NOT AN ARROW. A downward arrow into a tray is the download glyph on
   # every platform there is, and the first draft of this icon was exactly that.
-  ("/voice/inbox", "Inbox",
+  ("/inbox/inbox", "Inbox",
    "M3.5 12.5v5.6a1.4 1.4 0 0 0 1.4 1.4h14.2a1.4 1.4 0 0 0 1.4-1.4v-5.6h-4.3l-1.3 2.2H9.1"
    "l-1.3-2.2zM7.6 4.3 9.9 9.6M16.4 4.3 14.1 9.6"),
   # A COG IS A MACHINE'S ICON AND THIS IS NOT A MACHINE HE OPERATES. The old one was the
   # standard 12-tooth gear — the single most-drawn glyph in software, and the exact "basic as
   # hell" the owner named. Two sliders say what this screen is: a small number of his own
   # choices, set where he wants them. It also reads at 23px, which the gear barely did.
-  ("/voice/settings", "Settings",
+  ("/inbox/settings", "Settings",
    "M4 8h9M17 8h3M4 16h1M9 16h11"
    "M17 8a2 2 0 1 0-4 0 2 2 0 1 0 4 0M9 16a2 2 0 1 0-4 0 2 2 0 1 0 4 0"),
 )
@@ -602,7 +602,7 @@ _TABS = (
 def _tabbar(here: str) -> str:
     out = []
     for href, label, d in _TABS:
-        on = " on" if (here == href or (href != "/voice/" and here.startswith(href))) else ""
+        on = " on" if (here == href or (href != "/inbox/" and here.startswith(href))) else ""
         cur = ' aria-current="page"' if on else ""
         out.append(
             f'<a class="tab{on}" href="{href}"{cur}>'
@@ -645,8 +645,8 @@ def _shell(body: str, *, day: str = "", here: str = "") -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 {tc}
-<link rel="manifest" href="/voice/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/voice/icon-192.png">
+<link rel="manifest" href="/inbox/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/inbox/icon-192.png">
 <!-- APPLE STILL READS ITS OWN META. The manifest's `display` is what MDN says iOS requires before
      `Notification` even exists, and this legacy pair is what older iOS reads for the same thing.
      Both cost one line and the failure they prevent is silent. -->
@@ -667,7 +667,7 @@ def _rows(items: list, *, needs: bool = False) -> str:
     to report" are different claims and a dashboard that conflates them starts lying quietly.
 
     AN `href` IS A LINK, and this is the half that was missing. The report writes "3 conversations
-    are waiting on your reply" into `needs_you` WITH `href: /voice/inbox` — and this function
+    are waiting on your reply" into `needs_you` WITH `href: /inbox/inbox` — and this function
     rendered `text` and `value` only, so the one instruction on the first screen a buyer opens
     landed as dead text beside a number. The row he most needs to act on was the row he could not
     tap.
@@ -714,8 +714,8 @@ def _first_run() -> str:
                '</p></div></div>' if go else ""))
 
 
-@blueprint.get("/voice/")
-@blueprint.get("/voice")
+@blueprint.get("/inbox/")
+@blueprint.get("/inbox")
 def r_today():
     """WHAT HAPPENED TODAY, off the report this machine already writes.
 
@@ -916,7 +916,7 @@ def _space() -> str:
 # "answers nobody without a credential" — which is what would catch a public tier being added later.
 def _thread_href(zcid: str) -> str:
     from urllib.parse import quote as _q
-    return "/voice/inbox/" + _q(str(zcid), safe="")
+    return "/inbox/inbox/" + _q(str(zcid), safe="")
 
 
 def _channel(value: str) -> str:
@@ -961,7 +961,7 @@ def _drafts_row() -> str:
                 '<span>Ownbox can write a reply for every message, ready for you to read and '
                 'send. It needs an AI account to write with — yours, on your own bill, so '
                 'nothing you receive passes through us.</span>'
-                '<p style="margin:10px 0 0"><a class="btn" href="/voice/drafts">'
+                '<p style="margin:10px 0 0"><a class="btn" href="/inbox/drafts">'
                 'Connect an AI account</a></p></div>')
     # THE SECOND SENTENCE IS LOAD-BEARING AND DOES NOT GET CUT (§2.6). It is the promise the
     # whole product rests on, and Settings is where a nervous buyer goes to check it.
@@ -969,8 +969,8 @@ def _drafts_row() -> str:
             '<span>On. Ownbox writes a reply for every message that arrives. You read it and '
             'you send it — nothing goes out on its own.</span>'
             '<span style="margin-top:8px">Writing with your own AI account. '
-            '<a href="/voice/drafts" style="color:var(--accent)">Change</a> · '
-            '<a href="/voice/drafts?off=1" style="color:var(--accent)">Turn off</a></span>'
+            '<a href="/inbox/drafts" style="color:var(--accent)">Change</a> · '
+            '<a href="/inbox/drafts?off=1" style="color:var(--accent)">Turn off</a></span>'
             '</div>')
 
 
@@ -986,7 +986,7 @@ def _channels_row() -> str:
 
     NO NETWORK CALL FROM SETTINGS. This row reads the stored status only. Settings is the page a
     worried buyer opens, and a page that has to reach a vendor before it can paint is a page that
-    hangs when the vendor is slow. The live account list lives one click away, on /voice/connect,
+    hangs when the vendor is slow. The live account list lives one click away, on /inbox/connect,
     where a person has said they want to look."""
     from core import box_secrets
     st = box_secrets.zernio_state()
@@ -996,7 +996,7 @@ def _channels_row() -> str:
                 '<span>Ownbox reads your Instagram and Messenger for you and keeps every '
                 'conversation in one place. Connect them with your own social account — it stays '
                 'yours, and you can take it back any day.</span>'
-                '<p style="margin:10px 0 0"><a class="btn" href="/voice/connect">'
+                '<p style="margin:10px 0 0"><a class="btn" href="/inbox/connect">'
                 'Connect your channels</a></p></div>')
     if status == "payment_required":
         # THE ONE FAILURE A BUYER CAN ACTUALLY FIX, so it gets its own sentence instead of the
@@ -1005,18 +1005,18 @@ def _channels_row() -> str:
                 '<span>Your social account needs a payment method before it will connect any '
                 'more channels. Add one there, then come back — nothing here needs changing.'
                 '</span>'
-                '<p style="margin:10px 0 0"><a class="btn" href="/voice/connect">'
+                '<p style="margin:10px 0 0"><a class="btn" href="/inbox/connect">'
                 'Check your channels</a></p></div>')
     if status == "needs_reauth":
         return ('<div class="setrow"><b>Your channels</b>'
                 '<span>Ownbox can no longer reach your social account, so nothing new is '
                 'arriving. Re-connect it and the inbox catches up on its own.</span>'
-                '<p style="margin:10px 0 0"><a class="btn" href="/voice/connect">'
+                '<p style="margin:10px 0 0"><a class="btn" href="/inbox/connect">'
                 'Re-connect</a></p></div>')
     return ('<div class="setrow"><b>Your channels</b>'
             '<span>Connected. New messages arrive on their own.</span>'
             '<span style="margin-top:8px">'
-            '<a href="/voice/connect" style="color:var(--accent)">Add or remove a channel</a>'
+            '<a href="/inbox/connect" style="color:var(--accent)">Add or remove a channel</a>'
             '</span></div>')
 
 
@@ -1170,10 +1170,10 @@ def _acts(k: dict, *, who: str, channel: str) -> str:
             and (k.get("account_id") or "").strip()):
         items.append((f"{href}#reply", "Reply"))
     if plat and channel:
-        items.append(("/voice/inbox", "All channels"))
+        items.append(("/inbox/inbox", "All channels"))
     elif plat:
         from urllib.parse import quote as _q
-        items.append((f'/voice/inbox?channel={_esc(_q(plat, safe=""))}',
+        items.append((f'/inbox/inbox?channel={_esc(_q(plat, safe=""))}',
                       f"Only {_channel(plat)}"))
     if not items:
         # NO BUTTON AT ALL rather than a button that opens an empty card.
@@ -1213,7 +1213,7 @@ def _live(*paths: str) -> str:
 def _connect_verb(go: str) -> str:
     """WHAT THE BUTTON SAYS, decided by WHERE IT LANDS — because the two must agree.
 
-    "Connect a channel" promises a choice. On a box that serves the hub (`/voice/connect`) there
+    "Connect a channel" promises a choice. On a box that serves the hub (`/inbox/connect`) there
     is one. On a box that does not, this button reaches the MAILBOX screen, which offers exactly
     one thing — and a buyer who pressed "Connect a channel" expecting to pick Instagram and
     arrived at a Gmail form has been told something that was not true of his box.
@@ -1221,20 +1221,20 @@ def _connect_verb(go: str) -> str:
     A LABEL AND A DESTINATION THAT DISAGREE is the same defect as a link that 404s, only quieter:
     nothing breaks, and he simply believes the product is not what he was shown.
     """
-    return {"/voice/setup": "Set up your box",
-            "/voice/connect": "Connect a channel",
-            "/voice/mailbox": "Connect your inbox"}.get(go, "Finish setting up")
+    return {"/inbox/setup": "Set up your box",
+            "/inbox/connect": "Connect a channel",
+            "/inbox/mailbox": "Connect your inbox"}.get(go, "Finish setting up")
 
 
 def _connect_href() -> str:
     """Where a buyer with nothing connected should be sent — or "" when this box has nowhere.
 
-    ORDER IS "THE MOST IT CAN DO FOR HIM, ON THIS BOX". `/voice/connect` is the hub when a box
-    serves one; `/voice/mailbox` connects the one channel that needs no vendor account at all;
-    `/voice/settings` is the last resort, and on a bare box it offers an AI key, a theme and an
+    ORDER IS "THE MOST IT CAN DO FOR HIM, ON THIS BOX". `/inbox/connect` is the hub when a box
+    serves one; `/inbox/mailbox` connects the one channel that needs no vendor account at all;
+    `/inbox/settings` is the last resort, and on a bare box it offers an AI key, a theme and an
     install guide — nothing that connects anything. It was where this button led for a day.
     """
-    return _live("/voice/setup", "/voice/connect", "/voice/mailbox", "/voice/settings")
+    return _live("/inbox/setup", "/inbox/connect", "/inbox/mailbox", "/inbox/settings")
 
 
 def _nothing_arrives_yet() -> bool:
@@ -1307,7 +1307,7 @@ def _find(q: str, channel: str) -> str:
     # is the only page it can be on — carrying the old `page` in a hidden field is how a person
     # searches for "boiler", gets a blank screen, and concludes search is broken.
     chan = (f'<input type="hidden" name="channel" value="{_esc(channel)}">' if channel else "")
-    return ('<form class="find" method="get" action="/voice/inbox" role="search">'
+    return ('<form class="find" method="get" action="/inbox/inbox" role="search">'
             '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
             'stroke-width="1.9" stroke-linecap="round" aria-hidden="true">'
             '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.2 4.2"/></svg>'
@@ -1334,7 +1334,7 @@ def _url(*, q: str = "", channel: str = "", page: int = 1) -> str:
     was hand-assembling its own query string. That is three places to forget `page` in, and the
     forgetting is silent: the link still works, it just quietly puts him back on page one.
 
-    A DEFAULT IS NEVER WRITTEN INTO THE URL. `/voice/inbox` and `/voice/inbox?page=1` are the
+    A DEFAULT IS NEVER WRITTEN INTO THE URL. `/inbox/inbox` and `/inbox/inbox?page=1` are the
     same screen, and only one of them is worth showing a person.
     """
     from urllib.parse import quote as _qt
@@ -1345,7 +1345,7 @@ def _url(*, q: str = "", channel: str = "", page: int = 1) -> str:
         bits.append(f'channel={_qt(channel, safe="")}')
     if page > 1:
         bits.append(f"page={int(page)}")
-    return "/voice/inbox" + ("?" + "&".join(bits) if bits else "")
+    return "/inbox/inbox" + ("?" + "&".join(bits) if bits else "")
 
 
 def _clear(channel: str) -> str:
@@ -1408,7 +1408,7 @@ def _hits(q: str, channel: str, n: int, *, page: int, more: bool) -> str:
     return f'<div class="found">{body}{out}</div>'
 
 
-@blueprint.get("/voice/inbox")
+@blueprint.get("/inbox/inbox")
 def r_inbox():
     """Who has spoken to this business, most recent first."""
     space = _space()
@@ -1538,7 +1538,7 @@ def r_inbox():
                   f'{_pager(q=q, channel=channel, page=page, more=more)}'), 200
 
 
-@blueprint.get("/voice/inbox/<path:zcid>")
+@blueprint.get("/inbox/inbox/<path:zcid>")
 def r_thread(zcid):
     """One conversation, oldest first — the way a person reads a thread.
 
@@ -1599,7 +1599,7 @@ def r_thread(zcid):
             f'<div class="msg {"in" if inbound else "out"}">'
             f'<div class="b">{_esc(m.get("body") or "")}</div>'
             f'<div class="m">{_esc(by)} · {_esc(_when(m.get("created_at")))}</div></div>')
-    back = '<div class="foot"><a href="/voice/inbox">← Inbox</a></div>'
+    back = '<div class="foot"><a href="/inbox/inbox">← Inbox</a></div>'
     return _shell("".join(head) + f'<div class="thread">{"".join(bubbles)}</div>'
                   + _compose(zcid, conv) + back), 200
 
@@ -1750,7 +1750,7 @@ def _compose(zcid: str, conv: dict) -> str:
         from core import box_secrets
         if not box_secrets.is_set(box_secrets.ANTHROPIC):
             off_note = ('<div class="quiet" style="margin-top:8px">Drafts are off. '
-                        '<a href="/voice/settings" style="color:var(--accent)">Turn them on in '
+                        '<a href="/inbox/settings" style="color:var(--accent)">Turn them on in '
                         'Settings</a>.</div>')
     # `note` sits ABOVE the box because it introduces the draft inside it. `off_note` sits BELOW,
     # because §2.6 puts it there and the reason is the difference between the two: one labels
@@ -1760,7 +1760,7 @@ def _compose(zcid: str, conv: dict) -> str:
     # on when it exists because they test the same two fields — see `_acts`.
     return (win
             + '<form class="compose" id="reply" method="post" '
-            'action="' + _esc(f"/voice/inbox/{zcid}/reply") + '">'
+            'action="' + _esc(f"/inbox/inbox/{zcid}/reply") + '">'
             f'<input type="hidden" name="n" value="{_esc(_reply.new_nonce())}">'
             + note +
             '<textarea name="text" rows="3" maxlength="1800" required '
@@ -1772,7 +1772,7 @@ def _compose(zcid: str, conv: dict) -> str:
 # NOT `@blueprint.post`. `tests/test_customer_voice.py:498-500` scans this department for a CALL
 # named `post` and a decorator is a call — `app.py:659` took the same two extra characters for
 # the same reason, and weakening the guard to fit a feature is refused by name at `app.py:655`.
-@blueprint.route("/voice/inbox/<path:zcid>/reply", methods=["POST"])
+@blueprint.route("/inbox/inbox/<path:zcid>/reply", methods=["POST"])
 def r_reply(zcid):
     """Take a typed reply and hand it to the one part of this department allowed to send.
 
@@ -1784,7 +1784,7 @@ def r_reply(zcid):
     from marketing.customer_voice.inbox import reply as _reply
     space = _space()
     text = (request.form.get("text") or "").strip()
-    here = f"/voice/inbox/{zcid}"
+    here = f"/inbox/inbox/{zcid}"
 
     # WHICH PERSON — AND NO REPLY WITHOUT ONE. Since migration 47 every session belongs to a real
     # row, so "no user" is not "the owner", it is nobody. The earlier cut defaulted to the owner
@@ -1841,7 +1841,7 @@ def _thread_notice(zcid: str, kind: str, message: str) -> str:
     """Say what happened, on the thread, without losing the thread."""
     return _shell(f'<div class="card {_esc(kind)}"><div class="row"><span class="t">'
                   f'{_esc(message)}</span></div></div>'
-                  f'<div class="foot"><a href="/voice/inbox/{_esc(zcid)}">← Back to the '
+                  f'<div class="foot"><a href="/inbox/inbox/{_esc(zcid)}">← Back to the '
                   'conversation</a></div>')
 
 
@@ -1856,13 +1856,14 @@ def _thread_notice(zcid: str, kind: str, message: str) -> str:
 # person could act on, which is the silent failure this whole file is written against. The same is
 # true of the icons it names. None of these four carries a customer's name, a message, or a
 # number: the manifest is a colour and a title, the icons are drawn from constants in this module,
-# and the worker is our own code. `start_url` still points at `/voice/`, which IS gated — so
+# and the worker is our own code. `start_url` still points at `/inbox/`, which IS gated — so
 # opening the installed app asks for the password exactly as the browser does.
 PUBLIC_PATHS = frozenset({
-    "/voice/manifest.webmanifest",
-    "/voice/icon-192.png",
-    "/voice/icon-512.png",
-    "/voice/sw.js",
+    "/inbox/manifest.webmanifest",
+    "/inbox/icon-192.png",
+    "/inbox/icon-512.png",
+    "/inbox/sw.js",
+    "/voice/sw.js",   # THE TOMBSTONE, not an install file — see TOMBSTONE_SW_JS. Remove with it.
 })
 
 THEME = "#0b0d10"
@@ -1875,7 +1876,7 @@ ICON_FG = (125, 211, 252)
 # caches it for a day, but a stranger fetching it in a loop should not be able to buy CPU.
 # ── settings, and the light/dark switch ─────────────────────────────────────────────────────
 def _mailbox_row() -> str:
-    """The Settings row that makes /voice/mailbox reachable AFTER it has been set up.
+    """The Settings row that makes /inbox/mailbox reachable AFTER it has been set up.
 
     A DEAD END I BUILT, found by reading the rendered Settings rather than the code: every link
     to the mailbox screen lived on an EMPTY state, so connecting an inbox deleted the only way
@@ -1888,7 +1889,7 @@ def _mailbox_row() -> str:
 
     ABSENT WHEN THE BOX DOES NOT SERVE THE SCREEN — same rule as every other link in this app.
     """
-    go = _live("/voice/mailbox")
+    go = _live("/inbox/mailbox")
     if not go:
         return ""
     from core import box_secrets
@@ -1913,7 +1914,7 @@ def _mailbox_row() -> str:
             f'<a href="{go}" style="color:var(--accent)">{verb}</a>.</span></div>')
 
 
-@blueprint.get("/voice/settings")
+@blueprint.get("/inbox/settings")
 def r_settings():
     """The third tab. It exists because the switch needs somewhere to live that is not a thread.
 
@@ -1926,10 +1927,10 @@ def r_settings():
     cur = _theme()
     def seg(value, label):
         on = " on" if cur == value else ""
-        return f'<a class="seg-a{on}" href="/voice/theme?to={value}">{label}</a>'
+        return f'<a class="seg-a{on}" href="/inbox/theme?to={value}">{label}</a>'
     switch = ('<div class="seg">'
               + seg("light", "Light") + seg("dark", "Dark")
-              + f'<a class="seg-a{"" if cur else " on"}" href="/voice/theme?to=system">System</a>'
+              + f'<a class="seg-a{"" if cur else " on"}" href="/inbox/theme?to=system">System</a>'
               + '</div>').replace("seg-a", "")
     body = (
       '<h1>Settings</h1>'
@@ -1946,7 +1947,7 @@ def r_settings():
       f'{switch}</div>'
       '<div class="setrow"><b>On your home screen</b>'
       '<span>Installed, this opens without a browser around it and can notify you. '
-      '<a href="/voice/install" style="color:var(--accent)">Show me how</a>.</span></div>'
+      '<a href="/inbox/install" style="color:var(--accent)">Show me how</a>.</span></div>'
       '<div class="setrow"><b>How this stays current</b>'
       '<span>The box checks for new messages on a schedule rather than holding a connection '
       'open. Pull down to check now.</span></div>'
@@ -1954,7 +1955,7 @@ def r_settings():
     return _shell(body), 200
 
 
-@blueprint.get("/voice/theme")
+@blueprint.get("/inbox/theme")
 def r_theme():
     """Set, or clear, the appearance cookie — then go back to settings.
 
@@ -1964,12 +1965,12 @@ def r_theme():
     that has no tokens.
     """
     to = (request.args.get("to") or "").strip().lower()
-    resp = redirect("/voice/settings", code=303)
+    resp = redirect("/inbox/settings", code=303)
     if to in ("light", "dark"):
         resp.set_cookie(THEME_COOKIE, to, max_age=365 * 86400, samesite="Lax",
-                        secure=request.is_secure, httponly=True, path="/voice")
+                        secure=request.is_secure, httponly=True, path="/inbox")
     else:
-        resp.delete_cookie(THEME_COOKIE, path="/voice")
+        resp.delete_cookie(THEME_COOKIE, path="/inbox")
     return resp
 
 
@@ -2015,7 +2016,7 @@ def _png(size: int) -> bytes:
             + chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b""))
 
 
-@blueprint.get("/voice/manifest.webmanifest")
+@blueprint.get("/inbox/manifest.webmanifest")
 def r_manifest():
     """WHAT MAKES IT INSTALLABLE AT ALL. `display: standalone` is not decoration: MDN's
     compatibility data says the `Notification` interface is undefined on iOS unless the page is a
@@ -2026,31 +2027,31 @@ def r_manifest():
     m = {
         "name": f"{dash.brand()} · Unified Inbox",
         "short_name": "Unified Inbox",
-        "start_url": "/voice/",
-        "scope": "/voice/",
+        "start_url": "/inbox/",
+        "scope": "/inbox/",
         "display": "standalone",
         "background_color": THEME,
         "theme_color": THEME,
         "icons": [
             # BOTH SIZES, because Chrome's installability criteria want a 192 and a 512, and
             # `maskable` so an Android launcher crops our own safe zone rather than a square.
-            {"src": "/voice/icon-192.png", "sizes": "192x192", "type": "image/png",
+            {"src": "/inbox/icon-192.png", "sizes": "192x192", "type": "image/png",
              "purpose": "any maskable"},
-            {"src": "/voice/icon-512.png", "sizes": "512x512", "type": "image/png",
+            {"src": "/inbox/icon-512.png", "sizes": "512x512", "type": "image/png",
              "purpose": "any maskable"},
         ],
     }
     return Response(json.dumps(m), mimetype="application/manifest+json")
 
 
-@blueprint.get("/voice/icon-192.png")
+@blueprint.get("/inbox/icon-192.png")
 def r_icon_192():
     from flask import Response
     return Response(_png(192), mimetype="image/png",
                     headers={"Cache-Control": "public, max-age=86400"})
 
 
-@blueprint.get("/voice/icon-512.png")
+@blueprint.get("/inbox/icon-512.png")
 def r_icon_512():
     from flask import Response
     return Response(_png(512), mimetype="image/png",
@@ -2076,22 +2077,22 @@ self.addEventListener('push', function (event) {
   var body = d.body || 'Something new came in.';
   event.waitUntil(self.registration.showNotification(title, {
     body: body,
-    icon: '/voice/icon-192.png',
-    badge: '/voice/icon-192.png',
-    data: { navigate: d.navigate || '/voice/inbox' }
+    icon: '/inbox/icon-192.png',
+    badge: '/inbox/icon-192.png',
+    data: { navigate: d.navigate || '/inbox/inbox' }
   }));
 });
 
 self.addEventListener('notificationclick', function (event) {
   event.notification.close();
-  var to = (event.notification.data && event.notification.data.navigate) || '/voice/inbox';
+  var to = (event.notification.data && event.notification.data.navigate) || '/inbox/inbox';
   // ONLY OUR OWN APP. The payload is authored by the box and encrypted to this subscription, so
   // this is defence in depth, not a fix — the same rule safe_next applies on the way in.
-  if (typeof to !== 'string' || to.indexOf('/voice/') !== 0) { to = '/voice/inbox'; }
+  if (typeof to !== 'string' || to.indexOf('/inbox/') !== 0) { to = '/inbox/inbox'; }
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     .then(function (list) {
       for (var i = 0; i < list.length; i++) {
-        if (list[i].url.indexOf('/voice/') !== -1 && 'focus' in list[i]) {
+        if (list[i].url.indexOf('/inbox/') !== -1 && 'focus' in list[i]) {
           list[i].navigate(to); return list[i].focus();
         }
       }
@@ -2101,15 +2102,41 @@ self.addEventListener('notificationclick', function (event) {
 """
 
 
-@blueprint.get("/voice/sw.js")
+@blueprint.get("/inbox/sw.js")
 def r_sw():
     """SCOPE IS THE TRAP. MDN: a worker cannot have a scope broader than its own location unless
-    the server sends `Service-Worker-Allowed`. Served at `/voice/sw.js` it controls `/voice/*` and
+    the server sends `Service-Worker-Allowed`. Served at `/inbox/sw.js` it controls `/inbox/*` and
     nothing else, which is exactly what we want — so no header is needed, but the registration
-    below still passes `{scope: '/voice/'}` explicitly, because the failure mode is silent: it
+    below still passes `{scope: '/inbox/'}` explicitly, because the failure mode is silent: it
     registers, reports success, and never intercepts a thing."""
     from flask import Response
     return Response(SW_JS, mimetype="application/javascript",
+                    headers={"Cache-Control": "no-cache"})
+
+
+# ── the tombstone at the OLD worker address ─────────────────────────────────────────────────────
+# /voice/* MOVED TO /inbox/* ON 2026-09-17. The owner: "No redirect, please. Full cut over", because
+# /voice is the AI receptionist machine's path — so every other /voice route is simply gone: a 404,
+# never a redirect. THIS ONE ADDRESS STAYS, briefly, for a reason no redirect could serve. A phone
+# that installed the app before the cut holds a worker registered at scope /voice/, and a worker can
+# never claim /inbox/ (the scope rule in r_sw above). On its next update check that phone fetches
+# THIS file, installs it, and it unregisters itself. Nothing else: no fetch handler, no cache, no
+# navigation — it must not answer a single request on a path that is no longer ours.
+# REMOVE IT, and its PUBLIC_PATHS entry, once the owner's installed phone has taken it (runbook
+# #1311 §5.3). Until then tests/test_voice_path_is_free.py holds it to exactly this.
+TOMBSTONE_SW_JS = """// The inbox moved to /inbox/. This worker removes the old one and does nothing else.
+self.addEventListener('install', function () { self.skipWaiting(); });
+self.addEventListener('activate', function (event) {
+  event.waitUntil(self.registration.unregister());
+});
+"""
+
+
+@blueprint.get("/voice/sw.js")
+def r_sw_tombstone():
+    """The old worker's address, serving only the old worker's removal. See TOMBSTONE_SW_JS."""
+    from flask import Response
+    return Response(TOMBSTONE_SW_JS, mimetype="application/javascript",
                     headers={"Cache-Control": "no-cache"})
 
 
@@ -2121,7 +2148,7 @@ def r_sw():
 # publish" rule to fit a beacon would be a bad trade at any price.
 # NOT `@blueprint.post`. tests/test_customer_voice.py scans this department for a CALL named
 # `post`, and a decorator is a call — the same two extra characters app.py:659 and :909 spend.
-@blueprint.route("/voice/drafts", methods=["GET", "POST"])
+@blueprint.route("/inbox/drafts", methods=["GET", "POST"])
 def r_drafts():
     """§2.6 — where the buyer connects the AI account that writes their drafts.
 
@@ -2146,7 +2173,7 @@ def r_drafts():
         # key is the whole of turning drafting off: the drafter skips with no key, and every
         # message still arrives and is still answerable by hand.
         box_secrets.clear(box_secrets.ANTHROPIC, user_id=whoami)
-        return redirect("/voice/settings")
+        return redirect("/inbox/settings")
     note = ""
     if request.method == "POST":
         try:
@@ -2154,7 +2181,7 @@ def r_drafts():
             # this screen, a future one, or a script. The screen's job is to show the sentence.
             box_secrets.put(box_secrets.ANTHROPIC,
                             str(request.form.get("key") or ""), user_id=whoami)
-            return redirect("/voice/settings")
+            return redirect("/inbox/settings")
         except box_secrets.SecretRejected as e:
             # Never a lecture and never an echo — the same discipline as the claim form. The
             # field comes back empty: a key is not something to re-display for correction.
@@ -2169,7 +2196,7 @@ def r_drafts():
       'target="_blank" rel="noopener" style="color:var(--accent)">How to get a key →</a></p>'
       '</div></div>'
       + note +
-      '<form class="compose" method="post" action="/voice/drafts">'
+      '<form class="compose" method="post" action="/inbox/drafts">'
       '<input type="password" name="key" autocomplete="off" spellcheck="false"'
       ' aria-label="Paste your key" placeholder="Paste your key" '
       'style="width:100%;font:inherit;font-size:16px;padding:12px 14px;'
@@ -2178,9 +2205,9 @@ def r_drafts():
       '</form>'
       '<p class="quiet" style="margin-top:12px">You can change or remove this key any day. '
       'Nothing about it reaches us.</p>'
-      '<p style="margin-top:14px"><a href="/voice/settings" style="color:var(--accent)">'
+      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--accent)">'
       '← Settings</a></p>')
-    return _shell(body, here="/voice/settings"), 200
+    return _shell(body, here="/inbox/settings"), 200
 
 
 # ── the mailbox ─────────────────────────────────────────────────────────────────────────────
@@ -2219,7 +2246,7 @@ def _mailbox_form(*, user: str = "", note: str = "", verb: str = "Start reading 
              'border:1px solid var(--line);border-radius:12px;'
              'background:var(--card);color:var(--ink)')
     return (note +
-            '<form class="compose" method="post" action="/voice/mailbox" '
+            '<form class="compose" method="post" action="/inbox/mailbox" '
             'style="display:flex;flex-direction:column;gap:10px;align-items:stretch">'
             f'<input type="email" name="user" value="{_esc(user)}" autocomplete="email" '
             'spellcheck="false" aria-label="The email address to read" '
@@ -2435,7 +2462,7 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None) -
             + (f'<div class="card">{steps}</div>' if steps else "")
             + (f'<p class="quiet">{_esc(e.get("note"))}</p>' if e.get("note") else "")
             + note
-            + (f'<form class="compose" method="post" action="/voice/setup" '
+            + (f'<form class="compose" method="post" action="/inbox/setup" '
                'style="display:flex;flex-direction:column;gap:2px;align-items:stretch">'
                f'<input type="hidden" name="step" value="{_esc(e.get("key"))}">'
                f'{fields}<p style="margin:12px 0 0">'
@@ -2445,7 +2472,7 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None) -
 
 # NOT `@blueprint.post`. tests/test_customer_voice.py scans this department for a CALL named
 # `post`, and a decorator is a call — the same two extra characters r_drafts spends.
-@blueprint.route("/voice/setup", methods=["GET", "POST"])
+@blueprint.route("/inbox/setup", methods=["GET", "POST"])
 def r_setup():
     """EVERY CREDENTIAL THE BUYER SUPPLIES, ON ONE SCREEN, IN THE OWNER'S ORDER.
 
@@ -2480,7 +2507,7 @@ def r_setup():
         typed = {k: str(v) for k, v in request.form.items() if k != "step"}
         try:
             _setup_save(which, request.form, user_id=whoami)
-            return redirect(f"/voice/setup#{which}")
+            return redirect(f"/inbox/setup#{which}")
         except _setup_rejections() as e:
             notes[which] = (f'<p class="quiet" style="color:var(--accent);margin-top:10px">'
                             f'{_esc(str(e))}</p>')
@@ -2494,7 +2521,7 @@ def r_setup():
         log.warning("voice.setup_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
         return _shell('<h1>Set-up</h1><div class="quiet">This box could not read its own set-up '
                       'list. Nothing you have already connected is affected.</div>',
-                      here="/voice/settings"), 200
+                      here="/inbox/settings"), 200
 
     done = sum(1 for e in steps if e.get("status") == "connected")
     # COUNTED, NOT WRITTEN. This read "Two things only you can do" while the list had two entries,
@@ -2511,14 +2538,14 @@ def r_setup():
             'of it whenever you like.</p>')
     body = head + "".join(_setup_step(i, e, note=notes.get(e.get("key"), ""), typed=typed)
                           for i, e in enumerate(steps, 1))
-    body += ('<p style="margin-top:22px"><a href="/voice/settings" '
+    body += ('<p style="margin-top:22px"><a href="/inbox/settings" '
              'style="color:var(--accent)">← Settings</a></p>')
-    return _shell(body, here="/voice/settings"), 200
+    return _shell(body, here="/inbox/settings"), 200
 
 
 # NOT `@blueprint.post`. tests/test_customer_voice.py scans this department for a CALL named
 # `post`, and a decorator is a call — the same two extra characters r_drafts spends.
-@blueprint.route("/voice/mailbox", methods=["GET", "POST"])
+@blueprint.route("/inbox/mailbox", methods=["GET", "POST"])
 def r_mailbox():
     """WHERE A BUYER CONNECTS THEIR INBOX, and until now there was nowhere.
 
@@ -2554,7 +2581,7 @@ def r_mailbox():
         box_secrets.clear(box_secrets.EMAIL, user_id=whoami)
         box_secrets.clear(box_secrets.EMAIL_STATUS, user_id=whoami)
         box_secrets.clear(box_secrets.EMAIL_DETAIL, user_id=whoami)
-        return redirect("/voice/mailbox")
+        return redirect("/inbox/mailbox")
 
     note, typed = "", ""
     if request.method == "POST":
@@ -2565,7 +2592,7 @@ def r_mailbox():
             box_secrets.put_email(host="imap.gmail.com", user=typed,
                                   password=str(request.form.get("password") or ""),
                                   user_id=whoami)
-            return redirect("/voice/mailbox?saved=1")
+            return redirect("/inbox/mailbox?saved=1")
         except box_secrets.SecretRejected as e:
             note = (f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>')
 
@@ -2581,7 +2608,7 @@ def r_mailbox():
                 + (f'<p class="quiet">Google said: {_esc(detail)}</p>' if detail else "")
                 + _mailbox_steps()
                 + _mailbox_form(user=who, note=note, verb="Use this password instead")
-                + '<p style="margin-top:14px"><a href="/voice/settings" '
+                + '<p style="margin-top:14px"><a href="/inbox/settings" '
                   'style="color:var(--accent)">← Settings</a></p>')
     elif status == "admin_disabled":
         body = ('<h1>Your administrator has switched this off.</h1>'
@@ -2590,7 +2617,7 @@ def r_mailbox():
                 'Admin console; until then Ownbox cannot read this inbox, and nothing else about '
                 'your box is affected.</p>'
                 + (f'<p class="quiet">Google said: {_esc(detail)}</p>' if detail else "")
-                + '<p style="margin-top:14px"><a href="/voice/settings" '
+                + '<p style="margin-top:14px"><a href="/inbox/settings" '
                   'style="color:var(--accent)">← Settings</a></p>')
     elif who:
         saved = request.args.get("saved")
@@ -2607,9 +2634,9 @@ def r_mailbox():
                 '<span>Make a new app password in Google and paste it here. The address stays '
                 'the same unless you change it too.</span></div></div>'
                 + _mailbox_form(user=who, note=note, verb="Save this password")
-                + '<p style="margin-top:16px"><a href="/voice/mailbox?off=1" '
+                + '<p style="margin-top:16px"><a href="/inbox/mailbox?off=1" '
                   'style="color:var(--accent)">Stop reading this inbox</a></p>'
-                '<p style="margin-top:14px"><a href="/voice/settings" '
+                '<p style="margin-top:14px"><a href="/inbox/settings" '
                 'style="color:var(--accent)">← Settings</a></p>')
     else:
         body = ('<h1>Connect your inbox.</h1>'
@@ -2620,9 +2647,9 @@ def r_mailbox():
                 'that you can revoke on its own, without changing anything else.</p>'
                 + _mailbox_steps()
                 + _mailbox_form(user=typed, note=note)
-                + '<p style="margin-top:14px"><a href="/voice/settings" '
+                + '<p style="margin-top:14px"><a href="/inbox/settings" '
                   'style="color:var(--accent)">← Settings</a></p>')
-    return _shell(body, here="/voice/settings"), 200
+    return _shell(body, here="/inbox/settings"), 200
 
 
 # ── B1: where a buyer connects the accounts the inbox reads from ────────────────────────────
@@ -2657,7 +2684,7 @@ def _connect_return(platform: str) -> str:
     for this flow, because a person who is signed into their own box should come back to their own
     box, not to a build page for an order that finished weeks ago."""
     root = str(request.host_url or "").rstrip("/")
-    return f"{root}/voice/connect?connected={platform}"
+    return f"{root}/inbox/connect?connected={platform}"
 
 
 def _resolve_profile(z, brand_name: str):
@@ -2684,7 +2711,7 @@ def _resolve_profile(z, brand_name: str):
     return None, found
 
 
-@blueprint.route("/voice/connect", methods=["GET", "POST"])
+@blueprint.route("/inbox/connect", methods=["GET", "POST"])
 def r_connect():
     """Connect a social account to this box — or say, in one sentence, why it did not work.
 
@@ -2706,19 +2733,19 @@ def r_connect():
         # Disconnect. The key AND the profile resolved with it — `clear_zernio` is one call for
         # exactly that reason: a profile id left behind would be handed to the NEXT key pasted in.
         box_secrets.clear_zernio(user_id=whoami)
-        return redirect("/voice/settings", code=303)
+        return redirect("/inbox/settings", code=303)
 
     note = ""
     if request.method == "POST":
         try:
             box_secrets.put_zernio(str(request.form.get("key") or ""), user_id=whoami)
-            return redirect("/voice/connect", code=303)
+            return redirect("/inbox/connect", code=303)
         except box_secrets.SecretRejected as e:
             # Never an echo of what they pasted. Same discipline as the AI key form.
             note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
 
     if not box_secrets.is_set(box_secrets.ZERNIO):
-        return _shell(_connect_key_form(note), here="/voice/settings"), 200
+        return _shell(_connect_key_form(note), here="/inbox/settings"), 200
 
     # ── connected: show what is on, and what can still be added ──────────────────────────────
     sp = _connect_space()
@@ -2730,14 +2757,14 @@ def r_connect():
     chosen = request.args.get("profile")
     if chosen:
         box_secrets.put_zernio_profile(chosen, user_id=whoami)
-        return redirect("/voice/connect", code=303)
+        return redirect("/inbox/connect", code=303)
 
     try:
         pid, choices = (sp.get("zernio_profile_id"), [])
         if not pid:
             pid, choices = _resolve_profile(z, brand)
         if choices:
-            return _shell(_connect_profile_chooser(choices), here="/voice/settings"), 200
+            return _shell(_connect_profile_chooser(choices), here="/inbox/settings"), 200
         sp = dict(sp, zernio_profile_id=pid)
         z = zernio.client(sp)
         live = z.accounts.discover()
@@ -2749,17 +2776,17 @@ def r_connect():
             return _shell(_connect_trouble(
                 "Your social account needs a payment method before it will connect any more "
                 "channels. Add one there, then come back — nothing here needs changing."),
-                here="/voice/settings"), 200
+                here="/inbox/settings"), 200
         log.warning("connect.discover_failed", extra={"err": detail[:200]})
         return _shell(_connect_trouble(
             "Ownbox could not reach your social account just now. Nothing is lost — try again "
-            "in a minute."), here="/voice/settings"), 200
+            "in a minute."), here="/inbox/settings"), 200
 
     just = request.args.get("connected") or ""
-    return _shell(_connect_page(live, just), here="/voice/settings"), 200
+    return _shell(_connect_page(live, just), here="/inbox/settings"), 200
 
 
-@blueprint.get("/voice/connect/<platform>")
+@blueprint.get("/inbox/connect/<platform>")
 def r_connect_start(platform: str):
     """Send the person to the vendor's consent screen for ONE platform.
 
@@ -2774,17 +2801,17 @@ def r_connect_start(platform: str):
     if platform not in {p for p, _ in _CONNECTABLE}:
         # An unknown platform is never passed through to the vendor. The allow-list is the
         # channels the poller reads; anything else would grant access nothing ever collects.
-        return redirect("/voice/connect", code=303)
+        return redirect("/inbox/connect", code=303)
     sp = _connect_space()
     if not sp.get("zernio_key") or not sp.get("zernio_profile_id"):
-        return redirect("/voice/connect", code=303)
+        return redirect("/inbox/connect", code=303)
     try:
         url = zernio.client(sp).connect.url(platform, redirect_url=_connect_return(platform))
     except zernio.ZernioError as e:
         log.warning("connect.url_failed", extra={"platform": platform, "err": str(e)[:200]})
         return _shell(_connect_trouble(
             "That channel would not start just now. Nothing is lost — try again in a minute."),
-            here="/voice/settings"), 200
+            here="/inbox/settings"), 200
     return redirect(url, code=303)
 
 
@@ -2807,7 +2834,7 @@ def _connect_key_form(note: str) -> str:
       'rel="noopener" style="color:var(--accent)">Where to find your key &rarr;</a></p>'
       '</div></div>'
       + note +
-      '<form class="compose" method="post" action="/voice/connect">'
+      '<form class="compose" method="post" action="/inbox/connect">'
       '<input type="password" name="key" autocomplete="off" spellcheck="false"'
       ' aria-label="Paste your key" placeholder="Paste your key" '
       'style="width:100%;font:inherit;font-size:16px;padding:12px 14px;'
@@ -2816,7 +2843,7 @@ def _connect_key_form(note: str) -> str:
       '</form>'
       '<p class="quiet" style="margin-top:12px">Checked with your provider before it is saved, '
       'so you find out here if it is wrong — not tomorrow, from an empty inbox.</p>'
-      '<p style="margin-top:14px"><a href="/voice/settings" style="color:var(--accent)">'
+      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--accent)">'
       '&larr; Settings</a></p>')
 
 
@@ -2824,7 +2851,7 @@ def _connect_profile_chooser(choices: list) -> str:
     """The rare state: their account already holds several folders, so they say which one."""
     rows = "".join(
         f'<p style="margin:10px 0 0"><a class="btn" '
-        f'href="/voice/connect?profile={_esc(c["id"])}">{_esc(c["name"] or "Untitled")}</a></p>'
+        f'href="/inbox/connect?profile={_esc(c["id"])}">{_esc(c["name"] or "Untitled")}</a></p>'
         for c in choices)
     return (
       '<h1>Which one is this business?</h1>'
@@ -2832,7 +2859,7 @@ def _connect_profile_chooser(choices: list) -> str:
       '<span>Your social account keeps more than one workspace. Pick the one this box is for — '
       'Ownbox will only ever read the channels inside it.</span>'
       f'{rows}</div></div>'
-      '<p style="margin-top:14px"><a href="/voice/settings" style="color:var(--accent)">'
+      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--accent)">'
       '&larr; Settings</a></p>')
 
 
@@ -2860,16 +2887,16 @@ def _connect_page(live: dict, just: str) -> str:
             rows.append(f'<div class="setrow"><b>{_esc(label)}</b>'
                         '<span>Not connected yet.</span>'
                         '<p style="margin:10px 0 0"><a class="btn" '
-                        f'href="/voice/connect/{_esc(vendor_token)}">Connect {_esc(label)}</a>'
+                        f'href="/inbox/connect/{_esc(vendor_token)}">Connect {_esc(label)}</a>'
                         '</p></div>')
     return (
       '<h1>Your channels.</h1>'
       + done +
       '<div class="card">' + "".join(rows) + '</div>'
       '<p class="quiet" style="margin-top:12px">Connected with your own social account. '
-      '<a href="/voice/connect?off=1" style="color:var(--accent)">Disconnect it</a> and Ownbox '
+      '<a href="/inbox/connect?off=1" style="color:var(--accent)">Disconnect it</a> and Ownbox '
       'stops reading immediately — nothing you have already received is deleted.</p>'
-      '<p style="margin-top:14px"><a href="/voice/settings" style="color:var(--accent)">'
+      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--accent)">'
       '&larr; Settings</a></p>')
 
 
@@ -2877,12 +2904,12 @@ def _connect_trouble(sentence: str) -> str:
     """One sentence a person can act on, and a way back. Never a stack trace, never a code."""
     return ('<h1>Your channels.</h1>'
             f'<div class="card"><div class="setrow"><span>{_esc(sentence)}</span></div></div>'
-            '<p style="margin-top:14px"><a href="/voice/connect" style="color:var(--accent)">'
-            'Try again</a> · <a href="/voice/settings" style="color:var(--accent)">Settings</a>'
+            '<p style="margin-top:14px"><a href="/inbox/connect" style="color:var(--accent)">'
+            'Try again</a> · <a href="/inbox/settings" style="color:var(--accent)">Settings</a>'
             '</p>')
 
 
-@blueprint.route("/voice/installed", methods=["POST"])
+@blueprint.route("/inbox/installed", methods=["POST"])
 def r_installed():
     """A device reported that it is running installed.
 
@@ -2901,7 +2928,7 @@ def r_installed():
     return ("", 204)
 
 
-@blueprint.get("/voice/install")
+@blueprint.get("/inbox/install")
 def r_install():
     """TEACH THE INSTALL, ON THE PHONE, IN THE FLOW — not in a support article.
 
@@ -2955,5 +2982,5 @@ def r_install():
         + '<div class="card"><div class="row"><span class="t">Already done it? Open the app from '
         'your home screen rather than this tab, and you are set. Nothing else to switch on.'
         '</span></div></div>'
-        '<div class="foot"><a href="/voice/">← Today</a></div>')
+        '<div class="foot"><a href="/inbox/">← Today</a></div>')
     return _shell(body), 200

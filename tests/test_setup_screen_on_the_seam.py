@@ -107,7 +107,7 @@ def test_a_step_the_screen_has_never_heard_of_renders_in_full():
     _clear_seam()
     _register(state_fn=lambda: {"status": "not_connected", "detail": ""})
     app, c = _c()
-    html_ = c.get("/voice/setup").get_data(as_text=True)
+    html_ = c.get("/inbox/setup").get_data(as_text=True)
     words = _text(html_)
     ok("its title is on the screen", "Connect your gutter pigeons" in words)
     ok("...and the reason a buyer is being asked", "So the birds know which roof is yours." in words)
@@ -171,7 +171,7 @@ def test_a_machine_that_cannot_answer_reads_unavailable_never_not_connected():
        str(entry["status"]))
     ok("...with a sentence for the buyer", len(entry["detail"]) > 20, entry["detail"])
     app, c = _c()
-    words = _text(c.get("/voice/setup").get_data(as_text=True))
+    words = _text(c.get("/inbox/setup").get_data(as_text=True))
     # Matched case-insensitively ON PURPOSE: the screen prints core's SENTENCE here rather than
     # the label, because printing both said the same thing twice (see the stutter test below), and
     # in the sentence the phrase is mid-clause — "This could not be checked just now."
@@ -208,7 +208,7 @@ def test_unavailable_neither_stutters_nor_offers_to_replace_what_it_could_not_fi
 
     _register(state_fn=_explodes)
     app, c = _c()
-    html_ = c.get("/voice/setup").get_data(as_text=True)
+    html_ = c.get("/inbox/setup").get_data(as_text=True)
     words = _text(html_)
     low = words.lower()
     ok("the page still says the box could not check it", "could not be checked just now" in low)
@@ -226,7 +226,7 @@ def test_a_status_outside_the_closed_set_is_unavailable_not_a_blank_row():
     _clear_seam()
     _register(state_fn=lambda: {"status": "probably", "detail": "hmm"})
     app, c = _c()
-    words = _text(c.get("/voice/setup").get_data(as_text=True))
+    words = _text(c.get("/inbox/setup").get_data(as_text=True))
     ok("an unknown status renders as unavailable",
        "could not be checked just now" in words.lower(), words[:200])
     ok("...and the machine's own word never reaches the page", "probably" not in words.lower())
@@ -238,7 +238,7 @@ def test_saving_goes_through_core_and_the_machine_gets_only_what_it_declared():
     _clear_seam()
     saved = _register(state_fn=lambda: {"status": "not_connected", "detail": ""})
     app, c = _c()
-    r = c.post("/voice/setup", data={"step": KEY, "loft": "north tower", "whistle": "coo-coo",
+    r = c.post("/inbox/setup", data={"step": KEY, "loft": "north tower", "whistle": "coo-coo",
                                      "admin": "1", "user_id": "usr_someone_else"})
     ok("a good save redirects rather than re-rendering", r.status_code in (302, 303),
        str(r.status_code))
@@ -260,7 +260,7 @@ def test_a_rejection_is_shown_against_its_own_step_and_the_password_is_not_put_b
 
     _register(state_fn=lambda: {"status": "not_connected", "detail": ""}, save_fn=_refuses)
     app, c = _c()
-    r = c.post("/voice/setup", data={"step": KEY, "loft": "north tower", "whistle": "coo"})
+    r = c.post("/inbox/setup", data={"step": KEY, "loft": "north tower", "whistle": "coo"})
     html_ = r.get_data(as_text=True)
     words = _text(html_)
     ok("a refusal re-renders the page rather than redirecting", r.status_code == 200,
@@ -278,7 +278,7 @@ def test_the_link_out_stays_dead_until_the_step_is_past_not_connected():
               link={"label": "Choose which roofs", "url": "https://example.invalid/roofs",
                     "disabled_because": "Tell us the loft first.", "new_tab": True})
     app, c = _c()
-    html_ = c.get("/voice/setup").get_data(as_text=True)
+    html_ = c.get("/inbox/setup").get_data(as_text=True)
     ok("the button is drawn", "Choose which roofs" in _text(html_))
     ok("...and plainly dead", 'aria-disabled="true"' in html_)
     ok("...saying why it is waiting", "Tell us the loft first." in _text(html_))
@@ -289,7 +289,7 @@ def test_the_link_out_stays_dead_until_the_step_is_past_not_connected():
               link={"label": "Choose which roofs", "url": "https://example.invalid/roofs",
                     "new_tab": True})
     app, c = _c()
-    html_ = c.get("/voice/setup").get_data(as_text=True)
+    html_ = c.get("/inbox/setup").get_data(as_text=True)
     ok("once the step is past not_connected the button is live",
        'href="https://example.invalid/roofs"' in html_)
     ok("...and a new tab we did not write carries rel=noopener", "noopener" in html_)
@@ -299,7 +299,7 @@ def test_who_is_shown_so_he_can_see_WHICH_account_is_connected():
     _clear_seam()
     _register(state_fn=lambda: {"status": "connected", "who": "north tower", "detail": ""})
     app, c = _c()
-    words = _text(c.get("/voice/setup").get_data(as_text=True))
+    words = _text(c.get("/inbox/setup").get_data(as_text=True))
     ok("connected names the account", "Connected" in words and "north tower" in words, words[:200])
 
 
@@ -310,7 +310,7 @@ def test_with_an_EMPTY_seam_the_old_contract_still_renders_in_full():
     _clear_seam()
     ok("the seam really is empty", onboarding.steps() == [], str(onboarding.steps()))
     app, c = _c()
-    words = _text(c.get("/voice/setup").get_data(as_text=True))
+    words = _text(c.get("/inbox/setup").get_data(as_text=True))
     titles = [s["title"] for s in bs.SETUP_STEPS]
     ok("every step of the old contract is still on the screen",
        all(t in words for t in titles), str(titles))
@@ -339,7 +339,7 @@ def test_a_seam_step_never_renders_twice():
     _clear_seam()
     _register(state_fn=lambda: {"status": "not_connected", "detail": ""})
     app, c = _c()
-    words = _text(c.get("/voice/setup").get_data(as_text=True))
+    words = _text(c.get("/inbox/setup").get_data(as_text=True))
     ok("the registered step renders", words.count("Connect your gutter pigeons") == 1,
        str(words.count("Connect your gutter pigeons")))
     dupes = [t for t in [s["title"] for s in bs.SETUP_STEPS] if words.count(t) > 1]

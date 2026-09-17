@@ -9,7 +9,7 @@ TWO DEFECTS, BOTH FOUND BY RENDERING THE PAGE AND READING IT.
    came for, and it was the first thing he read after paying.
 
 2. THE ONE INSTRUCTION ON THAT SCREEN WAS NOT A LINK. `report()` writes "3 conversations are
-   waiting on your reply" into `needs_you` WITH `href: /voice/inbox`, and `_rows()` rendered `text`
+   waiting on your reply" into `needs_you` WITH `href: /inbox/inbox`, and `_rows()` rendered `text`
    and `value` only — so the row a person most needs to act on was the row he could not tap.
 
 WHAT THIS FILE HOLDS. That a first run leads with the set-up and promises no poll that will never
@@ -68,7 +68,7 @@ _NO_RAILS = {"headline": {"value": 0, "label": "rails set up"},
                         "state": "connect"}]}
 
 
-def _with(*, listening: bool, report, path: str = "/voice/"):
+def _with(*, listening: bool, report, path: str = "/inbox/"):
     """Render Today on a box we have fully described, and hand back (app, html)."""
     from core import box_secrets, spaces
     import marketing.customer_voice.report as rep
@@ -149,10 +149,10 @@ def test_a_listening_box_gets_its_report_untouched():
 def test_the_row_he_must_act_on_is_a_link():
     """`needs_you` carries an href and it was being dropped. This is the whole point of the row."""
     r = dict(_NO_RAILS, needs_you=[{"text": "3 conversations are waiting on your reply",
-                                    "href": "/voice/inbox"}])
+                                    "href": "/inbox/inbox"}])
     app, body = _with(listening=True, report=r)
     ok("the waiting row is an anchor, not a div",
-       '<a class="row go" href="/voice/inbox">' in body,
+       '<a class="row go" href="/inbox/inbox">' in body,
        re.findall(r'<(?:a|div) class="row[^"]*"[^>]*>', body)[:3])
     ok("...and it still reads exactly as the report wrote it",
        "3 conversations are waiting on your reply" in _text(body))
@@ -162,9 +162,9 @@ def test_an_href_this_box_does_not_serve_is_not_a_link():
     """THE REPORT IS A DIFFERENT MODULE and has no idea which pages this box serves — the same
     per-box fact `core.dash.landing()` exists for. An unserved path degrades to the plain row it
     was before, never to a 404 handed to somebody in their first five minutes."""
-    r = dict(_NO_RAILS, needs_you=[{"text": "something happened", "href": "/voice/not-a-page"}])
+    r = dict(_NO_RAILS, needs_you=[{"text": "something happened", "href": "/inbox/not-a-page"}])
     app, body = _with(listening=True, report=r)
-    ok("no anchor is drawn for a route this box lacks", "/voice/not-a-page" not in body)
+    ok("no anchor is drawn for a route this box lacks", "/inbox/not-a-page" not in body)
     ok("...and the row itself is still shown", "something happened" in _text(body))
     ok("...as a plain row", '<div class="row">' in body)
 

@@ -80,7 +80,7 @@ def _thread(zcid, *, platform="instagram", hours=2, who="Dana Whitfield", accoun
 
 def _page(zcid):
     app, c = _c()
-    return c.get(f"/voice/inbox/{zcid}").get_data(as_text=True)
+    return c.get(f"/inbox/inbox/{zcid}").get_data(as_text=True)
 
 
 def test_a_shut_window_still_renders_a_working_reply_box():

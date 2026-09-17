@@ -138,10 +138,10 @@ def test_the_screen_exists_and_is_shut_to_a_stranger():
     """A mailbox password is the most dangerous thing this app can be asked to hold."""
     from core.dispatch import app
     routes = {str(r) for r in app.url_map.iter_rules()}
-    ok("the box serves somewhere to connect an inbox", "/voice/mailbox" in routes)
+    ok("the box serves somewhere to connect an inbox", "/inbox/mailbox" in routes)
     anon = app.test_client()
     for verb in ("get", "post"):
-        r = getattr(anon, verb)("/voice/mailbox")
+        r = getattr(anon, verb)("/inbox/mailbox")
         ok(f"an anonymous {verb.upper()} is refused",
            r.status_code in (302, 303) and "/dash/login" in (r.headers.get("Location") or ""),
            f"{r.status_code} {r.headers.get('Location')}")
@@ -153,7 +153,7 @@ def test_day_one_tells_a_stuck_person_where_to_look():
     is on, so a buyer sent looking for it first finds nothing and concludes we are wrong."""
     _reset()
     app, c = _c()
-    body = c.get("/voice/mailbox").get_data(as_text=True)
+    body = c.get("/inbox/mailbox").get_data(as_text=True)
     words = _text(body)
     ok("it says what the box will do with the mailbox", "reads the mail your customers send" in words)
     ok("...and what it will never do",
@@ -175,7 +175,7 @@ def test_the_mistake_people_actually_make_is_refused_in_words():
     thing they believed they had given us."""
     _reset()
     app, c = _c()
-    r = c.post("/voice/mailbox", data={"user": "owner@acme.com", "password": "hunter2hunter2hunter2"})
+    r = c.post("/inbox/mailbox", data={"user": "owner@acme.com", "password": "hunter2hunter2hunter2"})
     ok("it is not stored", r.status_code == 200 and not bs.email_credential(), str(r.status_code))
     body = r.get_data(as_text=True)
     ok("...and the screen says which thing they pasted", "not an app password" in _text(body))
@@ -188,7 +188,7 @@ def test_the_mistake_people_actually_make_is_refused_in_words():
 def test_a_missing_address_is_its_own_sentence():
     _reset()
     app, c = _c()
-    body = c.post("/voice/mailbox", data={"user": "", "password": FLAT}).get_data(as_text=True)
+    body = c.post("/inbox/mailbox", data={"user": "", "password": FLAT}).get_data(as_text=True)
     ok("it says the address is what is missing",
        "full email address" in _text(body), _text(body)[:160])
     ok("...and not the password sentence", "not an app password" not in _text(body))
@@ -200,7 +200,7 @@ def test_saving_it_works_and_saying_connected_would_be_a_lie():
     password was pasted would be wrong for every typo."""
     _reset()
     app, c = _c()
-    r = c.post("/voice/mailbox", data={"user": "owner@acme.com", "password": GOOD})
+    r = c.post("/inbox/mailbox", data={"user": "owner@acme.com", "password": GOOD})
     ok("a good credential redirects rather than re-posting on refresh",
        r.status_code in (302, 303), str(r.status_code))
     ok("...and it is stored", bs.email_credential().get("user") == "owner@acme.com")
@@ -224,7 +224,7 @@ def test_google_refusing_it_later_is_the_normal_way_this_breaks():
     bs.put_email(host="imap.gmail.com", user="owner@acme.com", password=GOOD)
     bs.note_email_status("needs_reauth", "AUTHENTICATIONFAILED Invalid credentials")
     app, c = _c()
-    words = _text(c.get("/voice/mailbox").get_data(as_text=True))
+    words = _text(c.get("/inbox/mailbox").get_data(as_text=True))
     ok("it names the mailbox that is refusing", "owner@acme.com" in words)
     ok("...and says WHY it usually happens", "account password changes" in words)
     ok("...and quotes what Google actually said", "AUTHENTICATIONFAILED" in words)
@@ -239,7 +239,7 @@ def test_an_administrator_switching_it_off_offers_no_button_to_press():
     bs.put_email(host="imap.gmail.com", user="owner@acme.com", password=GOOD)
     bs.note_email_status("admin_disabled", "Your administrator has disabled this feature")
     app, c = _c()
-    body = c.get("/voice/mailbox").get_data(as_text=True)
+    body = c.get("/inbox/mailbox").get_data(as_text=True)
     words = _text(body)
     ok("it says who can fix it", "administrator" in words and "Admin console" in words)
     ok("...and offers no field that cannot succeed", "<input" not in body, body.count("<input"))
@@ -251,7 +251,7 @@ def test_stopping_takes_the_reason_with_the_credential():
     bs.put_email(host="imap.gmail.com", user="owner@acme.com", password=GOOD)
     bs.note_email_status("needs_reauth", "AUTHENTICATIONFAILED Invalid credentials")
     app, c = _c()
-    r = c.get("/voice/mailbox?off=1")
+    r = c.get("/inbox/mailbox?off=1")
     ok("it redirects rather than answering in place", r.status_code in (302, 303))
     ok("the credential is gone", not bs.email_credential())
     st = bs.email_state()
@@ -322,13 +322,13 @@ def test_the_connect_button_now_reaches_somewhere_that_can_act():
         rep.report = lambda day: {"headline": {}, "needs_you": [], "figures": [],
                                   "happened": [], "watch": []}
         app, c = _c()
-        body = c.get("/voice/").get_data(as_text=True)
+        body = c.get("/inbox/").get_data(as_text=True)
         routes = {str(r) for r in app.url_map.iter_rules()}
         targets = re.findall(r'class="btn" href="([^"?#]+)', body)
         ok("Today offers a button", bool(targets), body[:200])
         ok("...pointing at a route this box serves", all(t in routes for t in targets), str(targets))
         ok("...and it is not the page that cannot connect anything",
-           targets != ["/voice/settings"], str(targets))
+           targets != ["/inbox/settings"], str(targets))
     finally:
         spaces.all_spaces, rep.report = keep
 
@@ -351,19 +351,19 @@ def test_settings_can_still_reach_it_after_it_is_set_up():
             bs.put_email(host="imap.gmail.com", user="owner@acme.com", password=GOOD)
             if state_ != "connected":
                 bs.note_email_status(state_, "AUTHENTICATIONFAILED Invalid credentials")
-        body = c.get("/voice/settings").get_data(as_text=True)
+        body = c.get("/inbox/settings").get_data(as_text=True)
         ok(f"Settings reaches the mailbox screen when {why}",
-           "/voice/mailbox" in body, re.findall(r'href="(/voice/[^"]*)"', body))
+           "/inbox/mailbox" in body, re.findall(r'href="(/inbox/[^"]*)"', body))
         ok(f"...and the password is not on Settings when {why}",
            FLAT not in body and GOOD not in body)
 
     # AND IT SAYS WHICH STATE, because "is it still reading my mail" is what the row is for.
     _reset()
     bs.put_email(host="imap.gmail.com", user="owner@acme.com", password=GOOD)
-    words = _text(c.get("/voice/settings").get_data(as_text=True))
+    words = _text(c.get("/inbox/settings").get_data(as_text=True))
     ok("a connected box names the mailbox on Settings", "owner@acme.com" in words)
     bs.note_email_status("needs_reauth", "AUTHENTICATIONFAILED Invalid credentials")
-    words = _text(c.get("/voice/settings").get_data(as_text=True))
+    words = _text(c.get("/inbox/settings").get_data(as_text=True))
     ok("...and a refused one says nothing is arriving, rather than still reading 'connected'",
        "refusing the app password" in words and "nothing from this inbox is arriving" in words,
        words[:200])
@@ -378,7 +378,7 @@ def test_the_row_is_absent_on_a_box_that_does_not_serve_the_screen():
     ok("the app has a mailbox row to draw", callable(row), str(row))
     if not callable(row):
         return
-    with flask_app.test_request_context("/voice/settings"):
+    with flask_app.test_request_context("/inbox/settings"):
         real = voice._live
         try:
             voice._live = lambda *paths: ""      # a box serving none of them
@@ -406,14 +406,14 @@ def test_the_button_says_what_the_screen_it_reaches_actually_offers():
     # THE TABLE IS WRITTEN OUT HERE ON PURPOSE, not read from the app. A test that asks the
     # helper what it says and then checks it said that proves nothing. So a new destination is a
     # deliberate line in this file — which is how the set-up screen's arrival was caught.
-    pairs = {"/voice/setup": "Set up your box",
-             "/voice/connect": "Connect a channel",
-             "/voice/mailbox": "Connect your inbox"}
+    pairs = {"/inbox/setup": "Set up your box",
+             "/inbox/connect": "Connect a channel",
+             "/inbox/mailbox": "Connect your inbox"}
     for go, said in pairs.items():
         ok(f"{go} is offered as {said!r}", verb(go) == said, verb(go))
     ok("...and no two destinations share a label", len(set(pairs.values())) == len(pairs))
     ok("an unforeseen destination still gets an honest verb, never a channel promise",
-       "channel" not in verb("/voice/settings").lower(), verb("/voice/settings"))
+       "channel" not in verb("/inbox/settings").lower(), verb("/inbox/settings"))
 
     # AND ON THE PAGE, not just in the helper: the href and the words must travel together.
     _reset()
@@ -427,7 +427,7 @@ def test_the_button_says_what_the_screen_it_reaches_actually_offers():
                                   "happened": [], "watch": []}
         store.list_conversations = lambda space, **kw: []
         app, c = _c()
-        for path in ("/voice/", "/voice/inbox"):
+        for path in ("/inbox/", "/inbox/inbox"):
             got = re.findall(r'<a class="btn" href="([^"]+)">([^<]+)<',
                              c.get(path).get_data(as_text=True))
             ok(f"{path} offers one button", len(got) == 1, str(got))

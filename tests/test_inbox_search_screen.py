@@ -132,12 +132,12 @@ def _names(html: str) -> list:
 
 def test_the_buyer_can_search_at_all():
     c = _seeded()
-    plain = c.get("/voice/inbox").get_data(as_text=True)
+    plain = c.get("/inbox/inbox").get_data(as_text=True)
     ok("there is a search box on the inbox", 'name="q"' in plain and 'role="search"' in plain)
     ok("...and it is a plain GET form, so it works before any script runs",
-       'method="get"' in plain and 'action="/voice/inbox"' in plain)
+       'method="get"' in plain and 'action="/inbox/inbox"' in plain)
     ok("...and nothing claims a search when none was made", 'class="found"' not in plain)
-    hit = c.get("/voice/inbox?q=boiler").get_data(as_text=True)
+    hit = c.get("/inbox/inbox?q=boiler").get_data(as_text=True)
     ok("...and the field carries back what he typed", 'value="boiler"' in hit)
 
 
@@ -145,15 +145,15 @@ def test_it_searches_what_people_wrote_and_not_only_their_names():
     """THE HEADLINE CAPABILITY. Matching `participant` alone answers "who" and never "what", and
     "what did they say about the leak" is the question somebody actually has."""
     c = _seeded()
-    leak = _names(c.get("/voice/inbox?q=leak").get_data(as_text=True))
+    leak = _names(c.get("/inbox/inbox?q=leak").get_data(as_text=True))
     ok("a word nobody's NAME contains still finds them",
        set(leak) == {"Sofia Marchetti", "Len Okafor", "Marcus Cole"}, str(leak))
     ok("...including a message WE sent on the thread",
        "Len Okafor" in leak, "'is that a leak?' is an outbound message")
-    boiler = _names(c.get("/voice/inbox?q=boiler").get_data(as_text=True))
+    boiler = _names(c.get("/inbox/inbox?q=boiler").get_data(as_text=True))
     ok("a second word finds a different set", set(boiler) == {"Dana Whitfield", "Len Okafor"},
        str(boiler))
-    name = _names(c.get("/voice/inbox?q=Whitmore").get_data(as_text=True))
+    name = _names(c.get("/inbox/inbox?q=Whitmore").get_data(as_text=True))
     ok("...and a name still works", name == ["Whitmore & Sons"], str(name))
 
 
@@ -162,19 +162,19 @@ def test_likes_own_wildcards_are_asked_for_literally():
     sentence, and a screen that answered `%` with the entire inbox would be both wrong and the
     shape of a query-injection: the one character that turns a filter into no filter."""
     c = _seeded()
-    pct = _names(c.get("/voice/inbox?q=%25").get_data(as_text=True))
+    pct = _names(c.get("/inbox/inbox?q=%25").get_data(as_text=True))
     ok("a percent sign asks for a percent sign", pct == ["Ola Berg"], str(pct))
     ok("...and NOT for everything", len(pct) < len(SEED), f"{len(pct)} rows came back")
-    und = _names(c.get("/voice/inbox?q=AB_99").get_data(as_text=True))
+    und = _names(c.get("/inbox/inbox?q=AB_99").get_data(as_text=True))
     ok("an underscore is a character too", und == ["Reed Ashby"], str(und))
     # AND IT IS NOT VACUOUS: the underscore query must fail when the underscore is a wildcard.
-    miss = _names(c.get("/voice/inbox?q=AB_X9").get_data(as_text=True))
+    miss = _names(c.get("/inbox/inbox?q=AB_X9").get_data(as_text=True))
     ok("...proven by a query that only matches if _ were a wildcard", miss == [], str(miss))
 
 
 def test_a_search_and_a_channel_narrow_each_other():
     c = _seeded()
-    both = c.get("/voice/inbox?q=leak&channel=instagram").get_data(as_text=True)
+    both = c.get("/inbox/inbox?q=leak&channel=instagram").get_data(as_text=True)
     ok("a channel narrows a search", set(_names(both)) == {"Sofia Marchetti", "Marcus Cole"},
        str(_names(both)))
     ok("...and the field keeps the channel so the next search stays narrowed",
@@ -200,9 +200,9 @@ def test_a_count_for_the_whole_inbox_is_never_shown_beside_a_handful_of_matches(
     it is simply a wrong number on the screen, and scoping it needs a store this screen does not
     have — so the count comes off rather than being answered incorrectly."""
     c = _seeded()
-    plain = c.get("/voice/inbox").get_data(as_text=True)
+    plain = c.get("/inbox/inbox").get_data(as_text=True)
     ok("the chips count when he is NOT searching", '<span class="n">' in plain)
-    hit = c.get("/voice/inbox?q=leak").get_data(as_text=True)
+    hit = c.get("/inbox/inbox?q=leak").get_data(as_text=True)
     ok("...and drop the number the moment he is", '<span class="n">' not in hit)
     ok("...while still offering the channels themselves", "channel=instagram" in hit)
 
@@ -212,7 +212,7 @@ def test_the_screen_never_calls_a_page_size_a_total():
     size, and the Today screen refuses exactly this conflation by name — "0" and "nothing to
     report" are different claims."""
     c = _seeded()
-    full = c.get(f"/voice/inbox?q={_FILLER_WORD}").get_data(as_text=True)
+    full = c.get(f"/inbox/inbox?q={_FILLER_WORD}").get_data(as_text=True)
     # A RANGE, NOT A TOTAL. This used to read "the 50 most recent", which was true and a dead
     # end; with a next page the honest sentence says exactly what is on the screen and implies
     # nothing about what is past it. The property under both spellings is the same one: the
@@ -221,9 +221,9 @@ def test_the_screen_never_calls_a_page_size_a_total():
        "it claimed a total it did not count")
     ok("...and does not state a bare number", "55 conversations" not in full)
     ok("...and offers the next page", "Older" in full)
-    small = c.get("/voice/inbox?q=boiler").get_data(as_text=True)
+    small = c.get("/inbox/inbox?q=boiler").get_data(as_text=True)
     ok("a short result states the real count", "2 conversations matching" in small)
-    one = c.get("/voice/inbox?q=Whitmore").get_data(as_text=True)
+    one = c.get("/inbox/inbox?q=Whitmore").get_data(as_text=True)
     ok("...and one is singular, because a product that says '1 conversations' reads as unfinished",
        "1 conversation matching" in one and "1 conversations" not in one)
 
@@ -233,7 +233,7 @@ def test_three_different_empties_never_read_as_each_other():
     identical and mean opposite things. Showing the first-week welcome to a person with sixty
     conversations who mistyped a word is the worst reading of the three."""
     c = _seeded()
-    miss = c.get("/voice/inbox?q=quetzalcoatl").get_data(as_text=True)
+    miss = c.get("/inbox/inbox?q=quetzalcoatl").get_data(as_text=True)
     ok("a search with no match says so", "Nothing matches" in miss)
     ok("...and never says the box is empty", "No conversations yet" not in miss)
     ok("...and says what it searched, because he may think it only reads names",
@@ -241,7 +241,7 @@ def test_three_different_empties_never_read_as_each_other():
     ok("...and offers the way out", "Show everything" in miss)
     ok("...and keeps the box so he can edit the word rather than retype it",
        'value="quetzalcoatl"' in miss)
-    quiet = c.get("/voice/inbox?channel=whatsapp").get_data(as_text=True)
+    quiet = c.get("/inbox/inbox?channel=whatsapp").get_data(as_text=True)
     ok("an empty CHANNEL says that instead", "Nothing on WhatsApp yet" in quiet)
     ok("...and does not claim a search happened", "Nothing matches" not in quiet)
 
@@ -255,7 +255,7 @@ def test_one_clients_search_is_never_another_clients():
     from core import spaces
     other = store.search_conversations("tenant-b", "leaking")
     ok("the other Space really does hold a matching row", len(other) == 1, str(len(other)))
-    mine = c.get("/voice/inbox?q=leaking").get_data(as_text=True)
+    mine = c.get("/inbox/inbox?q=leaking").get_data(as_text=True)
     ok("...and this screen never returns it",
        "Someone Elses Customer" not in mine and "zc-other" not in mine)
     ok("...while still finding its own", "Sofia Marchetti" in mine)
@@ -275,10 +275,10 @@ def test_an_empty_query_is_not_a_search():
     """A blank box is a person who has not asked yet. Answering it with "0 conversations
     matching" would make the screen flicker between two meanings of empty."""
     c = _seeded()
-    blank = c.get("/voice/inbox?q=").get_data(as_text=True)
+    blank = c.get("/inbox/inbox?q=").get_data(as_text=True)
     ok("a blank query lists the inbox", "Dana Whitfield" in blank)
     ok("...and reports no search", 'class="found"' not in blank)
-    spaces_only = c.get("/voice/inbox?q=%20%20").get_data(as_text=True)
+    spaces_only = c.get("/inbox/inbox?q=%20%20").get_data(as_text=True)
     ok("...and so does a query of nothing but spaces", 'class="found"' not in spaces_only)
 
 

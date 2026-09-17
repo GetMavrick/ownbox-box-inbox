@@ -140,7 +140,7 @@ def test_every_row_carries_the_tag_its_state_earns():
     logo and on the day `<= 1` called an empty conversation New. The screen is the artifact.
     """
     c = _seeded()
-    seen = _rows(c.get("/voice/inbox").get_data(as_text=True))
+    seen = _rows(c.get("/inbox/inbox").get_data(as_text=True))
     ok("every seeded conversation is on the screen", len(seen) == len(SEED),
        f"{len(seen)} rows rendered of {len(SEED)}")
     for _zcid, who, _p, _h, _ad, _a, _n, _o, want in SEED:
@@ -153,7 +153,7 @@ def test_a_conversation_with_no_messages_is_not_new():
     heard a word on announced itself as New, directly beside a tag saying nothing had arrived.
     New means one message came in and nobody has answered it — not the empty state in a badge."""
     c = _seeded()
-    seen = _rows(c.get("/voice/inbox").get_data(as_text=True))
+    seen = _rows(c.get("/inbox/inbox").get_data(as_text=True))
     quiet = seen["Whitmore Plumb"][0]
     ok("an empty conversation is not New", "New" not in quiet, str(quiet))
     ok("...it says what is actually true of it", "No inbound yet" in quiet, str(quiet))
@@ -165,10 +165,10 @@ def test_the_menu_offers_reply_on_exactly_the_rows_that_can_be_replied_to():
     thread with nowhere to type is the same broken promise as a greyed-out button, just further
     away. Checked on every seeded row in both directions, so neither side can drift alone."""
     c = _seeded()
-    seen = _rows(c.get("/voice/inbox").get_data(as_text=True))
+    seen = _rows(c.get("/inbox/inbox").get_data(as_text=True))
     for zcid, who, _p, _h, _ad, _a, _n, _o, _t in SEED:
         offered = "Reply" in seen[who][1]
-        thread = c.get(f"/voice/inbox/{zcid}").get_data(as_text=True)
+        thread = c.get(f"/inbox/inbox/{zcid}").get_data(as_text=True)
         has_box = 'id="reply"' in thread
         ok(f"{who}: menu offers Reply ({offered}) iff the thread has a box ({has_box})",
            offered == has_box)
@@ -185,19 +185,19 @@ def test_a_channel_with_no_written_policy_gets_no_reply_box():
     oversight. Found by rendering a seeded box on `email`, which has no rule written.
     """
     c = _seeded()
-    t = c.get("/voice/inbox/zc-norule").get_data(as_text=True)
+    t = c.get("/inbox/inbox/zc-norule").get_data(as_text=True)
     ok("no reply box on a channel with no send rule", 'id="reply"' not in t)
     ok("...and it says so in the buyer's words, not ours", "no reply rule for WhatsApp" in t)
     # THE OTHER WRITTEN-DOWN REFUSAL, which must not be reported as the same thing. Email's rule
     # exists; what is missing is an SMTP path, and the sentence says where the reply goes instead.
-    m = c.get("/voice/inbox/zc-mail").get_data(as_text=True)
+    m = c.get("/inbox/inbox/zc-mail").get_data(as_text=True)
     ok("no reply box on email either", 'id="reply"' not in m)
     ok("...but it is NOT called a missing rule", "no reply rule for Email" not in m)
     ok("...it says where the send actually happens", "your own mail app" in m)
     ok("...while still showing him everything that arrived", "message 0" in t)
     # THE OTHER HALF: a channel that DOES have a rule still gets its box, or this guard has
     # quietly deleted the product.
-    live = c.get("/voice/inbox/zc-new").get_data(as_text=True)
+    live = c.get("/inbox/inbox/zc-new").get_data(as_text=True)
     ok("a channel with a rule keeps its reply box", 'id="reply"' in live)
 
 
@@ -239,7 +239,7 @@ def test_no_row_can_say_two_things_that_contradict_each_other():
     because the cheap way to add the next tag is another `if`, and that is how a row ends up
     saying both that it has never heard from someone and that they are new."""
     c = _seeded()
-    seen = _rows(c.get("/voice/inbox").get_data(as_text=True))
+    seen = _rows(c.get("/inbox/inbox").get_data(as_text=True))
     exclusive = {"Opted out", "No reply rule", "Send in your mail app", "No inbound yet",
                  "Window closed", "Tagged reply only", "Limited replies"}
     for who, (tags, _menu) in seen.items():
@@ -256,7 +256,7 @@ def test_the_row_is_still_one_link_with_the_menu_beside_it():
     of the row link, and that is a property worth pinning rather than eyeballing."""
     import re
     c = _seeded()
-    html = c.get("/voice/inbox").get_data(as_text=True)
+    html = c.get("/inbox/inbox").get_data(as_text=True)
     for chunk in html.split('<div class="convrow">')[1:]:
         row = chunk.split("</div>")[0]
         anchor = re.search(r'<a class="conv".*?</a>', row, re.S)

@@ -387,39 +387,39 @@ def test_the_landing_order_itself_is_what_OSDev1_asked_for():
         with app.test_request_context("/"):
             return _dash.landing()
 
-    # OSDev1's explicit ask on #1172: "a url_map holding both /dash/home and /voice/ lands on
+    # OSDev1's explicit ask on #1172: "a url_map holding both /dash/home and /inbox/ lands on
     # /dash/home." The owner ruled what he sees first (2026-09-09, "you're gonna see the today
     # page"), so a LOGIN fix must not move it as a side effect.
     ok("a box with both the client home and the inbox lands on the home",
-       lands_when("/dash/home", "/voice/") == "/dash/home",
-       lands_when("/dash/home", "/voice/"))
+       lands_when("/dash/home", "/inbox/") == "/dash/home",
+       lands_when("/dash/home", "/inbox/"))
     ok("...whichever order the routes happen to be registered in",
-       lands_when("/voice/", "/dash/home") == "/dash/home")
+       lands_when("/inbox/", "/dash/home") == "/dash/home")
     # AND THE OWNER'S BOX IS UNMOVED BY THE INBOX-FIRST CHANGE. His everything-box serves all
     # three, so it must still land on /dash/home — a box holding it never reaches the entries
     # below it. This is the assertion that keeps his 2026-09-09 ruling true.
     ok("the everything-box still lands on the client home, inbox route or not",
-       lands_when("/dash/home", "/voice/inbox", "/voice/", "/dash") == "/dash/home",
-       lands_when("/dash/home", "/voice/inbox", "/voice/", "/dash"))
-    # THE BUYER'S BOX, AND THE CASE THAT WAS WRONG UNTIL 2026-09-15. `/voice/` is not the inbox
-    # — the app's tabs are Today · Inbox · Settings and `/voice/` is TODAY, the uptime and
-    # pagespeed report. This assertion used to read `lands_when("/voice/") == "/voice/"` and call
+       lands_when("/dash/home", "/inbox/inbox", "/inbox/", "/dash") == "/dash/home",
+       lands_when("/dash/home", "/inbox/inbox", "/inbox/", "/dash"))
+    # THE BUYER'S BOX, AND THE CASE THAT WAS WRONG UNTIL 2026-09-15. `/inbox/` is not the inbox
+    # — the app's tabs are Today · Inbox · Settings and `/inbox/` is TODAY, the uptime and
+    # pagespeed report. This assertion used to read `lands_when("/inbox/") == "/inbox/"` and call
     # it "the inbox", which is how a sold box came to land its buyer on a monitoring page. The
-    # real inbox is `/voice/inbox`, and where a box serves it, it wins.
+    # real inbox is `/inbox/inbox`, and where a box serves it, it wins.
     ok("a box serving the real inbox lands on the INBOX, not on Today",
-       lands_when("/voice/", "/voice/inbox") == "/voice/inbox",
-       lands_when("/voice/", "/voice/inbox"))
+       lands_when("/inbox/", "/inbox/inbox") == "/inbox/inbox",
+       lands_when("/inbox/", "/inbox/inbox"))
     ok("...whichever order the routes were registered in",
-       lands_when("/voice/inbox", "/voice/") == "/voice/inbox")
+       lands_when("/inbox/inbox", "/inbox/") == "/inbox/inbox")
     # Today is still a landing for a box that somehow serves it alone — never a 404, never login.
-    ok("a box with Today and no inbox still lands on Today", lands_when("/voice/") == "/voice/")
+    ok("a box with Today and no inbox still lands on Today", lands_when("/inbox/") == "/inbox/")
     # THE CASE THAT DISTINGUISHES OSDev1'S ORDER FROM MY FIRST ONE. I had /dash second, which
     # lands a BUYER on the reel operator dashboard when their box has one and no client home.
     # His puts the inbox first: they land on the machine they bought.
     ok("with the reel dashboard and the inbox but no client home, the INBOX wins",
-       lands_when("/dash", "/voice/inbox") == "/voice/inbox", lands_when("/dash", "/voice/inbox"))
+       lands_when("/dash", "/inbox/inbox") == "/inbox/inbox", lands_when("/dash", "/inbox/inbox"))
     ok("...and Today still beats the operator dashboard on a box without the inbox route",
-       lands_when("/dash", "/voice/") == "/voice/", lands_when("/dash", "/voice/"))
+       lands_when("/dash", "/inbox/") == "/inbox/", lands_when("/dash", "/inbox/"))
     ok("...and /dash is still reached when it is genuinely all there is",
        lands_when("/dash") == "/dash")
     # A box serving none of them shipped no UI; terminate rather than loop, and say so loudly.

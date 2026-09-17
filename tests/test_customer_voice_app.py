@@ -46,13 +46,13 @@ def test_the_phone_app_answers_nobody_without_a_credential():
 
     Asserted as a property of the whole surface rather than of one route, because the failure mode
     is a route added later that forgets: the gate hangs on the blueprint so it cannot be forgotten,
-    and this walks every /voice route there is to prove it.
+    and this walks every /inbox route there is to prove it.
     """
     import core.config as cfg
     real = cfg.get_config
     try:
         app, c = _client(token="")
-        routes = sorted({str(r) for r in app.url_map.iter_rules() if str(r).startswith("/voice")})
+        routes = sorted({str(r) for r in app.url_map.iter_rules() if str(r).startswith("/inbox")})
         ok("the blueprint is mounted", bool(routes), str(routes))
         # THE FOUR INSTALL FILES ARE DELIBERATELY PUBLIC (stage 3) — a browser fetches a manifest
         # without cookies, so a gated one fails to install silently. They are excluded HERE and
@@ -62,11 +62,11 @@ def test_the_phone_app_answers_nobody_without_a_credential():
         from marketing.customer_voice.app import PUBLIC_PATHS
         # EACH ROUTE BY ITS OWN METHOD. A GET at a POST-only route is refused by Flask's ROUTING
         # with a 405, before any before_request runs — so walking everything with GET would have
-        # "proved" the gate holds on a route the gate never saw. The beacon at /voice/installed is
+        # "proved" the gate holds on a route the gate never saw. The beacon at /inbox/installed is
         # exactly that route, and it is a WRITE, so it is the one most worth hitting properly.
         methods = {}
         for rule in app.url_map.iter_rules():
-            if str(rule).startswith("/voice"):
+            if str(rule).startswith("/inbox"):
                 methods[str(rule)] = rule.methods - {"HEAD", "OPTIONS"}
         for path in routes:
             if path in PUBLIC_PATHS or "<" in path:
@@ -78,8 +78,8 @@ def test_the_phone_app_answers_nobody_without_a_credential():
                f"{r.status_code} {r.headers.get('Location')}")
             body = r.get_data()
             ok(f"...and serves no content at {path}", len(body) < 400, f"{len(body)} bytes")
-        ok("the exemption is exactly four files and no more",
-           len(PUBLIC_PATHS) == 4, str(sorted(PUBLIC_PATHS)))
+        ok("the exemption is exactly the four install files plus the /voice/sw.js tombstone",
+           len(PUBLIC_PATHS) == 5 and "/voice/sw.js" in PUBLIC_PATHS, str(sorted(PUBLIC_PATHS)))
     finally:
         cfg.get_config = real
 
@@ -97,7 +97,7 @@ def test_the_dash_password_opens_it_and_today_renders():
         app, c = _client(token="")
         r = c.post("/dash/login", data={"token": settings.dash_token})
         ok("the dash password is accepted", r.status_code in (302, 303), str(r.status_code))
-        r2 = c.get("/voice/")
+        r2 = c.get("/inbox/")
         ok("...and the phone app opens on it", r2.status_code == 200, str(r2.status_code))
         body = r2.get_data(as_text=True)
         ok("...on the Today screen", ">Today<" in body)
@@ -124,17 +124,17 @@ def test_the_token_opens_it_too_and_never_stays_in_the_address():
     real = cfg.get_config
     try:
         app, c = _client(token="a-real-token")
-        r = c.get("/voice/?k=a-real-token")
+        r = c.get("/inbox/?k=a-real-token")
         ok("the token is honoured", r.status_code == 303, str(r.status_code))
         loc = r.headers.get("Location") or ""
         ok("...and the address it sends him to carries NO token",
            "k=" not in loc and "a-real-token" not in loc, loc)
         ok("...and the cookie was banked", "aios_app_k" in str(r.headers))
-        r2 = c.get("/voice/")
+        r2 = c.get("/inbox/")
         ok("...so the next page opens without it", r2.status_code == 200, str(r2.status_code))
 
         app, c2 = _client(token="a-real-token")
-        r3 = c2.get("/voice/?k=wrong")
+        r3 = c2.get("/inbox/?k=wrong")
         ok("a wrong token opens nothing",
            r3.status_code in (302, 303) and "/dash/login" in (r3.headers.get("Location") or ""),
            f"{r3.status_code} {r3.headers.get('Location')}")
@@ -152,7 +152,7 @@ def test_a_blank_token_cannot_be_matched_by_a_blank_guess():
     try:
         app, c = _client(token="")
         for guess in ("", "anything"):
-            r = c.get(f"/voice/?k={guess}")
+            r = c.get(f"/inbox/?k={guess}")
             ok(f"a blank configured token refuses {guess!r}",
                r.status_code in (302, 303) and "/dash/login" in (r.headers.get("Location") or ""),
                f"{r.status_code} {r.headers.get('Location')}")
@@ -176,7 +176,7 @@ def test_an_unreadable_report_is_a_thin_page_not_a_500():
             raise RuntimeError("no such table: voice_observations")
 
         rep.report = boom
-        r = c.get("/voice/")
+        r = c.get("/inbox/")
         ok("an unreadable report still renders a page", r.status_code == 200, str(r.status_code))
         body = r.get_data(as_text=True)
         ok("...that says so plainly", "could not be read" in body)
@@ -251,23 +251,23 @@ def test_the_inbox_screen_shows_the_conversation_and_says_who_spoke():
 
         app, c = _client(token="")
         c.post("/dash/login", data={"token": settings.dash_token})
-        body = c.get("/voice/inbox").get_data(as_text=True)
+        body = c.get("/inbox/inbox").get_data(as_text=True)
         ok("the person's name is on the row", "Dana Whitfield" in body)
         ok("...with how many messages", "2 messages" in body)
         ok("...and where they came from", "Spring offer" in body)
         ok("newest inbound first, not newest touched",
            body.index("Dana Whitfield") < body.index("Older Person"), "ordering is wrong")
         ok("the whole row is the tap target, not a word inside it",
-           '<a class="conv" href="/voice/inbox/zc-new"' in body)
+           '<a class="conv" href="/inbox/inbox/zc-new"' in body)
 
-        thread = c.get("/voice/inbox/zc-new").get_data(as_text=True)
+        thread = c.get("/inbox/inbox/zc-new").get_data(as_text=True)
         ok("the thread carries both messages",
            "Any openings Friday?" in thread and "which suits" in thread)
         ok("...and says which of them the MACHINE sent", "the machine" in thread)
         ok("...and which of them they sent", ">them ·" in thread or "them ·" in thread)
         ok("...oldest first, the way a thread is read",
            thread.index("Any openings Friday?") < thread.index("which suits"))
-        ok("...with a way back to the list", 'href="/voice/inbox"' in thread)
+        ok("...with a way back to the list", 'href="/inbox/inbox"' in thread)
 
         # OPTED OUT IS SAID ON THE ROW, because replying to someone who opted out is the one
         # mistake this screen can help him make. IT IS A TAG NOW, NOT PROSE — it used to be third
@@ -275,12 +275,12 @@ def test_the_inbox_screen_shows_the_conversation_and_says_who_spoke():
         # to be cut off. Asserted as the pill it is, because "says so somewhere in the HTML" would
         # still pass if it slid back into the line that can vanish.
         store.set_opted_out(sp, "zc-new")
-        again = c.get("/voice/inbox").get_data(as_text=True)
+        again = c.get("/inbox/inbox").get_data(as_text=True)
         ok("an opted-out conversation says so on the list",
            '<span class="tag stop">Opted out</span>' in again)
         ok("...and the row offers no Reply, because the thread will offer no box either",
-           again.count('href="/voice/inbox/zc-new#reply"') == 0)
-        t2 = c.get("/voice/inbox/zc-new").get_data(as_text=True)
+           again.count('href="/inbox/inbox/zc-new#reply"') == 0)
+        t2 = c.get("/inbox/inbox/zc-new").get_data(as_text=True)
         ok("...and on the conversation itself", "has opted out" in t2)
     finally:
         cfg.get_config = real
@@ -308,7 +308,7 @@ def test_a_quiet_inbox_says_so_rather_than_looking_broken():
         c.post("/dash/login", data={"token": settings.dash_token})
         box_secrets.email_credential = lambda: {"user": "a@b.c", "password": "x"}
         store.list_conversations = lambda space, **kw: []
-        body = c.get("/voice/inbox").get_data(as_text=True)
+        body = c.get("/inbox/inbox").get_data(as_text=True)
         ok("a quiet inbox says it is quiet", "No conversations yet" in body)
         ok("...and does not claim a fault", "could not be read" not in body)
 
@@ -316,7 +316,7 @@ def test_a_quiet_inbox_says_so_rather_than_looking_broken():
             raise RuntimeError("no such table: inbox_conversations")
 
         store.list_conversations = boom
-        r = c.get("/voice/inbox")
+        r = c.get("/inbox/inbox")
         ok("an unreadable inbox is a page, not a 500", r.status_code == 200, str(r.status_code))
         b2 = r.get_data(as_text=True)
         ok("...that says which of the two it is", "could not be read" in b2)
@@ -353,10 +353,10 @@ def test_the_install_files_are_public_and_carry_nothing():
                              sent_by="contact", body="my private message body")
 
         app_, c = _client(token="")
-        for path, kind in (("/voice/manifest.webmanifest", "application/manifest+json"),
-                           ("/voice/icon-192.png", "image/png"),
-                           ("/voice/icon-512.png", "image/png"),
-                           ("/voice/sw.js", "application/javascript")):
+        for path, kind in (("/inbox/manifest.webmanifest", "application/manifest+json"),
+                           ("/inbox/icon-192.png", "image/png"),
+                           ("/inbox/icon-512.png", "image/png"),
+                           ("/inbox/sw.js", "application/javascript")):
             r = c.get(path)
             ok(f"{path} answers a browser with no credential", r.status_code == 200,
                str(r.status_code))
@@ -369,10 +369,10 @@ def test_the_install_files_are_public_and_carry_nothing():
 
         # AND NOTHING ELSE GOT OUT WITH THEM. The allow-list is exact, so every other route on
         # this blueprint must still refuse — walked, not assumed.
-        exempt = {"/voice/manifest.webmanifest", "/voice/icon-192.png", "/voice/icon-512.png",
-                  "/voice/sw.js"}
+        exempt = {"/inbox/manifest.webmanifest", "/inbox/icon-192.png", "/inbox/icon-512.png",
+                  "/inbox/sw.js"}
         for rule in sorted({str(r) for r in app_.url_map.iter_rules()
-                            if str(r).startswith("/voice")}):
+                            if str(r).startswith("/inbox")}):
             if rule in exempt or "<" in rule:
                 continue
             r = c.get(rule)
@@ -384,10 +384,10 @@ def test_the_install_files_are_public_and_carry_nothing():
         # THE MANIFEST SAYS THE ONE THING iOS REQUIRES. MDN: `Notification` is undefined on iOS
         # unless the page is a home-screen app AND the manifest has a non-default `display`.
         # Without this exact value there is no push on an iPhone, ever — so it is pinned by value.
-        m = json.loads(c.get("/voice/manifest.webmanifest").get_data(as_text=True))
+        m = json.loads(c.get("/inbox/manifest.webmanifest").get_data(as_text=True))
         ok("display is standalone, which is what makes push possible at all",
            m.get("display") == "standalone", str(m.get("display")))
-        ok("...start_url points back through the gated door", m.get("start_url") == "/voice/")
+        ok("...start_url points back through the gated door", m.get("start_url") == "/inbox/")
         ok("...and it names both sizes Chrome asks for",
            sorted(i["sizes"] for i in m["icons"]) == ["192x192", "512x512"],
            str([i["sizes"] for i in m["icons"]]))
@@ -411,7 +411,7 @@ def test_the_icons_are_real_pngs_drawn_without_a_dependency():
         w, h = struct.unpack(">II", b[16:24])
         ok(f"...and really is {size}x{size}", (w, h) == (size, size), f"{w}x{h}")
         ok("...and is not a stub", len(b) > 200, f"{len(b)} bytes")
-    # DRAWN ONCE PER PROCESS. `/voice/icon-512.png` is in PUBLIC_PATHS, so it is the one route on
+    # DRAWN ONCE PER PROCESS. `/inbox/icon-512.png` is in PUBLIC_PATHS, so it is the one route on
     # this app a stranger can hit without a credential, and it is 262k iterations of a Python loop
     # on a one-vCPU box. Without the cache a loop of requests buys our CPU for free. Asserted on
     # the function rather than by timing it, because a timing test on a shared runner is a flake.
@@ -433,17 +433,17 @@ def test_the_worker_can_never_push_silently():
     ok("...and a fallback body", "|| 'Something new came in.'" in js)
     ok("...with the parse wrapped so a bad payload cannot skip the notification",
        "try {" in js and "catch" in js)
-    ok("a click takes him to the inbox", "notificationclick" in js and "/voice/inbox" in js)
+    ok("a click takes him to the inbox", "notificationclick" in js and "/inbox/inbox" in js)
     # AND ONLY EVER INSIDE OUR OWN APP. `navigate` is read off the payload, and the payload is
     # ours and encrypted to the subscription — so this is depth, not a hole being plugged. It is
     # asserted anyway because an untested guard is one a later simplification deletes without
     # anything going red, and because `//evil.com/x` is not caught by a check for "starts with /".
-    ok("the click target is clamped to /voice/", "indexOf('/voice/') !== 0" in js)
+    ok("the click target is clamped to /inbox/", "indexOf('/inbox/') !== 0" in js)
     ok("...and anything else falls back to the inbox rather than opening",
-       "to = '/voice/inbox'" in js.split("indexOf('/voice/') !== 0", 1)[-1][:120])
+       "to = '/inbox/inbox'" in js.split("indexOf('/inbox/') !== 0", 1)[-1][:120])
     # SCOPE IS THE SILENT ONE. MDN: a worker cannot claim a scope broader than where it is served.
     # It registers, reports success, and intercepts nothing if this is wrong.
-    ok("the registration states its scope explicitly", "scope: '/voice/'" in _app.JS)
+    ok("the registration states its scope explicitly", "scope: '/inbox/'" in _app.JS)
     ok("...and the shell asks for the worker at all", "serviceWorker" in _app.JS)
 
 
@@ -573,7 +573,7 @@ def test_an_inbox_nothing_can_reach_says_so_instead_of_promising():
         store.list_conversations = lambda space, **kw: []
         spaces.all_spaces = lambda: [{"name": "default"}]            # a sold box on day one:
         box_secrets.email_credential = lambda: {}                    # no connector, no mailbox
-        body = c.get("/voice/inbox").get_data(as_text=True)
+        body = c.get("/inbox/inbox").get_data(as_text=True)
         ok("a box nothing can reach says exactly that", "Nothing can reach you yet" in body)
         ok("...and does not promise someone is coming",
            "The first person who messages you appears here" not in body)
@@ -603,7 +603,7 @@ def test_an_inbox_nothing_can_reach_says_so_instead_of_promising():
 
         # NOW IT IS LISTENING, and the calm sentence comes back.
         box_secrets.email_credential = lambda: {"user": "a@b.c", "password": "x"}
-        listening = c.get("/voice/inbox").get_data(as_text=True)
+        listening = c.get("/inbox/inbox").get_data(as_text=True)
         ok("a box that IS listening keeps the calm empty state",
            "No conversations yet" in listening)
         ok("...and stops offering a connect button", "Nothing can reach you yet" not in listening)
@@ -622,7 +622,7 @@ def test_the_install_page_shows_no_markup_to_the_buyer():
     try:
         app, c = _client(token="")
         c.post("/dash/login", data={"token": settings.dash_token})
-        body = c.get("/voice/install").get_data(as_text=True)
+        body = c.get("/inbox/install").get_data(as_text=True)
         ok("no escaped markup is shown to the buyer", "&lt;b&gt;" not in body)
         ok("...and the step is still there", "Add to Home screen" in body)
     finally:

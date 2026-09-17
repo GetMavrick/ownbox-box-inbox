@@ -703,7 +703,9 @@ def _clear_failures(ip: str) -> None:
 # carried by `/dash/home`, which stays at the head of this tuple and which his everything-box
 # serves; a box holding /dash/home never reaches the two entries below it. This changes exactly
 # one shape: a box that has an inbox and no client home — which is the product we sell.
-_LANDINGS = ("/dash/home", "/voice/inbox", "/voice/", "/dash")
+# /voice/* MOVED TO /inbox/* ON 2026-09-17. The owner: "No redirect, please. Full cut over" — /voice
+# belongs to the AI receptionist machine, so no login may land there again.
+_LANDINGS = ("/dash/home", "/inbox/inbox", "/inbox/", "/dash")
 
 
 def landing() -> str:

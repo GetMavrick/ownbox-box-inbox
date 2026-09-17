@@ -2,7 +2,7 @@
 
 THE STATE OF A DELIVERED BOX BEFORE THIS: `brain.backend` ships as `api` (bring your own key),
 `install.sh` mints none and the provisioner passes none, so `drafter/draft.py` returns
-{"skipped": "unconfigured"} and the box files every message and writes nothing. `/voice/settings`
+{"skipped": "unconfigured"} and the box files every message and writes nothing. `/inbox/settings`
 had three rows — theme, install, refresh — and no field that could fix it. The buyer has no shell
 and no `.env`.
 
@@ -43,7 +43,7 @@ _failed = 0
 
 # DOES THIS BOX CARRY THE INBOX AT ALL? Asked because this suite ships into EVERY box, and CI runs
 # all 114 shipped suites inside a freshly exported LEAD box — which has no `marketing/customer_voice`
-# and therefore no `/voice/*` routes. Twelve assertions here failed there while passing in the repo:
+# and therefore no `/inbox/*` routes. Twelve assertions here failed there while passing in the repo:
 # the sixth suite to hit the shape OSDev4 catalogued in #1182.
 #
 # THE SPLIT IS NOT "SKIP THIS SUITE". The half that matters most is core — `box_secrets`, `brain`
@@ -53,7 +53,7 @@ _failed = 0
 #
 # AND THE QUESTION IS ABOUT THE MACHINE, NOT ABOUT A ROUTE. No `marketing/customer_voice` directory
 # means this box does not have the inbox and there is no screen to hold. A box that HAS the
-# directory and still does not serve `/voice/settings` is broken, and these tests say so — which is
+# directory and still does not serve `/inbox/settings` is broken, and these tests say so — which is
 # the distinction test_inbox_design draws and the reason it is drawn there rather than by asking
 # the url_map, where a registration failure would look like a box shape.
 HAS_INBOX = os.path.isdir(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -154,14 +154,14 @@ def test_a_changed_key_is_not_held_stale_by_a_cached_client():
 def test_settings_offers_the_switch_when_there_is_no_key():
     print("test_settings_offers_the_switch_when_there_is_no_key")
     clear()
-    html = client().get("/voice/settings").get_data(as_text=True)
+    html = client().get("/inbox/settings").get_data(as_text=True)
     ok("the row is there", "Drafts" in html)
     # §2.6: phrased as a capability, not a missing key. "No API key configured" is a fault report
     # about our plumbing; the buyer did nothing wrong and does not know what an API key is.
     ok("...phrased as what the box can do", "write a reply for every message" in html)
     ok("...and the reason BYOK is an advantage, not an apology",
        "nothing you receive passes through us" in html)
-    ok("...with a control that goes somewhere", 'href="/voice/drafts"' in html)
+    ok("...with a control that goes somewhere", 'href="/inbox/drafts"' in html)
     low = html.lower()
     ok("never a fault report", "not configured" not in low and "api key configured" not in low
        and "missing" not in low)
@@ -170,7 +170,7 @@ def test_settings_offers_the_switch_when_there_is_no_key():
 def test_settings_says_it_is_on_and_keeps_the_promise_in_view():
     print("test_settings_says_it_is_on_and_keeps_the_promise_in_view")
     box_secrets.put(box_secrets.ANTHROPIC, KEY)
-    html = client().get("/voice/settings").get_data(as_text=True)
+    html = client().get("/inbox/settings").get_data(as_text=True)
     ok("it says it is on", "On. Ownbox writes a reply" in html)
     # §2.6: "The second sentence is load-bearing and does not get cut. It is the promise the
     # whole product rests on, and Settings is where a nervous buyer goes to check it."
@@ -185,7 +185,7 @@ def test_the_key_is_never_rendered_back_anywhere():
     print("test_the_key_is_never_rendered_back_anywhere")
     box_secrets.put(box_secrets.ANTHROPIC, KEY)
     c = client()
-    for path in ("/voice/settings", "/voice/drafts", "/voice/", "/voice/inbox"):
+    for path in ("/inbox/settings", "/inbox/drafts", "/inbox/", "/inbox/inbox"):
         r = c.get(path)
         body = r.get_data(as_text=True)
         # THE PAGE HAS TO HAVE RENDERED BEFORE ITS SILENCE MEANS ANYTHING. Without this line the
@@ -202,15 +202,15 @@ def test_the_buyer_can_turn_it_on_and_off():
     print("test_the_buyer_can_turn_it_on_and_off")
     clear()
     c = client()
-    r = c.post("/voice/drafts", data={"key": KEY})
+    r = c.post("/inbox/drafts", data={"key": KEY})
     ok("posting a key redirects back to Settings",
-       r.status_code in (301, 302, 303) and "/voice/settings" in r.headers.get("Location", ""))
+       r.status_code in (301, 302, 303) and "/inbox/settings" in r.headers.get("Location", ""))
     ok("...and the key is stored", box_secrets.get(box_secrets.ANTHROPIC) == KEY)
-    r = c.get("/voice/drafts?off=1")
+    r = c.get("/inbox/drafts?off=1")
     ok("turning off redirects back to Settings", r.status_code in (301, 302, 303))
     ok("...and the key is gone", box_secrets.get(box_secrets.ANTHROPIC) == "")
     # An empty submit is a typo, not a failure: say what to do, store nothing, no lecture.
-    r = c.post("/voice/drafts", data={"key": "   "})
+    r = c.post("/inbox/drafts", data={"key": "   "})
     ok("an empty submit stores nothing", box_secrets.get(box_secrets.ANTHROPIC) == "")
     ok("...and says what to do", "Paste the key" in r.get_data(as_text=True))
 
@@ -219,7 +219,7 @@ def test_a_stranger_cannot_set_this_boxs_key():
     print("test_a_stranger_cannot_set_this_boxs_key")
     clear()
     anon = flask_app.test_client()
-    r = anon.post("/voice/drafts", data={"key": "sk-ant-planted-by-a-stranger"})
+    r = anon.post("/inbox/drafts", data={"key": "sk-ant-planted-by-a-stranger"})
     ok("an unauthenticated POST does not store a key",
        box_secrets.get(box_secrets.ANTHROPIC) == "", "a stranger set this box's AI key")
     ok("...and is refused or bounced, never accepted", r.status_code != 200 or "sign" in
@@ -371,12 +371,12 @@ def test_a_key_is_checked_when_it_is_typed_not_hours_later_in_a_worker():
 def test_the_screen_shows_the_stores_own_refusal_not_one_of_its_own():
     print("test_the_screen_shows_the_stores_own_refusal_not_one_of_its_own")
     # SPLIT OUT OF THE TEST ABOVE, which is otherwise pure core and runs in every box. These two
-    # need `/voice/drafts`, and leaving them in there is what kept this suite red inside a lead
+    # need `/inbox/drafts`, and leaving them in there is what kept this suite red inside a lead
     # box after the other twelve were fixed. The second one also passed on that box's 404 — a
     # page that does not exist echoes nothing — so it is now asserted after the page has rendered.
     from core import box_secrets as bs
     clear()
-    r = client().post("/voice/drafts", data={"key": "hello@example.com"})
+    r = client().post("/inbox/drafts", data={"key": "hello@example.com"})
     html = r.get_data(as_text=True)
     ok("the page came back rather than 404ing", r.status_code in (200, 302, 400),
        str(r.status_code))
@@ -406,7 +406,7 @@ if __name__ == "__main__":
         test_the_screen_shows_the_stores_own_refusal_not_one_of_its_own()
     else:
         print("the six screen tests")
-        print("  --   this box does not carry the Unified Inbox — no /voice screens to hold; "
+        print("  --   this box does not carry the Unified Inbox — no /inbox screens to hold; "
               "the key, the export and the journal are checked above and below")
     test_the_key_is_not_in_the_data_export()
     test_the_key_is_never_written_to_the_journal()

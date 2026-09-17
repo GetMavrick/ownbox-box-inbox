@@ -44,7 +44,7 @@ TITLE = "Unified Inbox"
 # the same voice as the three that were always right ("connect your Google Business Profile").
 #
 # They deliberately do NOT name a place to go and do it. There is no field for a website address
-# in the app today (`/voice/settings` carries appearance, install and refresh), and sending a
+# in the app today (`/inbox/settings` carries appearance, install and refresh), and sending a
 # buyer to a screen that cannot help him is the same defect wearing politer words. When the field
 # exists, these gain "in Settings" and not before.
 LABEL = {
@@ -227,7 +227,7 @@ def report(day: date) -> dict:
             # being ignored for a week is worse than being ignored since breakfast, not resolved.
             noun = "conversation is" if waiting == 1 else "conversations are"
             needs_you.append({"text": f"{waiting} {noun} waiting on your reply",
-                              "href": "/voice/inbox"})
+                              "href": "/inbox/inbox"})
             watch.append({"text": f"Inbox — {waiting} waiting on you", "state": rails.WARN})
         elif counts["inbound"]:
             # ANSWERED, SAID PLAINLY. The good state has to be visible or the segment only ever

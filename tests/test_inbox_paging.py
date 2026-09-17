@@ -88,7 +88,7 @@ def _seeded():
 
 
 def _ids(html: str) -> list:
-    return re.findall(r'<a class="conv" href="/voice/inbox/([^"]+)"', html)
+    return re.findall(r'<a class="conv" href="/inbox/inbox/([^"]+)"', html)
 
 
 def _pager(html: str) -> dict:
@@ -101,9 +101,9 @@ def test_page_two_holds_the_next_fifty_and_not_fifty_of_the_same():
     fifty conversations silently, and both look like a working pager."""
     c = _seeded()
     from marketing.customer_voice.app import PAGE
-    p1 = _ids(c.get("/voice/inbox").get_data(as_text=True))
-    p2 = _ids(c.get("/voice/inbox?page=2").get_data(as_text=True))
-    p3 = _ids(c.get("/voice/inbox?page=3").get_data(as_text=True))
+    p1 = _ids(c.get("/inbox/inbox").get_data(as_text=True))
+    p2 = _ids(c.get("/inbox/inbox?page=2").get_data(as_text=True))
+    p3 = _ids(c.get("/inbox/inbox?page=3").get_data(as_text=True))
     ok(f"a full page holds exactly {PAGE}", len(p1) == PAGE and len(p2) == PAGE,
        f"{len(p1)} / {len(p2)}")
     ok("...even though one more was fetched to know there is a next page",
@@ -117,17 +117,17 @@ def test_page_two_holds_the_next_fifty_and_not_fifty_of_the_same():
 def test_a_control_appears_only_when_it_can_succeed():
     """The greyed-out button this codebase keeps deleting, in its newest form."""
     c = _seeded()
-    first = _pager(c.get("/voice/inbox").get_data(as_text=True))
-    mid = _pager(c.get("/voice/inbox?page=2").get_data(as_text=True))
-    last = _pager(c.get("/voice/inbox?page=3").get_data(as_text=True))
+    first = _pager(c.get("/inbox/inbox").get_data(as_text=True))
+    mid = _pager(c.get("/inbox/inbox?page=2").get_data(as_text=True))
+    last = _pager(c.get("/inbox/inbox?page=3").get_data(as_text=True))
     ok("page one offers Older and not Newer",
        "Older &rarr;" in first and "&larr; Newer" not in first, str(first))
     ok("a middle page offers both", len(mid) == 2, str(mid))
     ok("the last page offers Newer and not Older",
        "&larr; Newer" in last and "Older &rarr;" not in last, str(last))
-    ok("Older goes forward", first.get("Older &rarr;") == "/voice/inbox?page=2")
+    ok("Older goes forward", first.get("Older &rarr;") == "/inbox/inbox?page=2")
     ok("...and Newer goes back to a URL with no page in it at all",
-       mid.get("&larr; Newer") == "/voice/inbox", str(mid))
+       mid.get("&larr; Newer") == "/inbox/inbox", str(mid))
 
 
 def test_a_hand_typed_page_can_never_produce_a_negative_offset():
@@ -135,15 +135,15 @@ def test_a_hand_typed_page_can_never_produce_a_negative_offset():
     anything in particular, and the answer to that is the top of the list — not a 500, and
     never a negative OFFSET handed to the store."""
     c = _seeded()
-    first = _ids(c.get("/voice/inbox").get_data(as_text=True))
+    first = _ids(c.get("/inbox/inbox").get_data(as_text=True))
     for bad in ("banana", "-4", "0", "", "1e9999", "2; DROP TABLE inbox_messages"):
         from urllib.parse import quote
-        r = c.get(f"/voice/inbox?page={quote(bad)}")
+        r = c.get(f"/inbox/inbox?page={quote(bad)}")
         ok(f"page={bad!r} answers 200", r.status_code == 200, str(r.status_code))
         if bad in ("banana", "-4", "0", ""):
             ok(f"...and shows page one", _ids(r.get_data(as_text=True)) == first)
     ok("the messages table is still there",
-       len(_ids(c.get("/voice/inbox").get_data(as_text=True))) == 50)
+       len(_ids(c.get("/inbox/inbox").get_data(as_text=True))) == 50)
 
 
 def test_running_off_the_end_reads_as_the_end_not_as_an_empty_box():
@@ -151,13 +151,13 @@ def test_running_off_the_end_reads_as_the_end_not_as_an_empty_box():
     button, a typed number. "You have run off the end" and "you have no messages" are opposite
     facts, and this box holds 123 conversations."""
     c = _seeded()
-    body = c.get("/voice/inbox?page=9").get_data(as_text=True)
+    body = c.get("/inbox/inbox?page=9").get_data(as_text=True)
     ok("it says the page does not exist", "There is no page 9" in body)
     ok("...and never says the inbox is empty", "No conversations yet" not in body)
     ok("...and never claims a search happened", "Nothing matches" not in body)
     ok("...and says nothing is lost, because that is the fear", "Nothing has been lost" in body)
-    ok("...and offers the way back", 'href="/voice/inbox"' in body)
-    hit = c.get("/voice/inbox?q=boiler&page=9").get_data(as_text=True)
+    ok("...and offers the way back", 'href="/inbox/inbox"' in body)
+    hit = c.get("/inbox/inbox?q=boiler&page=9").get_data(as_text=True)
     ok("the same past-the-end on a search names the search",
        "There is no page 9" in hit and "boiler" in hit)
 
@@ -171,9 +171,9 @@ def test_the_query_and_the_channel_survive_a_page_turn_and_the_page_does_not_sur
     """
     c = _seeded()
     from urllib.parse import urlparse, parse_qs
-    body = c.get("/voice/inbox?q=boiler&channel=messenger").get_data(as_text=True)
+    body = c.get("/inbox/inbox?q=boiler&channel=messenger").get_data(as_text=True)
     ok("a search inside a channel still finds rows", len(_ids(body)) > 0)
-    paged = c.get("/voice/inbox?channel=messenger&page=2").get_data(as_text=True)
+    paged = c.get("/inbox/inbox?channel=messenger&page=2").get_data(as_text=True)
     pg = _pager(paged)
     for label, url in pg.items():
         got = parse_qs(urlparse(url).query)
@@ -189,16 +189,16 @@ def test_the_range_is_a_position_and_never_a_total():
     """"50 conversations" would be a count; it is a page size. The Today screen refuses the same
     conflation by name — "0" and "nothing to report" are different claims."""
     c = _seeded()
-    p1 = c.get("/voice/inbox").get_data(as_text=True)
-    p2 = c.get("/voice/inbox?page=2").get_data(as_text=True)
-    p3 = c.get("/voice/inbox?page=3").get_data(as_text=True)
+    p1 = c.get("/inbox/inbox").get_data(as_text=True)
+    p2 = c.get("/inbox/inbox?page=2").get_data(as_text=True)
+    p3 = c.get("/inbox/inbox?page=3").get_data(as_text=True)
     ok("page one of a plain list says nothing, because it has nothing to say",
        'class="found"' not in p1)
     ok("page two says where he is", "Conversations 51-100" in p2, "no position on the screen")
     ok("the last page ends at the real last row", "Conversations 101-123" in p3)
     ok("...and no page states a total", "123 conversations" not in p2 + p3)
     # A SEARCH THAT FITS ON ONE PAGE *IS* A COUNT, and should say so rather than hedge.
-    small = c.get("/voice/inbox?q=boiler").get_data(as_text=True)
+    small = c.get("/inbox/inbox?q=boiler").get_data(as_text=True)
     ok("a search that fits on one page gives the real count",
        re.search(r"\d+ conversations matching", small) is not None,
        "it hedged when it actually knew")
@@ -210,7 +210,7 @@ def test_one_clients_page_two_is_never_another_clients():
     Asserted on a LATER page because an offset is exactly where a boundary gets lost."""
     c = _seeded()
     for page in (1, 2, 3):
-        body = c.get(f"/voice/inbox?page={page}").get_data(as_text=True)
+        body = c.get(f"/inbox/inbox?page={page}").get_data(as_text=True)
         ok(f"page {page} carries no other client's conversation",
            "Someone Elses Customer" not in body and "zc-other" not in body)
 
