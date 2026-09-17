@@ -566,6 +566,23 @@ a.row:active{background:var(--hair);border-radius:10px}
   min-height:52px;color:var(--dimmer);font-size:10.5px;font-weight:540;letter-spacing:.01em}
 .tab svg{display:block}
 .tab.on{color:var(--accent)}
+/* THE DOT SAYS SOMETHING IS WAITING, AND SAYS ONLY THAT. Owner, 2026-09-17, picking it over a
+   number after seeing both on the real bar.
+   POSITIONED OFF THE CENTRE LINE, not off the tab's edge: the tab is a flex column with the
+   icon centred, so `left:50%` plus a small offset lands the dot on the icon's shoulder at every
+   tab width, where anchoring to `right` drifts as the bar divides by three or by four.
+   THE RING IS NOT DECORATION. The bar is translucent (`--tab-bg`) over whatever scrolls beneath
+   it, so an accent dot can land on accent-coloured content and vanish; a 2px ring in the bar's
+   own colour keeps its edge on any background.
+   AND IT CLEARS THE TWO STROKES, which cost one iteration to get right. Built at 6px/6px the dot
+   sat ON the tray icon's upper-right stroke — and the comment above `_TABS` argues those two
+   strokes are the whole point of this icon, the streams running into the tray. Three placements
+   rendered at 4x and compared: 6/6 covered a stroke, 1/11 floated free of the icon and crowded
+   the bar's top edge, 3/9 sits on the icon's shoulder with both strokes readable. It still
+   overlaps the svg's BOUNDING BOX, which is mostly empty space — the strokes are what matters. */
+.tab{position:relative}
+.tab .mark{position:absolute;top:3px;left:50%;margin-left:9px;width:8px;height:8px;
+  border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--tab-bg)}
 
 /* ── settings ──────────────────────────────────────────────────────────────────────────────
    Where the light/dark switch lives. Server-rendered like everything else: the switch is a LINK
@@ -771,16 +788,51 @@ shell.register_section(
     ])
 
 
+def _unread() -> int:
+    """How many conversations he has not read — 0 on any box that cannot answer.
+
+    THE TAB BAR IS IN `_shell`, so this runs on every page this app draws. It is one indexed
+    query and it is wrapped, because a number that cannot be fetched must cost him a dot, never
+    a page: a box mid-migration, a Space with no inbox tables, a locked database during a poll.
+    Silent by design — `log.info` and not `warning`, since the honest reading of a failure here
+    is "nothing to report", which is also what 0 renders as.
+    """
+    try:
+        from marketing.customer_voice.inbox import store as _store
+        return int(_store.unread_conversations(_space()))
+    except Exception as e:                       # noqa: BLE001 — see above
+        log.info("voice.unread_unreadable", extra={"error": type(e).__name__})
+        return 0
+
+
 def _tabbar(here: str) -> str:
+    unread = _unread()
     out = []
     for href, label, d in _TABS:
         on = " on" if (here == href or (href != "/inbox/" and here.startswith(href))) else ""
         cur = ' aria-current="page"' if on else ""
+        # A DOT, NOT A NUMBER — owner, 2026-09-17, choosing between the two rendered side by
+        # side. From another screen the only question is whether anything is waiting, and a dot
+        # answers exactly that; a number invites a precision the tab then has to defend (two
+        # conversations, or two messages? two people, or one who wrote twice?). The icon's own
+        # comment above already refuses to encode a count for the same reason.
+        #
+        # IT IS DRAWN ON THE INBOX TAB EVEN WHILE HE IS STANDING ON IT. Suppressing it there
+        # would be a rule to learn — "why did it vanish?" — and the dot is still true: the rows
+        # under it are bold. It goes out when he has read them, which is the whole contract.
+        #
+        # AND THE NUMBER IS THE PART A SCREEN READER GETS. A dot is invisible to one, exactly as
+        # the row's bold is, so the count goes in `.vh` where it costs no pixels. `aria-hidden`
+        # on the dot itself so the same fact is not announced twice.
+        mark = ""
+        if unread and href == "/inbox/inbox":
+            mark = ('<span class="mark" aria-hidden="true"></span>'
+                    f'<span class="vh">{unread} unread</span>')
         out.append(
             f'<a class="tab{on}" href="{href}"{cur}>'
             f'<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
             f'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-            f'<path d="{d}"/></svg><span>{label}</span></a>')
+            f'<path d="{d}"/></svg>{mark}<span>{label}</span></a>')
     return f'<nav class="tabs" aria-label="Sections"><div class="tabs-in">{"".join(out)}</div></nav>'
 
 
@@ -2073,11 +2125,22 @@ def r_thread(zcid):
     # WHO SAID IT, ON EVERY LINE. `sent_by` is contact | ai | human, and on a screen where the
     # machine may have answered on his behalf, not saying which is which is the one thing that
     # would make him distrust the whole surface.
-    said = {"contact": "them", "ai": "the machine", "human": "you"}
+    # AND THE CONTACT IS CALLED BY THEIR NAME. This line read "them" under every message the
+    # customer sent, on a screen whose header is that customer's name. The file already argues
+    # the case for the other side — "once more than one person can answer, 'you' is wrong for
+    # everyone except whoever typed it" — and then only half-applied it: we take trouble to name
+    # OUR human and call theirs a direction. A first name is what a person would say out loud.
+    #
+    # FIRST NAME ONLY, because the surname is already in the header two lines up and a thread of
+    # "Len Okafor · 20:02" repeated down the page is the header stuttering. "Someone" is the
+    # fallback `who` already uses, so an unnamed contact still reads as a person.
+    first = who.split()[0] if who and who != "Someone" else "Them"
+    said = {"contact": first, "ai": "the machine", "human": "you"}
     bubbles = []
+    last_stamp = ""
     for m in msgs:
         inbound = str(m.get("direction") or "") == "in"
-        by = said.get(str(m.get("sent_by") or ""), "them" if inbound else "you")
+        by = said.get(str(m.get("sent_by") or ""), first if inbound else "you")
         # WHICH HUMAN. "Sent by Maria" is the entire point of having employees on the box: once
         # more than one person can answer, "you" is wrong for everyone except whoever typed it.
         # The name comes from the ledger row, so it stays right after that person is revoked —
@@ -2088,10 +2151,18 @@ def r_thread(zcid):
             # day this ships), so an unnamed human send reads "you" exactly as it did before.
             if nm:
                 by = nm
+        # THE CLOCK IS PRINTED WHEN IT CHANGES, NOT ON EVERY LINE. Four messages exchanged inside
+        # one minute rendered the same "Wed 16 Sep, 20:02" four times — the reader learns nothing
+        # from the repeats and the thread turns into a column of dates. A run at the same stamp
+        # keeps it once, on the first of the run, which is also where a person looks for it.
+        stamp = _when(m.get("created_at"))
+        show = stamp != last_stamp
+        last_stamp = stamp
         bubbles.append(
             f'<div class="msg {"in" if inbound else "out"}">'
             f'<div class="b">{_esc(m.get("body") or "")}</div>'
-            f'<div class="m">{_esc(by)} · {_esc(_when(m.get("created_at")))}</div></div>')
+            f'<div class="m">{_esc(by)}'
+            + (f' · {_esc(stamp)}' if show else "") + '</div></div>')
     back = '<div class="foot"><a href="/inbox/inbox">← Inbox</a></div>'
     return _shell("".join(head) + f'<div class="thread">{"".join(bubbles)}</div>'
                   + _compose(zcid, conv, msgs) + back), 200

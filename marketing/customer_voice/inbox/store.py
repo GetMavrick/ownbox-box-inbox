@@ -692,3 +692,38 @@ def day_counts(space: str, lo: str, hi: str) -> dict:
                    " WHERE space = ? AND dismissed_at IS NULL "
                    "   AND created_at >= ? AND created_at < ?", (space, lo, hi))
     return {"inbound": inbound, "replied": replied, "new_people": new_people, "drafts": drafts}
+
+
+# PLACED AT THE END RATHER THAN BESIDE `awaiting_reply`, WHICH IS WHERE IT BELONGS.
+# #1277 adds `inbox_counts()` into the gap between `awaiting_reply` and `day_counts`, and this
+# function first went into that same gap — an add/add conflict, found by dry-running the merge
+# order rather than by CI. Third adjacent-insertion collision of the evening; OSDev1 named the
+# rule for the suite list and it is the same rule in a source file. Move it up beside its
+# sibling once the queue is empty — the two are opposites and read best together.
+def unread_conversations(space: str) -> int:
+    """How many conversations have something in them he has not read.
+
+    THE ONE FACT THE TAB BAR NEEDS, and the reason it is a COUNT rather than a boolean: a screen
+    reader is told the number ("2 unread"), while the dot beside the icon only says THAT there is
+    something. Both come from here, so they can never disagree about whether the box is quiet.
+
+    THE SAME `_UNREAD` PREDICATE THE ROWS USE, deliberately reused rather than rewritten. Two
+    separately written queries about one fact is the defect this file keeps catching in itself —
+    a dot lit over a list with nothing bold in it is a screen nobody trusts twice, and it would
+    be invisible until somebody happened to look at both at once.
+
+    NOT FILTERED BY `opted_out`, WHICH IS THE OPPOSITE OF `awaiting_reply` ABOVE. That one counts
+    who is WAITING ON A REPLY, and somebody who said STOP is not. This one counts what he has not
+    READ — and a message from somebody who then opted out is still a message he has not seen, and
+    is arguably the one he most needs to. Unread is about his attention; waiting is about theirs.
+
+    ONE QUERY, called on every page render because the tab bar is in `_shell`. A correlated
+    EXISTS over the (space, conversation, created_at) index, short-circuited per row by SQLite —
+    the same shape the row list already pays for once.
+    """
+    with state.connect() as c:
+        row = c.execute(
+            "SELECT COUNT(*) n FROM inbox_conversations k "
+            " WHERE k.space = ? "
+            f"   AND {_UNREAD}", (space,)).fetchone()
+    return int(row["n"]) if row else 0

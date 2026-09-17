@@ -272,7 +272,11 @@ def test_the_inbox_screen_shows_the_conversation_and_says_who_spoke():
         ok("the thread carries both messages",
            "Any openings Friday?" in thread and "which suits" in thread)
         ok("...and says which of them the MACHINE sent", "the machine" in thread)
-        ok("...and which of them they sent", ">them ·" in thread or "them ·" in thread)
+        # BY THEIR NAME, NOT BY "them". This asserted the literal "them ·", which was the
+        # implementation of the byline rather than what the assertion is for — the thread saying
+        # which messages the CONTACT sent. It now says "Dana ·", so the check follows the intent
+        # and would still fail if the byline vanished or stopped distinguishing the two sides.
+        ok("...and which of them they sent", "Dana ·" in thread, thread[thread.find("Dana"):][:80])
         ok("...oldest first, the way a thread is read",
            thread.index("Any openings Friday?") < thread.index("which suits"))
         ok("...with a way back to the list", 'href="/inbox/inbox"' in thread)
