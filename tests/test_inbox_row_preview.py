@@ -189,6 +189,68 @@ def test_search_rows_carry_it_too():
     ok("...and its row carries the message", all(h.get("preview") for h in hits), str(hits[:1]))
 
 
+def test_the_row_shows_two_lines_of_the_message_and_no_count_of_them():
+    """Owner, 2026-09-17: "showing more of the conversation rather than having that one message
+    label totally in the way. The conversation should run two lines."
+
+    BOTH HALVES OR NEITHER. The second line is paid for by the line the count label was using,
+    so a change that added the clamp and left the label would make every row taller instead of
+    more readable — which is the opposite of what was asked for. Asserted together.
+    """
+    from marketing.customer_voice.app import CSS
+    rule = re.search(r"\.conv \.p\{(.*?)\}", CSS, re.S)
+    ok("the preview rule still exists", bool(rule), CSS[:120])
+    body = rule.group(1) if rule else ""
+    ok("...and clamps the message to TWO lines", "-webkit-line-clamp:2" in body, body)
+    # THE OLD ONE-LINE RULE MUST BE GONE, not merely overridden by the clamp. `nowrap` left in
+    # place still wins for line breaking, so the row would clamp to two lines it can never fill.
+    ok("...and no longer forbids wrapping", "white-space:nowrap" not in body, body)
+    ok("...and breaks a pasted URL rather than letting it run out of the row",
+       "overflow-wrap:anywhere" in body, body)
+    # THE FLOOR THAT ONLY GUARDED THE COUNT WENT WITH IT.
+    ok("the count's own CSS rule is gone too", ".conv .s .sub{" not in CSS)
+
+
+def test_no_row_says_how_many_messages_it_holds():
+    """SCOPED TO THE ROWS, NOT THE PAGE. This stylesheet is inlined into every page, and its
+    comments explain the label that was removed — so a page-wide search for "1 message" matches
+    prose about the change and fails on a correct build. The claim is about the row.
+    """
+    _talk("zc-count", "Ivy Nakamura", [("in", "first"), ("out", "second"), ("in", "third")])
+    html_ = _c()[1].get("/inbox/inbox").get_data(as_text=True)
+    rows = re.findall(r'<a class="conv[^"]*".*?</a>', html_, re.S)
+    ok("there are rows to check", bool(rows), str(len(rows)))
+    ok("no row carries a message count",
+       not any(re.search(r"\d+\s+messages?\b", r) for r in rows),
+       next((r[:160] for r in rows if re.search(r"\d+\s+messages?\b", r)), ""))
+    ok("...and the count's span is gone from the markup", 'class="sub"' not in html_)
+    # AND THE "NEW" PILL THAT REPLACED IT IS GONE TOO — owner, 2026-09-17, it "gets in the way
+    # too". Unread is carried by weight now (tests/test_the_row_says_what_he_has_read.py), so a
+    # row states a CONSTRAINT or an attribution or nothing at all.
+    ok("...and no row wears a New pill either",
+       not any(">New<" in r for r in rows),
+       next((r[:160] for r in rows if ">New<" in r), ""))
+
+
+def test_a_calm_row_draws_no_empty_grey_line():
+    """With the count gone the tag line can be genuinely empty — an ordinary conversation inside
+    its send window wears no tag at all — and an empty flex row still spends the grid's row gap,
+    so it would read as a blank line under every quiet conversation."""
+    import marketing.customer_voice.app as _app
+    rows_with = [r for r in re.findall(r'<a class="conv[^"]*".*?</a>',
+                                       _c()[1].get("/inbox/inbox").get_data(as_text=True), re.S)]
+    # Find a row whose tag list is genuinely empty by asking the source of truth directly.
+    convs = store.list_conversations("default", limit=50)
+    bare = [k for k in convs if not _app._tag_list(k)]
+    if not bare:
+        print("  --   no tagless conversation in this box to check")
+        return
+    who = (bare[0].get("participant") or "").strip()
+    mine = next((r for r in rows_with if who and who in r), "")
+    ok("the tagless row was found on the page", bool(mine), who)
+    ok("...and it draws no tag span at all", 'class="s"' not in mine, mine[:200])
+
+
 def test_ci_actually_runs_this_file():
     """A GUARD MUST KNOW WHERE IT IS STANDING. `.github/` is ours and never ships, and this suite
     DOES ship to a Customer Voice box — it imports the inbox, which that box carries — so a bare
@@ -214,6 +276,9 @@ if __name__ == "__main__":
                test_fifty_rows_cost_one_query_not_fifty_one,
                test_a_very_long_message_is_trimmed_before_it_crosses_the_wire,
                test_search_rows_carry_it_too,
+               test_the_row_shows_two_lines_of_the_message_and_no_count_of_them,
+               test_no_row_says_how_many_messages_it_holds,
+               test_a_calm_row_draws_no_empty_grey_line,
                test_ci_actually_runs_this_file):
         print(fn.__name__)
         fn()

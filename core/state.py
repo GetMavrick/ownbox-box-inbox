@@ -512,6 +512,8 @@ _MIGRATION_OWNER: dict[int, str] = {
     48: "customer_voice",
     # 50 touches inbox_state — a table only a Customer Voice box carries.
     50: "customer_voice",
+    # 51 adds inbox_conversations.read_at — a table only a Customer Voice box carries.
+    51: "customer_voice",
 }
 # A table each machine is known by, for the one-time bootstrap of boxes that predate the split.
 _MACHINE_MARKER = {"customer_voice": "voice_rails", "content": "reel_scripts", "lead": "gtm_leads"}
@@ -593,7 +595,7 @@ def _replay_machine(conn, machine: str, upto: int) -> None:
 # concurrent migrators: worker, dispatch, and watchdog can all boot and call init_db;
 # exactly one runs the steps, the rest wait on the lock then see the bumped version.
 
-SCHEMA_VERSION = 50
+SCHEMA_VERSION = 51
 
 
 def _migration_1(c) -> None:
@@ -1534,6 +1536,38 @@ def _migration_50(c) -> None:
         c.execute("UPDATE inbox_state SET last_activity = NULL WHERE last_seen_msg_id IS NULL")
 
 
+def _migration_51(c) -> None:
+    """AN INBOX THAT CANNOT TELL READ FROM UNREAD HAS NOTHING TO PUT IN BOLD.
+
+    Owner, 2026-09-17: "New messages should be in Bold text. Read messages in regular. Just like
+    a normal inbox." Nothing in this schema knew that. The row carried a New pill meaning
+    `message_count == 1`, which is not unread — it is "nobody has replied yet", and it stays true
+    on a conversation he has read ten times.
+
+    WHY NOT REUSE `awaiting_reply`. It is the tempting version and it is wrong: it means the
+    NEWEST message is inbound, so it does not clear when he reads — only when he answers. An
+    owner who reads on his phone and replies from a laptop later would watch every row stay bold
+    until he had answered all of them, and a list where everything is bold says nothing. Bold has
+    to clear on the act it names.
+
+    NULL MEANS NEVER OPENED, which is the correct reading for every row already on the box: he
+    has not looked at any of them through this column, so they are all unread the first time he
+    loads the screen after this ships. That is the honest default — the alternative, stamping
+    every existing row as read at migration time, would hide real waiting customers behind a
+    column that was invented after they wrote in.
+
+    COMPARING AGAINST A MESSAGE'S `created_at` IS SOUND HERE, and it is worth saying why, because
+    #1304 established the opposite for the send window: `created_at` is `state._now()` at MIRROR
+    time, not when the customer hit send. For a WINDOW that is a lie about the clock. For read
+    state it is exactly the question being asked — has anything arrived in this box since he last
+    looked at this conversation — so mirror time is the right stamp to compare.
+
+    Tagged `customer_voice` in _MIGRATION_OWNER: a Lead or Content box has no such table.
+    """
+    if _table_exists(c, "inbox_conversations"):
+        _add_column_if_missing(c, "inbox_conversations", "read_at")
+
+
 MIGRATIONS = {
     46: _migration_46,   # the schema split's bootstrap (kernel step)
     1: _migration_1, 2: _migration_2, 3: _migration_3, 4: _migration_4,
@@ -1549,7 +1583,7 @@ MIGRATIONS = {
               39: _migration_39, 40: _migration_40, 41: _migration_41,
               42: _migration_42, 43: _migration_43, 44: _migration_44,
               45: _migration_45, 47: _migration_47, 48: _migration_48,
-              49: _migration_49, 50: _migration_50}
+              49: _migration_49, 50: _migration_50, 51: _migration_51}
 
 
 # init_db IS SAFE TO CALL FROM MANY THREADS AND PROCESSES AT ONCE. Main went red on 2026-09-06

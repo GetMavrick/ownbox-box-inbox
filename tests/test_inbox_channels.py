@@ -12,6 +12,7 @@ inferred" — and a chip that filters to nothing is the same dead control.
 Run: python tests/test_inbox_channels.py
 """
 import os
+import re
 import sys
 import tempfile
 
@@ -70,7 +71,12 @@ ok("one channel renders NO chip row — a filter with one option changes nothing
 # screenshot, and it carries the channel's name in a visually-hidden span so a screen reader says
 # "Messenger" rather than "image". Both are checked, because the old form of this check would pass
 # on a bare coloured dot with a title attribute, and that is exactly what it exists to refuse.
-_row = html.split('class="conv"', 1)[1].split("</a>", 1)[0]
+# ANCHORED ON THE OPENING TAG, not on the attribute alone. Two traps, both hit while fixing
+# this: `class="conv` also matches the `convrow` WRAPPER, and — because this app inlines its
+# stylesheet into every page — it matches any CSS COMMENT that happens to quote a row's markup,
+# which sits far above the first real row. Matching `<a class="conv` is what makes it a row.
+_m = re.search(r'<a class="conv[^"]*".*?</a>', html, re.S)
+_row = _m.group(0) if _m else ""
 ok("...and the row still NAMES the channel, not merely colours it",
    ">Messenger<" in _row, _row[-160:])
 ok("...with the name in text a screen reader reads, not an attribute it may skip",

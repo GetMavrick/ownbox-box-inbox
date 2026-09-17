@@ -127,7 +127,9 @@ def _seeded():
 def _names(html: str) -> list:
     import re
     return [n.replace("&amp;", "&")
-            for n in re.findall(r'<a class="conv" href="[^"]*">.*?<b>([^<]*)</b>', html, re.S)]
+            # `conv[^"]*`: the row's class now carries read state (`conv unread`).
+            for n in re.findall(r'<a class="conv[^"]*" href="[^"]*">.*?<b>([^<]*)</b>',
+                                html, re.S)]
 
 
 def test_the_buyer_can_search_at_all():

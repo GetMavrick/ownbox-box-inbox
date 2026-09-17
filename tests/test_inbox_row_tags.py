@@ -54,8 +54,11 @@ def _ago(hours):
 # quietly drops a state fails here rather than going unnoticed on a box nobody has that state on.
 #   zcid, who, platform, hours since inbound, ad_title, account_id, messages, opted out, tags
 SEED = [
+    # WAS ["New"] until 2026-09-17. A conversation with one message and no constraint now wears
+    # NOTHING — the owner had the pill removed and unread is a weight on the row instead. An
+    # empty expectation is the point of this row: it proves a calm conversation stays calm.
     ("zc-new",    "Dana Whitfield",  "messenger", 1,    None,           "acct-1", 1, False,
-     ["New"]),
+     []),
     # WHATSAPP, NOT EMAIL, IS THE RULELESS CHANNEL NOW. Email was this suite's stand-in for "no
     # policy written" and it stopped being one the moment the email rule landed: it is written,
     # cited, and refuses because this box has no SMTP path. Swapping in a channel that genuinely
@@ -155,9 +158,12 @@ def test_a_conversation_with_no_messages_is_not_new():
     c = _seeded()
     seen = _rows(c.get("/inbox/inbox").get_data(as_text=True))
     quiet = seen["Whitmore Plumb"][0]
-    ok("an empty conversation is not New", "New" not in quiet, str(quiet))
+    ok("an empty conversation wears no New pill", "New" not in quiet, str(quiet))
     ok("...it says what is actually true of it", "No inbound yet" in quiet, str(quiet))
-    ok("a conversation with exactly one message IS New", "New" in seen["Dana Whitfield"][0])
+    # THE PILL IS GONE EVERYWHERE, not just on the empty row. It read as an unread marker and
+    # measured `message_count == 1`, which stays true on a thread he has read ten times.
+    ok("...and neither does a one-message conversation",
+       "New" not in seen["Dana Whitfield"][0], str(seen["Dana Whitfield"][0]))
 
 
 def test_the_menu_offers_reply_on_exactly_the_rows_that_can_be_replied_to():
@@ -246,8 +252,13 @@ def test_no_row_can_say_two_things_that_contradict_each_other():
         n = len(exclusive.intersection(tags))
         ok(f"{who} states at most one thing about whether he can reply", n <= 1, str(tags))
         ok(f"...and never more than three tags in total", len(tags) <= 3, str(tags))
-    ok("...and 'No inbound yet' never appears beside 'New'",
-       all(not {"No inbound yet", "New"} <= set(t) for t, _m in seen.values()))
+    # WAS: "'No inbound yet' never appears beside 'New'". The pill it guarded against no longer
+    # exists, so the pair it forbade is unconstructable — kept as the stronger claim it was
+    # really making, which is that no row invents a pill this table does not list.
+    known = exclusive | {"From Spring offer", "From Autumn tune-up"}
+    for who, (tags, _menu) in seen.items():
+        unknown = [t for t in tags if t not in known and not t.startswith("From ")]
+        ok(f"{who} states nothing this suite has not named", not unknown, str(unknown))
 
 
 def test_the_row_is_still_one_link_with_the_menu_beside_it():
@@ -259,7 +270,7 @@ def test_the_row_is_still_one_link_with_the_menu_beside_it():
     html = c.get("/inbox/inbox").get_data(as_text=True)
     for chunk in html.split('<div class="convrow">')[1:]:
         row = chunk.split("</div>")[0]
-        anchor = re.search(r'<a class="conv".*?</a>', row, re.S)
+        anchor = re.search(r'<a class="conv[^"]*".*?</a>', row, re.S)
         ok("the row link exists", anchor is not None)
         if anchor:
             ok("...and contains no nested anchor", "<a " not in anchor.group(0)[3:])

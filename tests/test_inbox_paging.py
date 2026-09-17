@@ -88,7 +88,11 @@ def _seeded():
 
 
 def _ids(html: str) -> list:
-    return re.findall(r'<a class="conv" href="/inbox/inbox/([^"]+)"', html)
+    # `conv[^"]*` BECAUSE THE ROW CARRIES ITS READ STATE IN THAT ATTRIBUTE. An unread row is
+    # `class="conv unread"`, and a pattern pinned to `class="conv"` silently counted only the
+    # rows he had already opened — which on a freshly seeded box is none of them, so every
+    # count here read zero while the pager was working perfectly.
+    return re.findall(r'<a class="conv[^"]*" href="/inbox/inbox/([^"]+)"', html)
 
 
 def _pager(html: str) -> dict:

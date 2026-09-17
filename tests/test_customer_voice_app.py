@@ -253,12 +253,20 @@ def test_the_inbox_screen_shows_the_conversation_and_says_who_spoke():
         c.post("/dash/login", data={"token": settings.dash_token})
         body = c.get("/inbox/inbox").get_data(as_text=True)
         ok("the person's name is on the row", "Dana Whitfield" in body)
-        ok("...with how many messages", "2 messages" in body)
+        # WAS "2 messages" — the count label the row no longer carries. Owner, 2026-09-17:
+        # it was "totally in the way". What this assertion is FOR is that the row tells him
+        # something about the conversation beyond the name, so it now asks for the thing the
+        # list exists to show: the newest message, prefixed because we sent it last.
+        ok("...with the newest message, not a count of them", "2pm or 4pm" in body)
         ok("...and where they came from", "Spring offer" in body)
         ok("newest inbound first, not newest touched",
            body.index("Dana Whitfield") < body.index("Older Person"), "ordering is wrong")
         ok("the whole row is the tap target, not a word inside it",
-           '<a class="conv" href="/inbox/inbox/zc-new"' in body)
+           # THE CLASS CARRIES READ STATE NOW, so both spellings are the same claim: the row
+           # is ONE anchor at the thread. Pinned to `class="conv"` it passed only on rows he
+           # had already opened.
+           ('<a class="conv" href="/inbox/inbox/zc-new"' in body
+            or '<a class="conv unread" href="/inbox/inbox/zc-new"' in body))
 
         thread = c.get("/inbox/inbox/zc-new").get_data(as_text=True)
         ok("the thread carries both messages",

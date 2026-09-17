@@ -172,6 +172,7 @@ CSS = """
      bubble is white on the accent. It is also used as link text throughout, at the same 3.63:1.
      #b03f1c is the same hue, deepened until ONE value fixes all three: white on it 5.88:1, it as
      text on white 5.88:1, and as the 'New' tag on its own soft ground 5.23:1.
+     (That third pair carried the 'New' pill until 2026-09-17; the avatar monogram uses it now.)
      THE ALTERNATIVE WAS TO KEEP #e05d38 AND PUT DARK INK ON IT (4.88:1), as dark mode already
      does. That preserves the exact brand orange for fills but leaves it failing everywhere it is
      used as text, which is most places. Flagged to the owner; one line to switch back. */
@@ -277,15 +278,47 @@ a.row:active{background:var(--hair);border-radius:10px}
   /* NO PHOTO EXISTS. The vendor sends us a display name and nothing else, so initials are not a
      placeholder for an avatar we failed to load — they are the avatar, the way Apple's Messages
      draws a contact with no picture. */}
-.conv .w{grid-row:1;grid-column:2;font-weight:570;font-size:15.5px;letter-spacing:-.01em;
+.conv .w{grid-row:1;grid-column:2;font-size:15.5px;letter-spacing:-.01em;
   display:flex;align-items:baseline;gap:7px;min-width:0}
-.conv .w b{font-weight:590;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conv .w b{font-weight:500;color:var(--dim);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
 .conv .t{font-weight:400;font-size:13px;color:var(--dimmer);flex:none}
-/* THE MESSAGE. One line, clipped with an ellipsis rather than wrapped, because a row that grows
-   with the length of what somebody wrote makes the list jump about as it loads — and the whole
-   of it is one tap away. `--dim` at 15px measures 7.98:1 on the card. */
+/* ── READ AND UNREAD, THE WAY EVERY INBOX SAYS IT ────────────────────────────────────────────
+   Owner, 2026-09-17: "New messages should be in Bold text. Read messages in regular. Just like
+   a normal inbox."
+
+   THE UNREAD ROW IS THE DEPARTURE, AND READ IS THE RESTING STATE. Written the other way first —
+   bold as the default with a `.read` class lightening it — which is the same pixels and the
+   wrong default: a row whose `unread` key is somehow absent then renders as SHOUTING. Unread
+   has to be the thing that is added.
+
+   IT WAS ALSO A DEMOTION, NOT JUST A PROMOTION. The name sat at 590 on every row, so nothing
+   could be bolder than anything; making unread heavier alone would have left a list where the
+   two states were 590 and 700 and nobody could see which was which. Read drops to 500 and
+   `--dim`, unread rises to 700 and `--ink`. 200 units and a colour step apart, which is the
+   distance the eye actually resolves at 15px.
+
+   TWO CHANNELS ON THE MESSAGE, NOT ONE: weight AND ink. Weight alone is a fine signal on a
+   desktop and a poor one on a phone at arm's length, and both tokens here are already measured
+   against both grounds this app draws on.
+
+   AND A WORD FOR THE PEOPLE WHO CANNOT SEE IT AT ALL. Bold is invisible to a screen reader, so
+   an unread row carries the word in `.vh` — no pixels, the whole fact. */
+.conv.unread .w b{font-weight:700;color:var(--ink)}
+.conv.unread .t{font-weight:600;color:var(--dim)}
+.conv.unread .p{font-weight:470;color:var(--ink)}
+/* THE MESSAGE, TWO LINES. Owner, 2026-09-17: "The conversation should run two lines so people
+   can see more information on the screen." It was one clipped line, on the reasoning that a row
+   which grows with what somebody wrote makes the list jump about — but the cost of that was the
+   thing the list is FOR, cut mid-sentence on the screen he opens most.
+   TWO IS A CLAMP, NOT A WRAP, which is what keeps the old reasoning honest: every row is exactly
+   one or two lines tall whatever arrives, so the list still cannot jump. Three would be a wrap
+   wearing a number. `overflow-wrap` is for the customer who pastes a URL with no spaces in it —
+   without it one unbreakable token runs out past the channel logo.
+   `--dim` at 15px measures 7.98:1 on the card. */
 .conv .p{grid-row:2;grid-column:2;color:var(--dim);font-size:15px;line-height:1.4;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;margin-top:1px}
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  overflow-wrap:anywhere;min-width:0;margin-top:1px}
 .conv .p i{font-style:normal;color:var(--dimmer)}
 .conv .s{grid-row:3;grid-column:2;display:flex;align-items:center;gap:6px;min-width:0;
   flex-wrap:wrap;row-gap:5px;color:var(--dim);font-size:15px}
@@ -305,18 +338,32 @@ a.row:active{background:var(--hair);border-radius:10px}
    suite red — a comment about layout, breaking a test about copy, because the guard cannot tell
    the two apart from inside the page. It is RIGHT to scan the whole page; the fix belongs here.
    Read that suite before writing prose in this string. */
-/* THE FLOOR SURVIVES, BUT IT GUARDS SOMETHING SMALLER NOW. It was added because a long
-   PREVIEW shared this line with the tags and got crushed to "1 ." to save them. The change
-   that gave the preview a line of its own removed that pressure entirely, so what is left
-   here is the message count, and 6ch keeps it from rendering as "1 ." when a long tag
-   crowds it. Smaller stake, same rule, and the count itself is arguably noise now. */
-.conv .s .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:6ch;flex:1 1 0}
+/* THE COUNT IS GONE AND SO IS ITS FLOOR. Owner, 2026-09-17: "showing more of the conversation
+   rather than having that one message label totally in the way". `.conv .s .sub` and the 6ch
+   floor under it existed only to stop "1 message" rendering as "1 ." beside a long tag — a rule
+   protecting a label that was costing the row a line. The line it was holding now belongs to the
+   message, so the rule went with the label. What is left on this row is tags, which never
+   truncate because they wrap. */
 /* AND THE MARK SPANS THREE ROWS NOW, not two — the preview took a line of its own,
    which is what made the row worth reading. `1/4` rather than `1/3` is the whole of
    this side of the merge, and getting it wrong leaves the channel logo floating
    against the name with the tags underneath it. */
 .conv .mk{grid-row:1/4;grid-column:3;flex:none;display:flex;align-items:center}
-.conv.out .av{background:var(--bubble-in);color:var(--dimmer)}
+/* AND THE AVATAR RECEDES WITH THE REST OF A READ ROW. Demoting the name to 500/--dim left the
+   accent monogram as the LOUDEST thing on a row that is meant to be quiet — the eye went to the
+   initials instead of the person, which is the hierarchy upside down. Unread rows keep the
+   accent; read rows take the neutral ground.
+
+   THIS RULE EXISTED ALREADY, as `.conv.out .av`, and no row in this file has ever been given
+   that second class — dead since whatever design dropped it. Repurposed rather than added, but
+   NOTE: this comment deliberately does NOT spell the attribute out. The stylesheet is inlined
+   into every page, so a comment naming a row's markup is a string that page-scanning tests
+   match as though it were a row. An earlier draft of this very comment broke
+   test_inbox_channels, which finds the first row by splitting on that attribute.
+   NOT copied verbatim: it used `--dimmer`, which is 4.27:1 on `--bubble-in` in dark mode, under
+   AA for a 15px monogram (it clears 4.72:1 in light, which is how a rule can look measured and
+   only be half-measured). `--dim` is 7.24:1 light and 6.51:1 dark. */
+.conv:not(.unread) .av{background:var(--bubble-in);color:var(--dim)}
 
 /* ── tags, and the menu that appears on hover ──────────────────────────────────────────────
    Owner, 2026-09-16: "we're also going to add some different tags on each conversation and an
@@ -339,7 +386,6 @@ a.row:active{background:var(--hair);border-radius:10px}
   line-height:1.6;white-space:nowrap}
 .tag.stop{color:var(--bad);background:var(--bad-soft);border-color:var(--bad-soft)}
 .tag.warn{color:var(--dim);background:var(--bg);border-color:var(--accent-line)}
-.tag.new{color:var(--accent);background:var(--accent-soft);border-color:var(--accent-soft)}
 .tag.ad{color:var(--dim);background:var(--bg);border-color:var(--line)}
 
 /* A <details> IS THE MENU. No library, no state in JS, keyboard-operable and open-able before
@@ -1297,22 +1343,33 @@ def _tag_list(k: dict) -> list:
         # policy nobody has written — `window.decide`'s most important branch — and "Window
         # closed" would quietly promise it reopens tomorrow.
         out.append(("No reply rule", "stop"))
-    elif not k.get("last_inbound_at"):
+    elif not k.get("has_inbound"):
         # A ROW WE KNOW ABOUT AND HAVE NEVER HEARD FROM. Every channel here is reply-only, so
         # there is no permission to answer — a different fact from a window that has shut.
+        #
+        # ASKS THE MESSAGES, VIA `has_inbound`, FOR THE SAME REASON `_compose` DOES: this read
+        # `last_inbound_at` and so labelled "No inbound yet" onto rows whose thread prints the
+        # customer's own words. A tag is a claim about the conversation, and that one was false.
+        # A row with inbound and no readable clock now falls through to the window branch below,
+        # where `decide(plat, None)` refuses and the row says "Window closed" — which is the
+        # honest reading of not knowing WHEN they wrote, and matches the note the thread puts
+        # above the reply box on the very same row. A warning, on both surfaces; never a block.
         out.append(("No inbound yet", "warn"))
     else:
         from marketing.customer_voice.inbox import window as _w
         d = _w.decide(plat, k.get("last_inbound_at"))["decision"]
         if d in _WINDOW_TAG:
             out.append(_WINDOW_TAG[d])
-    if (k.get("message_count") or 0) == 1:
-        # EXACTLY ONE, NOT "AT MOST ONE". Written as `<= 1` first, and rendering a seeded box
-        # caught it immediately: a conversation with ZERO messages — a row the poller knows about
-        # and has never heard a word on — announced itself as New, right beside a tag saying
-        # nothing had ever come in. "New" means one message has arrived and nobody has answered
-        # it; it is not the empty state wearing a badge.
-        out.append(("New", "new"))
+    # THE "NEW" PILL USED TO BE HERE, on `message_count == 1`. Owner, 2026-09-17: "the new label
+    # just gets in the way too. New messages should be in Bold text. Read messages in regular."
+    #
+    # IT WAS ALSO NEVER QUITE TRUE. `message_count == 1` means nobody has replied yet, which stays
+    # true on a conversation he has read ten times — so the badge that looked like an unread
+    # marker was measuring something else, and the row had no way to say what he had actually
+    # seen. `store._UNREAD` is that fact now, and the row spends no horizontal space on it.
+    #
+    # WHAT IS LEFT ON THIS LINE IS CONSTRAINTS AND ATTRIBUTION — what stops him replying, and
+    # what a conversation is worth. Both are things a weight cannot say.
     if k.get("ad_title"):
         # IT USED TO BE PROSE IN THE GREY LINE, where it competed with the message count for the
         # same characters and lost. Attribution is the one thing on this row that says what the
@@ -1350,8 +1407,13 @@ def _acts(k: dict, *, who: str, channel: str) -> str:
     # of them and it arrived with email: a channel whose rule is written and says the send happens
     # in the person's own mail app shows no box, so it must offer no Reply either. Adding a gate
     # to `_compose` and not to this list is precisely the drift the suite beside this catches.
+    #
+    # `has_inbound` IS THE ROW'S HALF OF THE SAME FACT the thread reads off its own messages. It
+    # had to come from the store because a list of fifty rows cannot afford a query each, and it
+    # replaced `last_inbound_at` here for the reason `_compose` gives at length: that column is an
+    # inference a poller fills and it is NULL on threads the customer demonstrably wrote on.
     if (not k.get("opted_out") and not _no_send_lane(plat) and _has_send_rule(plat)
-            and (k.get("last_inbound_at") or "")
+            and k.get("has_inbound")
             and (k.get("account_id") or "").strip()):
         items.append((f"{href}#reply", "Reply"))
     if plat and channel:
@@ -1725,7 +1787,6 @@ def r_inbox():
     rows = []
     for k in convs:
         who = (k.get("participant") or "").strip() or "Someone"
-        n = k.get("message_count") or 0
         when = _ago(k.get("last_inbound_at"))
         # THE FLAGS LEFT THIS SENTENCE AND BECAME TAGS. "opted out" and "from <ad>" used to be
         # prose here, third and fourth in a line that truncates — so the two facts most worth
@@ -1742,20 +1803,37 @@ def r_inbox():
         # heard a word on is not one we replied to.
         preview = " ".join(str(k.get("preview") or "").split())
         mine = preview and not k.get("awaiting_reply")
-        sub = f'{n} message' + ("" if n == 1 else "s")
+        # AND THE ROW NO LONGER COUNTS THEM. It said "N messages" on a line of its own, which
+        # is the line the message now runs onto — owner, 2026-09-17, that label was "totally in
+        # the way". Nobody opens an inbox to learn a conversation has four messages in it; they
+        # open it to read the newest one. `message_count` is still read, once, by `_tag_list`,
+        # where exactly-one earns the New tag — a fact, not a tally.
+        tags = _tags(k)
+        # UNREAD IS A CLASS ON THE ROW, not a badge inside it. One word of markup, and it styles
+        # the name, the clock and the message together — which is what makes the row read as one
+        # object in two states rather than three elements that happen to agree.
+        unread = bool(k.get("unread"))
         # KINSO'S ROW, EXACTLY: avatar, name with the time beside it, one grey line under it, and
         # the channel's own logo far right. The mark is a SHAPE before it is a colour, so it still
         # separates in greyscale — and the channel's word is one tap away in the thread header, so
         # nothing here is carried by colour alone.
         plat = k.get("platform")
         rows.append('<div class="convrow">'
-                    f'<a class="conv" href="{_esc(_thread_href(k.get("zernio_conversation_id")))}">'
+                    f'<a class="conv{" unread" if unread else ""}" '
+                    f'href="{_esc(_thread_href(k.get("zernio_conversation_id")))}">'
                     f'<span class="av" aria-hidden="true">{_monogram(who)}</span>'
-                    f'<span class="w"><b>{_esc(who)}</b><span class="t">{_esc(when)}</span></span>'
+                    # THE WORD, FOR A READER THAT CANNOT SEE THE WEIGHT. First thing inside the
+                    # link, so it is announced before the name rather than after the timestamp.
+                    + ('<span class="vh">Unread.</span>' if unread else "")
+                    + f'<span class="w"><b>{_esc(who)}</b><span class="t">{_esc(when)}</span></span>'
                     + (f'<span class="p">{"<i>You:</i> " if mine else ""}{_esc(preview)}</span>'
                        if preview else '<span class="p"><i>No message yet</i></span>')
-                    + f'<span class="s"><span class="sub">{_esc(sub)}</span>{_tags(k)}</span>'
-                    f'<span class="mk">{_mark(plat)}'
+                    # NO EMPTY GREY LINE. With the count gone this span can have nothing in it
+                    # at all — an ordinary conversation inside its window wears no tag — and an
+                    # empty flex row still spends the grid's row gap. Drawn only when it carries
+                    # something, so a calm row is genuinely shorter than a busy one.
+                    + (f'<span class="s">{tags}</span>' if tags else "")
+                    + f'<span class="mk">{_mark(plat)}'
                     f'<span class="vh">{_esc(_channel(plat))}</span></span></a>'
                     f'{_acts(k, who=who, channel=channel)}</div>')
     return _shell(_stopped_note()
@@ -1785,6 +1863,21 @@ def r_thread(zcid):
                       'read on this box.</div>'), 200
     if not conv:
         return ("", 404)
+
+    # HE HAS LOOKED AT IT, SO IT STOPS SHOUTING. The act of opening the thread is what clears
+    # the bold on the list — the same contract as every inbox, and the reason no "mark as read"
+    # control has to exist on a phone screen that has no room for one.
+    #
+    # NEVER FAILS THE READ. A stamp that cannot be written is a row that stays bold, which is a
+    # cosmetic wrong; refusing to show him the conversation over it would be a real one.
+    # `_store`, NOT `store`. This module imports the store under a local alias inside each
+    # route's try block and has no module-level name for it — so `store.mark_read` here raises
+    # NameError INSIDE the except below, logs a warning, and marks nothing read for ever. A bug
+    # that passes every screen test because the screen still renders.
+    try:
+        _store.mark_read(space, zcid)
+    except Exception as e:                       # noqa: BLE001 — see above
+        log.warning("voice.mark_read_failed", extra={"error": f"{type(e).__name__}: {e}"[:160]})
 
     who = (conv.get("participant") or "").strip() or "Someone"
     # THE CHANNEL, IN THE HEADER. Answering an Instagram DM as though it were an email is a
@@ -1828,7 +1921,7 @@ def r_thread(zcid):
             f'<div class="m">{_esc(by)} · {_esc(_when(m.get("created_at")))}</div></div>')
     back = '<div class="foot"><a href="/inbox/inbox">← Inbox</a></div>'
     return _shell("".join(head) + f'<div class="thread">{"".join(bubbles)}</div>'
-                  + _compose(zcid, conv) + back), 200
+                  + _compose(zcid, conv, msgs) + back), 200
 
 
 # HOW EACH WINDOW STATE LOOKS. A table, not a branch — and keyed on `state`, which OSDev4 added
@@ -1845,7 +1938,7 @@ _WINDOW_TONE = {
 }
 
 
-def _window_note(conv: dict) -> str:
+def _window_note(conv: dict, msgs: list[dict]) -> str:
     """The send window, in the buyer's words, above the box he is about to type in.
 
     SILENT WHEN THE WINDOW IS SIMPLY OPEN. "You can reply now" over a reply box is the screen
@@ -1855,7 +1948,29 @@ def _window_note(conv: dict) -> str:
     A FAILURE HERE COSTS THE NOTE, NEVER THE BOX. `explain()` is documented never to raise, but
     this screen is the one place where being wrong about that would take away a working reply box
     on a live conversation, so it is wrapped anyway.
+
+    IT DOES NOT ASK `explain()` A QUESTION IT HAS NO INPUT FOR. `explain()` reads one column, and
+    handed a NULL one it answers, correctly for what it was given, "nothing from them has reached
+    the box yet". On a thread that IS printing their messages that sentence is false, and moving
+    the reply box back without this branch simply relocates the false sentence one line lower —
+    which is exactly what rendering showed on the first pass of this fix.
+
+    AND IT DOES NOT DATE THE MESSAGES INSTEAD, which was the tempting version of this. A message's
+    `created_at` is `state._now()` AT MIRROR TIME, not when the customer hit send: a backfill
+    stamps three-week-old messages with today. Feeding that to `explain()` would print "you can
+    reply now" over a window that shut a fortnight ago — a confident lie in the direction of
+    encouraging a send, which is worse than the one it replaces. So we say the true thing, which
+    is that we do not know the hour, and leave the decision where the note always leaves it.
     """
+    if not str(conv.get("last_inbound_at") or "").strip() \
+            and any(str(m.get("direction") or "") == "in" for m in msgs):
+        return ('<div class="card win unknown"><div class="row"><span class="t">'
+                '<b class="dim">The box cannot tell when they last wrote</b>'
+                '<span class="sub" style="display:block;margin-top:3px">Their messages are here, '
+                'but not the hour they arrived, so Ownbox cannot work out whether '
+                + _esc(_channel(str(conv.get("platform") or ""))) + ' still counts this as a live '
+                'conversation. Send it — the channel decides, and it will say so either '
+                'way.</span></span></div></div>')
     try:
         from marketing.customer_voice.inbox import window as _w
         got = _w.explain(str(conv.get("platform") or ""), conv.get("last_inbound_at"))
@@ -1877,7 +1992,7 @@ def _window_note(conv: dict) -> str:
             + '</span></div></div>')
 
 
-def _compose(zcid: str, conv: dict) -> str:
+def _compose(zcid: str, conv: dict, msgs: list[dict]) -> str:
     """The reply box. Absent — not disabled — when this conversation cannot be replied to.
 
     A CONTROL THAT CANNOT SUCCEED IS WORSE THAN NO CONTROL, which this codebase keeps deleting
@@ -1917,7 +2032,7 @@ def _compose(zcid: str, conv: dict) -> str:
                 'rule for ' + _esc(_channel(str(conv.get("platform") or ""))) + ' yet, so it '
                 'will not send on it. You can read everything here; replies go out from the '
                 'channel itself for now.</span></div></div>')
-    if not (conv.get("last_inbound_at") or "").strip():
+    if not any(str(m.get("direction") or "") == "in" for m in msgs):
         # THE SECOND HALF OF THE SAME RULE, and rendering found it the same way. Every channel
         # here is reply-only, so a conversation with no inbound message on record has nothing to
         # reply TO — `window.decide` refuses it outright, on every platform, at every hour.
@@ -1927,6 +2042,23 @@ def _compose(zcid: str, conv: dict) -> str:
         # It stays PRESENT when the refusal is the clock itself, a window that shut and reopens
         # the moment they write again; that decision is the send path's, not this screen's, and
         # taking it here would delete the reply box from every conversation older than a day.
+        #
+        # IT ASKS THE MESSAGES, NOT `last_inbound_at`, AND THAT IS THE WHOLE FIX (OSDev4's call,
+        # 2026-09-17: "a thread only renders because messages exist"). `last_inbound_at` is an
+        # inference a poller fills and two paths leave it NULL on a thread the customer plainly
+        # wrote on: `upsert_conversation` COALESCEs only non-null values in, so one later poll
+        # carrying nothing never clears it but one earlier poll carrying nothing never sets it;
+        # and `email_channel` passes None outright whenever the message it mirrors is outbound.
+        #
+        # RENDERED, 2026-09-17, WHICH IS HOW THE SIZE OF IT LANDED. A thread with three messages
+        # — two of them from the customer, printed on the screen in her own words — closed with
+        # "Nothing has come in on this conversation yet." The page contradicted itself in one
+        # scroll, and the reply box was gone, which on a reply-only channel is the whole product.
+        # The messages were right there in the route the entire time; this line just asks them.
+        #
+        # THE SENTENCE IS STILL TRUE WHEN IT PRINTS. The route returns before this on an empty
+        # thread, so what reaches here and still has no inbound is a conversation carrying only
+        # outbound messages — and on a reply-only channel there is genuinely nothing to reply to.
         return ('<div class="card"><div class="row"><span class="t quiet">Nothing has come in on '
                 'this conversation yet. Every channel here is reply-only, so there is nothing to '
                 'reply to until they write — and then the box appears.</span></div></div>')
@@ -1946,7 +2078,7 @@ def _compose(zcid: str, conv: dict) -> str:
     # is the fact. So a shut clock is a warning above a working box, not a missing box — which is
     # also why this sits here, after the branches that return early for reasons the clock cannot
     # change, rather than adding a new one.
-    win = _window_note(conv)
+    win = _window_note(conv, msgs)
 
     # ONE NONCE PER RENDER. It is what "this particular attempt to send" means: a browser that
     # resubmits this same form (double tap, flaky connection, back button) carries the same one

@@ -59,6 +59,51 @@ _NEWEST_IS_INBOUND = (
     "             AND m.zernio_conversation_id = k.zernio_conversation_id "
     "           ORDER BY m.created_at DESC, m.id DESC LIMIT 1) = 'in', 0)")
 
+# HAS THE CUSTOMER EVER WRITTEN ON THIS THREAD? THE FACT, NOT THE CLOCK COLUMN.
+#
+# `k.last_inbound_at` is an INFERENCE a poller fills, and two paths leave it NULL on a thread the
+# customer plainly did write on: `upsert_conversation` only ever COALESCEs a non-null value in, and
+# `email_channel` passes None whenever the message it is mirroring happens to be outbound. The
+# messages themselves are the fact — the screen was hiding its reply box on the inference while
+# rendering the customer's own words directly above the sentence saying they had never written.
+#
+# DELIBERATELY NOT `_NEWEST_IS_INBOUND`. That one asks "is this thread waiting on a reply", which
+# goes false the moment somebody answers — and a thread you have already answered is the most
+# ordinary thing in an inbox to answer again. This asks whether there is anything to reply TO,
+# ever, which is the question the reply box and the row's Reply item both actually have.
+#
+# EXISTS, NOT COUNT: it stops at the first inbound row, and it is selected in the same pass as the
+# other two subselects for the reason stated above — fifty rows must cost one query, not fifty-one.
+_HAS_INBOUND = (
+    "EXISTS(SELECT 1 FROM inbox_messages m "
+    "        WHERE m.space = k.space "
+    "          AND m.zernio_conversation_id = k.zernio_conversation_id "
+    "          AND m.direction = 'in')")
+
+# HAS ANYTHING ARRIVED SINCE HE LAST OPENED THIS CONVERSATION? The one fact that lets the row put
+# an unread message in bold and a read one in regular — owner, 2026-09-17: "Just like a normal
+# inbox."
+#
+# INBOUND ONLY. Our own reply appearing in bold would mean the box was telling him he had not read
+# something he wrote himself, and the drafter mirrors machine sends through this same table.
+#
+# `read_at IS NULL` IS UNREAD, NOT READ. Null means never opened, which is true of every row that
+# predates the column. Defaulting those to read would hide customers who are genuinely waiting
+# behind a column invented after they wrote in.
+#
+# STRICTLY NEWER THAN `read_at`, so opening a thread clears it and the next arrival sets it again.
+# Comparing to a message's `created_at` — MIRROR time, not send time — is right here for the exact
+# reason it was wrong for the send window in #1304: the question is what has reached this box since
+# he looked, and mirror time is when it reached the box.
+#
+# SAME PASS, SAME REASON AS THE THREE ABOVE: fifty rows must cost one query, not fifty-one.
+_UNREAD = (
+    "EXISTS(SELECT 1 FROM inbox_messages m "
+    "        WHERE m.space = k.space "
+    "          AND m.zernio_conversation_id = k.zernio_conversation_id "
+    "          AND m.direction = 'in' "
+    "          AND (k.read_at IS NULL OR m.created_at > k.read_at))")
+
 
 def upsert_conversation(*, space: str, zcid: str, platform: str = "messenger",
                         ad_meta_id: str | None = None, ad_title: str | None = None,
@@ -145,7 +190,9 @@ def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
             # the list and the search — because a row that is waiting does not stop waiting
             # because somebody typed a name into a box.
             f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply, "
-            f"       ({_NEWEST_BODY}) AS preview "
+            f"       ({_NEWEST_BODY}) AS preview, "
+            f"       ({_HAS_INBOUND}) AS has_inbound, "
+            f"       ({_UNREAD}) AS unread "
             "  FROM inbox_conversations k "
             f" WHERE {where} "
             " ORDER BY (k.last_inbound_at IS NULL), k.last_inbound_at DESC, k.id ASC "
@@ -226,7 +273,9 @@ def search_conversations(space: str, query: str, *, limit: int = 50,
             # the list and the search — because a row that is waiting does not stop waiting
             # because somebody typed a name into a box.
             f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply, "
-            f"       ({_NEWEST_BODY}) AS preview "
+            f"       ({_NEWEST_BODY}) AS preview, "
+            f"       ({_HAS_INBOUND}) AS has_inbound, "
+            f"       ({_UNREAD}) AS unread "
             "  FROM inbox_conversations k "
             f" WHERE {where} "
             "   AND ( COALESCE(k.participant, '') LIKE ? ESCAPE '\\' "
@@ -276,6 +325,28 @@ def set_opted_out(space: str, zcid: str) -> None:
                   "WHERE space = ? AND zernio_conversation_id = ?",
                   (state._now(), space, zcid))
     log.info("inbox.opted_out", space=space, conversation=zcid)
+
+
+def mark_read(space: str, zcid: str) -> None:
+    """He has looked at this conversation. Called when the thread is opened.
+
+    A GET THAT WRITES, DELIBERATELY. It is what every inbox does — opening the thread IS the act
+    that clears the bold — and the alternative is a "mark as read" control nobody would ever tap.
+
+    READ IS PER BOX, NOT PER PERSON. This box can have several people signed in, and a
+    per-user read state would need a row per person per conversation and would still leave the
+    question of what the list shows when two of them disagree. A shared inbox where one person
+    handling a customer clears it for everyone is the behaviour a small team actually wants:
+    the list answers "has anyone here dealt with this", which is the question being asked.
+    Worth revisiting the day a box has enough staff for that to chafe.
+
+    NOT CONDITIONAL ON THERE BEING ANYTHING TO READ. Stamping a conversation he opened is true
+    whatever was in it, and `_UNREAD` needs inbound mail to light up anyway.
+    """
+    with state.connect() as c:
+        c.execute("UPDATE inbox_conversations SET read_at = ?, updated_at = ? "
+                  "WHERE space = ? AND zernio_conversation_id = ?",
+                  (state._now(), state._now(), space, zcid))
 
 
 def claim_opener(space: str, zcid: str) -> bool:

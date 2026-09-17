@@ -600,8 +600,19 @@ def test_a_refusal_days_later_reaches_both_screens_and_they_agree():
     # needs and nothing else.
     conv = {"zernio_conversation_id": "c9", "platform": "messenger", "account_id": "acct_1",
             "last_inbound_at": state._now(), "opted_out": 0}
+    # AND ONE INBOUND MESSAGE, because that is what decides whether there is a box to draw.
+    #
+    # THIS IS A SEMANTIC CONFLICT RESOLVED, not a new requirement. These four calls arrived on
+    # main with #1358 written against `_compose(zcid, conv)`; #1304 changed the signature to
+    # `(zcid, conv, msgs)` because the box used to be gated on `conv["last_inbound_at"]` — an
+    # inference a poller fills, NULL on threads the customer demonstrably wrote on — and now
+    # asks the messages themselves. Both changes were green apart and the merge broke: exactly
+    # the failure the merge run exists to find. `last_inbound_at` above is left as it was; it
+    # still dates the send window, which is the other half of what this conv is for.
+    msgs = [{"direction": "in", "sent_by": "contact", "body": "are you open Sunday?",
+             "created_at": state._now()}]
     bs.note_anthropic_status("needs_reauth", "401")
-    box = _app._compose("c9", conv)
+    box = _app._compose("c9", conv, msgs)
     ok("the thread says drafting is PAUSED, where the draft would have been",
        "Drafts are paused" in box, box[-220:] if box else "(no reply box rendered)")
     ok("...and does not claim they were never turned on",
@@ -613,7 +624,7 @@ def test_a_refusal_days_later_reaches_both_screens_and_they_agree():
     ok("...and sends them to the form that replaces the key, not to a menu",
        'href="/inbox/drafts"' in box and "Paste a new one" in box, box[-260:])
     bs.note_anthropic_status("payment_required", "403")
-    box = _app._compose("c9", conv)
+    box = _app._compose("c9", conv, msgs)
     ok("an account out of credit is told so on the thread too",
        "needs credit" in box, box[-260:])
     ok("...and goes to Settings, because the fix is a card in the console, not a field here",
@@ -622,10 +633,10 @@ def test_a_refusal_days_later_reaches_both_screens_and_they_agree():
     with vendor(200):
         bs.put_anthropic(KEY)
     ok("...and says nothing at all once the key works again",
-       "Drafts are paused" not in _app._compose("c9", conv))
+       "Drafts are paused" not in _app._compose("c9", conv, msgs))
     bs.clear_anthropic()
     ok("...while a box with no key still gets the original off note",
-       "Drafts are off" in _app._compose("c9", conv))
+       "Drafts are off" in _app._compose("c9", conv, msgs))
     with vendor(200):
         bs.put_anthropic(KEY)
 

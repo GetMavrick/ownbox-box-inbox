@@ -186,7 +186,9 @@ ok("...and focus is drawn with an offset so it reads against the surface",
    "outline:2px" in CSS.replace(" ", "") and "outline-offset" in CSS)
 ok("a conversation row is a 44px tap target",
    re.search(r"\.conv\{[^}]*min-height:44px", CSS) is not None)
-ok("...and the whole row is the anchor, not a word inside it", '<a class="conv"' in SRC)
+# READS THE SOURCE, so it sees the f-string that appends the read-state class rather than the
+# rendered attribute. The claim is unchanged: the anchor opens with the row's own class.
+ok("...and the whole row is the anchor, not a word inside it", '<a class="conv' in SRC)
 ok("a tab is a 44px+ target too", re.search(r"\.tab\{[^}]*min-height:5\dpx", CSS) is not None)
 # THE CHANNEL IS NAMED, NOT ONLY COLOURED. The mark is a shape, and the name travels with it in
 # text a screen reader reads — a coloured dot with a title attribute would not pass this.

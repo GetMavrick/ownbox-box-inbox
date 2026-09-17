@@ -160,12 +160,25 @@ def test_the_preview_yields_and_the_tag_does_not():
     # THE WRAP ITSELF STAYS, and that is the point of asserting both halves here. An earlier pass
     # set the row to `nowrap` and a render showed a tag cut to "Opted ou" and a second tag sliding
     # under the channel logo. A tag must never truncate; the preview always may.
-    ok("the grey line has a zero flex base so it never forces the wrap",
-       "flex:1 1 0}" in _SRC and ".conv .s .sub{" in _SRC)
-    ok("...and it still ellipses rather than overflowing",
-       "text-overflow:ellipsis" in _SRC.split(".conv .s .sub{", 1)[1][:200])
+    # THE INVARIANT HELD; THE MECHANISM MOVED, 2026-09-17. The two assertions here used to name
+    # `.conv .s .sub{` and its `flex:1 1 0` — the message COUNT, which shared the tag line and
+    # was the thing being protected from a long preview. The owner had that label removed ("the
+    # new label just gets in the way too"), so the rule went with it and this suite broke with
+    # `IndexError: list index out of range` on a split that no longer finds its needle.
+    #
+    # WHICH IS THE RIGHT FAILURE. The claim was never about that one selector: it is that a tag
+    # must never truncate and the MESSAGE is what gives way. Both are still true, so both are
+    # still asserted — the message now yields by clamping to two lines rather than by shrinking
+    # to a zero flex base, and the tag row still wraps.
+    ok("the message is what gives way, by clamping rather than overflowing",
+       "-webkit-line-clamp:2" in _SRC.split(".conv .p{", 1)[1][:260])
+    ok("...and it no longer forbids wrapping, which is what makes the clamp reachable",
+       "white-space:nowrap" not in _SRC.split(".conv .p{", 1)[1][:260])
     ok("...and the row can still wrap when two tags genuinely will not fit",
        "flex-wrap:wrap" in _SRC.split(".conv .s{", 1)[1][:200])
+    # AND NOTHING IS LEFT BEHIND TO PROTECT A LABEL THAT NO LONGER EXISTS.
+    ok("...with the count's own rule gone rather than orphaned",
+       ".conv .s .sub{" not in _SRC)
 
 
 def test_the_suite_is_named_in_ci():
