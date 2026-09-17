@@ -40,6 +40,38 @@ log = get_logger(__name__)
 STATUSES = frozenset({"not_connected", "connected", "needs_reauth", "admin_disabled",
                       "payment_required", "unavailable"})
 _FIELD_TYPES = frozenset({"text", "email", "password", "url"})
+
+# WHAT A SETTING MAY BE, AND IT IS A CLOSED SET FOR THE SAME REASON THE FIELD TYPES ARE. One
+# renderer draws every connection's settings; an open set is how a machine ends up shipping HTML
+# into the screen, and then the screen is the thing that knows what each machine means.
+_SETTING_TYPES = frozenset({"toggle", "choice", "text", "number"})
+
+# WHO MAY CHANGE IT. `users.role` is a closed set of two on a box — 'owner' | 'member' — so this is
+# too. Credentials and anything that spends money are the owner's; a preference a person holds for
+# themselves is not (docs/PLAN_BOX_SETTINGS_AND_CONNECTIONS.md §6).
+_SETTING_ROLES = frozenset({"owner", "member"})
+
+# WHOSE ANSWER IT IS. `box` is one answer for the machine; `person` is an answer each seat holds
+# separately. "Which timezone this box is in" is a box answer and "notify me at 8am" is not — and
+# discovering that after a box has two people in it means migrating live rows, so a setting says
+# which it is on the day it is declared.
+_SETTING_SCOPES = frozenset({"box", "person"})
+
+# HOW LONG A TEXT ANSWER MAY BE, and why only this type needs a number at all. Three of the four
+# setting types are bounded by their own shape: a toggle is a bool, a choice is one of a declared
+# list, and a number is an int. `text` is whatever arrived in the form body — so it is the one a
+# paste can turn into a row that nothing renders, no screen can shrink again, and every read of
+# that machine's settings carries forever. OSDev1's gate on the registry step, 2026-09-17: "put()
+# trusts its caller, so the registry must refuse undeclared keys and cap value size."
+#
+# COUNTED IN CHARACTERS, not bytes, because the sentence the buyer reads is in characters and a
+# cap he cannot count against is a cap he cannot satisfy. 200 characters of emoji is 800 bytes,
+# which is nothing next to the reason for the limit.
+#
+# A MACHINE MAY ASK FOR MORE, up to the ceiling, by declaring `max_len` — and the ceiling exists
+# so that "more" is a decision made here once rather than by whoever writes the next machine.
+_TEXT_MAX = 200
+_TEXT_CEILING = 2000
 _KEY = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 
 
@@ -60,6 +92,7 @@ class Step:
     save: Callable[..., None]
     note: str = ""
     link: Mapping | None = field(default=None)
+    settings: tuple = ()
 
 
 _STEPS: dict[str, Step] = {}
@@ -67,7 +100,7 @@ _STEPS: dict[str, Step] = {}
 
 def register_step(key: str, *, order: int, machine: str, title: str, why: str, fields, steps,
                   state: Callable[[], Mapping], save: Callable[..., None], note: str = "",
-                  link: Mapping | None = None) -> None:
+                  link: Mapping | None = None, settings=()) -> None:
     """Called by a machine at import. Idempotent for the same machine, so a re-import cannot stack
     two; refused for a key another machine already holds, so one machine cannot overwrite another's
     step by choosing the same word. Everything is checked here, at import, where a mistake is a
@@ -95,6 +128,40 @@ def register_step(key: str, *, order: int, machine: str, title: str, why: str, f
                              f"in {sorted(_FIELD_TYPES)} — got {f!r}")
     if len(set(names)) != len(names):
         raise ValueError(f"set-up step {key!r} declares the same field twice: {names}")
+    settings = tuple(dict(x) for x in (settings or ()))
+    seen: set = set()
+    for opt in settings:
+        name = opt.get("name")
+        if not name or not opt.get("label"):
+            raise ValueError(f"set-up step {key!r}: every setting needs a name and a label — {opt!r}")
+        if opt.get("type") not in _SETTING_TYPES:
+            raise ValueError(f"set-up step {key!r}: setting {name!r} needs a type in "
+                             f"{sorted(_SETTING_TYPES)} — got {opt.get('type')!r}")
+        if opt.setdefault("who", "owner") not in _SETTING_ROLES:
+            raise ValueError(f"set-up step {key!r}: setting {name!r} has an unknown `who` "
+                             f"{opt['who']!r} — {sorted(_SETTING_ROLES)}")
+        if opt.setdefault("scope", "box") not in _SETTING_SCOPES:
+            raise ValueError(f"set-up step {key!r}: setting {name!r} has an unknown `scope` "
+                             f"{opt['scope']!r} — {sorted(_SETTING_SCOPES)}")
+        # A CHOICE WITH NO CHOICES IS A DEAD CONTROL, and it renders as an empty dropdown the buyer
+        # cannot use. Caught here rather than on his screen.
+        if opt["type"] == "choice" and not tuple(opt.get("choices") or ()):
+            raise ValueError(f"set-up step {key!r}: setting {name!r} is a choice with no choices")
+        # THE CAP IS RESOLVED AT IMPORT, NOT AT THE WRITE, so a machine that declares a nonsense
+        # limit fails the box's own boot rather than one buyer's save. A limit on a type that is
+        # already bounded is REFUSED rather than ignored: a declaration the code does not honour
+        # is a lie the next reader believes.
+        if opt["type"] == "text":
+            cap = opt.setdefault("max_len", _TEXT_MAX)
+            if isinstance(cap, bool) or not isinstance(cap, int) or not 1 <= cap <= _TEXT_CEILING:
+                raise ValueError(f"set-up step {key!r}: setting {name!r} has a max_len of {cap!r} "
+                                 f"— it must be a whole number from 1 to {_TEXT_CEILING}")
+        elif "max_len" in opt:
+            raise ValueError(f"set-up step {key!r}: setting {name!r} is a {opt['type']} and cannot "
+                             f"declare max_len — only `text` is unbounded without one")
+        if name in seen:
+            raise ValueError(f"set-up step {key!r} declares the setting {name!r} twice")
+        seen.add(name)
     steps = tuple(str(s) for s in (steps or ()))
     if not steps:
         raise ValueError(f"set-up step {key!r} needs at least one instruction")
@@ -103,7 +170,8 @@ def register_step(key: str, *, order: int, machine: str, title: str, why: str, f
         if not link.get("label") or not str(link.get("url", "")).startswith("https://"):
             raise ValueError(f"set-up step {key!r}: a link needs a label and an https:// url")
     _STEPS[key] = Step(key=key, order=order, machine=machine, title=title, why=why, fields=fields,
-                       steps=steps, state=state, save=save, note=note or "", link=link)
+                       steps=steps, state=state, save=save, note=note or "", link=link,
+                       settings=tuple(settings))
     log.info("onboarding.step_registered", key=key, machine=machine, order=order)
 
 
@@ -149,7 +217,10 @@ def steps() -> list[dict]:
         entry = {"key": step.key, "order": step.order, "machine": step.machine, "title": step.title,
                  "why": step.why, "fields": [dict(f) for f in step.fields], "steps": list(step.steps),
                  "note": step.note, "status": live["status"], "who": live["who"],
-                 "detail": live["detail"]}
+                 "detail": live["detail"],
+                 # COPIED, NEVER HANDED OUT. The same rule the fields follow one line up: a screen
+                 # that mutated this would be editing the registry every other screen reads.
+                 "settings": [dict(o) for o in step.settings]}
         if step.link:
             enabled = live["status"] != "not_connected"
             entry["link"] = dict(step.link, enabled=enabled,
@@ -157,6 +228,115 @@ def steps() -> list[dict]:
                                  (step.link.get("disabled_because") or "Finish this step first."))
         out.append(entry)
     return out
+
+
+def settings_for(key: str) -> list[dict]:
+    """The settings one step declared. Empty for a step that declared none, which is most of them."""
+    _ensure_registered()
+    step = _STEPS.get(str(key))
+    return [dict(o) for o in (step.settings if step else ())]
+
+
+def read_settings(key: str, *, user_id: str | None = None) -> dict:
+    """{name: value in force} for this step, for this person. Never raises.
+
+    THE DECLARED DEFAULT IS THE FLOOR, not `None`. A screen handed None for a toggle nobody has
+    touched renders it off, and a machine reading it decides nothing is switched on — so a step's
+    own default is what the store falls through to, and a setting works the day it is declared
+    rather than the day somebody first opens the screen.
+    """
+    from core import box_settings
+    step = _STEPS.get(str(key))
+    if step is None:
+        return {}
+    out = {}
+    for opt in step.settings:
+        # A `box` setting ignores who is asking. Passing a user id for one would look up a row that
+        # must never exist, and the day one did (a hand-written row, a bad migration) one person
+        # would silently see a different answer than the box.
+        scope_user = user_id if opt.get("scope") == "person" else None
+        out[opt["name"]] = box_settings.get(step.machine, f"{key}.{opt['name']}",
+                                            user_id=scope_user, default=opt.get("default"))
+    return out
+
+
+def write_settings(key: str, values: Mapping, *, user_id: str | None = None,
+                   role: str = "member") -> None:
+    """Store what a person changed. Raises StepRejected with a sentence they can read.
+
+    THE ROLE GATE IS HERE AND NOT ON THE SCREEN, and that is the point. A screen that hides a
+    control is a courtesy; the gate belongs where the write happens, because a form can be posted
+    without ever rendering the page that would have hidden it.
+
+    ONLY DECLARED SETTINGS, exactly as `save()` hands a machine only its declared fields. A name
+    this step never declared is dropped rather than stored, so a crafted form cannot write a key
+    into a machine's namespace and have it read back later as if the machine had put it there.
+
+    AND ONLY AS FAR AS THE DECLARATION ALLOWS: `_coerce` turns each value back into its own type
+    and refuses a `text` answer past the step's cap. `box_settings.put` trusts whatever it is
+    handed — deliberately, it is a store — so this is the door where a form stops being a form.
+    """
+    from core import box_settings
+    _ensure_registered()
+    step = _STEPS.get(str(key))
+    if step is None:
+        raise StepRejected("That form is not one this screen knows.")
+    declared = {o["name"]: o for o in step.settings}
+
+    # CHECKED IN FULL BEFORE ANYTHING IS WRITTEN. A form carries several settings, and a rejection
+    # part-way through a single loop would store the fields before the bad one and refuse the
+    # rest — so the buyer reads "that did not work" over a box that half changed, and the only way
+    # to find out which half is to reload the page. Two passes cost one dict on a form of five
+    # fields; a save that is true of some of the form is not a state worth being fast about.
+    ready = []
+    for name, raw in dict(values or {}).items():
+        opt = declared.get(name)
+        if opt is None:
+            continue                                 # not declared: not stored. See the docstring.
+        if opt["who"] == "owner" and str(role or "").strip().lower() != "owner":
+            raise StepRejected(f"Only the box's owner can change {opt['label']}.")
+        ready.append((name, opt, _coerce(opt, raw)))
+
+    for name, opt, value in ready:
+        scope_user = user_id if opt.get("scope") == "person" else None
+        box_settings.put(step.machine, f"{key}.{name}", value,
+                         user_id=scope_user, set_by=user_id)
+
+
+def _coerce(opt: Mapping, raw):
+    """A form posts strings; the store keeps types. Raises StepRejected with the buyer's sentence.
+
+    A SETTINGS SCREEN IS AN HTML FORM, so `False` arrives as the string "false" or as nothing at
+    all, and a store that kept it verbatim would hand back a truthy string — a toggle that can
+    never be switched off. Every type is turned back into itself here, once, rather than at each
+    reader.
+    """
+    kind = opt.get("type")
+    if kind == "toggle":
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() in ("1", "true", "on", "yes")
+    if kind == "number":
+        try:
+            return int(str(raw).strip())
+        except (TypeError, ValueError):
+            raise StepRejected(f"{opt['label']} needs to be a number.") from None
+    if kind == "choice":
+        choices = [str(c) for c in (opt.get("choices") or ())]
+        got = str(raw)
+        if got not in choices:
+            # NEVER ECHO THE POSTED VALUE BACK INTO THE SENTENCE. It renders on a page, and a
+            # value a stranger chose is not something to print at somebody.
+            raise StepRejected(f"Choose one of the offered options for {opt['label']}.")
+        return got
+    # `text`, and the one branch where the buyer can hand us any length at all. The sentence names
+    # the limit because "too long" without a number is a form he cannot get past; it still never
+    # echoes what he typed, for the reason the choice branch above gives.
+    text = str(raw)
+    cap = int(opt.get("max_len") or _TEXT_MAX)
+    if len(text) > cap:
+        raise StepRejected(f"{opt['label']} is too long — {cap} characters at most.")
+    return text
 
 
 def save(key: str, form: Mapping, *, user_id: str | None = None) -> None:

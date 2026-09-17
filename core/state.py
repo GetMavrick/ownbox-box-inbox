@@ -281,6 +281,47 @@ CREATE TABLE IF NOT EXISTS box_secrets (
   set_by      TEXT                -- the users.id who typed it, for the audit answer
 );
 
+-- ── WHAT A PERSON CHANGED ON THIS BOX (docs/PLAN_BOX_SETTINGS_AND_CONNECTIONS.md §5) ─────
+-- SCHEMA, not MIGRATIONS: a brand-new table needs no version number (the rule above). It also
+-- keeps this out of a race — #1293 already claims migration 51 on another branch, and two
+-- branches claiming one number is the _migration_28 incident this file warns about by name.
+--
+-- WHY NOT `my/settings.yaml`, WHICH ALREADY EXISTS. Measured on 2026-09-17, three reasons and any
+-- one of them settles it:
+--
+--   1. `get_config` is `@functools.lru_cache(maxsize=1)`. The file is read ONCE per process, so a
+--      settings screen that writes it changes nothing until the box restarts — the buyer sees his
+--      change saved and it does not happen. That alone disqualifies the file for anything a person
+--      edits from a screen.
+--   2. The overlay's `_deep_merge` recurses into dicts and REPLACES everything else, so writing one
+--      key of a list silently drops the rest: `send_days: [mon]` wipes the other six days.
+--   3. The file has no author. A box must be able to answer who changed a setting, the same way
+--      `box_secrets.set_by` answers who typed a credential.
+--
+-- The tracked YAML stays what a box SHIPS with and the overlay stays what an OPERATOR pins.
+-- Neither is what a buyer edits, and this table is the third thing that was missing.
+--
+-- SCOPE IS THE WHOLE BOX ('') OR ONE PERSON (their users.id), and a row per person is the same
+-- table. The day a box has two people, "notify me at 8am" is one person's answer and "which
+-- timezone this box is in" is not — discovering that later would mean migrating live rows, so the
+-- column is here from the start even though nothing writes a per-person row yet.
+--
+-- '' AND NOT NULL, AND THAT IS A CORRECTION RATHER THAN A STYLE CHOICE. The first version used NULL
+-- for the box-wide scope, and SQLITE TREATS NULLS AS DISTINCT IN A PRIMARY KEY — so
+-- `ON CONFLICT(machine, key, user_id)` never fired, every write INSERTED another row, and the
+-- SELECT handed back whichever was written first. A setting could be changed and would not change.
+-- Caught by a test that wrote seven values to one key and read back the first; the public API still
+-- takes `user_id=None` and translates, so nothing above this has to know.
+CREATE TABLE IF NOT EXISTS box_settings (
+  machine     TEXT NOT NULL,          -- the machine that registered it; 'core' for core's own
+  key         TEXT NOT NULL,
+  user_id     TEXT NOT NULL DEFAULT '',   -- '' = this box's answer; a users.id = that person's
+  value       TEXT NOT NULL,          -- JSON, so a bool stays a bool and a list stays a list
+  set_at      TEXT NOT NULL,
+  set_by      TEXT,                   -- users.id of whoever changed it, for the audit answer
+  PRIMARY KEY (machine, key, user_id)
+);
+
 -- ── CONNECTOR SEATS (docs/PLAN_AIOS_CONNECTOR.md section 6 step 2) ────────────────────────
 -- SCHEMA, not MIGRATIONS: a brand-new table needs no version number (the rule above).
 --

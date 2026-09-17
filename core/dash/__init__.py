@@ -708,6 +708,24 @@ def _clear_failures(ip: str) -> None:
 _LANDINGS = ("/dash/home", "/inbox/inbox", "/inbox/", "/dash")
 
 
+@blueprint.get("/")
+def bare_domain():
+    """THE BOX'S OWN ADDRESS, typed bare — the first thing a buyer does after the claim email.
+
+    It was a 404. OSDev4 walked the onboarding as customer #1 on a fresh box (2026-09-17): the claim
+    and the login both redirect to `landing()`, which is fine, but nothing answered `/` and the
+    Caddyfile is a plain reverse_proxy, so `acme.ownbox.app` — typed, bookmarked, or tapped from a
+    note — showed a blank Not Found on the one site he now owns. Two lines: not signed in goes to the
+    login, which lands him afterwards; signed in goes straight to where he would have landed.
+
+    A REDIRECT TO `landing()`, NEVER A HARDCODED PAGE. The landing order is decided once, in
+    `_LANDINGS`, and a second opinion here is how `/` would start disagreeing with the login.
+    """
+    if not session_ok(request):
+        return redirect("/dash/login")
+    return redirect(landing())
+
+
 def landing() -> str:
     """The first of `_LANDINGS` this box actually serves; never a path that 404s."""
     from flask import current_app
