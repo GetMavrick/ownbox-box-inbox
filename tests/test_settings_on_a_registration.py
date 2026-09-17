@@ -282,6 +282,97 @@ except ValueError:
     ok("max_len on a type that cannot use it is refused, not ignored", True)
 
 
+# ── 5c. the settings menu is DERIVED, so it cannot disagree with what is behind it ───────
+print("\ntest_the_settings_menu_is_derived_not_declared")
+
+# R4 of docs/SCOPE_WHAT_A_MACHINE_MAY_PUT_IN_THE_MENU.md — backed by OSDev1 as core owner ("I
+# back R1-R4") and by OSDev5 ("agreed without reservation", #1322). NOT by a ruling from the
+# owner: he said "Yes go!!" on a turn where R4 was the open question, which is a go-ahead to
+# build. Corrected after OSDev1 caught the first version claiming his backing without his words.
+# A machine declaring its settings in one place and its settings MENU ENTRY in
+# another drifts in both directions, and neither direction is catchable by a test that looks at
+# one registry, because each registry is self-consistent on its own.
+ONE = ({"name": "a", "label": "A", "type": "toggle"},)
+TWO = ONE + ({"name": "b", "label": "B", "type": "text"},)
+FIELD = ({"name": "k", "label": "K", "type": "password"},)
+
+
+def declare(key, order, machine, settings):
+    ob._STEPS.pop(key, None)
+    ob.register_step(key, order=order, machine=machine, title=f"Set up {key}",
+                     why="Because.", fields=FIELD, steps=("Do the thing.",),
+                     state=lambda: {"status": "connected"},
+                     save=lambda values, *, user_id=None: None, settings=settings)
+
+
+ob._STEPS.clear()
+declare("mailbox", 20, "gutters", TWO)      # one machine…
+declare("social", 30, "gutters", TWO)       # …two set-up steps
+declare("nothing_to_change", 10, "drains", ())
+declare("roost", 5, "pigeons", ONE)
+rows = ob.settings_sections()
+
+ok("ONE ROW PER MACHINE, NOT PER STEP — the budget that keeps the rail on a phone",
+   [r["machine"] for r in rows] == ["pigeons", "gutters"], str([r["machine"] for r in rows]))
+ok("...and the machine's two steps are both behind its one row",
+   rows[1]["steps"] == ["mailbox", "social"], str(rows[1]["steps"]))
+ok("...carrying how much is behind it, so a screen need not re-count",
+   rows[1]["count"] == 4, str(rows[1]["count"]))
+
+ok("A MACHINE WITH NOTHING TO CHANGE GETS NO ROW — half of R4: no dead control",
+   "drains" not in [r["machine"] for r in rows])
+
+# The other half, and the one no screen-side test can make: every declared setting is REACHABLE.
+declared = {(s.machine, s.key) for s in ob._STEPS.values() if s.settings}
+reachable = {(r["machine"], k) for r in rows for k in r["steps"]}
+ok("EVERY DECLARED SETTING IS REACHABLE — the other half: no stored, enforced, unreachable knob",
+   declared == reachable, f"declared {sorted(declared)} vs reachable {sorted(reachable)}")
+
+ok("core still hands out no LABEL — the words live where the rail is declared, not here",
+   all("title" not in r and "label" not in r for r in rows), str(rows[0]))
+
+# THE MENU MUST NOT DEPEND ON IMPORT ORDER, which is the hazard here: `_STEPS` is filled by
+# machines importing at boot, and which imports first is a fact about a recipe file, not a
+# decision anyone made. A machine's place is its EARLIEST step's, so the same machines declared
+# in any sequence give the same menu.
+def menu_from(sequence):
+    ob._STEPS.clear()
+    for key, order, machine, settings in sequence:
+        declare(key, order, machine, settings)
+    return [(r["machine"], r["order"], tuple(sorted(r["steps"]))) for r in ob.settings_sections()]
+
+
+SET = [("mailbox", 20, "gutters", TWO), ("social", 30, "gutters", TWO),
+       ("roost", 5, "pigeons", ONE), ("nothing_to_change", 10, "drains", ())]
+ok("declared in reverse, the menu is identical — import order decides nothing",
+   menu_from(SET) == menu_from(list(reversed(SET))), str(menu_from(SET)))
+ok("...and that menu is the one we expect",
+   menu_from(SET) == [("pigeons", 5, ("roost",)), ("gutters", 20, ("mailbox", "social"))],
+   str(menu_from(SET)))
+
+# A machine that later declares an EARLIER step does move up — a machine's position is a function
+# of the numbers it declares, and while R3 is open those numbers are still the machine's own.
+# Pinned as the behaviour it is, so that whatever R3 settles changes a failing test and not a
+# silent one.
+declare("late_arrival", 1, "gutters", ONE)
+after = ob.settings_sections()
+ok("a step declared with a lower order DOES move its machine up, while R3 is unsettled",
+   [r["machine"] for r in after] == ["gutters", "pigeons"], str([r["machine"] for r in after]))
+ok("...and it joins the same one row rather than opening a second",
+   sorted(after[0]["steps"]) == ["late_arrival", "mailbox", "social"], str(after[0]["steps"]))
+
+# Deterministic, because a menu that reshuffles between page loads is a menu nobody can use.
+ob._STEPS.clear()
+declare("one_step", 7, "zebra", ONE)
+declare("other_step", 7, "aardvark", ONE)
+ok("two machines on the same order break the tie on the machine key, not on chance",
+   [r["machine"] for r in ob.settings_sections()] == ["aardvark", "zebra"])
+
+ob._STEPS.clear()
+ok("a box with no machine at all has an empty settings menu rather than an error",
+   ob.settings_sections() == [])
+
+
 # ── 6. it is still the same registry the set-up screen renders ───────────────────────────
 print("\ntest_set_up_and_settings_are_one_registry")
 

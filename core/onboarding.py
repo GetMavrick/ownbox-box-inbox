@@ -230,6 +230,64 @@ def steps() -> list[dict]:
     return out
 
 
+def settings_sections() -> list[dict]:
+    """The settings menu — ONE entry per machine that declares settings. Derived, never registered.
+
+    R4 OF docs/SCOPE_WHAT_A_MACHINE_MAY_PUT_IN_THE_MENU.md.
+
+    WHO ACTUALLY BACKED THIS, corrected after OSDev1 caught me writing "backed by the owner" with
+    no words of his behind it (2026-09-17). The design is backed by OSDev1 as core owner — "I back
+    R1-R4 as core owner", on the wall — and by OSDev5, whose #1322 says "agreed without
+    reservation" and who is waiting on it. The OWNER said "Yes go!!" in my session, on a turn
+    where R4 was the only open question I had put to him; that is a go-ahead to build and it is
+    not a ruling on the design, and the difference matters because he reads these files to know
+    what he has already decided. If he rules on the substance, quote him here and delete this
+    paragraph.
+
+    A machine would otherwise declare its settings in one place and its
+    settings MENU ENTRY in another, and two declarations of one intent drift in both directions:
+
+      * an entry whose page has no settings behind it — a dead control on a paying customer's
+        screen, and the kind this repo keeps deleting by name;
+      * a setting that is stored, role-gated, enforced, and CANNOT BE REACHED.
+
+    Neither is catchable by a test that looks at only one registry, because each registry is
+    self-consistent. Deriving one from the other removes the disagreement rather than policing it.
+
+    ONE ENTRY PER MACHINE, NOT PER STEP — R1, and it is the budget that keeps the rail on a phone.
+    The inbox declares its mailbox and its social account as two set-up steps; in Settings it is
+    one row called Inbox, and both sit behind it. Six machines is six rows.
+
+    CORE SUPPLIES THE TRUTH AND THE SCREEN SUPPLIES THE WORDS. What comes back is the machine's
+    key and the steps beneath it, never a label — `core/` names no machine, and the human name a
+    machine goes by already exists where the rail is declared. A screen joins the two; a machine
+    that has settings but no rail section still appears here, which is the point, because its
+    settings exist either way.
+
+    NO ORDER BAKED IN. R3 (who decides rail order) is still open between OSDev1 and OSDev5 — the
+    box's recipe or the morning report's — so this sorts by the `order` a step already carries,
+    which is what the set-up screen has always used. Whatever R3 settles applies at the rail, not
+    here, and nothing below has to change for it.
+    """
+    _ensure_registered()
+    out: dict[str, dict] = {}
+    for step in sorted(_STEPS.values(), key=lambda s: (s.order, s.key)):
+        if not step.settings:
+            continue                      # a machine with nothing to change gets no row. R4.
+        row = out.setdefault(step.machine, {"machine": step.machine, "order": step.order,
+                                            "steps": [], "count": 0})
+        row["steps"].append(step.key)
+        row["count"] += len(step.settings)
+        # THE MACHINE'S PLACE IS ITS EARLIEST STEP'S. `_STEPS` is filled by machines importing at
+        # boot, so the hazard this closes is IMPORT ORDER: which machine imports first is a fact
+        # about a recipe file, not a decision anyone made, and a menu that depended on it would
+        # differ between two boxes with the same machines. A machine that declares a lower number
+        # does still move up — while R3 is open, position is a function of the numbers a machine
+        # picks, which is precisely what R3 exists to take away.
+        row["order"] = min(row["order"], step.order)
+    return sorted(out.values(), key=lambda r: (r["order"], r["machine"]))
+
+
 def settings_for(key: str) -> list[dict]:
     """The settings one step declared. Empty for a step that declared none, which is most of them."""
     _ensure_registered()
