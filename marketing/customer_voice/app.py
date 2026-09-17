@@ -478,6 +478,11 @@ a.row:active{background:var(--hair);border-radius:10px}
 .chip.on{color:var(--accent-ink);background:var(--accent)}
 .chip.on .n{color:var(--accent-ink);opacity:.75}
 .chip .n{color:var(--dimmer);font-size:12px;font-variant-numeric:tabular-nums}
+/* THE TWO ROWS ARE NOT THE SAME KIND OF CHOICE, and stacking two identical rows reads as one
+   control that wrapped. The filter row asks WHAT STATE; the channel row asks WHERE FROM. So the
+   filter row sits tighter to the header it qualifies, and the channel row keeps its own space. */
+.chips.pills{margin:12px 0 0}
+.chips.pills + .chips{margin-top:8px}
 
 /* ── the inbox on a screen with room ───────────────────────────────────────────────────────
    Owner, 2026-09-17: "With the social media channels on the left, and they move horizontally at
@@ -1378,6 +1383,13 @@ def _tag_list(k: dict) -> list:
     return out[:_TAG_LIMIT]
 
 
+# ONE NAME FOR THE ONE DESTINATION. The channel row's first chip and the row menu's way out both
+# land on /inbox/inbox with no channel; two spellings of the same idea is how a reader concludes
+# they must do different things. It is "Every channel" and not "All", because the UNANSWERED filter
+# row above it already opens with "All" and means something else entirely.
+_EVERY_CHANNEL = "Every channel"
+
+
 def _tags(k: dict) -> str:
     return "".join(f'<span class="tag {c}">{_esc(t)}</span>' for t, c in _tag_list(k))
 
@@ -1417,7 +1429,10 @@ def _acts(k: dict, *, who: str, channel: str) -> str:
             and (k.get("account_id") or "").strip()):
         items.append((f"{href}#reply", "Reply"))
     if plat and channel:
-        items.append(("/inbox/inbox", "All channels"))
+        # THE SAME WORDS AS THE CHIP IT DUPLICATES. This menu item and the first chip in the
+        # channel row go to the same place; calling one "All channels" and the other "Every
+        # channel" makes a reader wonder what the difference is, and there is none.
+        items.append(("/inbox/inbox", _EVERY_CHANNEL))
     elif plat:
         from urllib.parse import quote as _q
         items.append((f'/inbox/inbox?channel={_esc(_q(plat, safe=""))}',
@@ -1508,7 +1523,8 @@ def _nothing_arrives_yet() -> bool:
         return False                             # say nothing rather than say something wrong
 
 
-def _chips(space: str, current: str, *, q: str = "") -> str:
+def _chips(space: str, current: str, *, q: str = "", waiting: bool = False,
+           from_ad: bool = False) -> str:
     """All, then one chip per channel THIS BOX ACTUALLY HAS. Never a menu of hopes.
 
     ONE CHANNEL IS NOT A CHOICE, so a box with only Messenger renders no chip row at all — a
@@ -1534,26 +1550,123 @@ def _chips(space: str, current: str, *, q: str = "") -> str:
     # NO `page` ON A CHIP, and that is the whole reason these go through `_url`. Changing the
     # channel changes WHICH conversations there are, so page 7 of the old filter is not page 7
     # of the new one — it is a page that may not exist. Every chip lands on page one.
-    out = [f'<a class="chip{"" if current else " on"}" href="{_esc(_url(q=q))}">All</a>']
+    # "EVERY CHANNEL", NOT "ALL". The filter row above this one also opens with "All", and two
+    # adjacent controls carrying the same word mean two different things to the app and one thing
+    # to the person reading them. Found by rendering the screen with both rows on it for the first
+    # time; the word that has to be specific is this one, because the other row's "All" is about
+    # the conversations themselves.
+    out = [f'<a class="chip{"" if current else " on"}" '
+           f'href="{_esc(_url(q=q, waiting=waiting, from_ad=from_ad))}">{_EVERY_CHANNEL}</a>']
     for row in present:
         pid = str(row["platform"] or "")
         on = " on" if pid == current else ""
-        n = "" if q else f' <span class="n">{row["n"]}</span>'
-        out.append(f'<a class="chip{on}" href="{_esc(_url(q=q, channel=pid))}">'
+        # AND THE COUNT COMES OFF UNDER THE UNANSWERED FILTER, for the reason the docstring gives
+        # about search: `platforms_present` counts the WHOLE channel, so "Messenger 9" beside a
+        # filtered list of two is a wrong number, not a smaller one.
+        n = "" if (q or waiting or from_ad) else f' <span class="n">{row["n"]}</span>'
+        out.append(f'<a class="chip{on}" '
+                   f'href="{_esc(_url(q=q, channel=pid, waiting=waiting, from_ad=from_ad))}">'
                    f'{_esc(_channel(pid))}{n}</a>')
     return f'<div class="chips">{"".join(out)}</div>'
 
 
-def _find(q: str, channel: str) -> str:
+def _counts(space: str) -> dict:
+    """How many are waiting on a person, and how many came from an ad. -1 when the box cannot say.
+
+    -1 RATHER THAN 0, because those are opposite facts on this screen: zero is "you are caught
+    up" and is worth celebrating, and a store that would not answer must say nothing at all.
+
+    ONE CALL, because it is one query — the header and both filter pills are answered by the same
+    scan rather than one apiece on every render.
+    """
+    try:
+        from marketing.customer_voice.inbox import store as _store
+        got = _store.inbox_counts(space)
+        return {"waiting": int(got.get("waiting") or 0), "from_ad": int(got.get("from_ad") or 0)}
+    except Exception as e:                       # noqa: BLE001 — a missing number is not a 500
+        log.warning("voice.counts_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
+        return {"waiting": -1, "from_ad": -1}
+
+
+def _head(n: int) -> str:
+    """The inbox title, carrying the only number this product exists to produce.
+
+    THE NUMBER IS A SENTENCE, NOT A BADGE. "3" beside the word Inbox is a notification dot, and a
+    notification dot means "something happened". This number means something DIFFERENT and more
+    useful: three people are waiting on you personally. Said in words it needs no legend.
+
+    AND IT IS SAID ONCE. The filter below is the control; the header is the fact. Printing "3" in
+    both places is the stutter this file removed from the set-up screen an hour ago.
+    """
+    if n < 0:
+        return '<h1>Inbox</h1>'
+    if n == 0:
+        return ('<h1>Inbox</h1>'
+                '<p class="quiet" style="margin:2px 0 0">Nobody is waiting on you.</p>')
+    who = "1 person is" if n == 1 else f"{n} people are"
+    return (f'<h1>Inbox</h1><p class="quiet" style="margin:2px 0 0">'
+            f'<b class="warn">{who}</b> waiting on a reply.</p>')
+
+
+def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: str = "") -> str:
+    """All / Unanswered / From an ad — and each one only when it can change the screen.
+
+    A FILTER THAT CANNOT CHANGE THE SCREEN IS NOT SHIPPED HERE, which is the same rule `_chips`
+    applies to a box with one channel. With nothing waiting, Unanswered leads to an empty list a
+    person did not need to visit; the header has already told them they are caught up. With no
+    conversation from an ad — which is most boxes, most weeks — that pill is a promise about a
+    kind of message this box has never received.
+
+    EACH IS STILL DRAWN WHILE ITS OWN FILTER IS ON AND ITS COUNT HAS FALLEN TO ZERO — answering
+    the last one must not delete the way back to All under his thumb.
+
+    "FROM AN AD", NOT "LEADS". Everyone in this inbox is arguably a lead; the thing this filter
+    actually knows is narrower and far more useful — these people clicked something he PAID for.
+    Said plainly it needs no legend, and it cannot be read as a judgement the box did not make.
+    """
+    show_wait = counts.get("waiting", 0) > 0 or waiting
+    show_ad = counts.get("from_ad", 0) > 0 or from_ad
+    if not show_wait and not show_ad:
+        return ""
+
+    def pill(label: str, on: bool, **flip) -> str:
+        # EACH PILL TOGGLES ITS OWN DIMENSION AND CARRIES THE OTHER. They are not a radio group:
+        # the store composes them, and "unanswered AND from an ad" is the most valuable list in
+        # the box — somebody who clicked an ad he paid for and has not been answered. A row that
+        # dropped the other filter would make that list unreachable by tapping, and a pill that
+        # could not turn itself off would make it a one-way door.
+        #
+        # `aria-pressed`, because two of these can be on at once. A radio group is what this LOOKS
+        # like, and a screen reader must not be told that.
+        return (f'<a class="chip{" on" if on else ""}" aria-pressed="{"true" if on else "false"}" '
+                f'href="{_esc(_url(q=q, channel=channel, **flip))}">{label}</a>')
+
+    out = [pill("All", not (waiting or from_ad))]
+    if show_wait:
+        out.append(pill("Unanswered", waiting, waiting=not waiting, from_ad=from_ad))
+    if show_ad:
+        out.append(pill("From an ad", from_ad, waiting=waiting, from_ad=not from_ad))
+    return f'<div class="chips pills">{"".join(out)}</div>'
+
+
+def _find(q: str, channel: str, waiting: bool = False, from_ad: bool = False) -> str:
     """The search field. A plain GET form, so it works before any script has run.
 
-    THE CHANNEL RIDES ALONG AS A HIDDEN FIELD. Searching inside a channel filter is the obvious
-    thing to want and it is one input; dropping it would quietly widen a search he had narrowed.
+    THE FILTERS RIDE ALONG AS HIDDEN FIELDS. Searching inside a channel, or inside the messages
+    still waiting on him, is the obvious thing to want and it is one input each; dropping either
+    would quietly widen a search he had narrowed.
     """
-    # THE CHANNEL RIDES, THE PAGE DOES NOT. A new search is a new set of results and page one
+    # THE FILTERS RIDE, THE PAGE DOES NOT. A new search is a new set of results and page one
     # is the only page it can be on — carrying the old `page` in a hidden field is how a person
     # searches for "boiler", gets a blank screen, and concludes search is broken.
     chan = (f'<input type="hidden" name="channel" value="{_esc(channel)}">' if channel else "")
+    # THE WAITING FILTER RIDES ALONG, exactly as the channel does: searching inside a filter is
+    # the obvious thing to want, and dropping it would quietly widen a search he had narrowed.
+    chan += '<input type="hidden" name="waiting" value="1">' if waiting else ""
+    chan += '<input type="hidden" name="from_ad" value="1">' if from_ad else ""
+    # AND THE ACTION IS THE CURRENT URL. These commits were written before the /voice -> /inbox
+    # cut, so each carried its own copy of the old path — the staleness that made their suites
+    # 404 while every store-side assertion in them passed.
     return ('<form class="find" method="get" action="/inbox/inbox" role="search">'
             '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
             'stroke-width="1.9" stroke-linecap="round" aria-hidden="true">'
@@ -1573,7 +1686,8 @@ def _find(q: str, channel: str) -> str:
 PAGE = 50            # what the store is asked for, and what a page holds
 
 
-def _url(*, q: str = "", channel: str = "", page: int = 1) -> str:
+def _url(*, q: str = "", channel: str = "", page: int = 1, waiting: bool = False,
+         from_ad: bool = False) -> str:
     """Every link on this screen, built in ONE place.
 
     THE CHIPS ALREADY LOST THE QUERY ONCE. Each control here — a chip, Clear, Older, Newer —
@@ -1590,21 +1704,30 @@ def _url(*, q: str = "", channel: str = "", page: int = 1) -> str:
         bits.append(f'q={_qt(q, safe="")}')
     if channel:
         bits.append(f'channel={_qt(channel, safe="")}')
+    if waiting:
+        bits.append("waiting=1")
+    if from_ad:
+        bits.append("from_ad=1")
     if page > 1:
         bits.append(f"page={int(page)}")
     return "/inbox/inbox" + ("?" + "&".join(bits) if bits else "")
 
 
-def _clear(channel: str) -> str:
+def _clear(channel: str, waiting: bool = False, from_ad: bool = False) -> str:
     """Back out of a search WITHOUT backing out of the channel he chose — or the page he is on.
 
     THE PAGE GOES. That is the point of Clear: page 4 of a search is meaningless once the search
     is gone, and landing on page 4 of everything is not what he asked for.
+
+    THE UNANSWERED FILTER STAYS, for the same reason the channel does. He narrowed to the messages
+    waiting on him and then searched inside that; clearing the search is not asking to be shown
+    every conversation he has already dealt with.
     """
-    return _url(channel=channel)
+    return _url(channel=channel, waiting=waiting, from_ad=from_ad)
 
 
-def _pager(*, q: str, channel: str, page: int, more: bool) -> str:
+def _pager(*, q: str, channel: str, page: int, more: bool, waiting: bool = False,
+           from_ad: bool = False) -> str:
     """Older and Newer — and NEITHER of them when there is nowhere to go.
 
     A CONTROL THAT CANNOT SUCCEED IS THE ONE THIS APP KEEPS DELETING, and a greyed-out Older on
@@ -1616,10 +1739,12 @@ def _pager(*, q: str, channel: str, page: int, more: bool) -> str:
         return ""
     out = []
     if page > 1:
-        out.append(f'<a class="pg prev" href="{_esc(_url(q=q, channel=channel, page=page - 1))}" '
+        out.append(f'<a class="pg prev" '
+                   f'href="{_esc(_url(q=q, channel=channel, page=page - 1, waiting=waiting, from_ad=from_ad))}" '
                    f'rel="prev">&larr; Newer</a>')
     if more:
-        out.append(f'<a class="pg next" href="{_esc(_url(q=q, channel=channel, page=page + 1))}" '
+        out.append(f'<a class="pg next" '
+                   f'href="{_esc(_url(q=q, channel=channel, page=page + 1, waiting=waiting, from_ad=from_ad))}" '
                    f'rel="next">Older &rarr;</a>')
     return f'<div class="pager">{"".join(out)}</div>'
 
@@ -1691,6 +1816,11 @@ def r_inbox():
     # — `search_conversations` escapes LIKE's own wildcards before binding, so a query of `%`
     # asks for a percent sign rather than for every conversation in the box.
     q = (request.args.get("q") or "").strip()[:120]
+    # THE ONE FILTER THAT IS A VERB. Anything other than the exact strings this screen's own links
+    # produce is off — a filter reached by a hand-typed URL should behave like no filter, not like
+    # a third state nobody designed.
+    waiting = (request.args.get("waiting") or "") in ("1", "true", "yes", "on")
+    from_ad = (request.args.get("from_ad") or "") in ("1", "true", "yes", "on")
     # WHICH PAGE. Anything that is not a page number is page one — a hand-typed `page=banana`
     # or `page=-3` is a person who has not asked for anything in particular, and the answer to
     # that is the top of the list, not a 500 and not a negative OFFSET.
@@ -1708,10 +1838,12 @@ def r_inbox():
         off = (page - 1) * PAGE
         if q:
             convs = _store.search_conversations(space, q, limit=ask, offset=off,
-                                                platform=channel or None)
+                                                platform=channel or None, waiting=waiting,
+                                                from_ad=from_ad)
         else:
             convs = _store.list_conversations(space, limit=ask, offset=off,
-                                              platform=channel or None)
+                                              platform=channel or None, waiting=waiting,
+                                              from_ad=from_ad)
         more = len(convs) > PAGE
         convs = convs[:PAGE]
     except Exception as e:                       # noqa: BLE001 — a page, never a stack trace
@@ -1737,24 +1869,56 @@ def r_inbox():
         # stale bookmark, a back button, a hand-typed number — and it is the empty most likely
         # to be read as data loss. "You have run off the end of the list" and "you have no
         # messages" are opposite facts, and this box may hold two hundred conversations.
+        #
+        # AND A FIFTH ARRIVED WITH THE UNANSWERED FILTER, and it is the only empty on this screen
+        # that is GOOD NEWS. An inbox with nothing left waiting is the state this product is for,
+        # and rendering the neutral "no conversations" over it would be the one moment the app had
+        # something to congratulate somebody for and said nothing.
+        # THE FILTER ROW IS DRAWN ON THE EMPTY SCREENS TOO. It is how a person gets back out of
+        # the filter that emptied the screen, and a control that disappears exactly when it is
+        # needed is the same bug as one that was never there.
+        _n = _counts(space)
+        top = (_head(_n["waiting"]) + _find(q, channel, waiting, from_ad)
+               + _pills(_n, waiting, from_ad, q=q, channel=channel))
+        rail = _chips(space, channel, q=q, waiting=waiting, from_ad=from_ad)
         if page > 1:
-            body = (f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel, q=q)}'
+            body = (f'{top}{rail}'
                     f'<div class="quiet">There is no page {page}'
                     + (f' of conversations matching <b>{_esc(q)}</b>' if q else "")
                     + '. Nothing has been lost — the list simply ends before here. '
-                    f'<a href="{_esc(_url(q=q, channel=channel))}" style="color:var(--accent)">'
-                    'Back to the top</a></div>')
+                    f'<a href="{_esc(_url(q=q, channel=channel, waiting=waiting, from_ad=from_ad))}" '
+                    'style="color:var(--accent)">Back to the top</a></div>')
         elif q:
-            body = (f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel, q=q)}'
+            body = (f'{top}{rail}'
                     f'<div class="quiet">Nothing matches <b>{_esc(q)}</b>'
+                    + (' among the messages waiting on you' if waiting else "")
+                    + (' among the conversations that came from an ad' if from_ad else "")
                     + (f' on {_esc(_channel(channel))}' if channel else "")
                     + '. This searches what people wrote, not just their names. '
-                    f'<a href="{_esc(_clear(channel))}" style="color:var(--accent)">'
-                    'Show everything</a></div>')
+                    f'<a href="{_esc(_clear(channel, waiting, from_ad))}" '
+                    'style="color:var(--accent)">Show everything</a></div>')
+        elif waiting:
+            body = (f'{top}{rail}'
+                    '<div class="quiet">You have answered everyone'
+                    + (f' on {_esc(_channel(channel))}' if channel else "")
+                    + '. Nothing here is waiting on you. '
+                    f'<a href="{_esc(_url(channel=channel))}" style="color:var(--accent)">'
+                    'Show every conversation</a></div>')
+        elif from_ad:
+            # NOT "you have no leads". Nobody has clicked an ad INTO this box, which is a fact
+            # about advertising and not about the inbox — and a box whose owner runs no ads is
+            # the normal case, not a fault to report.
+            body = (f'{top}{rail}'
+                    '<div class="quiet">No conversation here started from one of your ads'
+                    + (f' on {_esc(_channel(channel))}' if channel else "")
+                    + '. When somebody messages you by tapping an ad, they land here with the '
+                    'ad they came from on the row. '
+                    f'<a href="{_esc(_url(channel=channel))}" style="color:var(--accent)">'
+                    'Show every conversation</a></div>')
         elif channel:
-            body = (f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel)}'
+            body = (f'{top}{rail}'
                     f'<div class="quiet">Nothing on {_esc(_channel(channel))} yet. '
-                    'Other channels may have messages — tap <b>All</b>.</div>')
+                    f'Other channels may have messages — tap <b>{_EVERY_CHANNEL}</b>.</div>')
         elif _nothing_arrives_yet():
             # NOTHING IS LISTENING. "The first person who messages you appears here" is a promise,
             # and here it is one the box cannot keep: nobody is coming. This is the only empty
@@ -1836,11 +2000,20 @@ def r_inbox():
                     + f'<span class="mk">{_mark(plat)}'
                     f'<span class="vh">{_esc(_channel(plat))}</span></span></a>'
                     f'{_acts(k, who=who, channel=channel)}</div>')
+    # UNION, AND BOTH SIDES SHIP SOMETHING. This branch replaced the bare `<h1>Inbox</h1>` with
+    # the header sentence and the filter pills; main (#1357) put `_stopped_note()` above
+    # everything here, so a buyer whose box is stopped is told BEFORE he reads a list that
+    # cannot be growing. The note is about the BOX and the header is about the LIST, so taking
+    # either side alone silently deletes a shipped feature.
+    counts = _counts(space)
     return _shell(_stopped_note()
-                  + f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel, q=q)}'
+                  + f'{_head(counts["waiting"])}{_find(q, channel, waiting, from_ad)}'
+                  f'{_pills(counts, waiting, from_ad, q=q, channel=channel)}'
+                  f'{_chips(space, channel, q=q, waiting=waiting, from_ad=from_ad)}'
                   f'{_hits(q, channel, len(convs), page=page, more=more)}'
                   f'<div class="card">{"".join(rows)}</div>'
-                  f'{_pager(q=q, channel=channel, page=page, more=more)}', wide=True), 200
+                  f'{_pager(q=q, channel=channel, page=page, more=more, waiting=waiting, from_ad=from_ad)}',
+                  wide=True), 200
 
 
 @blueprint.get("/inbox/inbox/<path:zcid>")

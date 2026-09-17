@@ -11,6 +11,7 @@ that live HERE, at the SQL layer, not in caller discipline:
     human behind it CLAIMS its key first (`claim_send`) and resolves it after, so a
     double-click cannot produce two vendor calls.
 """
+import hashlib
 import uuid
 
 from core import state
@@ -147,8 +148,26 @@ def get_conversation(space: str, zcid: str) -> dict | None:
     return dict(row) if row else None
 
 
+# WAITING ON A PERSON, AS A PREDICATE. `awaiting_reply()` counts these and the two readers below
+# filter by them, and the count and the list MUST agree: a header that says "3 waiting on you" over
+# a filtered list of five is a screen nobody trusts again. So both are this one string, including
+# the opted-out carve-out — somebody who said STOP is not waiting for a reply.
+_WAITING = f"k.opted_out = 0 AND {_NEWEST_IS_INBOUND}"
+
+# CAME FROM AN AD HE PAID FOR. `ad_meta_id` and `ad_title` are written by the poller at INSERT for
+# a click-to-message conversation and by nothing else; the row already wears a "From <ad_title>"
+# tag because attribution is the one thing on a row that says what the conversation is WORTH. This
+# turns that existing fact into a filter — it invents no new idea of a lead.
+#
+# TRIMMED, NOT JUST NOT-NULL. A vendor that sends an empty string for an ad id is not an ad, and
+# the difference between NULL and "" is exactly the kind of thing that puts every conversation in
+# the box behind a filter labelled "from an ad".
+_FROM_AD = "TRIM(COALESCE(k.ad_meta_id, '')) <> ''"
+
+
 def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
-                       platform: str | None = None) -> list[dict]:
+                       platform: str | None = None, waiting: bool = False,
+                       from_ad: bool = False) -> list[dict]:
     """The conversations in one Space, newest inbound first — the inbox screen.
 
     THE STORE HAD NO READER A SCREEN COULD USE. `get_conversation` answers about ONE, by id, and
@@ -176,6 +195,12 @@ def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
     if platform:
         where += " AND k.platform = ?"
         args.append(str(platform))
+    # NO BOUND PARAMETER, BECAUSE THERE IS NO VALUE — `waiting` is a Python bool the route already
+    # reduced a query string to, and what it appends is a fixed fragment written in this file.
+    if waiting:
+        where += f" AND {_WAITING}"
+    if from_ad:
+        where += f" AND {_FROM_AD}"
     args += [int(limit), int(offset)]
     with state.connect() as c:
         rows = c.execute(
@@ -218,7 +243,8 @@ def platforms_present(space: str) -> list[dict]:
 
 
 def search_conversations(space: str, query: str, *, limit: int = 50,
-                         offset: int = 0, platform: str | None = None) -> list[dict]:
+                         offset: int = 0, platform: str | None = None,
+                         waiting: bool = False, from_ad: bool = False) -> list[dict]:
     """Conversations whose MESSAGES or participant match `query`, newest inbound first.
 
     THE CARD SELLS THIS AND THE BOX DID NOT HAVE IT. `$499` bullet 6 is "Search everything", and
@@ -259,6 +285,13 @@ def search_conversations(space: str, query: str, *, limit: int = 50,
     if platform:
         where += " AND k.platform = ?"
         args.append(str(platform))
+    # SEARCH KEEPS THE FILTER IT WAS GIVEN. Typing a name while looking at the unanswered list is
+    # narrowing that list, not leaving it — dropping the filter here would quietly hand back
+    # conversations already dealt with, among them the one he was trying NOT to see.
+    if waiting:
+        where += f" AND {_WAITING}"
+    if from_ad:
+        where += f" AND {_FROM_AD}"
     args += [like, space, like, int(limit), int(offset)]
     with state.connect() as c:
         rows = c.execute(
@@ -514,15 +547,48 @@ def get_send(space: str, idem_key: str) -> dict | None:
     return dict(row) if row else None
 
 
+def _mirror_key(space: str, zcid: str, direction: str, sent_by: str,
+                body: str | None, sent_at: str | None) -> str:
+    """A stable id for a message the vendor gave no id for. Same message → same key, forever.
+
+    WHY THIS HAD TO EXIST. `inbox_messages.zernio_message_id` is UNIQUE, and the mirror leans on
+    that for exactly-once. A key that is missing breaks it in BOTH directions at once, and both
+    were live:
+
+      * `None` — SQLite treats NULLs as DISTINCT in a unique index, so INSERT OR IGNORE never
+        fires and the same message mirrors again on every poll. Measured by OSDev5, 2026-09-17:
+        the same message over three polls made three rows.
+      * `""` — the opposite, and worse. `_header(msg, "Message-ID")` returns "" when a mail
+        carries no Message-ID (email_channel.py:214), and "" is NOT null, so the FIRST
+        header-less email on the box claims the empty key and EVERY LATER header-less email
+        from anybody is silently dropped by INSERT OR IGNORE. A real customer's message would
+        simply never appear.
+
+    So neither falsy value is stored. The key is derived from what makes the message itself:
+    `sent_at` is in it because a customer who writes "yes" twice in one thread has sent two
+    messages, and without a clock they would hash the same and the second would vanish — which
+    is the `""` bug again with extra steps.
+    """
+    raw = "|".join(("v1", space, zcid, str(direction), str(sent_by or ""),
+                    str(sent_at or ""), (body or "")[:2000]))
+    return "syn:" + hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:40]
+
+
 def record_message(*, space: str, zcid: str, zmid: str | None, direction: str,
-                   sent_by: str, body: str | None) -> None:
-    """Mirror one message (idempotent by the vendor message id)."""
+                   sent_by: str, body: str | None, sent_at: str | None = None) -> None:
+    """Mirror one message, exactly once.
+
+    Idempotent by the VENDOR's message id when there is one, and by `_mirror_key` when there is
+    not — see there for why a missing id is not a small problem. `sent_at` is optional only so
+    that callers which never had it keep working; pass it wherever the vendor gives one.
+    """
+    key = (zmid or "").strip() or _mirror_key(space, zcid, direction, sent_by, body, sent_at)
     with state.connect() as c:
         c.execute(
             "INSERT OR IGNORE INTO inbox_messages (id, space, "
             "zernio_conversation_id, zernio_message_id, direction, sent_by, body, "
             "created_at) VALUES (?,?,?,?,?,?,?,?)",
-            (str(uuid.uuid4()), space, zcid, zmid, direction, sent_by,
+            (str(uuid.uuid4()), space, zcid, key, direction, sent_by,
              (body or "")[:2000], state._now()))
 
 
@@ -568,9 +634,31 @@ def awaiting_reply(space: str) -> int:
     with state.connect() as c:
         row = c.execute(
             "SELECT COUNT(*) n FROM inbox_conversations k "
-            " WHERE k.space = ? AND k.opted_out = 0 "
-            f"   AND {_NEWEST_IS_INBOUND}", (space,)).fetchone()
+            f" WHERE k.space = ? AND {_WAITING}", (space,)).fetchone()
     return int(row["n"]) if row else 0
+
+
+def inbox_counts(space: str) -> dict:
+    """Both numbers the inbox header and its filter row need, in ONE pass.
+
+    TWO COUNTS, NOT TWO QUERIES. Each one is a scan that evaluates a correlated subquery per row;
+    asking separately doubles that on every single render of the screen a person looks at most.
+    Conditional sums over the same scan cost one.
+
+    THE SAME PREDICATES THE LISTS USE, by name. A header that says "3 waiting" over a filtered
+    list of five is a screen nobody trusts twice, and the only durable way to prevent it is for
+    the number and the list to be the same string of SQL — `awaiting_reply()` keeps its own name
+    because the morning report reads it, but it is the same `_WAITING`.
+    """
+    with state.connect() as c:
+        row = c.execute(
+            f"SELECT SUM(CASE WHEN {_WAITING} THEN 1 ELSE 0 END) AS waiting, "
+            f"       SUM(CASE WHEN {_FROM_AD} THEN 1 ELSE 0 END) AS from_ad "
+            "  FROM inbox_conversations k WHERE k.space = ?", (space,)).fetchone()
+    # SUM OVER NO ROWS IS NULL, NOT 0 — an empty box would otherwise hand the screen a None it
+    # would render as a filter it cannot use.
+    return {"waiting": int((row["waiting"] if row else 0) or 0),
+            "from_ad": int((row["from_ad"] if row else 0) or 0)}
 
 
 def day_counts(space: str, lo: str, hi: str) -> dict:

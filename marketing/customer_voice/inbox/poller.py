@@ -234,6 +234,37 @@ def _is_inbound(m) -> bool:
     return _f(m, "fromMe", "from_me") is False
 
 
+def _direction_of(m) -> str | None:
+    """'in', 'out', or None when the vendor said nothing we can read.
+
+    WHY THIS IS NOT `_is_inbound`, AND WHY IT MUST NOT BE. That function answers "may we reply to
+    this?" and so it FAILS CLOSED: anything unreadable is not inbound, because a false positive
+    makes the box talk to itself. Recording is a different question with a different worst case,
+    and reusing the two-way answer would write every unreadable message down as OUTBOUND.
+
+    What that costs: `store.awaiting_reply` asks whether a conversation's newest message came from
+    the customer. A message wrongly recorded as "out" makes a thread look ANSWERED when a real
+    person is still waiting — the box quietly drops someone. Wrongly "in" is the opposite and is
+    what #1293 was held for: the owner told "72 people are waiting" when two were.
+
+    So there is no safe guess, and this does not guess. Unreadable is None and the caller records
+    nothing, leaving the thread's newest RECORDED message the newest one we actually understood.
+    Measured: the live vendor sends "incoming"/"outgoing" on every message (OSDev1, 58 of 58), so
+    None is the case that should never fire — and the log line is how we would find out it did.
+    """
+    direction = str(_f(m, "direction", "type") or "").strip().lower()
+    if direction in _OUTBOUND_WORDS:
+        return "out"
+    if direction in _INBOUND_WORDS:
+        return "in"
+    from_me = _f(m, "fromMe", "from_me")
+    if from_me is True:
+        return "out"
+    if from_me is False:
+        return "in"
+    return None
+
+
 def _inbound_msgs(msgs: list) -> list:
     """INBOUND messages in a page (tolerant of asc/desc ordering)."""
     return [m for m in msgs if _is_inbound(m)]
@@ -357,8 +388,49 @@ def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, 
             ad_meta_id=ad_id, ad_title=ad_title,
             participant=name, last_inbound_at=inbound_at or None,
             account_id=acctid or None)
-        store.record_message(space=space, zcid=zcid, zmid=target_id,
-                             direction="in", sent_by="contact", body=body)
+        # MIRROR THE WHOLE PAGE, IN BOTH DIRECTIONS. Until now this recorded ONE message — the
+        # target — and hardcoded direction="in". The page at `msgs` above already carries our own
+        # replies and `_direction_of` already classifies them, so the box FETCHED the outbound
+        # side and threw it away.
+        #
+        # WHAT THAT COST, measured on the live box by OSDev1 (2026-09-17): inbox_messages held 72
+        # rows and every one of them said "in". `store.awaiting_reply` calls a thread waiting when
+        # its newest message is inbound, so all 72 counted as waiting — including threads the
+        # owner had already answered inside Instagram (the probe saw 15 outgoing across 3). The
+        # 8 AM email would have opened with "72 people are waiting" when 2 had an inbound that
+        # week. A notification that wrong is worse than no notification: it is read once, trusted
+        # once, and never again.
+        #
+        # REPLIES SENT THROUGH THE BOX WERE ALREADY MIRRORED (reply.py, handler.py). This is for
+        # the ones sent anywhere else — the phone, the Instagram app, a laptop at midnight — which
+        # is how a small business actually answers its customers, and the only place the box can
+        # learn about them is this page.
+        #
+        # IDEMPOTENT, so re-polling a conversation rewrites nothing: `record_message` keys on the
+        # vendor's message id. Cheap, too — this page was already fetched and is capped at
+        # `_MSG_PAGE`; the loop adds no vendor call.
+        mirrored = 0
+        for m in msgs:
+            way = _direction_of(m)
+            if way is None:
+                log.warning("inbox.message_direction_unreadable", space=space,
+                            channel=ch.key, conversation=zcid)
+                continue
+            store.record_message(
+                space=space, zcid=zcid,
+                zmid=str(_f(m, "id", "_id", "message_id") or "") or None,
+                # `sent_by` IS THE DOCUMENTED SET — contact | ai | human — not a fourth word.
+                # An outbound message we learn about HERE was sent by a person, from the phone or
+                # the Instagram app, so "human" is what it is. The thread renders that by looking
+                # the sender up on the send ledger, finds no row (there was no send through the
+                # box) and falls back to "you", which is exactly right. A message the box itself
+                # sent is already mirrored with sent_by="ai" and wins on INSERT OR IGNORE, so
+                # this can never relabel the machine's own words as the owner's.
+                direction=way, sent_by="contact" if way == "in" else "human",
+                body=_body(m), sent_at=str(_f(m, *_SENT_AT_KEYS) or "") or None)
+            mirrored += 1
+        log.info("inbox.page_mirrored", space=space, channel=ch.key,
+                 conversation=zcid, messages=mirrored, of=len(msgs))
         # WS2: de-anonymize the CTM-ad lead into the People lake. OBSERVE-SAFE —
         # identity capture at poll time, independent of inbox.autonomy (capturing a
         # psid is not an auto-DM). Idempotent by psid → a re-poll never double-lakes.

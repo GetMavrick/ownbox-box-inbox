@@ -514,6 +514,8 @@ _MIGRATION_OWNER: dict[int, str] = {
     50: "customer_voice",
     # 51 adds inbox_conversations.read_at — a table only a Customer Voice box carries.
     51: "customer_voice",
+    # 52 clears inbox_state.last_activity — the same table 50 touched, same reason.
+    52: "customer_voice",
 }
 # A table each machine is known by, for the one-time bootstrap of boxes that predate the split.
 _MACHINE_MARKER = {"customer_voice": "voice_rails", "content": "reel_scripts", "lead": "gtm_leads"}
@@ -595,7 +597,7 @@ def _replay_machine(conn, machine: str, upto: int) -> None:
 # concurrent migrators: worker, dispatch, and watchdog can all boot and call init_db;
 # exactly one runs the steps, the rest wait on the lock then see the bumped version.
 
-SCHEMA_VERSION = 51
+SCHEMA_VERSION = 52
 
 
 def _migration_1(c) -> None:
@@ -1568,6 +1570,29 @@ def _migration_51(c) -> None:
         _add_column_if_missing(c, "inbox_conversations", "read_at")
 
 
+def _migration_52(c) -> None:
+    """A FIX CANNOT REACH WHAT THE BUG ALREADY WATERMARKED. One clearing of the skip-marker, once.
+
+    `poller._sweep_channel` skips a conversation whose stored `last_activity` equals the vendor's — the
+    optimisation that keeps a quiet inbox to one list call per sweep. On the live box every one of the 72
+    conversations carries a watermark written by the poller that recorded directions wrongly, so the fix for
+    that (#1334) is invisible to every thread that already exists: they are skipped before a single message
+    is re-read. The owner's 8 AM and 5 PM mail counts who is waiting, and it would have counted from rows
+    nobody could correct.
+
+    ONLY `last_activity`, NEVER `last_seen_msg_id`. The first is "has anything changed since we looked" and
+    clearing it costs one re-read per conversation. The second is "which message have we already acted on",
+    and clearing THAT would offer the box every old inbound as new — the send window would hold them, but
+    depending on a second gate to undo a mistake made by the first is not a migration, it is a bet.
+
+    Idempotent by construction: it is an UPDATE to NULL, so a re-run sets what is already NULL. Safe on a box
+    with no rows, and skipped entirely on a box that has no such table — `_MIGRATION_OWNER` tags it
+    `customer_voice`, and a Lead box never had an inbox to watermark.
+    """
+    if _table_exists(c, "inbox_state"):
+        c.execute("UPDATE inbox_state SET last_activity = NULL")
+
+
 MIGRATIONS = {
     46: _migration_46,   # the schema split's bootstrap (kernel step)
     1: _migration_1, 2: _migration_2, 3: _migration_3, 4: _migration_4,
@@ -1583,7 +1608,7 @@ MIGRATIONS = {
               39: _migration_39, 40: _migration_40, 41: _migration_41,
               42: _migration_42, 43: _migration_43, 44: _migration_44,
               45: _migration_45, 47: _migration_47, 48: _migration_48,
-              49: _migration_49, 50: _migration_50, 51: _migration_51}
+              49: _migration_49, 50: _migration_50, 51: _migration_51, 52: _migration_52}
 
 
 # init_db IS SAFE TO CALL FROM MANY THREADS AND PROCESSES AT ONCE. Main went red on 2026-09-06

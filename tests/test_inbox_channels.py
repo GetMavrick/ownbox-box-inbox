@@ -60,8 +60,13 @@ store.upsert_conversation(space=SPACE, zcid="m1", platform="messenger",
                           participant="Dana", account_id="a1", last_inbound_at="2026-09-15T06:00:00Z")
 c = _client()
 _, html = _page(c, "/inbox/inbox")
+# `class="chips">` WITH THE CLOSING BRACKET, because the screen now carries TWO rows built from
+# the same CSS: the CHANNEL row (`class="chips"`) and the unanswered FILTER row
+# (`class="chips pills"`). A bare `class="chips"` matches both, which would have turned this
+# assertion — the one that says a one-channel box gets no channel row — into a false failure, and
+# its twin below into a false pass. Same rule as `_url`: be specific about which control you mean.
 ok("one channel renders NO chip row — a filter with one option changes nothing",
-   'class="chips"' not in html)
+   'class="chips">' not in html)
 # THE ROW STILL NAMES THE CHANNEL, and this assertion was rewritten when the row moved to the
 # channel's own logo (2026-09-15, the Kinso-derived redesign). It deliberately does NOT pin the
 # markup any more — it pins the GUARANTEE, which is the thing worth keeping: a person must be able
@@ -87,8 +92,8 @@ ok("...and the mark is a shape, drawn as a path rather than a coloured blob",
 store.upsert_conversation(space=SPACE, zcid="i1", platform="instagram",
                           participant="Sam", account_id="a2", last_inbound_at="2026-09-15T07:00:00Z")
 _, html = _page(c, "/inbox/inbox")
-ok("a second channel brings the chip row with it", 'class="chips"' in html)
-ok("...with an All chip", ">All<" in html)
+ok("a second channel brings the chip row with it", 'class="chips">' in html)
+ok("...with a chip that clears the channel filter", ">Every channel<" in html)
 ok("...and one chip per channel present", "Messenger" in html and "Instagram" in html)
 ok("...and NO chip for a channel this box has never received",
    "WhatsApp" not in html and "Reviews" not in html and "SMS" not in html)
