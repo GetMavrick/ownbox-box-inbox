@@ -14,7 +14,16 @@ THE SEQUENCING THIS SUITE ALSO PINS. #1273 adds the seam and registers NOTHING; 
 inbox onto it next. Between those landings `onboarding.steps()` is empty, and a screen that
 rendered it unconditionally would show a paying customer a set-up page with nothing on it. So the
 empty-seam case is a test, not an assumption: with nothing registered the old contract still
-renders in full, and the moment something is registered the seam wins.
+renders in full.
+
+AND THE MOMENT SOMETHING IS REGISTERED, THE TWO ARE MERGED — this line used to read "the seam
+wins", which was the intent when it was written and turned out to be a landmine (OSDev4,
+2026-09-17, scope #1307). Winning meant the FIRST step registered through the seam, about anything
+at all, deleted every step still in `box_secrets` from the buyer's screen: measured, three became
+one. The concern underneath it was never "hide the old contract", it was "nobody sees a step
+twice" — which `_setup_source` now guarantees by deduping on key, so a migrated step REPLACES its
+predecessor in place and an unmigrated one still renders, once. That also makes the migration this
+paragraph describes possible one step at a time instead of all three in a single commit.
 
 Run: python tests/test_setup_screen_on_the_seam.py
 """
@@ -169,7 +178,15 @@ def test_a_machine_that_cannot_answer_reads_unavailable_never_not_connected():
     ok("the screen says the box could not check it",
        "could not be checked just now" in words.lower())
     ok("...in core's own sentence, whole", entry["detail"] in words, entry["detail"])
-    ok("...and does NOT tell him it is not connected", "Not connected yet" not in words, words[:200])
+    # SCOPED TO THIS STEP'S ROW, not to the whole page (OSDev4, 2026-09-17). The assertion read
+    # the entire document, which worked only while the seam REPLACED the old contract and the page
+    # therefore held one step. `_setup_source` merges now, so email/zernio/AI-key render alongside
+    # — and they are genuinely "Not connected yet" on a fresh box, which made a true page fail a
+    # test about a different row. What this always meant is that THIS step must not be called
+    # not-connected when the truth is that it could not be checked; that is what it says now, and
+    # it still fails if the unavailable row ever claims not-connected.
+    _row = words.split("Connect your gutter pigeons", 1)[-1][:240]
+    ok("...and does NOT tell him it is not connected", "Not connected yet" not in _row, _row)
     ok("...and never leaks why it broke", "loft is on fire" not in words and "RuntimeError" not in words)
 
 
@@ -301,16 +318,35 @@ def test_with_an_EMPTY_seam_the_old_contract_still_renders_in_full():
     ok("...in its order", all(i >= 0 for i in seen) and seen == sorted(seen), str(seen))
 
 
-def test_when_the_seam_has_a_step_it_is_the_source_not_an_addition():
-    """Otherwise the day OSDev4 registers the inbox's steps, every buyer sees each of them twice."""
+def test_a_seam_step_never_renders_twice():
+    """NOBODY SEES A STEP TWICE — which is what this test was always for, asserted directly.
+
+    It read: "Otherwise the day OSDev4 registers the inbox's steps, every buyer sees each of them
+    twice." That is the intent, and it is right. The assertion underneath it was a PROXY — no
+    `box_secrets` title anywhere on the page — which held only because `_setup_source` PREFERRED
+    the seam and so rendered one source or the other.
+
+    Preferring turned out to be a landmine (OSDev4, 2026-09-17, scope #1307): the first step
+    registered through the seam, about anything at all, deleted every step still living in
+    `box_secrets` from the buyer's screen. Measured — three steps became one. `_setup_source`
+    merges and dedupes by key now, so an unmigrated step legitimately still renders, ONCE, and a
+    migrated one replaces its predecessor in place.
+
+    So the proxy is replaced by the thing it stood for, and the new assertion is STRICTER than the
+    old one: it counts every title on the page rather than checking a set is absent, which would
+    also have caught a duplicate the old form could not see.
+    """
     _clear_seam()
     _register(state_fn=lambda: {"status": "not_connected", "detail": ""})
     app, c = _c()
     words = _text(c.get("/voice/setup").get_data(as_text=True))
-    ok("the registered step is what renders", "Connect your gutter pigeons" in words)
-    ok("...and the old contract is not rendered alongside it",
-       not any(s["title"] in words for s in bs.SETUP_STEPS),
-       str([s["title"] for s in bs.SETUP_STEPS if s["title"] in words]))
+    ok("the registered step renders", words.count("Connect your gutter pigeons") == 1,
+       str(words.count("Connect your gutter pigeons")))
+    dupes = [t for t in [s["title"] for s in bs.SETUP_STEPS] if words.count(t) > 1]
+    ok("...and NOTHING on the page is rendered twice", not dupes, str(dupes))
+    ok("...and the box's own credentials are still offered, which is the bug this replaced",
+       all(s["title"] in words for s in bs.SETUP_STEPS),
+       str([s["title"] for s in bs.SETUP_STEPS if s["title"] not in words]))
 
 
 def test_ci_actually_runs_this_file():

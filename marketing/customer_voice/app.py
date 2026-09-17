@@ -2260,22 +2260,47 @@ def _seam_keys() -> set:
 
 
 def _setup_source() -> list:
-    """The steps to render. The seam when it has any, the old contract while it does not.
+    """The steps to render: BOTH sources, merged, the seam winning a key it has taken over.
 
-    A seam that raises is not allowed to take the set-up page down with it: the old contract still
-    renders, and the failure is logged rather than shown. The reverse is not true — if the OLD
+    THIS USED TO PREFER THE SEAM, AND THAT WAS A LANDMINE. The line was `live = onboarding.steps()`
+    / `if live: return live` — so the FIRST step anybody registered through the seam, about
+    anything at all, made every step still living in `box_secrets` disappear from the screen.
+    Measured on 2026-09-17 (OSDev4, scope doc #1307): the set-up page goes from
+    ['email', 'zernio', 'anthropic'] to ['relay'] on one unrelated registration. Not a crash — a
+    page that renders, and is wrong, on the screen a buyer uses to connect his box.
+
+    MERGING IS ALSO WHAT MAKES THE MIGRATION POSSIBLE. `core/onboarding`'s own comment says the
+    old section gets deleted "once every step is registered", which under the old behaviour meant
+    ALL THREE had to move in one commit or the screen broke in between. Merged, a step moves on
+    its own: register `email` in the seam and it REPLACES the old one, in place; register nothing
+    and nothing changes.
+
+    IN PLACE, DELIBERATELY. A seam step that takes over an existing key keeps that key's position
+    rather than jumping to the end by `order` — the owner set this screen's order (mailbox, then
+    channels, then drafts) and migrating a step is not the moment to rearrange his screen.
+
+    A seam that raises is still not allowed to take the page down with it: the old contract renders
+    alone and the failure is logged rather than shown. The reverse is not true — if the OLD
     contract raises there is nothing left to draw, and `r_setup` turns that into a page that says
     so, which is why this does not swallow it.
     """
+    seam: dict = {}
     try:
         from core import onboarding
-        live = [dict(e) for e in onboarding.steps()]
-        if live:
-            return live
+        seam = {str(e.get("key")): dict(e) for e in onboarding.steps()}
     except Exception as e:                       # noqa: BLE001 — the page outranks the seam
         log.warning("voice.setup_seam_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
     from core import box_secrets
-    return [dict(e) for e in box_secrets.setup_state()]
+    out, taken = [], set()
+    for entry in box_secrets.setup_state():
+        key = str(entry.get("key"))
+        migrated = seam.get(key)
+        out.append(dict(migrated) if migrated else dict(entry))
+        taken.add(key)
+    # Whatever the seam holds that core does not: appended in the order its machines declared,
+    # which is what `onboarding.steps()` already sorts by.
+    out.extend(dict(e) for k, e in seam.items() if k not in taken)
+    return out
 
 
 def _setup_save(which: str, form, *, user_id: str | None) -> None:
