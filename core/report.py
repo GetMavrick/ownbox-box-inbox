@@ -26,6 +26,7 @@ ratchets it back.
 """
 import json
 import pathlib
+import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -34,6 +35,8 @@ from core.config import get_config, settings
 from core.logging import get_logger
 
 log = get_logger(__name__)
+
+_KEY = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STATE = "my/review.json"                 # {"sent", "emailed"}: one once-a-day marker per channel; "retry_at": the attempt lease
 SEND_TICK_S = 300                        # review_send LOOKS this often; run() says why it is not hourly
@@ -43,7 +46,15 @@ RETRY_S = 3600                           # ...and ATTEMPTS at most once in this 
 # Lead. A box with only the Content Machine still shows Content in the middle; fixed position
 # is what lets an owner learn where to look. `meters` is not a segment — it is the rail at the
 # bottom that absorbed the cost digest (§1.7), stored with the day so a past day keeps its meters.
-ORDER = ("customer_voice", "content_machine", "lead_machine")
+#
+# THESE THREE ARE THE OWNER'S RULING AND THEY DO NOT MOVE. OSDev1 asked for the order to come
+# from the box's recipe (#1332 step 2); measured, the recipe would put them Content, Lead,
+# Customer Voice — a complete reversal of the line above. Reordering the morning page a buyer
+# has learned to read, on the way past, is not something to do while carrying out a different
+# instruction. So the ruling stands here and the question goes back to him; what changes below
+# is only what happens to a machine the owner never ruled on.
+RULED = ("customer_voice", "content_machine", "lead_machine")
+ORDER = RULED                            # kept as a name: three modules read it
 METERS = "meters"
 WATCH_STATES = ("ok", "warn", "fail", "connect")
 STALE_AFTER_S = 45 * 60                  # three refresh intervals (§2.2b) — older is "no report since"
@@ -92,8 +103,17 @@ def register_reporter(machine: str, title: str, fn) -> None:
     """fn(day: date) -> Report. Local DB reads only. Never raises. Never slow. NOT the same
     registry as `register_periodic` (§1.4): that one takes a zero-arg callable; this one takes
     a day. Idempotent on machine so a re-import (tests) cannot stack two."""
-    if machine != METERS and machine not in ORDER:
-        raise ValueError(f"unknown machine {machine!r}; the segments are {ORDER}")
+    # A NEW MACHINE MAY REPORT ON THE DAY IT LANDS. This used to raise for any machine not in the
+    # three above, so the AI receptionist arriving in two weeks could put nothing on the morning
+    # page or the dashboard until somebody hand-edited core — the arm-per-product growth
+    # `test_core_boundary` exists to stop, and the reason the registry was built at all.
+    #
+    # THE KEY IS STILL CHECKED, just not against a list of products: a machine name is a short
+    # lowercase slug, so a typo or a path fragment is still refused at import where it is a failed
+    # boot line rather than a missing segment nobody notices.
+    if machine != METERS and not _KEY.match(str(machine or "")):
+        raise ValueError(f"machine {machine!r} must be a short lowercase slug, "
+                         f"like {RULED[0]!r}")
     REPORTERS[machine] = {"title": title, "fn": fn}
     log.info("report.registered", machine=machine)
 
@@ -262,6 +282,56 @@ def close_open_days(now: datetime | None = None) -> list[str]:
     return open_days
 
 
+def _recipe_rank() -> dict:
+    """Where each machine sits in this box's recipe — `{machine: index}`.
+
+    THE RECIPE IS ALREADY THE LIST OF MACHINES ON THE BOX, so nothing new has to be maintained:
+    a machine that is installed appears in `modules:`, and one that is not, does not. The entries
+    are dotted module paths (`marketing.customer_voice.inbox`), so a machine's rank is where its
+    key FIRST appears as a component — the inbox and the reviews side of Customer Voice are two
+    modules and one machine.
+
+    Matched on components, never on substring: `marketing.lead_machine` must not rank a machine
+    called `lead` and `content_machine.voice` must not rank one called `voice`.
+    """
+    seen: dict = {}
+    for i, path in enumerate(get_config().get("modules") or ()):
+        for part in str(path).split("."):
+            seen.setdefault(part, i)
+    return seen
+
+
+def _segment_rank(rep) -> tuple:
+    """Sort key: the owner's three first and in his order, then every other machine in the order
+    the recipe installs it, then meters, then anything we cannot place at all.
+
+    A MACHINE THE OWNER NEVER RULED ON GETS A PLACE RATHER THAN A GUESS. Before this it sorted to
+    99 with everything else, so two new machines had no defined order between them and the page
+    could reshuffle between reads.
+
+    FOUR TIERS, AND THE LAST TWO USED TO BE THE WRONG WAY ROUND — caught by OSDev1 reviewing this
+    PR against the sentence above. An unplaceable machine took a huge rank INSIDE the recipe tier,
+    so it sorted ahead of meters while the docstring promised it came after. Both orders are
+    arguable; a docstring that disagrees with its own function is not, and that is the defect.
+
+    THE LAST TIER IS A FALLBACK BUCKET AND BELONGS AT THE BOTTOM. Reaching it means a machine
+    registered a reporter without appearing in `modules:` — which is a misconfiguration, not a
+    fourth product. Sorting it in among the installed machines is how a box that is wrong looks
+    like a box that is fine.
+    """
+    machine = str((rep or {}).get("machine") or "")
+    if machine in RULED:
+        return (0, RULED.index(machine), machine)
+    if machine == METERS:
+        return (2, 0, machine)
+    rank = _recipe_rank().get(machine)
+    if rank is None:
+        # ITS OWN TIER, NOT A BIG NUMBER IN SOMEBODY ELSE'S. `10 ** 6` was a sentinel doing a
+        # tier's job, and a sentinel inside a tier can only ever sort within it.
+        return (3, 0, machine)
+    return (1, rank, machine)
+
+
 def read(day: date | str, machine: str | None = None) -> list[dict]:
     """Stored rows for a day, in segment ORDER with meters last. THE ONLY CALL THE PAGE MAKES.
     Pure SQL — no reporter runs, no machine is imported. Each dict carries `written_at` and
@@ -281,8 +351,7 @@ def read(day: date | str, machine: str | None = None) -> list[dict]:
         rep["written_at"] = r["written_at"]
         rep["final"] = bool(r["final"])
         out.append(rep)
-    rank = {m: i for i, m in enumerate(ORDER + (METERS,))}
-    out.sort(key=lambda x: rank.get(x.get("machine"), 99))
+    out.sort(key=_segment_rank)
     return out
 
 
@@ -375,7 +444,9 @@ def view(day: date | str | None = None, now: datetime | None = None) -> dict:
     rows = read(d)
     stored = days()
     live = d == t.isoformat()
-    segs = [r for r in rows if r.get("machine") in ORDER]
+    # EVERY MACHINE'S ROW IS A SEGMENT. This read `in ORDER`, so a stored report from a machine
+    # not in the ruled three was silently dropped from the page that exists to show it.
+    segs = [r for r in rows if r.get("machine") and r.get("machine") != METERS]
     meters = next((r for r in rows if r.get("machine") == METERS), None)
     newest = max((r.get("written_at") or "" for r in rows), default="")
     stale_at = is_stale(rows, now) if live else None
@@ -501,7 +572,8 @@ def render(day: date, now: datetime | None = None) -> str:
     now = now or now_local()
     yday = read(day)
     tday = read(today(now))
-    segs = lambda rows: [r for r in rows if r.get("machine") in ORDER]      # noqa: E731
+    segs = lambda rows: [r for r in rows                                     # noqa: E731
+                         if r.get("machine") and r.get("machine") != METERS]
     needs = [(r["title"], n) for r in segs(tday) for n in r.get("needs_you") or []]
     lines = [f"Morning review, {now:%a %d %b}"]
     if needs:
