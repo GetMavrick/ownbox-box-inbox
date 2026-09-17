@@ -58,6 +58,7 @@ class Item:
     label: str
     href: str
     tone: str = ""
+    icon: str = ""
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,7 @@ class Section:
     href: str
     items: tuple[Item, ...] = ()
     home: bool = False
+    icon: str = ""
 
 
 @dataclass(frozen=True)
@@ -91,7 +93,7 @@ _SECTIONS: dict[str, Section] = {}
 
 
 def register_section(key: str, *, order: int, machine: str, title: str, href: str,
-                     items: Iterable = (), home: bool = False) -> None:
+                     items: Iterable = (), home: bool = False, icon: str = "") -> None:
     """Declare one rail section. Called at import, like every other seam in this box.
 
     CHECKED HERE, AT IMPORT, where a mistake is a failed boot line — not on the screen, where it
@@ -136,8 +138,11 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
         tone = str(it.get("tone") or "")
         if tone not in TONES:
             raise ValueError(f"rail item {ikey!r} has tone {tone!r}; expected one of {sorted(TONES)}")
+        # AN ICON IS SVG PATH DATA, the same shape the inbox's tab bar already stores — a `d`
+        # string, never a URL and never a file. Core holds no image and fetches nothing; the
+        # machine that owns the section owns how it looks, exactly as it owns its title.
         built.append(Item(key=ikey, label=str(it["label"]).strip(),
-                          href=str(it["href"]), tone=tone))
+                          href=str(it["href"]), tone=tone, icon=str(it.get("icon") or "")))
 
     if home:
         other = next((s for s in _SECTIONS.values() if s.home and s.key != key), None)
@@ -147,7 +152,7 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
             raise ValueError(f"rail section {key!r} claims home, but {other.key!r} already does")
 
     _SECTIONS[key] = Section(key=key, order=order, machine=machine, title=title.strip(),
-                             href=href, items=tuple(built), home=bool(home))
+                             href=href, items=tuple(built), home=bool(home), icon=str(icon or ""))
     log.info("shell.section_registered", key=key, machine=machine, items=len(built))
 
 
@@ -181,7 +186,13 @@ def _within(path: str, href: str) -> bool:
     if path == href:
         return True
     stem = href.rstrip("/")
-    return path.startswith(stem + "/") if stem else path.startswith("/")
+    if not stem:
+        # ROOT IS NOT A CONTAINER HERE, and this is OSDev1's review catch on #1317. Every path is
+        # "under" `/`, so treating it as one marks a section at root as current on every page of
+        # the box — a rail where two rows light up at once, which tells the person the screen does
+        # not know where they are either. Root matches root, and nothing else.
+        return False
+    return path.startswith(stem + "/")
 
 
 def current(path: str) -> Section | None:
@@ -214,7 +225,7 @@ def rail(path: str) -> Rail:
         return Rail(level=2, title=here.title, back=home_href(), items=here.items, here=path)
     # LEVEL 1 — the sections themselves, rendered through the same `Item` the second level uses so
     # a template has one row to draw and not two.
-    top = tuple(Item(key=s.key, label=s.title, href=s.href) for s in sections())
+    top = tuple(Item(key=s.key, label=s.title, href=s.href, icon=s.icon) for s in sections())
     return Rail(level=1, title="", back="", items=top, here=path)
 
 
@@ -228,10 +239,15 @@ def crumb(path: str) -> tuple[str, ...]:
     got = rail(path)
     if got.level != 2:
         return ()
+    # THE LONGEST MATCH, exactly as `current()` picks a section — OSDev1's review catch on #1317.
+    # Taking the FIRST match instead means an item at `/settings` swallows the crumb for its own
+    # sibling at `/settings/keys`, and the breadcrumb then names a page the person is not on. The
+    # two functions answer the same question at two depths; they must answer it the same way.
+    best = None
     for it in got.items:
-        if it.href == path or _within(path, it.href):
-            return (got.title, it.label)
-    return (got.title,)
+        if _within(path, it.href) and (best is None or len(it.href) > len(best.href)):
+            best = it
+    return (got.title, best.label) if best is not None else (got.title,)
 
 
 def is_current(item: Item, path: str) -> bool:

@@ -705,7 +705,33 @@ def _clear_failures(ip: str) -> None:
 # one shape: a box that has an inbox and no client home — which is the product we sell.
 # /voice/* MOVED TO /inbox/* ON 2026-09-17. The owner: "No redirect, please. Full cut over" — /voice
 # belongs to the AI receptionist machine, so no login may land there again.
-_LANDINGS = ("/dash/home", "/inbox/inbox", "/inbox/", "/dash")
+#
+# `/dashboard` SITS SECOND, AND THAT PLACE IS THE WHOLE DECISION (2026-09-17).
+#
+# Owner, 2026-09-17, quoted verbatim by OSDev1 from his own session: *"They should go to
+# /dashboard and then they should see some helpful information and can click settings to set
+# things up."* And to me, on the front door: */ must redirect to landing()… it follows /dashboard
+# automatically the moment that lands.* That second sentence is only TRUE if `/dashboard` is in
+# this tuple, which is why it is added here rather than left for later.
+#
+# SECOND AND NOT FIRST, because the two rulings are about two different people and both stand.
+# `/dash/home` is served by the LEAD MACHINE (marketing/lead_machine/dash.py) — measured, not
+# assumed — so it exists on his everything-box and on no inbox box we sell. Putting `/dashboard`
+# behind it therefore changes nothing he sees and everything a buyer sees: his 2026-09-09 ruling
+# keeps its screen, and a buyer stops landing on the INBOX — whatever that path is called this
+# week — and lands on the dashboard the 2026-09-17 ruling names. Ahead of it would have overturned
+# a ruling to satisfy a ruling.
+#
+# THE ENTRY BELOW IT IS NAMED BY ROLE, NOT BY PATH, because this comment was first written saying
+# `/voice/inbox` and that path stopped existing the same morning — OSDev1's cut renamed it while
+# this branch was open. A test in this stack made the identical mistake and would have raised a
+# ValueError on his replay. Prose that names a neighbour ages exactly as badly as an assertion
+# that does.
+#
+# AND IT IS ONE PLACE, NOT TWO. The front door (`/`) resolves through `landing()`, so this tuple
+# is the only thing that decides where a box opens. A redirect in `deploy/Caddyfile` would be a
+# second answer to the same question, living in a file no test reads.
+_LANDINGS = ("/dash/home", "/dashboard", "/inbox/inbox", "/inbox/", "/dash")
 
 
 @blueprint.get("/")
@@ -1443,3 +1469,9 @@ def tls_ask():
 # through the kernel's one login-free mount, not through `web_modules:`. Imported last: it needs
 # `blueprint` and `page` above. It imports no department — test_dash_boundary checks.
 from core.dash import review as _review  # noqa: E402,F401
+
+# THE BUYER'S HOME mounts the same way and for the same reason — `/dashboard` ships on every box
+# through the kernel's one mount, not through `web_modules:`. It must be imported HERE rather than
+# by whoever happens to need it: a blueprint stops accepting routes the moment it is registered on
+# an app, so a page imported later is a silent 404 in production and an AssertionError in a test.
+from core.dash import home as _home  # noqa: E402,F401
