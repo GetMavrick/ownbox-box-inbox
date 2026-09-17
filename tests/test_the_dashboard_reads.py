@@ -406,49 +406,66 @@ def test_the_front_door_follows_the_dashboard_without_a_second_place_to_remember
        str(_dash._LANDINGS))
     # NAMED BY POSITION, NOT BY THE PATH BELOW IT. Written first as "ahead of /voice/inbox", and
     # that entry is GONE — OSDev1's cut renamed it to /inbox/inbox while this branch was open, so
-    # `.index()` would have raised ValueError the moment he replayed this onto main. The decision
-    # here was never about which path sits under it; it is that his 2026-09-09 screen keeps the
-    # head and the buyer's dashboard takes the next place. Assert that, and the tuple below can be
-    # renamed as often as the routes are.
-    ok("...and it sits directly behind his own screen, wherever the rest of the list goes",
-       _dash._LANDINGS[:2] == ("/dash/home", "/dashboard"), str(_dash._LANDINGS))
+    # `.index()` would have raised ValueError the moment he replayed this onto main. It was then
+    # rewritten as `[:2] == ("/dash/home", "/dashboard")`, which names a neighbour just as surely,
+    # one place further along, and went red the day the owner ruled that neighbour out of the head
+    # (2026-09-17, in the test below). The rule was only ever about ONE entry — core's own home,
+    # first — so assert that, and the rest of the tuple can be reordered as often as the routes are.
+    ok("...and it heads the list, so every box opens on a page core itself serves",
+       _dash._LANDINGS[0] == "/dashboard", str(_dash._LANDINGS))
 
 
-def test_both_of_his_rulings_survive_because_they_are_about_two_people():
-    """His 2026-09-09 ruling is what HE sees first; his 2026-09-17 ruling is what a BUYER sees.
-    `/dash/home` is served by the LEAD MACHINE, so it exists on his everything-box and on no inbox
-    box we sell. `/dashboard` second therefore changes nothing he sees and everything a buyer sees.
-    Ahead of it would have overturned one ruling to satisfy the other.
+def test_no_machine_page_stands_ahead_of_cores_own_home():
+    """Owner, to me, 2026-09-17: *"The lead machine shouldn't own core features."*
 
-    IT ASKS THE TUPLE, NOT THIS BOX, and that correction is the whole point of this docstring.
-    The first version asserted `"/dash/home" in app.url_map` — requiring, on every box, the very
-    route whose absence it was written to describe. MEASURED, not reasoned: exported a
-    `customer_voice` box with `scripts/export_box.sh` and ran this suite inside it, where it FAILED
-    on its own label — "not universal", then insisting on it.
+    MEASURED BEFORE ACTING ON IT, and he is right about this tuple in the strongest way:
+    `/dash/home` is `marketing/lead_machine/dash.py` — it reads `gtm_leads`, `gtm_businesses` and
+    the lead funnel. Heading `_LANDINGS`, it meant "where does this box open" — core's question —
+    was answered by a machine, on every box that happened to carry that machine. `/dashboard`
+    heads it now, and core ships whole, so every box serves it.
+
+    THIS MOVES THE OWNER'S OWN LANDING, and saying so plainly is the point rather than a footnote.
+    On 2026-09-09 he ruled which screen he wanted to see first; the only reason a machine's route
+    carried that ruling is that core had no home of its own when he made it. It has one now. He
+    has not been asked whether he wants the lead page back on top — the PR flags it, and it is one
+    line in either direction.
+
+    IT ASKS THE TUPLE, NOT THIS BOX, and that correction is worth keeping. An earlier version
+    asserted `"/dash/home" in app.url_map` — requiring, on every box, the very route whose absence
+    it was written to describe. MEASURED, not reasoned: exported a `customer_voice` box with
+    `scripts/export_box.sh` and ran this suite inside it, where it FAILED on its own label.
 
     CI would never have caught that. `test_recipe_ships` builds a LEAD box, which carries the lead
     machine and therefore serves `/dash/home`, so the suite passes there and fails only in the box
-    we actually sell. OSDev1 flagged the same trap on OSDev4's #1320 an hour ago, from the other
-    direction: a suite with no machine import ships into every box and has to survive all of them.
-
-    So both shapes are resolved from `_LANDINGS` against a hypothetical set of served routes. No
-    assertion here needs any particular machine to be installed.
+    we actually sell.
     """
     from core import dash as _dash
-    ok("his screen still heads the list", _dash._LANDINGS[0] == "/dash/home",
+    ok("core's own home heads the list", _dash._LANDINGS[0] == "/dashboard",
        str(_dash._LANDINGS))
+
+    # NOT MERELY "IT SAYS /dashboard". A path is a string; what makes it the right answer is WHO
+    # SERVES IT, and `/dash/home` read as core-ish for weeks while belonging to a machine. So the
+    # head is checked against core's own module — if someone moves `/dashboard` out to a machine,
+    # this goes red even though the tuple still reads correctly.
+    src = (pathlib.Path(__file__).resolve().parents[1] / "core" / "dash" / "home.py").read_text()
+    ok("...and it is core/dash/home.py that registers that route",
+       f'"{_dash._LANDINGS[0]}"' in src,
+       "the head of _LANDINGS is not a route core itself serves")
 
     def lands_on(served):
         """`landing()`'s own rule — the first entry this box serves — without needing a box."""
         return next((p for p in _dash._LANDINGS if p in served), None)
 
-    everything_box = set(_dash._LANDINGS)                 # his: carries the lead machine
-    inbox_box = everything_box - {"/dash/home"}           # a buyer's: does not
-    ok("his everything-box still opens on his own screen",
-       lands_on(everything_box) == "/dash/home", str(lands_on(everything_box)))
-    ok("a box without the lead machine opens on the dashboard",
-       lands_on(inbox_box) == "/dashboard", str(lands_on(inbox_box)))
-    ok("...and neither answer depends on which machines THIS box happens to carry",
+    every = set(_dash._LANDINGS)                          # carries every machine we ship
+    inbox_box = every - {"/dash/home"}                    # a buyer's: no lead machine
+    lead_box = every - {"/inbox/inbox", "/inbox/"}        # the other buyer's: no inbox
+    ok("an everything-box opens on the dashboard", lands_on(every) == "/dashboard",
+       str(lands_on(every)))
+    ok("...so does a box with no lead machine", lands_on(inbox_box) == "/dashboard",
+       str(lands_on(inbox_box)))
+    ok("...and so does a lead-only box, which used to open on its machine's own funnel",
+       lands_on(lead_box) == "/dashboard", str(lands_on(lead_box)))
+    ok("...none of which depends on which machines THIS box happens to carry",
        lands_on(set()) is None)
 
 

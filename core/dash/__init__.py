@@ -731,7 +731,33 @@ def _clear_failures(ip: str) -> None:
 # AND IT IS ONE PLACE, NOT TWO. The front door (`/`) resolves through `landing()`, so this tuple
 # is the only thing that decides where a box opens. A redirect in `deploy/Caddyfile` would be a
 # second answer to the same question, living in a file no test reads.
-_LANDINGS = ("/dash/home", "/dashboard", "/inbox/inbox", "/inbox/", "/dash")
+#
+# ── 2026-09-17: CORE'S OWN HOME GOES FIRST. ──────────────────────────────────────────────────
+#
+# Owner, to me, 2026-09-17: *"The lead machine shouldn't own core features."* Measured before
+# acting on it, and he is right about this list in the strongest way:
+#
+#   `/dash/home` IS NOT A CORE HOME. It is `marketing/lead_machine/dash.py:443` — a LEAD MACHINE
+#   page, reading `gtm_leads`, `gtm_businesses` and the lead funnel. Nothing about it is base.
+#
+# Heading this tuple, it meant every login on every box carrying the lead machine landed on that
+# machine's page — including a box whose buyer bought an inbox and has no interest in a lead
+# funnel. A machine was answering the question "where does this box open", which is core's.
+#
+# So `/dashboard` heads it now: core's own home, which every box serves because core ships whole.
+# The lead machine's page stays exactly where it is and keeps its URL; it simply stops being the
+# front door, and becomes reachable the way every machine's page is — from the rail.
+#
+# THIS CHANGES WHAT THE OWNER HIMSELF LANDS ON, and that is the point rather than a side effect:
+# his 2026-09-09 ruling was about the screen he wanted first, and the only reason it was carried
+# by a machine's route is that core had no home of its own to carry it. Now it does. Flagged to
+# OSDev1 and reversible in one line if he wants the old screen back.
+#
+# STILL NOT RIGHT, AND NOT MINE TO FIX HERE: this tuple names machine paths at all. The
+# principled end state is ("/dashboard", "/dash") with every machine reached from the rail — but
+# the `/inbox/*` entries below were set by OSDev1's cut hours ago and removing them is his call,
+# not something to slip into a one-line reorder.
+_LANDINGS = ("/dashboard", "/dash/home", "/inbox/inbox", "/inbox/", "/dash")
 
 
 @blueprint.get("/")
