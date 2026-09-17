@@ -342,6 +342,25 @@ def anthropic_key() -> str:
             or (getattr(settings, "anthropic_api_key", "") or "").strip()
             or get(ANTHROPIC))
 
+def anthropic_state() -> dict:
+    """What the set-up screen says about the AI key. Never the key itself.
+
+    ONLY TWO STATES ARE HONEST HERE, and that is the finding rather than a shortcut. A mailbox and
+    a Zernio key are VERIFIED with their vendor before they are stored, so their screens can say
+    `needs_reauth` and mean it. An Anthropic key is not: `put` checks its shape and nothing more,
+    deliberately — "only Anthropic can say whether a key works, and a box that refused a valid key
+    because our regex was a month out of date would be worse than one that accepted a typo".
+    So this answers `connected` or `not_connected` and never invents a third.
+
+    ENVIRONMENT COUNTS AS CONNECTED, because `brain` uses it: `anthropic_key()` reads `.env` ahead
+    of the store, so a box whose key is in its environment IS able to draft. A screen that showed
+    "not connected" there would send its owner to buy a key he already has, and the row would stay
+    red forever no matter what he pasted.
+    """
+    return {"status": "connected" if anthropic_key() else "not_connected",
+            "user": None, "detail": ""}
+
+
 # ── THE SET-UP SCREEN, IN THE ORDER THE OWNER ASKED FOR ─────────────────────────────────────────
 #
 # THE DATA IS OSDev1's, FROM #1250, CARRIED VERBATIM. He cites the owner for the order — Gmail
@@ -396,6 +415,37 @@ SETUP_STEPS = (
 )
 
 
+# WHY THIS ONE STAYS IN CORE while `core/onboarding.py` exists to move steps OUT of it. That seam
+# is for a MACHINE's credential — the inbox's mailbox, the inbox's Zernio key — so that adding a
+# machine stops meaning editing core. The AI key belongs to no machine: `core.brain` is the one
+# gateway every machine reasons through, and a box with no key cannot draft, summarise or route
+# anything, whichever machines it carries. There is nothing to register it, so core asks for it.
+_AI_STEP = {
+    "key": "anthropic", "title": "Your AI key",
+    "why": "This is what writes the replies. Your box drafts with your own key on your own bill, "
+           "so your customers' messages are never on anybody else's account. Nothing is sent "
+           "automatically — the box writes, you read it, and you decide.",
+    "fields": ({"name": "key", "label": "Anthropic API key", "type": "password",
+                "placeholder": "sk-ant-..."},),
+    "steps": ("Create an Anthropic account, or sign in to the one you have.",
+              "Add a payment method — the drafting is billed to you, not to us.",
+              "Open API keys, create one, and copy it.",
+              "Paste it here. Your box keeps a hard spending cap on top of whatever you set "
+              "at Anthropic."),
+    "note": "Without this the box still reads everything and still shows you every message — it "
+            "simply will not write the drafts.",
+}
+
+SETUP_STEPS = SETUP_STEPS + (_AI_STEP,)
+
+# ONE STATE READER PER STEP, BY NAME. This was `email_state() if key == "email" else zernio_state()`
+# — a binary that was correct while there were exactly two steps and silently wrong the moment
+# there was a third: the AI key would have rendered Zernio's status, so a buyer with a connected
+# Zernio account would have read "Connected" under a key he had never pasted. A map cannot do that;
+# an unknown key gets nothing rather than the last branch's answer.
+_STATE_READERS = {"email": email_state, "zernio": zernio_state, "anthropic": anthropic_state}
+
+
 def setup_state() -> list[dict]:
     """Every credential the buyer supplies, in screen order, with what is set and what to do.
 
@@ -412,7 +462,8 @@ def setup_state() -> list[dict]:
     """
     out = []
     for step in SETUP_STEPS:
-        st = email_state() if step["key"] == "email" else zernio_state()
+        reader = _STATE_READERS.get(step["key"])
+        st = reader() if reader else {}
         entry = dict(step, status=st.get("status") or "not_connected",
                      who=st.get("user"), detail=(st.get("detail") or "").strip())
         # The link out is only useful once the key is in: sending someone to connect accounts

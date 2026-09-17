@@ -2296,6 +2296,12 @@ def _setup_save(which: str, form, *, user_id: str | None) -> None:
                               password=str(form.get("password") or ""), user_id=user_id)
     elif which == "zernio":
         box_secrets.put_zernio(str(form.get("key") or ""), user_id=user_id)
+    elif which == "anthropic":
+        # `put` CARRIES THE VALIDATION, unlike the two above which have their own front doors. It
+        # checks the shape and refuses a blank, a pasted newline or the wrong thing entirely with
+        # a sentence for the buyer — and deliberately does NOT call Anthropic, because only they
+        # can say whether a key works and refusing a valid one on a stale regex is the worse bug.
+        box_secrets.put(box_secrets.ANTHROPIC, str(form.get("key") or ""), user_id=user_id)
     else:
         raise box_secrets.SecretRejected("That form is not one this screen knows.")
 
@@ -2466,7 +2472,14 @@ def r_setup():
                       here="/voice/settings"), 200
 
     done = sum(1 for e in steps if e.get("status") == "connected")
-    head = ('<h1>Set up your box.</h1><p class="quiet">Two things only you can do. Your box is '
+    # COUNTED, NOT WRITTEN. This read "Two things only you can do" while the list had two entries,
+    # and went false the moment the AI key became the third (OSDev4, #1287-era audit: a buyer
+    # connected Gmail and Zernio, read "You are set up", and had a box that could not draft a
+    # single reply because nothing had ever asked him for a key). Deriving it means the next step
+    # added cannot make this sentence lie either.
+    _n = {1: "One thing", 2: "Two things", 3: "Three things"}.get(len(steps),
+                                                                 f"{len(steps)} things")
+    head = (f'<h1>Set up your box.</h1><p class="quiet">{_n} only you can do. Your box is '
             'already running — this is what tells it where to listen.</p>'
             if done < len(steps) else
             '<h1>You are set up.</h1><p class="quiet">Everything below is connected. Change any '
