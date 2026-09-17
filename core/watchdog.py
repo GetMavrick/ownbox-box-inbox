@@ -410,7 +410,28 @@ def probe_backend() -> tuple[str, bool, str]:
     key = box_secrets.anthropic_key()
     if key:
         return ("anthropic_api", *_probe_anthropic(key))
-    return "anthropic_api", False, "no AI key yet — the buyer adds it on the set-up screen"
+    # A BOX NOBODY HAS SET UP YET IS NOT AN OUTAGE. Until a buyer adds a key there is nothing to
+    # probe, and this used to return a FAILURE: every new box logged
+    # `watchdog.probe_failed_operator_unset` at ERROR from its first pass until someone added a key
+    # (found by the image v9 clone-check, 2026-09-17), and a box with an operator contact would page
+    # that person for every customer who had not finished set-up. It is reported as a skip, which
+    # `_alert` already reads as "could not evaluate": no page, no ERROR, no false "recovered". The
+    # heartbeat still tells the truth — `unset`, never `ok` — so no health report shows a green
+    # brain on a box that has no key.
+    return "anthropic_api", True, NO_AI_KEY
+
+
+# The backend probe's detail on a box with no AI key yet. It starts with "skip (" ON PURPOSE: that
+# prefix is how `_alert` knows a probe could not evaluate. `_beat` turns it into an `unset` heartbeat.
+NO_AI_KEY = "skip (no AI key yet — nothing to probe until the buyer adds one)"
+
+
+def _beat(ok: bool, detail: str) -> str:
+    """The heartbeat status a probe result records: `unset` for a box with no AI key yet, so the
+    health report says so instead of an `ok` it has not earned; otherwise `ok` or `fail`."""
+    if detail == NO_AI_KEY:
+        return "unset"
+    return "ok" if ok else "fail"
 
 
 def check_backend_now() -> bool:
@@ -421,7 +442,7 @@ def check_backend_now() -> bool:
     backend should page and let the daemon keep running (so it recovers when the backend
     returns), never crash-loop."""
     key, ok, detail = probe_backend()
-    state.heartbeat("brain_backend", "ok" if ok else "fail")
+    state.heartbeat("brain_backend", _beat(ok, detail))
     _alert(key, ok, detail)
     return ok
 
@@ -1850,7 +1871,7 @@ def run_once() -> None:
 
     notifier_ok = True
     for key, (ok, detail) in probes.items():
-        state.heartbeat(f"probe:{key}", "ok" if ok else "fail")
+        state.heartbeat(f"probe:{key}", _beat(ok, detail))
         if not _alert(key, ok, detail):
             notifier_ok = False  # an alert we NEEDED to send did not reach Slack
 

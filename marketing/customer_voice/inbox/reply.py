@@ -186,7 +186,7 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
                                                           "error": str(e)[:160]})
             raise ReplyIndeterminate(str(e)) from e
         store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
-        raise ReplyRefused(f"the message did not send: {str(e)[:160]}") from e
+        raise ReplyRefused(_refusal_sentence(conv, e)) from e
     except Exception as e:                # noqa: BLE001 — an unexpected raise mid-call is UNKNOWN
         # A non-ZernioError escaping the gateway (a bug, a socket the SDK did not wrap) tells us
         # nothing about whether the vendor took the message. The row must not be left `sending`
@@ -205,6 +205,47 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
     log.info("inbox.reply_sent", extra={"space": space, "conversation": zcid,
                                         "message_id": mid, "user": user_id or "owner"})
     return {"status": "ok", "message_id": mid, "idem_key": idem, "duplicate": False}
+
+
+# ── saying WHY the vendor refused, in words ──────────────────────────────────────────────
+
+# Meta's own marker for a send outside the messaging window. Carried as the subcode rather than
+# a phrase because the subcode is stable and the English around it is not — and because Zernio
+# proxies the error, so the wording that reaches us is theirs, not Meta's.
+#   developers.facebook.com/docs/messenger-platform/error-codes  (code 10 / subcode 2018278)
+_WINDOW_MARKERS = ("2018278", "outside of allowed window", "outside the allowed window",
+                   "messaging window", "24-hour window", "24 hour window")
+
+
+def _refusal_sentence(conv: dict, exc: Exception) -> str:
+    """Turn a determinate vendor refusal into something the person who typed it can act on.
+
+    OPTION C OF #1170 — THE HALF THAT NEEDED NO RULING. The window is never consulted to decide
+    whether to CALL the vendor; this runs only after the vendor has already said no, and it
+    changes the sentence, never the outcome.
+
+    THE CLOCK CORROBORATES, IT NEVER DECIDES. The plain-language answer is used only when the
+    vendor refused for a window reason AND this box's own `last_inbound_at` agrees the window is
+    shut. Our state is an inference from a column a poller fills — it lags, skips channels, and
+    carries stale watermarks — so when the two disagree the inference is the thing that is wrong,
+    and quoting it at somebody would be inventing a reason for a refusal we do not understand.
+
+    FALLS BACK TO THE VENDOR'S OWN WORDS, always. Every path that is not confidently recognised
+    returns what today's code returns. A recogniser that guesses wrong costs a person the real
+    error text, which is the one thing they could have searched for.
+    """
+    raw = str(exc)
+    low = raw.lower()
+    if any(m in low for m in _WINDOW_MARKERS):
+        from . import window
+        state = window.explain(conv.get("platform") or "", conv.get("last_inbound_at"))
+        if state.get("state") in ("closed", "tagged", "limited"):
+            log.info("inbox.reply_window_refusal",
+                     extra={"platform": conv.get("platform"), "state": state.get("state"),
+                            "vendor": raw[:160]})
+            who = window.pretty_platform(conv.get("platform") or "")
+            return f"{state['headline']} {who} would not take this one."
+    return f"the message did not send: {raw[:160]}"
 
 
 def _space(name: str) -> dict | None:

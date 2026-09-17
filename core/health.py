@@ -45,7 +45,11 @@ def report() -> str:
         lines.append("• brain: :grey_question: no probe yet")
     else:
         age = _age_s(backend["ts"])
-        if backend["status"] == "ok" and not (0 <= age <= _BACKEND_STALE_S):
+        if backend["status"] == "unset":
+            # Not set up yet (core/watchdog.NO_AI_KEY): neither a green brain nor a red outage.
+            lines.append(f"• brain: :grey_question: no AI key yet — nothing can draft until one is added "
+                         f"(probed {age}s ago)")
+        elif backend["status"] == "ok" and not (0 <= age <= _BACKEND_STALE_S):
             # An "ok" older than ~2 watchdog passes can't be trusted — the backend may have
             # died since. Don't let `health` show a confident green off a stale probe.
             lines.append(f"• brain: :large_yellow_circle: last probe ok but STALE ({age}s ago)")

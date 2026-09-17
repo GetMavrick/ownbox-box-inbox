@@ -469,6 +469,8 @@ _MIGRATION_OWNER: dict[int, str] = {
     # 48 touches inbox_conversations and inbox_send_ledger — tables only a Customer Voice box
     # carries, so the kernel pass must skip it and the machine's own replay must run it.
     48: "customer_voice",
+    # 50 touches inbox_state — a table only a Customer Voice box carries.
+    50: "customer_voice",
 }
 # A table each machine is known by, for the one-time bootstrap of boxes that predate the split.
 _MACHINE_MARKER = {"customer_voice": "voice_rails", "content": "reel_scripts", "lead": "gtm_leads"}
@@ -550,7 +552,7 @@ def _replay_machine(conn, machine: str, upto: int) -> None:
 # concurrent migrators: worker, dispatch, and watchdog can all boot and call init_db;
 # exactly one runs the steps, the rest wait on the lock then see the bumped version.
 
-SCHEMA_VERSION = 49
+SCHEMA_VERSION = 50
 
 
 def _migration_1(c) -> None:
@@ -1460,6 +1462,37 @@ def _migration_49(c) -> None:
             c.execute("UPDATE users SET pw_hash = ? WHERE id = ? AND pw_hash IS NULL", (row[0], row[1]))
 
 
+def _migration_50(c) -> None:
+    """THE FIX FOR THE BROKEN CLASSIFIER CANNOT REACH THE THREADS THE BROKEN CLASSIFIER TOUCHED.
+
+    Measured by OSDev1 on the live box, 2026-09-17: #1287 is deployed and surfaces NOTHING. All 91
+    `inbox_state` watermarks (default 52, default 39) carry `last_seen_msg_id` NULL and a
+    `last_activity` equal to the thread's CURRENT activity. Both were written by the poller before
+    the classifier was fixed — every message read as outbound, so `_newest_inbound` returned None
+    and the id stored NULL, while the activity stamp stored fine.
+
+    THAT COMBINATION IS SELF-SEALING. `_sweep_channel` skips a conversation whose stored
+    `last_activity` equals the one on the page — the optimisation that keeps a poll from fetching
+    messages for threads that have not moved. So the corrected classifier is never reached on any
+    thread that already has a watermark: the box would show a conversation only after its NEXT
+    message, which on a quiet account could be never. New boxes were never affected — they have no
+    watermarks — which is exactly why every test was green.
+
+    INVALIDATED, NOT DELETED. Clearing `last_activity` makes the equality fail once, so the next
+    poll fetches messages and the fixed classifier runs; the row, and the audit of when it was last
+    touched, stay. Dropping the rows would have worked identically and thrown away data to do it.
+
+    ONE-TIME, AND IT HAS TO BE. A standing runtime rule keyed on `last_seen_msg_id IS NULL` would
+    re-fetch forever on the threads where NULL is CORRECT — a conversation whose messages are all
+    outbound has no newest inbound and legitimately stores NULL. Those threads pay one extra
+    message fetch here, once, and nothing after.
+
+    Tagged `customer_voice` in _MIGRATION_OWNER: a Lead or Content box has no such table.
+    """
+    if _table_exists(c, "inbox_state"):
+        c.execute("UPDATE inbox_state SET last_activity = NULL WHERE last_seen_msg_id IS NULL")
+
+
 MIGRATIONS = {
     46: _migration_46,   # the schema split's bootstrap (kernel step)
     1: _migration_1, 2: _migration_2, 3: _migration_3, 4: _migration_4,
@@ -1475,7 +1508,7 @@ MIGRATIONS = {
               39: _migration_39, 40: _migration_40, 41: _migration_41,
               42: _migration_42, 43: _migration_43, 44: _migration_44,
               45: _migration_45, 47: _migration_47, 48: _migration_48,
-              49: _migration_49}
+              49: _migration_49, 50: _migration_50}
 
 
 # init_db IS SAFE TO CALL FROM MANY THREADS AND PROCESSES AT ONCE. Main went red on 2026-09-06

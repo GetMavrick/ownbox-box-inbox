@@ -14,6 +14,11 @@ has one, which is what the Managed tier sells.
 Every existing watchdog suite stubs `probe_backend` out whole, so none of them could see which key it
 resolved. This one stubs only the network call and asserts on the key that reached it.
 
+FOUND AGAIN BY THE IMAGE v9 CLONE-CHECK (2026-09-17), the other half: before anyone adds a key, the
+probe still returned a FAILURE, so every new box logged that ERROR from its first pass — and a box
+with an operator contact would page for every customer who had not finished set-up. No key is now a
+SKIP (no page, no ERROR) with an `unset` heartbeat; a key the vendor refuses still fails loudly.
+
 Run: python tests/test_watchdog_byo_ai_key.py
 """
 from __future__ import annotations
@@ -66,18 +71,59 @@ def run():
     return watchdog.probe_backend()
 
 
-print("\n— a box nobody has onboarded yet —")
+print("\n— a box nobody has set up yet is NOT an outage (image v9 clone-check, 2026-09-17) —")
 name, up, detail = run()
-ok("with no key anywhere the AI is reported down", up is False and name == "anthropic_api", detail)
+ok("with no key anywhere the probe reports a SKIP, not a failure",
+   name == "anthropic_api" and up is True and detail.startswith("skip ("), f"{up} {detail}")
 ok("...without a network call it could not make", probed == [], str(probed))
-ok("...and the sentence says where the key comes from, not which env var is empty",
-   "set-up screen" in detail, detail)
+ok("...and it is the exact sentence the heartbeat recognises", detail == watchdog.NO_AI_KEY, detail)
+
+errors: list = []
+dms: list = []
+_real_error, _real_dm = watchdog.log.error, watchdog.slack.send_dm
+watchdog.log.error = lambda event, **kw: errors.append(event)                       # type: ignore[assignment]
+watchdog.slack.send_dm = lambda dm, text: (dms.append(text) or True)                # type: ignore[assignment]
+try:
+    watchdog._alert(name, up, detail)
+    watchdog._alert(name, up, detail)                                                # the next pass, too
+    watchdog.check_backend_now()
+finally:
+    watchdog.log.error, watchdog.slack.send_dm = _real_error, _real_dm              # type: ignore[assignment]
+ok("NO ERROR is logged on a box that has not been set up — the v9 clone logged one on its first pass",
+   errors == [], str(errors))
+ok("...nobody is paged", dms == [], str(dms))
+row = state.get_alert_row(name)
+ok("...and no FAIL is on record", row is None or row["state"] != "FAIL", str(dict(row) if row else None))
+beats = {h["component"]: h["status"] for h in state.get_heartbeats()}
+ok("the heartbeat says `unset` — never an `ok` it has not earned", beats.get("brain_backend") == "unset",
+   str(beats))
+from core import health  # noqa: E402
+brain = next((ln for ln in health.report().splitlines() if ln.startswith("• brain:")), "")
+ok("the health report says there is no AI key yet, neither green nor an outage",
+   "no AI key yet" in brain and ":white_check_mark:" not in brain and ":red_circle:" not in brain, brain)
 
 print("\n— THE DEFECT: the buyer has pasted their key —")
 bs.put(bs.ANTHROPIC, BUYERS_KEY)
 name, up, detail = run()
 ok("the AI is reported UP once the buyer's key is stored", up is True, detail)
 ok("...because the probe used the key the brain drafts with", probed == [BUYERS_KEY], str(probed))
+watchdog.check_backend_now()
+beats = {h["component"]: h["status"] for h in state.get_heartbeats()}
+ok("...and the heartbeat is a real `ok` now", beats.get("brain_backend") == "ok", str(beats))
+
+print("\n— going quiet on NO key must not mute a BAD key —")
+watchdog._probe_anthropic = lambda key=None: (probed.append(key) or (False, "HTTP 401"))  # refused
+errors.clear()
+watchdog.log.error = lambda event, **kw: errors.append(event)                       # type: ignore[assignment]
+try:
+    name, up, detail = run()
+    watchdog._alert(name, up, detail)
+finally:
+    watchdog.log.error = _real_error                                                 # type: ignore[assignment]
+ok("a key the vendor REFUSES is still a failure, logged at ERROR on its first pass",
+   up is False and "watchdog.probe_failed_operator_unset" in errors, f"{up} {detail} {errors}")
+ok("...and its heartbeat is `fail`", watchdog._beat(up, detail) == "fail", watchdog._beat(up, detail))
+watchdog._probe_anthropic = lambda key=None: (probed.append(key) or (True, "auth ok"))  # no network
 
 print("\n— the environment still wins, as it does for the brain —")
 os.environ["ANTHROPIC_API_KEY"] = OPERATORS_KEY

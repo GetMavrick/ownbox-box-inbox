@@ -105,9 +105,13 @@ def _msg(mid, text, when):
     live box showed zero conversations. A fixture written from an assumption can only ever prove
     the code agrees with the assumption.
 
-    Both keys are kept: the old ones prove nothing that polled before this breaks."""
+    BOTH CLOCKS RIDE, BECAUSE THE VENDOR SENDS BOTH. OSDev1 measured the live account on
+    2026-09-17: `createdAt` is on all 58 messages, ISO-8601 Z, equal to `sentAt` on every one. A
+    fixture carrying only `sentAt` implies reading `createdAt` finds nothing, which is what I
+    wrongly published as the reason the clock was empty. It never was empty."""
     return {"_id": mid, "accountId": "acc-x", "conversationId": "conv-x",
-            "direction": "incoming", "senderId": "sender-x", "message": text, "sentAt": when}
+            "direction": "incoming", "senderId": "sender-x", "message": text,
+            "sentAt": when, "createdAt": when}
 
 
 def _reset_sweep():

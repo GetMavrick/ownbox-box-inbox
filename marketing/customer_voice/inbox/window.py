@@ -252,3 +252,117 @@ def allowed_send(last_inbound_at: str | None, now: datetime | None = None,
     designed to reason about.
     """
     return FREEFORM if decide(platform, last_inbound_at, now)["decision"] == FREEFORM else BLOCKED
+
+
+# ── what a PERSON is told, as opposed to what the machine decided ────────────────────────
+#
+# OPTION C OF #1170, AND ONLY OPTION C. That proposal asked the owner a question no dev may
+# answer — "if our clock says the window is shut and the person wants to send anyway, does the
+# box let them try?" — and recommended shipping the half that does not need the answer: SAY THE
+# STATE BEFORE THEY TYPE, AND LET THE VENDOR DECIDE AFTER. Nothing here blocks a send, nothing
+# here is consulted by `reply.py` to decide whether to call the vendor, and adding such a caller
+# is a send-policy change that goes to the owner first (CLAUDE.md: amounts, cadence and send
+# policy wait for his actual word).
+#
+# WHY THE `reason` STRINGS ABOVE COULD NOT BE REUSED. They are written for the developer reading
+# a queue row — "no send rule is written for 'x'; nothing sends on a platform whose policy nobody
+# has read" is an accurate sentence about our work and a baffling one to a plumber looking at his
+# own inbox. Same decision, two audiences, and a screen that shows the wrong one reads as a
+# malfunction. `reason` stays exactly as it is; this is a second rendering of the same fact.
+#
+# NEVER "YOU MAY NOT". Our window state is an INFERENCE from `last_inbound_at`, a column a poller
+# fills — it can lag, skip a channel, or carry a stale watermark. The vendor's answer is the
+# FACT. So every sentence below that reports a shut window says what MAY happen and leaves the
+# door open, because a false block would tell a business owner he is not allowed to answer his
+# own customer, on our arithmetic, and would not even make the message send.
+
+_TRY_ANYWAY = "You can still send it — {p} decides, not us."
+
+
+def pretty_platform(platform: str) -> str:
+    """The channel's name as a person writes it. Display only — it decides nothing."""
+    key = (platform or "").strip().lower()
+    # Title-cased rather than echoed raw, because the fallback is what a buyer reads when we have
+    # not written a rule for their channel — "whatsapp" in a sentence looks like a bug in the box.
+    return {"instagram": "Instagram", "messenger": "Messenger", "tiktok": "TikTok",
+            "email": "Email"}.get(key, key.replace("_", " ").title() or "the platform")
+
+
+def explain(platform: str, last_inbound_at: str | None, now: datetime | None = None) -> dict:
+    """The same decision, in words for the person about to type. Never raises.
+
+    Returns {"decision", "state", "headline", "detail", "can_try"}.
+
+    `state` is one of open | tagged | limited | closed | no_lane | unknown, and it exists so a
+    screen can style the row without matching on English or reading `_RULES` — the second reader
+    of that table this module refuses to have.
+
+    `can_try` is FALSE ONLY where there is no lane to try: email, which this box cannot send from
+    at all, and a platform nobody has written a rule for. A shut clock is not one of those cases.
+    """
+    d = decide(platform, last_inbound_at, now)
+    who = pretty_platform(platform)
+    dec = d["decision"]
+
+    if d.get("no_send_lane"):
+        # NOT A CLOCK AND NOT A REFUSAL BY US. The box reads this mailbox and drafts for it; the
+        # send happens in the person's own mail app, which is a fact about the product rather
+        # than a permission they are waiting on.
+        return {**d, "state": "no_lane", "can_try": False,
+                "headline": "The box drafts this one — you send it.",
+                "detail": "Your box reads this mailbox and writes the reply. Copy it into your "
+                          "own mail app to send it."}
+
+    if d.get("no_rule"):
+        # OURS, AND SAID AS OURS. Telling a buyer to wait out a window we simply have not
+        # researched would be a screen lying with true words.
+        return {**d, "state": "unknown", "can_try": False,
+                "headline": f"Replies from the box are not switched on for {who} yet.",
+                "detail": f"Nobody has written the send rules for {who}, so the box will not send "
+                          f"there. Reply in the {who} app in the meantime."}
+
+    if dec == FREEFORM:
+        return {**d, "state": "open", "can_try": True,
+                "headline": "You can reply now.",
+                "detail": f"{d['reason'].capitalize()}."}
+
+    if dec == TAGGED:
+        # THE ONE CASE WHERE THE SENTENCE CARRIES A RESTRICTION WE CANNOT ENFORCE. A tagged
+        # message must not be promotional; code cannot read intent, so the person is TOLD rather
+        # than policed, and told plainly enough to act on.
+        return {**d, "state": "tagged", "can_try": True,
+                "headline": "You can reply — keep it to their question.",
+                "detail": f"It is past {who}'s free reply window, so this must answer what they "
+                          f"asked. No offers, discounts or promotion in this one."}
+
+    if dec == LIMITED:
+        n = d.get("remaining")
+        return {**d, "state": "limited", "can_try": True,
+                "headline": f"About {n} more messages until they write again.",
+                "detail": f"{who} narrows how much you can send once their last message is a "
+                          f"while old. Replies still go through."}
+
+    if "in the future" in (d.get("reason") or ""):
+        # A clock that disagrees with itself. Do not dress this up as a window state.
+        return {**d, "state": "closed", "can_try": True,
+                "headline": "The box cannot read the time on their last message.",
+                "detail": "Its timestamp is in the future, so the window cannot be worked out. "
+                          + _TRY_ANYWAY.format(p=who)}
+
+    if "no inbound message on record" in (d.get("reason") or ""):
+        return {**d, "state": "closed", "can_try": True,
+                "headline": f"Nothing from them has reached the box yet.",
+                "detail": f"{who} only lets a business reply to someone who wrote first, and the "
+                          f"box has no message from them on record. " + _TRY_ANYWAY.format(p=who)}
+
+    # THE LONGEST LANE THAT CLOSED, not the first one. Messenger at nine days is past its 24-hour
+    # free window AND past the 7-day tagged one, and saying "more than 24 hours" there is true
+    # while quietly implying a tag lane might still save it. Name the last door that shut.
+    rule = _RULES.get((platform or "").strip().lower(), {})
+    shut = rule.get("tag_hours") or rule.get("free_hours")
+    hrs = (f"{shut // 24} days" if shut and shut >= 48 else
+           f"{shut} hours" if shut else "a while")
+    return {**d, "state": "closed", "can_try": True,
+            "headline": f"It is more than {hrs} since they wrote to you.",
+            "detail": f"{who} usually refuses a reply after that, and would tell you so in its "
+                      f"own words. " + _TRY_ANYWAY.format(p=who)}

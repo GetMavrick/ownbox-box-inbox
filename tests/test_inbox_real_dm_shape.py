@@ -48,10 +48,18 @@ def ok(label: str, cond: bool, detail: str = "") -> None:
 
 
 def live_msg(direction: str, text: str, mid: str = "m1") -> dict:
-    """A message in the shape the VENDOR sends — no fromMe, direction spelled their way."""
+    """A message in the shape the VENDOR sends — no fromMe, direction spelled their way.
+
+    BOTH CLOCKS, BECAUSE THE VENDOR SENDS BOTH. OSDev1 measured the live account on 2026-09-17:
+    `createdAt` is present on all 58 messages, ISO-8601 Z, and EQUALS `sentAt` on every one. This
+    fixture originally carried `sentAt` alone, which made it look as though reading `createdAt`
+    would find nothing — and that inference, which I published, was wrong. A fixture thinner than
+    the real payload is how the last bug hid; it is not allowed to be the way the next one does.
+    """
+    when = "2026-09-16T10:00:00.000Z"
     return {"_id": mid, "accountId": "acc_live", "conversationId": "conv_live",
             "direction": direction, "senderId": "sender_live",
-            "message": text, "sentAt": "2026-09-16T10:00:00.000Z"}
+            "message": text, "sentAt": when, "createdAt": when}
 
 
 # ── the bug, in one assertion ────────────────────────────────────────────────────────────────
@@ -117,12 +125,23 @@ ok("...while a STOP we sent OURSELVES is not mistaken for theirs",
 print("\n— the vendor's own timestamp is read, or every conversation refuses to reply —")
 older = live_msg("incoming", "first", mid="m10")
 newer = live_msg("incoming", "second", mid="m11")
-newer["sentAt"] = "2026-09-16T11:00:00.000Z"
+newer["sentAt"] = newer["createdAt"] = "2026-09-16T11:00:00.000Z"
 ok("the NEWEST inbound is picked by the vendor's sentAt, not by list order",
    (poller._newest_inbound([newer, older]) or {}).get("_id") == "m11",
    "an empty sort key makes max() return whichever the vendor listed first")
 ok("...and reversing the page does not change the answer",
    (poller._newest_inbound([older, newer]) or {}).get("_id") == "m11")
+# THE CORRECTION, PINNED. The live payload carries BOTH clocks and they agree (OSDev1, 58/58 on
+# 2026-09-17), so a fallback that only ever saw `sentAt` is untested dead weight — and the claim
+# that `createdAt` found nothing on real data was mine and was wrong. Both arms are exercised.
+_created_only = {k: v for k, v in newer.items() if k != "sentAt"}
+ok("a message carrying ONLY createdAt still reads a clock — the fallback is not decoration",
+   str(poller._f(_created_only, *poller._SENT_AT_KEYS)).startswith("2026-09-16T11"),
+   str(poller._f(_created_only, *poller._SENT_AT_KEYS)))
+ok("...and on the live shape the two agree, so the order changes nothing it reads",
+   poller._f(newer, "sentAt") == poller._f(newer, "createdAt"))
+ok("a message with NO readable clock sorts on empty — the failure the chain exists to prevent",
+   poller._f({"_id": "x"}, *poller._SENT_AT_KEYS) is None)
 ok("sentAt is read at all", str(poller._f(newer, *poller._SENT_AT_KEYS)).startswith("2026-09-16T11"),
    str(poller._f(newer, *poller._SENT_AT_KEYS)))
 ok("...and the older createdAt shape still works, so nothing that polled before breaks",

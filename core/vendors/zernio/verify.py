@@ -81,5 +81,18 @@ def verify_key(key: str) -> tuple[bool, str]:
             return (False, "That key works, but your Zernio account needs a payment method before "
                            "it can connect another account. Add one in Zernio, then try again.")
         return (False, "Could not reach Zernio to check that key just now. Try again in a minute.")
-    valid = bool(data.get("valid")) if isinstance(data, dict) else False
-    return (True, "") if valid else (False, "Zernio did not recognise that key.")
+    # MEASURED AGAINST THE LIVE ENDPOINT, both arms, 2026-09-17 (OSDev4), after OSDev1 flagged on
+    # the wall that this might require a field the SDK does not return. It does return it: a good
+    # key answers 200 {valid, userId, authType, scope} with valid true, and a bad key answers 401,
+    # which `_handle_response` raises as LateAuthenticationError above — so a key that reaches this
+    # line has ALREADY been accepted by the vendor.
+    #
+    # WHICH IS WHY ABSENCE NO LONGER MEANS NO. The old line read `bool(data.get("valid"))`, so a
+    # body without the field — an empty 204, which the SDK hands back as `{}`, or a rename on the
+    # vendor's side — rejected a working key with a sentence blaming the person who pasted it, on
+    # the one screen where they cannot get past it. Only an EXPLICIT `valid: false` is a refusal
+    # now. That is identical to the old behaviour against the shape measured above and differs
+    # only where the old one failed closed on a buyer who had done nothing wrong.
+    if isinstance(data, dict) and data.get("valid") is False:
+        return (False, "Zernio did not recognise that key.")
+    return (True, "")

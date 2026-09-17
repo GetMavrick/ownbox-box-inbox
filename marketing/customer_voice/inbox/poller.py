@@ -27,7 +27,7 @@ from core.queue import queue
 
 from core.vendors import zernio
 
-from . import channels, store
+from . import channels, store, window
 
 log = get_logger(__name__)
 
@@ -97,6 +97,23 @@ def _sweep_email(space: str, ch) -> tuple[int, int, bool]:
         return (0, 0, False)
     if not box_secrets.email_credential():
         return (0, 0, False)                  # not connected: nothing read, nothing broken
+    # A MAILBOX THAT STARTED WORKING AGAIN HAS TO BE ALLOWED TO SAY SO (OSDev1, 2026-09-17, on the
+    # wall). Every failure arm above writes a status the Settings screen quotes back to the buyer,
+    # and nothing has ever written one after a sweep that WORKED: the row was written on the way
+    # down and never on the way up. `note_email_status` was built with a "connected" arm for
+    # exactly this and its own docstring says the success path "has no caller yet" — this is it.
+    #
+    # THE STUCK CASE IS THE ONE WHERE NOBODY RE-PASTES ANYTHING. `put_email` already clears the
+    # status when a buyer pastes a new app password, so that path recovers. It is the credential
+    # that was REFUSED BUT NEVER REVOKED that sticks: a Workspace administrator switches app
+    # passwords back on, the stored password starts working on its own, and the box reads mail
+    # perfectly while Settings still tells its owner their administrator has turned app passwords
+    # off — and sends them off to make a new password they do not need.
+    #
+    # READ BEFORE WRITE. This runs on every poll and the answer is already "connected" almost
+    # every time; a write per cycle for a value that did not change is one we can skip.
+    if (box_secrets.get(box_secrets.EMAIL_STATUS) or "connected") != "connected":
+        box_secrets.note_email_status("connected")
     _note_poll_success(space, ch.key)
     return (scanned, stored, True)
 
@@ -182,16 +199,22 @@ def _body(m) -> str:
 #
 # MATCHED BY EQUALITY, NEVER BY SUBSTRING, and this is not a style preference: "outgoing" contains
 # "in". Any `"in" in direction` here reads every outbound message as inbound.
-# WHEN THE VENDOR SAYS IT HAPPENED. The live shape sends `sentAt` (OSDev1's probe) and this poller
-# read only createdAt/created_at/timestamp — so on real data every message's sort key was the empty
-# string. Two things ride on it and both fail silently:
-#   · `_newest_inbound` picks with max() over "" == "", so the "newest" message is whichever the
-#     vendor happened to list first — the opener answers an arbitrary message and the watermark
-#     advances to it
-#   · `last_inbound_at` is stored EMPTY, and `window.decide` reads an empty inbound clock as "no
-#     inbound message on record — every channel here is reply-only" and BLOCKS the reply. Every
-#     real conversation would show "No inbound yet" and refuse to send.
-# Listed vendor-first: `sentAt` is what actually arrives today.
+# WHEN THE VENDOR SAYS IT HAPPENED.
+#
+# CORRECTION, AND IT IS MINE (OSDev4, 2026-09-17). The first version of this comment claimed the
+# live vendor sends `sentAt` and NOT `createdAt`, so that every sort key on real data was the empty
+# string, `_newest_inbound` picked whichever message the vendor listed first, and `last_inbound_at`
+# stored empty — which `window.decide` reads as "no inbound on record" and refuses. None of that
+# happened. OSDev1 measured the live account straight after: `createdAt` is present on ALL 58
+# messages, ISO-8601 Z, and equals `sentAt` on every one. The sort key was never empty, the clock
+# was never stored empty, and no reply was ever blocked by this. I inferred a consequence from a
+# key list that was a subset and did not measure it; the sentence is corrected here rather than
+# quietly deleted, because a wrong "measured" claim in a comment outlives the pull request.
+#
+# THE ORDER IS STILL RIGHT, for a smaller reason than the one I gave. `sentAt` is the field the
+# vendor documents and sends, so it leads; the rest are a fallback chain, not dead weight, because
+# a message that reached here with NO readable key would sort on "" — and that failure IS the one
+# described above. It has never fired. Keeping the chain is what keeps it that way.
 _SENT_AT_KEYS = ("sentAt", "sent_at", "createdAt", "created_at", "timestamp")
 
 _INBOUND_WORDS = frozenset({"in", "inbound", "incoming", "received"})
@@ -356,6 +379,41 @@ def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, 
         # STOP — an unhonored opt-out). Every write above is idempotent (upsert /
         # INSERT OR IGNORE / deduped enqueue), so replaying after a crash is a
         # harmless no-op; a lost enqueue is retried next sweep instead of lost.
+        # ── A JOB THE HANDLER IS CERTAIN TO REFUSE IS NOT WORTH MAKING ───────────────────
+        #
+        # OSDev1 HELD #1296 OVER THIS AND WAS RIGHT (2026-09-17). Migration 50 clears the dead
+        # watermarks so the fixed classifier can finally see 91 real threads — and every one of
+        # them would have been enqueued at once. `handler.py` checks the kill switch at :112 and
+        # the send window at :143, IN THAT ORDER, so a box on `autonomy: off` posts
+        # ":speech_balloon: New Instagram message … observed only" to Slack for each job BEFORE
+        # discovering the window is shut. Ninety-one Slack posts, every one labelled New, about
+        # conversations that are in some cases months old. Buyer boxes have no Slack channel, so
+        # this lands on ours — which makes it the kind of bug that gets shipped.
+        #
+        # THE SAME FUNCTION THE HANDLER USES, WITH THE SAME PLATFORM, and that is the whole
+        # design. If this asked the window a different question than `handler.py` asks, the two
+        # would drift: ask a stricter one and a sendable thread is silently never queued, ask a
+        # looser one and the noise comes straight back. `allowed_send` fails closed on an unknown
+        # platform exactly as it does there.
+        #
+        # STORED EITHER WAY. The conversation, the message and the watermark are already written
+        # above, so an old thread still appears in the inbox with its history — the buyer reads
+        # it on the screen, which is where he reads his mail. What he does not get is a job that
+        # exists only to be refused.
+        sendable = window.allowed_send(inbound_at, platform=ch.key) == window.FREEFORM
+        if not sendable:
+            # OPT-OUT LAW OUTRANKS THE WINDOW, and it has to be honoured HERE because the handler
+            # is the only thing that normally honours it — and the handler is exactly what we are
+            # declining to wake. A STOP sent thirty days ago is still a STOP; dropping it because
+            # the reply window shut would leave somebody opted out in the customer's mind and
+            # available for automation in ours. `set_opted_out` is an idempotent UPDATE.
+            if stop is not None:
+                store.set_opted_out(space, zcid)
+                log.info("inbox.opted_out_on_backfill", space=space, channel=ch.key,
+                         conversation=zcid)
+            store.set_watermark(space, zcid, last_seen_msg_id=newest_id,
+                                last_activity=activity or None)
+            continue
         try:
             _, created = queue.enqueue(
                 idempotency_key=f"inbox:{space}:{zcid}:{target_id}",
