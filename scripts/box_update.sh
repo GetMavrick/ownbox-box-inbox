@@ -28,7 +28,20 @@ if ! flock -n 9; then
 fi
 cd /opt/aios
 UNIT_BACKUP="/root/aios-units-backup-$(date -u +%Y%m%dT%H%M%SZ)"
-export GIT_SSH_COMMAND="ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+# >>> ssh-key-selection (tests/test_box_update_ssh_key.py runs this block)
+# A SOLD BOX CARRIES ITS OWN SSH COMMAND, AND IT MUST WIN. scripts/box_update_key.sh sets the repository's
+# core.sshCommand to the box's own read-only deploy key (/var/lib/aios/update_key) with GitHub's pinned host
+# key (trust/github_known_hosts). GIT_SSH_COMMAND overrides core.sshCommand, and this line used to export it
+# unconditionally with /root/.ssh/id_ed25519 — a key only the OPERATOR's box has. So every box built from the
+# golden image failed its daily update in the same second: "Identity file /root/.ssh/id_ed25519 not
+# accessible", then "Host key verification failed", then DEPLOY ABORTED, nothing installed. Measured
+# 2026-09-17 by running aios-update on a box built from image v8; every clone-check before that had only
+# asked whether the timer was ENABLED. A box that cannot update never receives a fix, security or otherwise.
+# The operator's monorepo checkout has no core.sshCommand, so it keeps exactly the key it always used.
+if ! git -C /opt/aios config --get core.sshCommand >/dev/null 2>&1; then
+  export GIT_SSH_COMMAND="ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+fi
+# <<< ssh-key-selection
 # Where releases come from: this box's own git remote unless .env names another source — a URL, or a
 # path to a bundle file for a box with no network. Read with sed, never `source`: .env values carry
 # unquoted spaces.
