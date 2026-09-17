@@ -26,7 +26,7 @@ import html as _html
 
 from flask import request
 
-from core import report, shell
+from core import pause, report, shell
 from core.dash import blueprint, brand
 
 CSS = """
@@ -359,6 +359,36 @@ def _segments(view: dict) -> str:
     return "".join(out)
 
 
+def _stop_card() -> str:
+    """The one control a person reaches for when something is going wrong.
+
+    IT LIVES HERE BECAUSE THE BOX WE SELL HAD NONE (#1332). `core/pause.py` shipped on every box
+    and the only buttons that called it were the lead machine's, so a buyer of the inbox box could
+    not stop their own box from any screen.
+
+    OWNER ONLY, and the button is simply not drawn for anyone else — the route refuses them too
+    (`core/dash` stop_everything), which is the half that matters: hiding a control is a courtesy,
+    and a form can be posted without ever loading the page that would have hidden it.
+
+    ONE BUTTON, BOTH WAYS. Same shape the lead machine's Home has always had: a POST either way,
+    so nothing but a person pressing it can flip the box.
+    """
+    from flask import request as _rq
+    from core.dash import session_user as _who
+    person = _who(_rq)
+    if not person or person.get("role") != "owner":
+        return ""
+    paused = pause.is_paused()
+    word = "Start it again" if paused else "Stop everything"
+    sub = ("Nothing is running. Every machine on this box is stopped until you start it again."
+           if paused else
+           "Stops every machine on this box. Your data and your messages stay exactly as they are.")
+    return (f'<div class="card"><h2>{"Your box is stopped" if paused else "Stop everything"}</h2>'
+            f'<p class="sub">{_esc(sub)}</p>'
+            f'<form method="post" action="/dash/{"resume" if paused else "stop"}">'
+            f'<button type="submit">{_esc(word)}</button></form></div>')
+
+
 def _home() -> str:
     view = report.view()
     if not view.get("exists"):
@@ -372,6 +402,9 @@ def _home() -> str:
                 'the numbers below are the last ones written, not this minute\'s.</span></div>'
                 if stale else "")
         body = note + _needs_card(view) + _segments(view)
+    # LAST ON THE PAGE, deliberately: it is the control you want findable and never the one you
+    # want your thumb near while reading the morning's numbers on a phone.
+    body += _stop_card()
     return chrome("/dashboard", title="Dashboard",
                   lede=f"What your box did — {view.get('label') or 'today'}.",
                   body=body)

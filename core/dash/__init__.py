@@ -28,6 +28,7 @@ from urllib.parse import quote
 from flask import Blueprint, make_response, redirect, request
 
 from core import claim as _claim
+from core import pause
 from core import state
 from core.config import get_config, settings
 from core.logging import get_logger
@@ -1296,6 +1297,61 @@ def _managed_body() -> str:
             f'{how}'
             '<p class="val">Cancelling Managed does not touch the box. It keeps running, it keeps your data, '
             'and it stays yours — you would simply be running it yourself.</p>')
+
+
+# ── STOP EVERYTHING, AND IT IS THE BOX'S, NOT A MACHINE'S ───────────────────────────────────
+# WHERE THIS WAS, AND WHAT THAT COST. `core/pause.py` ships on every box and works on every box,
+# but the only two callers of `halt`/`resume` anywhere outside it lived in
+# `marketing/lead_machine/dash.py`. Measured on a customer_voice box exported from main
+# (2026-09-17): `core/pause.py` imports fine and `/dash/stop` does not exist. So the box we
+# actually sell could not be stopped from a screen — the machinery was under the buyer's feet and
+# the only switch had been built into a machine they did not buy.
+#
+# MOVED, NOT COPIED, AND ON THE SAME TWO URLS. The lead machine's own Home page posts to
+# `/dash/stop`, so keeping the paths means its button keeps working untouched while every other
+# box gains one. A second pair of routes would have been two switches over one marker file.
+#
+# OWNER ONLY (OSDev1, reviewing #1332). Halting the box stops work every person on it depends on,
+# which is not a thing a member should be able to do to the others; `_owner_session` is the same
+# gate `/dash/people` uses, and it reads the session's own row rather than the app token.
+#
+# POST, NEVER GET. A link preview, a crawler or a prefetch issues GETs, and any one of them would
+# otherwise stop a business's box without a human touching anything.
+def _pause_redirect():
+    """Back where they were — through `landing()`, never a path spelled out here.
+
+    The lead machine's version redirected to `/dash/home`, which is that machine's own page and
+    does not exist on the box we sell: pressing Stop there would have answered 404. This is the
+    same lesson the front door learned today, applied in the one place it would bite next."""
+    return redirect(landing())
+
+
+@blueprint.post("/dash/stop")
+def stop_everything():
+    who = _owner_session()
+    if who is None:
+        return redirect("/dash/login") if session_user(request) is None else (
+            page("Stop", "narrow",
+                 '<p class="val">Only the box\'s owner can stop it.</p>',
+                 title=f"{brand()} · Stop"), 403)
+    # THE MARKER RECORDS WHO, because "why is nothing running?" is the question this answers and
+    # `pause.status()` is where anyone looks for it. An email is the name a person recognises.
+    pause.halt(f"dashboard:{who.get('email') or who.get('id') or 'owner'}")
+    log.warning("dash.halt", user=who.get("id"), email=who.get("email"))
+    return _pause_redirect()
+
+
+@blueprint.post("/dash/resume")
+def resume_everything():
+    who = _owner_session()
+    if who is None:
+        return redirect("/dash/login") if session_user(request) is None else (
+            page("Resume", "narrow",
+                 '<p class="val">Only the box\'s owner can start it again.</p>',
+                 title=f"{brand()} · Resume"), 403)
+    pause.resume()
+    log.info("dash.resume", user=who.get("id"), email=who.get("email"))
+    return _pause_redirect()
 
 
 @blueprint.get("/dash/managed")
