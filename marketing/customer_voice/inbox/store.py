@@ -32,6 +32,27 @@ log = get_logger(__name__)
 # screen handed NULL for a yes/no column has to know that NULL means no. It is falsy either way in
 # Python, which is exactly why it would have survived review and then surprised somebody writing
 # `if row["awaiting_reply"] is False`. The column answers 0 or 1, always.
+# THE NEWEST MESSAGE ITSELF — what the row has been missing since it was built.
+#
+# The list said "1 message". The one thing a person opens an inbox to read was the one thing the
+# list would not tell them, so every row had to be opened to learn whether it mattered. Owner,
+# 2026-09-16: "Make sure that the messages are readable" — a row that shows a COUNT of messages
+# is not readable at any contrast.
+#
+# SAME PASS, SAME REASON AS THE TWO ABOVE. Fifty rows must cost one query, not fifty-one, and a
+# correlated subquery over the (space, conversation, created_at) index is what the other two
+# already do. It is ordered identically to `_NEWEST_IS_INBOUND` — same ORDER BY, same tie-break —
+# so the preview and the "waiting on you" flag can never describe two different messages.
+#
+# TRIMMED IN SQL, NOT IN THE SCREEN. A pasted email can be tens of kilobytes; fifty of them is a
+# megabyte crossing the wire to render one truncated line on a phone. 240 is far more than a row
+# can show and small enough that the page stays a page.
+_NEWEST_BODY = (
+    "(SELECT SUBSTR(COALESCE(m.body, ''), 1, 240) FROM inbox_messages m "
+    "  WHERE m.space = k.space "
+    "    AND m.zernio_conversation_id = k.zernio_conversation_id "
+    "  ORDER BY m.created_at DESC, m.id DESC LIMIT 1)")
+
 _NEWEST_IS_INBOUND = (
     "COALESCE((SELECT m.direction FROM inbox_messages m "
     "           WHERE m.space = k.space "
@@ -123,7 +144,8 @@ def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
             # same reason: fifty rows must cost one query, not fifty-one. BOTH READERS GET IT —
             # the list and the search — because a row that is waiting does not stop waiting
             # because somebody typed a name into a box.
-            f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply "
+            f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply, "
+            f"       ({_NEWEST_BODY}) AS preview "
             "  FROM inbox_conversations k "
             f" WHERE {where} "
             " ORDER BY (k.last_inbound_at IS NULL), k.last_inbound_at DESC, k.id ASC "
@@ -203,7 +225,8 @@ def search_conversations(space: str, query: str, *, limit: int = 50,
             # same reason: fifty rows must cost one query, not fifty-one. BOTH READERS GET IT —
             # the list and the search — because a row that is waiting does not stop waiting
             # because somebody typed a name into a box.
-            f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply "
+            f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply, "
+            f"       ({_NEWEST_BODY}) AS preview "
             "  FROM inbox_conversations k "
             f" WHERE {where} "
             "   AND ( COALESCE(k.participant, '') LIKE ? ESCAPE '\\' "

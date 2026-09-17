@@ -167,6 +167,33 @@ def test_settings_offers_the_switch_when_there_is_no_key():
        and "missing" not in low)
 
 
+def test_the_threads_offer_lands_where_the_thing_is_turned_on():
+    print("test_the_threads_offer_lands_where_the_thing_is_turned_on")
+    # THE ONE PLACE A BUYER MEETS THE MISSING DRAFT is the thread, under the reply box, and the
+    # line there is an OFFER: "Turn them on." It used to link to /inbox/settings, which turns
+    # nothing on — the buyer then had to find "Connect an AI account" to reach the one field they
+    # wanted. Two clicks for a promise worded as one, on the first thread of their first day.
+    # Found by walking an exported customer_voice box as customer #1 (OSDev4, 2026-09-17).
+    clear()
+    from marketing.customer_voice.inbox import store
+    store.upsert_conversation(space="default", zcid="conv-offer", platform="instagram",
+                              participant="Priya", last_inbound_at="2026-09-17T18:00:00Z",
+                              account_id="acc-1")
+    store.record_message(space="default", zcid="conv-offer", zmid="m-offer", direction="in",
+                         sent_by="contact", body="Are you open Sunday?")
+    html = client().get("/inbox/inbox/conv-offer").get_data(as_text=True)
+    ok("the thread says drafts are off", "Drafts are off" in html)
+    ok("...and the offer goes to the page that TURNS THEM ON, not to the menu that lists it",
+       'href="/inbox/drafts"' in html, html[html.find("Drafts are off"):][:200])
+    ok("...and it no longer sends them to Settings to go looking",
+       'href="/inbox/settings" style="color:var(--accent)">Turn' not in html)
+
+    # AND THE DESTINATION REALLY IS THE PLACE, rather than another signpost: it carries the field.
+    dest = client().get("/inbox/drafts").get_data(as_text=True)
+    ok("the page it lands on has the key field", 'name="key"' in dest)
+    ok("...and a control that says what it does", "Turn drafts on" in dest)
+
+
 def test_settings_says_it_is_on_and_keeps_the_promise_in_view():
     print("test_settings_says_it_is_on_and_keeps_the_promise_in_view")
     box_secrets.put(box_secrets.ANTHROPIC, KEY)
@@ -396,6 +423,7 @@ if __name__ == "__main__":
     # key, still must not leak it into an export or a log, and still has to notice a new one.
     if HAS_INBOX:
         test_settings_offers_the_switch_when_there_is_no_key()
+        test_the_threads_offer_lands_where_the_thing_is_turned_on()
         test_settings_says_it_is_on_and_keeps_the_promise_in_view()
         test_the_key_is_never_rendered_back_anywhere()
         test_the_buyer_can_turn_it_on_and_off()

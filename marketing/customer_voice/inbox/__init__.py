@@ -29,16 +29,33 @@ log = get_logger(__name__)
 _sdk_ok, _sdk_detail = zernio.verify_sdk()
 (log.info if _sdk_ok else log.error)("inbox.verify_sdk", ok=_sdk_ok, detail=_sdk_detail)
 
+# THE SEND PATH STAYS FAIL-CLOSED. `handler.handle` is what SENDS — the instant opener, the reply
+# — and sending on an SDK nobody can verify is the exact failure this gate was built for.
 if _sdk_ok:
     register("inbox", handler.handle)
-    # 45s default (config inbox.poll_interval_s) — an ad DM gets its opener inside
-    # ~a minute, and an unchanged inbox costs one list call per Space per sweep.
-    register_periodic(poller.poll_sweep,
-                      interval_s=int((get_config().get("inbox", {}) or {})
-                                     .get("poll_interval_s", 45)),
-                      name="inbox_poll")
 else:
     log.error("inbox.disabled_sdk_drift", detail=_sdk_detail)
+
+# INTAKE IS REGISTERED EITHER WAY, AND THAT IS THE DECISION — the same one this file already made
+# for `tools` below, applied to the channel with the stronger claim to it.
+#
+# WHAT WAS TRUE BEFORE (OSDev4, measured 2026-09-17). This registration sat inside the `if` above,
+# and `poll_sweep` is where the MAILBOX is swept too (`_sweep_email`). Email is IMAP: it touches no
+# Zernio SDK, no Zernio key and no Zernio account. So a drifted vendor SDK stopped a buyer's Gmail
+# from being read — and that is step ONE of set-up, the step with the longest instructions on the
+# screen and the only one that needs no new account and no card. A buyer who did it perfectly got
+# silence, for a reason that had nothing to do with them, on the first day they owned the box.
+#
+# ZERNIO ITSELF IS NOT LOOSENED. `poller._vendor_intake_allowed` asks the same `verify_sdk` and
+# leaves the Zernio client unbuilt when it says no, so every Zernio channel takes the skip an
+# email-only box has always taken. Intake for the vendor stops; intake for the mailbox does not.
+#
+# 45s default (config inbox.poll_interval_s) — an ad DM gets its opener inside ~a minute, and an
+# unchanged inbox costs one list call per Space per sweep.
+register_periodic(poller.poll_sweep,
+                  interval_s=int((get_config().get("inbox", {}) or {})
+                                 .get("poll_interval_s", 45)),
+                  name="inbox_poll")
 
 # THE READ TOOLS REGISTER EITHER WAY, and that placement is the decision. Everything above is
 # fail-closed on the vendor SDK, correctly: polling and sending on an SDK nobody can verify is the

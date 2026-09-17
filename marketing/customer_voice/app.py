@@ -213,6 +213,15 @@ a{color:inherit;text-decoration:none}
   backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid var(--hair)}
 .bar-in{display:flex;align-items:baseline;gap:10px;padding:13px 16px;max-width:620px;margin:0 auto}
 .brand{font-weight:650;letter-spacing:-.015em}
+/* THE WAY OUT. Sits before the mark and reads as a trail, not a button: the reference the owner
+   gave us puts one quiet arrow at the top left and nothing else competing with it. `align-self`
+   because `.bar-in` aligns on the BASELINE for the brand and the day — an icon on a text baseline
+   sits a couple of pixels low, which is the kind of wrongness that is felt and not seen. */
+.up{display:inline-flex;align-items:center;gap:4px;align-self:center;flex:none;
+  color:var(--dim);text-decoration:none;font-size:14px;font-weight:530;
+  margin:-4px 2px -4px -6px;padding:4px 6px;border-radius:8px}
+.up svg{display:block;flex:none}
+.up:hover{color:var(--ink);background:var(--bubble-in)}
 .day{margin-left:auto;font-size:13px;color:var(--dimmer)}
 h1{font-size:22px;font-weight:670;letter-spacing:-.022em;margin:18px 0 2px;color:var(--ink)}
 h1 .chan{vertical-align:middle}
@@ -259,10 +268,10 @@ a.row:active{background:var(--hair);border-radius:10px}
 /* ── a conversation row, copied from Kinso ─────────────────────────────────────────────────
    Their structure exactly: avatar, name with the time right beside it, one grey line of preview
    under it, and the channel's own logo far right. 44px minimum and the whole row is the link. */
-.conv{display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto auto;
+.conv{display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto auto auto;
   gap:2px 12px;padding:11px 0;min-height:44px;border-bottom:1px solid var(--hair);align-items:center}
 .conv:last-child{border-bottom:0}
-.conv .av{grid-row:1/3;width:42px;height:42px;border-radius:50%;display:flex;align-items:center;
+.conv .av{grid-row:1/4;width:42px;height:42px;border-radius:50%;display:flex;align-items:center;
   justify-content:center;font-size:15px;font-weight:600;letter-spacing:.01em;
   background:var(--accent-soft);color:var(--accent);flex:none;
   /* NO PHOTO EXISTS. The vendor sends us a display name and nothing else, so initials are not a
@@ -272,20 +281,23 @@ a.row:active{background:var(--hair);border-radius:10px}
   display:flex;align-items:baseline;gap:7px;min-width:0}
 .conv .w b{font-weight:590;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .conv .t{font-weight:400;font-size:13px;color:var(--dimmer);flex:none}
-.conv .s{grid-row:2;grid-column:2;display:flex;align-items:center;gap:6px;min-width:0;
+/* THE MESSAGE. One line, clipped with an ellipsis rather than wrapped, because a row that grows
+   with the length of what somebody wrote makes the list jump about as it loads — and the whole
+   of it is one tap away. `--dim` at 15px measures 7.98:1 on the card. */
+.conv .p{grid-row:2;grid-column:2;color:var(--dim);font-size:15px;line-height:1.4;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;margin-top:1px}
+.conv .p i{font-style:normal;color:var(--dimmer)}
+.conv .s{grid-row:3;grid-column:2;display:flex;align-items:center;gap:6px;min-width:0;
   flex-wrap:wrap;row-gap:5px;color:var(--dim);font-size:15px}
 /* A TAG NEVER TRUNCATES AND NEVER OVERLAPS — IT WRAPS. Written first as one non-wrapping line,
    and a 390px render showed both failures at once: "2 messages" cut to "2 mess…" for no reason,
    and a second tag sliding straight under the channel logo, because a `flex:none` pill cannot
    shrink and simply overflowed its grid column. A half-shown tag is a half-shown fact, and
    "Opted ou" is worse than not saying it. So a busy row grows a line instead of hiding one. */
-/* AND THE GREY LINE IS WHAT GIVES WAY, WHICH IS THE HALF THE RULE ABOVE LEFT OUT. `min-width:0`
+/* AND THE GREY LINE IS WHAT GIVES WAY, which is the half the rule above left out. `min-width:0`
    lets it shrink but flexbox decides to WRAP from each item's BASE size, before any shrinking —
    so a long preview pushed the tag onto a second line even though the preview was the one thing
-   on the row that could have yielded. Measured at 390px: rows came out 85, 85, 85, 140, 112, 111
-   px tall, a 65% swing between neighbours in a list whose whole job is to be scanned.
-   `flex:1 1 0` makes its base size zero, so it never forces the wrap, takes whatever is left and
-   ellipses — which is what every mail app does with a preview, and what the tags must never do.
+   on the row that could have yielded. `flex:1 1 0` zeroes its base so it never forces that wrap.
 
    MIND THE PROSE IN HERE: this stylesheet is INLINED INTO EVERY PAGE, so a CSS comment is shipped
    bytes, and `test_drafts_switch` reads the whole of /inbox/settings looking for fault-report
@@ -293,8 +305,17 @@ a.row:active{background:var(--hair);border-radius:10px}
    suite red — a comment about layout, breaking a test about copy, because the guard cannot tell
    the two apart from inside the page. It is RIGHT to scan the whole page; the fix belongs here.
    Read that suite before writing prose in this string. */
-.conv .s .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 0}
-.conv .mk{grid-row:1/3;grid-column:3;flex:none;display:flex;align-items:center}
+/* THE FLOOR SURVIVES, BUT IT GUARDS SOMETHING SMALLER NOW. It was added because a long
+   PREVIEW shared this line with the tags and got crushed to "1 ." to save them. The change
+   that gave the preview a line of its own removed that pressure entirely, so what is left
+   here is the message count, and 6ch keeps it from rendering as "1 ." when a long tag
+   crowds it. Smaller stake, same rule, and the count itself is arguably noise now. */
+.conv .s .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:6ch;flex:1 1 0}
+/* AND THE MARK SPANS THREE ROWS NOW, not two — the preview took a line of its own,
+   which is what made the row worth reading. `1/4` rather than `1/3` is the whole of
+   this side of the merge, and getting it wrong leaves the channel logo floating
+   against the name with the tags underneath it. */
+.conv .mk{grid-row:1/4;grid-column:3;flex:none;display:flex;align-items:center}
 .conv.out .av{background:var(--bubble-in);color:var(--dimmer)}
 
 /* ── tags, and the menu that appears on hover ──────────────────────────────────────────────
@@ -712,6 +733,46 @@ def _tabbar(here: str) -> str:
     return f'<nav class="tabs" aria-label="Sections"><div class="tabs-in">{"".join(out)}</div></nav>'
 
 
+def _up() -> str:
+    """The way back out of the inbox, at the top of every page of it.
+
+    Owner, 2026-09-17: *"they can go back into the dashboard so there should be a back arrow with
+    a dashboard label"*, and earlier the same day: *"a back button back to the dashboard at the top
+    of our inbox."* Top, not bottom — this app's bottom edge is the tab bar he already approved.
+
+    EVERY WORD AND EVERY PATH COMES FROM `core.shell`, NOT FROM HERE. `home_href()` decides where
+    the box's home is and `home_title()` names it, through one resolution each, so the label cannot
+    say "Dashboard" while the link goes somewhere else. Hardcoding either would be a second answer
+    to a question core already answers — the mistake `_LANDINGS` was carrying this morning.
+
+    IT ASKS WHETHER THIS BOX SERVES THE DESTINATION, through `home._serving()` rather than a
+    re-derived url_map read. A box is one of four products; an arrow to a page this build does not
+    ship is a 404 handed to a buyer, and `rail_html` already refuses rows for that reason.
+
+    THE BOTTOM TAB BAR IS DELIBERATELY UNTOUCHED. Its three entries and the rail's level-2 items
+    are the same three destinations, so driving both from `shell.rail()` is the obvious next step
+    and the right one — but it would relabel "Inbox" to "Messages" and reorder a bar he has
+    approved and uses daily, which is not what he asked for here. Noted, not done.
+    """
+    from core import shell
+    from core.dash import home as _home_mod
+    try:
+        href, label = shell.home_href(), shell.home_title()
+    except Exception:                            # noqa: BLE001 — no registry, no arrow
+        return ""
+    if not href or href == "/dash/login":
+        # NOTHING TO GO BACK TO. `home_href` falls through to the login when no section claims
+        # home, and an arrow pointing at a password form is worse than no arrow.
+        return ""
+    have = _home_mod._serving()
+    if have and href not in have:
+        return ""
+    return (f'<a class="up" href="{_esc(href)}" aria-label="Back to {_esc(label)}">'
+            f'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            f'<path d="M15 18l-6-6 6-6"/></svg><span>{_esc(label)}</span></a>')
+
+
 THEME_COOKIE = "aios_voice_theme"
 _THEME_BG = {"light": "#eff2f4", "dark": "#0d0d0d"}
 
@@ -754,7 +815,7 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>{_esc(brand)} · Unified Inbox</title><style>{CSS}</style></head>
 <body{' class="ib"' if wide else ''}>
-<div class="bar"><div class="bar-in"><span class="brand">{_esc(brand)}</span>
+<div class="bar"><div class="bar-in">{_up()}<span class="brand">{_esc(brand)}</span>
 <span class="day">{_esc(day)}</span></div></div>
 <div class="wrap">{body}</div>
 {_tabbar(here or request.path)}
@@ -1622,6 +1683,17 @@ def r_inbox():
         # prose here, third and fourth in a line that truncates — so the two facts most worth
         # seeing were the two most likely to be cut off. They are pills now, and pills do not
         # truncate; what is left is the one thing a sentence says better than a badge.
+        # THE ROW SAID "1 message" AND THE MESSAGE WAS THE ONE THING IT WOULD NOT SHOW, so every
+        # row had to be opened to find out whether it mattered. `preview` is the newest message,
+        # trimmed in SQL, selected in the same pass as the count.
+        #
+        # "You:" WHEN WE SPOKE LAST, which is how every inbox a person already uses reads, and it
+        # answers the question the list is for — whether the ball is in their court. `awaiting_reply`
+        # is the same subquery ordered the same way, so the prefix and the tag can never disagree.
+        # Guarded on there BEING a message: a conversation the poller knows about but has never
+        # heard a word on is not one we replied to.
+        preview = " ".join(str(k.get("preview") or "").split())
+        mine = preview and not k.get("awaiting_reply")
         sub = f'{n} message' + ("" if n == 1 else "s")
         # KINSO'S ROW, EXACTLY: avatar, name with the time beside it, one grey line under it, and
         # the channel's own logo far right. The mark is a SHAPE before it is a colour, so it still
@@ -1632,7 +1704,9 @@ def r_inbox():
                     f'<a class="conv" href="{_esc(_thread_href(k.get("zernio_conversation_id")))}">'
                     f'<span class="av" aria-hidden="true">{_monogram(who)}</span>'
                     f'<span class="w"><b>{_esc(who)}</b><span class="t">{_esc(when)}</span></span>'
-                    f'<span class="s"><span class="sub">{_esc(sub)}</span>{_tags(k)}</span>'
+                    + (f'<span class="p">{"<i>You:</i> " if mine else ""}{_esc(preview)}</span>'
+                       if preview else '<span class="p"><i>No message yet</i></span>')
+                    + f'<span class="s"><span class="sub">{_esc(sub)}</span>{_tags(k)}</span>'
                     f'<span class="mk">{_mark(plat)}'
                     f'<span class="vh">{_esc(_channel(plat))}</span></span></a>'
                     f'{_acts(k, who=who, channel=channel)}</div>')
@@ -1853,9 +1927,16 @@ def _compose(zcid: str, conv: dict) -> str:
     if not drafted:
         from core import box_secrets
         if not box_secrets.is_set(box_secrets.ANTHROPIC):
+            # STRAIGHT TO WHERE THEY ARE TURNED ON, not to the menu that lists it. This pointed
+            # at `/inbox/settings`, so a buyer who read "Turn them on" landed on a page that does
+            # not turn anything on and had to find "Connect an AI account" to reach the one field
+            # they wanted — two clicks for a promise worded as one. `/inbox/drafts` IS that page:
+            # it is titled "Add your AI key", it carries the only `name="key"` input in the app,
+            # and its button says "Turn drafts on". Walked on an exported customer_voice box,
+            # 2026-09-17; nothing pinned the old destination.
             off_note = ('<div class="quiet" style="margin-top:8px">Drafts are off. '
-                        '<a href="/inbox/settings" style="color:var(--accent)">Turn them on in '
-                        'Settings</a>.</div>')
+                        '<a href="/inbox/drafts" style="color:var(--accent)">'
+                        'Turn them on</a>.</div>')
     # `note` sits ABOVE the box because it introduces the draft inside it. `off_note` sits BELOW,
     # because §2.6 puts it there and the reason is the difference between the two: one labels
     # what is in the box, the other is an aside about what is not. Only one is ever present.

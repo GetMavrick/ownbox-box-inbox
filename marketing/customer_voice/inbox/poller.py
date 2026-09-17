@@ -443,6 +443,27 @@ def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, 
     return scanned, enqueued
 
 
+_VENDOR_OK: bool | None = None
+
+
+def _vendor_intake_allowed() -> bool:
+    """May we poll ZERNIO this sweep? Email never asks — see `poll_sweep`.
+
+    Computed once and kept. `verify_sdk` imports the SDK, compares a pinned version and inspects
+    three signatures — no network, but not free at 45-second intervals either, and the answer
+    cannot change without a restart because it is a property of what is installed on disk.
+    """
+    global _VENDOR_OK
+    if _VENDOR_OK is None:
+        _VENDOR_OK, detail = zernio.verify_sdk()
+        if not _VENDOR_OK:
+            # ONCE, AT THE FIRST SWEEP, AND LOUD. A box quietly not polling Instagram is the
+            # failure this whole gate exists to make visible; the department's own import logs
+            # the same fact, and this is the line that proves the poller honoured it.
+            log.error("inbox.vendor_intake_disabled", detail=detail)
+    return bool(_VENDOR_OK)
+
+
 def poll_sweep() -> dict:
     """Worker periodic. Cheap no-op when nothing changed or nothing is keyed."""
     spaces = _spaces()
@@ -462,7 +483,14 @@ def poll_sweep() -> dict:
         # BUILT ONLY IF SOMETHING NEEDS IT. An email-only box has no Zernio key, and the transport
         # is fail-closed on a falsy key by design — constructing it here would raise before the
         # email channel ever got its turn.
-        z = zernio.client(sp) if sp.get("zernio_key") else None
+        #
+        # AND ONLY IF THE VENDOR SDK VERIFIES. This sweep now runs whether or not it does, so that
+        # a buyer's MAILBOX does not wait on an unrelated vendor (see `inbox/__init__`). Zernio
+        # itself stays fail-closed: a drifted SDK leaves `z` None and every Zernio channel takes
+        # the `continue` below — the same path an email-only box has always taken, which is why
+        # this needs no new branch.
+        z = (zernio.client(sp)
+             if sp.get("zernio_key") and _vendor_intake_allowed() else None)
         for ch in channels.POLLED:
             if ch.vendor == channels.IMAP:
                 ch_scanned, ch_stored, ch_ok = _sweep_email(space, ch)
