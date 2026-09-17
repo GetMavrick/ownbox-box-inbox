@@ -24,6 +24,12 @@ from core.logging import get_logger
 log = get_logger(__name__)
 
 ANTHROPIC = "anthropic_api_key"
+# WHAT THE VENDOR LAST SAID ABOUT THAT KEY, so a screen never has to guess from its presence.
+# `is_set(ANTHROPIC)` answers "is there a key", which is not the question a buyer is asking; the
+# question is "will a draft arrive", and those two parted company the moment a key could be
+# revoked. Same shape as EMAIL_STATUS and ZERNIO_STATUS, and read through `anthropic_state()`.
+ANTHROPIC_STATUS = "anthropic_status"
+ANTHROPIC_DETAIL = "anthropic_detail"
 # THE BUYER'S MAILBOX, FOR READING (SPEC #1226). Three values useless apart, so they are stored and
 # replaced as ONE row: a half-updated credential is an auth failure nobody can explain.
 # THE BUYER'S OWN ZERNIO ACCOUNT (owner, 2026-09-16). Ruled after checking all 60 SDK resources:
@@ -89,11 +95,48 @@ def zernio_key() -> str:
     return get(ZERNIO)
 
 
+def put_anthropic(value: str, *, user_id: str | None = None) -> None:
+    """Store the buyer's AI key — after asking the vendor whether it works.
+
+    THE LAST CREDENTIAL ON THIS BOX THAT NOBODY CHECKED. Zernio is verified below and the mailbox
+    signs in (`put_email`); this one was `put(ANTHROPIC, ...)` straight into the table on a prefix
+    and a length. Measured on an exported customer_voice box, 2026-09-17: `sk-ant-api03-` plus
+    eighty characters was accepted, the screen redirected as though it had worked, `brain.
+    can_think()` answered `(True, 'api')`, and `/inbox/settings` then stated — as settled fact —
+    "Drafts On. Ownbox writes a reply for every message that arrives." On that box it never would.
+
+    AND THE THREAD SAID NOTHING, which is what made it silent rather than merely wrong. §2.6's
+    "Drafts are off" note hangs off `is_set(ANTHROPIC)`, and the key IS set — so the one line that
+    exists to explain a missing draft is suppressed by the very thing that broke it. The buyer
+    gets an ordinary empty reply box, on every thread, forever, and no sentence anywhere.
+
+    THE SHAPE CHECK STAYS AND RUNS FIRST. `validate` catches the wrong THING entirely — a Zernio
+    key, a password, a line of a receipt — without spending a round trip, and it is the same rule
+    whoever writes a key. The probe is for the thing a shape can never see: a well-formed key that
+    was revoked, typed one character short, or belongs to an account with no credit left.
+    """
+    value = validate(ANTHROPIC, value)           # shape first: free, and it is the same rule
+    from core import brain                       # lazily — `core.brain` imports config and state
+    ok, detail = brain.verify_key(value)
+    if not ok:
+        # UNREACHABLE IS NOT REFUSED. `verify_key` has already decided which of the two this is
+        # and written the sentence for it; a box that could not get to the API stores nothing and
+        # condemns nothing, so nobody is sent off to mint a key they did not need.
+        raise SecretRejected(detail)
+    put(ANTHROPIC, value, user_id=user_id)
+    put(ANTHROPIC_STATUS, "connected", user_id=user_id)
+    # CLEARED, NOT OVERWRITTEN WITH A SENTINEL — the same correction `put_email` carries, and for
+    # the same reason: a successful reconnect must not leave last week's refusal sitting under a
+    # row that now says Connected.
+    clear(ANTHROPIC_DETAIL, user_id=user_id)
+
+
 def put_zernio(value: str, *, user_id: str | None = None) -> None:
     """Store the buyer's Zernio key. Raises SecretRejected with a sentence they can act on.
 
-    VERIFIED WITH THE VENDOR, NOT MATCHED AGAINST A SHAPE. The Anthropic key above is checked by
-    prefix because its shape is published and stable. Zernio's is not: it is 67 characters with no
+    VERIFIED WITH THE VENDOR, NOT MATCHED AGAINST A SHAPE. `put_anthropic` above now asks its vendor
+    too, but it can shape-check first because an Anthropic key's prefix is published and stable.
+    Zernio's is not: it is 67 characters with no
     documented prefix, so a regex here would be a rule we invented, and the failure it produced
     would be OUR bug wearing the buyer's name. Asking the vendor costs one round trip at the only
     moment a person is present to fix it, and it catches the thing a shape check never could — a
@@ -282,7 +325,7 @@ def validate(name: str, value: str) -> str:
     # `.strip()` turned that into "" and the empty check raised — after the status row had already
     # been written, so the box was left with a half-written status AND an exception in the poller.
     # Reproduced, then moved. A guard placed after the thing it guards is not a guard.
-    if name in (EMAIL, EMAIL_DETAIL, ZERNIO_DETAIL, ZERNIO_PROFILE):
+    if name in (EMAIL, EMAIL_DETAIL, ZERNIO_DETAIL, ZERNIO_PROFILE, ANTHROPIC_DETAIL):
         return str(value or "")
     value = str(value or "").strip()
     if not value:
@@ -342,23 +385,64 @@ def anthropic_key() -> str:
             or (getattr(settings, "anthropic_api_key", "") or "").strip()
             or get(ANTHROPIC))
 
+def note_anthropic_status(status: str, detail: str = "", *, user_id: str | None = None) -> None:
+    """The drafter says why Anthropic turned it away, so a screen can say something actionable.
+
+    CALLED ON REFUSAL, NEVER ON A BAD MINUTE. The drafter runs every few minutes on a box with no
+    one watching; if a rate limit or a dropped connection wrote `needs_reauth` here, a buyer would
+    come back to a box telling them their working key was broken. `core.brain._is_transient` is
+    the one place that judgement lives and the caller asks it there.
+
+    `connected` CLEARS THE DETAIL rather than writing one, exactly as `note_email_status` does —
+    see the long note there for the sentinel bug that arrangement fixed."""
+    if status not in ("connected", "needs_reauth", "payment_required"):
+        raise ValueError(f"unknown anthropic status {status!r}")
+    put(ANTHROPIC_STATUS, status, user_id=user_id)
+    if detail and detail.strip():
+        put(ANTHROPIC_DETAIL, detail[:300], user_id=user_id)
+    else:
+        clear(ANTHROPIC_DETAIL, user_id=user_id)
+
+
+def clear_anthropic(*, user_id: str | None = None) -> None:
+    """Turn drafting off — the key AND what the vendor last said about it.
+
+    A STATUS LEFT BEHIND IS THE NEXT KEY'S PROBLEM. `clear_zernio` exists for exactly this reason
+    and the failure is the same shape here: turn drafting off while the row reads `needs_reauth`,
+    paste a fresh working key, and the screen greets it with the last one's refusal."""
+    for name in (ANTHROPIC, ANTHROPIC_STATUS, ANTHROPIC_DETAIL):
+        clear(name, user_id=user_id)
+
+
 def anthropic_state() -> dict:
     """What the set-up screen says about the AI key. Never the key itself.
 
-    ONLY TWO STATES ARE HONEST HERE, and that is the finding rather than a shortcut. A mailbox and
-    a Zernio key are VERIFIED with their vendor before they are stored, so their screens can say
-    `needs_reauth` and mean it. An Anthropic key is not: `put` checks its shape and nothing more,
-    deliberately — "only Anthropic can say whether a key works, and a box that refused a valid key
-    because our regex was a month out of date would be worse than one that accepted a typo".
-    So this answers `connected` or `not_connected` and never invents a third.
+    STILL TWO STATES, FOR A DIFFERENT REASON THAN WHEN THIS WAS WRITTEN. It used to say only two
+    were honest because an Anthropic key was never verified at all — `put` checked its shape and
+    stopped, so "connected" meant no more than "something key-shaped is in the table". Since
+    `put_anthropic` the vendor is asked before the row is written, so `connected` now means the
+    same thing it means under the mailbox and Zernio: this credential worked.
+
+    WHAT IS STILL MISSING IS THE LATER REFUSAL, and it is worth naming rather than implying. The
+    mailbox has `note_email_status` and Zernio has `note_zernio_status`, so a poller that gets
+    turned away can move the row to `needs_reauth` days after it was set. Nothing writes an
+    equivalent for this key yet, so a key revoked or run out of credit NEXT week still reads
+    `connected` here. That is a following change, not a state to invent now — a third status no
+    code can ever produce is a screen that lies in a new direction.
 
     ENVIRONMENT COUNTS AS CONNECTED, because `brain` uses it: `anthropic_key()` reads `.env` ahead
     of the store, so a box whose key is in its environment IS able to draft. A screen that showed
     "not connected" there would send its owner to buy a key he already has, and the row would stay
     red forever no matter what he pasted.
     """
-    return {"status": "connected" if anthropic_key() else "not_connected",
-            "user": None, "detail": ""}
+    if not anthropic_key():
+        return {"status": "not_connected", "user": None, "detail": ""}
+    # A KEY WITH NO STATUS ROW IS CONNECTED, and that default is what keeps every box already in
+    # the field working. A key in `.env` never passes through `put_anthropic`, and so does a key
+    # stored before this existed; neither has a row, and both drive a box that drafts perfectly
+    # well. Defaulting the other way would paint a working box red and send its owner shopping.
+    return {"status": get(ANTHROPIC_STATUS) or "connected", "user": None,
+            "detail": get(ANTHROPIC_DETAIL)}
 
 
 # ── THE SET-UP SCREEN, IN THE ORDER THE OWNER ASKED FOR ─────────────────────────────────────────

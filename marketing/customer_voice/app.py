@@ -1118,13 +1118,36 @@ def _drafts_row() -> str:
     WHEN MANAGED INFERENCE LANDS, §2.5's wording replaces this and the row stays where it is.
     """
     from core import box_secrets
-    if not box_secrets.is_set(box_secrets.ANTHROPIC):
+    # THE ROW ASKS WHETHER A DRAFT WILL ARRIVE, NOT WHETHER A KEY EXISTS, and those are two
+    # different questions the moment a key can be revoked. `anthropic_state()` is the one reader
+    # the set-up screen already uses, so the two cannot disagree about the same key.
+    _ai = box_secrets.anthropic_state()
+    if _ai["status"] == "not_connected":
         return ('<div class="setrow"><b>Drafts</b>'
                 '<span>Ownbox can write a reply for every message, ready for you to read and '
                 'send. It needs an AI account to write with — yours, on your own bill, so '
                 'nothing you receive passes through us.</span>'
                 '<p style="margin:10px 0 0"><a class="btn" href="/inbox/drafts">'
                 'Connect an AI account</a></p></div>')
+    # STOPPED, AND WHY, IN THE WORDS OF THE FIX. The key was checked when it was pasted, so a box
+    # that lands here has had something CHANGE at the vendor — and the buyer's only clue used to
+    # be drafts that stopped appearing. The two reasons take different actions, so they get
+    # different sentences and different buttons.
+    if _ai["status"] == "payment_required":
+        return ('<div class="setrow"><b>Drafts</b>'
+                '<span>Paused. Your AI account needs credit before it will write any more '
+                'replies — add some there and your box picks up on its own. Every message is '
+                'still arriving and you can still answer by hand.</span>'
+                '<p style="margin:10px 0 0"><a class="btn" '
+                'href="https://console.anthropic.com/settings/billing" target="_blank" '
+                'rel="noopener">Add credit</a></p></div>')
+    if _ai["status"] == "needs_reauth":
+        return ('<div class="setrow"><b>Drafts</b>'
+                '<span>Paused. Your AI account stopped accepting the key this box has — that '
+                'usually means it was deleted or replaced in the console. Paste the new one and '
+                'drafting starts again. Every message is still arriving in the meantime.</span>'
+                '<p style="margin:10px 0 0"><a class="btn" href="/inbox/drafts">'
+                'Paste a new key</a></p></div>')
     # THE SECOND SENTENCE IS LOAD-BEARING AND DOES NOT GET CUT (§2.6). It is the promise the
     # whole product rests on, and Settings is where a nervous buyer goes to check it.
     return ('<div class="setrow"><b>Drafts</b>'
@@ -1570,6 +1593,31 @@ def _hits(q: str, channel: str, n: int, *, page: int, more: bool) -> str:
     return f'<div class="found">{body}{out}</div>'
 
 
+def _stopped_note() -> str:
+    """One line, on the page a buyer lives on, when they have stopped the box.
+
+    THE GAP THIS CLOSES IS ONE WE MADE TODAY (#1341). `Stop everything` moved into core and onto
+    /dashboard, which says plainly that the box is stopped. The INBOX said nothing at all — and
+    the inbox is where a buyer actually is. New messages simply stop arriving, the screen looks
+    completely normal, and the conclusion available to them is "this thing is broken". Measured on
+    an exported customer_voice box: dashboard says stopped, inbox/thread/settings say nothing.
+
+    IT NAMES WHAT STILL WORKS, because half a fact here is worse than none. `core/pause` is read
+    by `core/worker` and by nothing else — so the MACHINES stop and a person can still answer by
+    hand. Telling someone their box is stopped without that would have them thinking a reply they
+    typed went nowhere.
+    """
+    try:
+        from core import pause
+        if not pause.is_paused():
+            return ""
+    except Exception:                    # noqa: BLE001 — a note is never worth a 500
+        return ""
+    return ('<div class="quiet" style="margin-bottom:12px">Your box is stopped, so no new '
+            'messages are arriving. You can still reply to the ones here. '
+            '<a href="/dashboard" style="color:var(--accent)">Start it again</a>.</div>')
+
+
 @blueprint.get("/inbox/inbox")
 def r_inbox():
     """Who has spoken to this business, most recent first."""
@@ -1672,7 +1720,7 @@ def r_inbox():
         # WIDE ON THE EMPTIES TOO. Every branch above still draws the chip row, so a reader who
         # filtered to Instagram and found nothing must keep the rail that got them there —
         # otherwise the layout moves under them at the exact moment they need to change filter.
-        return _shell(body, wide=True), 200
+        return _shell(_stopped_note() + body, wide=True), 200
 
     rows = []
     for k in convs:
@@ -1710,7 +1758,8 @@ def r_inbox():
                     f'<span class="mk">{_mark(plat)}'
                     f'<span class="vh">{_esc(_channel(plat))}</span></span></a>'
                     f'{_acts(k, who=who, channel=channel)}</div>')
-    return _shell(f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel, q=q)}'
+    return _shell(_stopped_note()
+                  + f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel, q=q)}'
                   f'{_hits(q, channel, len(convs), page=page, more=more)}'
                   f'<div class="card">{"".join(rows)}</div>'
                   f'{_pager(q=q, channel=channel, page=page, more=more)}', wide=True), 200
@@ -1926,17 +1975,35 @@ def _compose(zcid: str, conv: dict) -> str:
     # instead of being told nothing at all and concluding the box does not work.
     if not drafted:
         from core import box_secrets
-        if not box_secrets.is_set(box_secrets.ANTHROPIC):
-            # STRAIGHT TO WHERE THEY ARE TURNED ON, not to the menu that lists it. This pointed
-            # at `/inbox/settings`, so a buyer who read "Turn them on" landed on a page that does
-            # not turn anything on and had to find "Connect an AI account" to reach the one field
-            # they wanted — two clicks for a promise worded as one. `/inbox/drafts` IS that page:
-            # it is titled "Add your AI key", it carries the only `name="key"` input in the app,
-            # and its button says "Turn drafts on". Walked on an exported customer_voice box,
-            # 2026-09-17; nothing pinned the old destination.
+        # ONE READER, SO THE THREAD AND SETTINGS CANNOT DISAGREE. This asked `is_set` — "is there
+        # a key" — which was the wrong question in the one case that matters most: a key that the
+        # vendor has since refused IS set, so this note fell silent and the buyer got an ordinary
+        # empty reply box on every thread with no sentence anywhere.
+        _ai = box_secrets.anthropic_state()["status"]
+        if _ai == "not_connected":
+            # STRAIGHT TO WHERE THEY ARE TURNED ON, not to the menu that lists it (#1356). This
+            # pointed at `/inbox/settings`, so a buyer who read "Turn them on" landed on a page
+            # that does not turn anything on and had to find "Connect an AI account" to reach the
+            # one field they wanted — two clicks for a promise worded as one. `/inbox/drafts` IS
+            # that page: it is titled "Add your AI key", it carries the only `name="key"` input in
+            # the app, and its button says "Turn drafts on".
             off_note = ('<div class="quiet" style="margin-top:8px">Drafts are off. '
                         '<a href="/inbox/drafts" style="color:var(--accent)">'
                         'Turn them on</a>.</div>')
+        elif _ai == "needs_reauth":
+            # SAME RULE AS THE LINE ABOVE, APPLIED TO THE OTHER STATE THAT HAS A FIELD BEHIND IT.
+            # A key the vendor no longer accepts is fixed by pasting a new one, and that is the
+            # same page — so this goes straight there rather than through Settings.
+            off_note = ('<div class="quiet" style="margin-top:8px">Drafts are paused — your AI '
+                        'account no longer accepts this key. <a href="/inbox/drafts" '
+                        'style="color:var(--accent)">Paste a new one</a>.</div>')
+        elif _ai == "payment_required":
+            # AND THIS ONE GOES TO SETTINGS, deliberately, because the fix is NOT a field on this
+            # box — it is a card in the Anthropic console. Settings is where that sentence and its
+            # link live; sending them to the key form would offer a control that cannot help.
+            off_note = ('<div class="quiet" style="margin-top:8px">Drafts are paused — your AI '
+                        'account needs credit. <a href="/inbox/settings" '
+                        'style="color:var(--accent)">See why</a>.</div>')
     # `note` sits ABOVE the box because it introduces the draft inside it. `off_note` sits BELOW,
     # because §2.6 puts it there and the reason is the difference between the two: one labels
     # what is in the box, the other is an aside about what is not. Only one is ever present.
@@ -2357,15 +2424,21 @@ def r_drafts():
         # "Turn off" — §2.6's second state offers it, so it has to actually work. Removing the
         # key is the whole of turning drafting off: the drafter skips with no key, and every
         # message still arrives and is still answerable by hand.
-        box_secrets.clear(box_secrets.ANTHROPIC, user_id=whoami)
+        # `clear_anthropic`, NOT `clear` — the key AND what the vendor last said about it. A
+        # status left behind is the NEXT key's problem: turn drafting off while the row reads
+        # `needs_reauth`, paste a fresh working key, and the screen greets it with the old
+        # refusal. Same contract as `clear_zernio`.
+        box_secrets.clear_anthropic(user_id=whoami)
         return redirect("/inbox/settings")
     note = ""
     if request.method == "POST":
         try:
             # VALIDATED IN THE STORE, NOT HERE, so the rule is the same whoever writes a key —
             # this screen, a future one, or a script. The screen's job is to show the sentence.
-            box_secrets.put(box_secrets.ANTHROPIC,
-                            str(request.form.get("key") or ""), user_id=whoami)
+            # `put_anthropic`, NOT `put`: the front door that asks Anthropic whether the key
+            # works before it is stored, the same as the Zernio and mailbox doors. A bare `put`
+            # took a well-formed dud and left this screen saying drafts were on.
+            box_secrets.put_anthropic(str(request.form.get("key") or ""), user_id=whoami)
             return redirect("/inbox/settings")
         except box_secrets.SecretRejected as e:
             # Never a lecture and never an echo — the same discipline as the claim form. The
@@ -2388,7 +2461,13 @@ def r_drafts():
       'border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)">'
       '<button class="btn" type="submit">Turn drafts on</button>'
       '</form>'
-      '<p class="quiet" style="margin-top:12px">You can change or remove this key any day. '
+      # THE SAME PROMISE THE CONNECT SCREEN MAKES, NOW THAT THIS SCREEN CAN KEEP IT. `_connect_
+      # key_form` has carried this sentence since it was written, and the two forms are the same
+      # shape on purpose — a buyer who has done one should recognise the second on sight. Until
+      # `put_anthropic`, this was the one of the two that could not have said it.
+      '<p class="quiet" style="margin-top:12px">Checked with your AI account before it is saved, '
+      'so you find out here if it is wrong — not tomorrow, from an empty draft box.</p>'
+      '<p class="quiet" style="margin-top:8px">You can change or remove this key any day. '
       'Nothing about it reaches us.</p>'
       '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--accent)">'
       '← Settings</a></p>')
@@ -2534,11 +2613,12 @@ def _setup_save(which: str, form, *, user_id: str | None) -> None:
     elif which == "zernio":
         box_secrets.put_zernio(str(form.get("key") or ""), user_id=user_id)
     elif which == "anthropic":
-        # `put` CARRIES THE VALIDATION, unlike the two above which have their own front doors. It
-        # checks the shape and refuses a blank, a pasted newline or the wrong thing entirely with
-        # a sentence for the buyer — and deliberately does NOT call Anthropic, because only they
-        # can say whether a key works and refusing a valid one on a stale regex is the worse bug.
-        box_secrets.put(box_secrets.ANTHROPIC, str(form.get("key") or ""), user_id=user_id)
+        # A FRONT DOOR OF ITS OWN NOW, like the two above. This read `put`, with a comment saying
+        # it deliberately did not call Anthropic because "only they can say whether a key works"
+        # — which is the argument FOR asking them, not against it. What it was really refusing
+        # was a guessed regex, and `put_anthropic` still keeps the shape check that catches the
+        # wrong thing entirely; it just no longer stops there.
+        box_secrets.put_anthropic(str(form.get("key") or ""), user_id=user_id)
     else:
         raise box_secrets.SecretRejected("That form is not one this screen knows.")
 

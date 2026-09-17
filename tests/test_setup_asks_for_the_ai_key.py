@@ -137,12 +137,26 @@ quiet(bs.put, bs.ANTHROPIC, GOOD_KEY + "  ")
 ok("a trailing space is STRIPPED rather than refused — that is the clipboard, not a mistake",
    bs.anthropic_key() == GOOD_KEY, repr(bs.anthropic_key()))
 
+import contextlib  # noqa: E402
 import inspect  # noqa: E402
+import types  # noqa: E402
 
-ok("NO ROUND TRIP TO ANTHROPIC, deliberately — only they can say whether a key works, and "
-   "refusing a valid one on a stale regex is the worse bug",
+# THIS ASSERTION USED TO READ "NO ROUND TRIP TO ANTHROPIC, DELIBERATELY", and the argument under
+# it was that only Anthropic can say whether a key works, so refusing a valid one on a stale regex
+# would be the worse bug. The first half of that is the case FOR asking them; what it was really
+# defending was guessing. So the property splits in two, and both are now pinned.
+#
+# `validate` STAYS FREE AND OFFLINE. It is the rule every writer of a key goes through, it runs on
+# the way in, and it must cost nothing: it catches the wrong THING entirely — a password, a Zernio
+# key, half a paste — without spending a round trip on it.
+ok("the shape check itself still makes no network call, so the cheap rule stays cheap",
    "anthropic" not in inspect.getsource(bs.validate).lower().replace("anthropic_shape", "")
    or "requests" not in inspect.getsource(bs.validate))
+# AND THE ROUND TRIP EXISTS, ONE DOOR OUT. Measured on an exported box on 2026-09-17: without it a
+# well-formed dud was stored, `can_think()` said (True, 'api'), and the settings row stated "Drafts
+# On. Ownbox writes a reply for every message that arrives" on a box that never would.
+ok("...and the front door DOES ask the vendor before it stores anything",
+   "verify_key" in inspect.getsource(bs.put_anthropic))
 
 
 # ── 5. a key in the environment IS a working box ─────────────────────────────────────────
@@ -165,14 +179,42 @@ print("\ntest_the_step_can_actually_be_saved")
 
 from marketing.customer_voice import app as _app  # noqa: E402
 
-quiet(_app._setup_save, "anthropic", {"key": GOOD_KEY}, user_id=None)
+
+@contextlib.contextmanager
+def vendor_says_yes():
+    """A stand-in `anthropic` for the length of a block, so this suite makes no network call.
+
+    `anthropic>=0.40` is a real dependency (pyproject.toml:7). On a machine that has it installed,
+    saving a made-up key here would make a REAL call and get a REAL 401 — red for the wrong
+    reason, and impossible in a sandbox with no egress. `sys.modules` beats the installed package,
+    so the same stub serves a machine with the SDK and one without."""
+    mod = types.ModuleType("anthropic")
+
+    class _A:
+        def __init__(self, **kw):
+            self.models = type("M", (), {"list": lambda _s, **_k: object()})()
+    mod.Anthropic = _A
+    was = sys.modules.get("anthropic")
+    sys.modules["anthropic"] = mod
+    try:
+        yield
+    finally:
+        sys.modules["anthropic"] = was if was is not None else sys.modules.pop("anthropic", None)
+
+
+with vendor_says_yes():
+    quiet(_app._setup_save, "anthropic", {"key": GOOD_KEY}, user_id=None)
 ok("the save path the screen posts to stores the key", bs.anthropic_key() == GOOD_KEY)
 try:
-    quiet(_app._setup_save, "anthropic", {"key": "nope"}, user_id=None)
+    with vendor_says_yes():
+        quiet(_app._setup_save, "anthropic", {"key": "nope"}, user_id=None)
     refused = False
 except bs.SecretRejected:
     refused = True
-ok("...and refuses a bad one through the same door", refused)
+# THE SHAPE CHECK, NOT THE VENDOR — the stub above says yes to everything, so a refusal here can
+# only have come from `validate`. That is the point: the cheap rule still runs first and still
+# catches the wrong thing entirely without spending anything.
+ok("...and refuses a bad one through the same door, before any round trip", refused)
 
 # ASSERTED ON THE COPY AS IT IS RENDERED, not on the source text. My first version of this check
 # searched the whole function for "Two things only you can do" and failed — on MY OWN COMMENT,

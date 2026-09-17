@@ -77,6 +77,89 @@ def clear():
     box_secrets.clear(box_secrets.ANTHROPIC)
 
 
+class _Refused(Exception):
+    """Stands in for the SDK's AuthenticationError / PermissionDeniedError, by STATUS.
+
+    `brain._is_transient` and `verify_key` both read `status_code` and the class NAME, and a real
+    `anthropic.AuthenticationError` cannot be constructed without an httpx response. Matching on
+    the attribute is what the spine actually does — see `_TRANSIENT_EXC_NAMES` and the comment
+    above it explaining why the SDK is never imported to classify an error."""
+    def __init__(self, status):
+        super().__init__(f"status {status}")
+        self.status_code = status
+
+
+class APIConnectionError(Exception):
+    """NAMED, not numbered — this is the half of the split that carries no status at all, and the
+    name is the only thing `_is_transient` can match it on."""
+
+
+def vendor(answer):
+    """Put a stand-in `anthropic` on sys.modules for the length of a `with` block.
+
+    NO NETWORK, IN EITHER ENVIRONMENT, AND THAT IS THE POINT OF INJECTING RATHER THAN SKIPPING.
+    `anthropic>=0.40` is a real dependency (pyproject.toml:7), so on a machine that has it a test
+    posting a fake key would make a REAL call to Anthropic and get a real 401 — passing for the
+    wrong reason, costing a round trip, and failing in a sandbox with no egress. `sys.modules`
+    wins over the installed package, so the same stub serves both.
+
+    `answer` is 200 for a key the vendor accepts, an int status for one it refuses or a transient
+    failure, or an exception instance to raise as-is."""
+    import contextlib
+    import types
+
+    class _Models:
+        def list(self, **kw):
+            if answer == 200:
+                return object()
+            raise answer if isinstance(answer, Exception) else _Refused(answer)
+
+    class _Anthropic:
+        def __init__(self, **kw):
+            # WHAT THE PROBE IS BUILT WITH IS ASSERTED, not assumed: a probe that inherited
+            # `max_retries=4` from the worker's client would sit on a dead network for a minute
+            # with a person watching a button, and one built without the pasted key would report
+            # a verdict about whatever is already stored on the box.
+            self.kw = kw
+            self.models = _Models()
+            _Anthropic.last = kw
+
+    @contextlib.contextmanager
+    def _cm():
+        mod = types.ModuleType("anthropic")
+        mod.Anthropic = _Anthropic
+        old = sys.modules.get("anthropic")
+        sys.modules["anthropic"] = mod
+        try:
+            yield _Anthropic
+        finally:
+            if old is None:
+                sys.modules.pop("anthropic", None)
+            else:
+                sys.modules["anthropic"] = old
+    return _cm()
+
+
+def no_vendor():
+    """A box whose own SDK will not import — the sandbox, and the half-installed box."""
+    import contextlib
+    import types
+
+    @contextlib.contextmanager
+    def _cm():
+        broken = types.ModuleType("anthropic")   # a module with no `Anthropic` in it: the import
+        old = sys.modules.get("anthropic")       # `from anthropic import Anthropic` raises
+        sys.modules["anthropic"] = broken
+        try:
+            yield
+        finally:
+            if old is None:
+                sys.modules.pop("anthropic", None)
+            else:
+                sys.modules["anthropic"] = old
+    return _cm()
+
+
 # ── 1. the store, and who wins ───────────────────────────────────────────────────────
 def test_the_environment_still_wins_so_no_box_running_today_changes():
     print("test_the_environment_still_wins_so_no_box_running_today_changes")
@@ -229,7 +312,10 @@ def test_the_buyer_can_turn_it_on_and_off():
     print("test_the_buyer_can_turn_it_on_and_off")
     clear()
     c = client()
-    r = c.post("/inbox/drafts", data={"key": KEY})
+    # A VENDOR THAT SAYS YES, because since `put_anthropic` the screen asks one. Before this the
+    # line below stored a key nobody had checked, which is the whole of what this PR fixes.
+    with vendor(200):
+        r = c.post("/inbox/drafts", data={"key": KEY})
     ok("posting a key redirects back to Settings",
        r.status_code in (301, 302, 303) and "/inbox/settings" in r.headers.get("Location", ""))
     ok("...and the key is stored", box_secrets.get(box_secrets.ANTHROPIC) == KEY)
@@ -395,6 +481,216 @@ def test_a_key_is_checked_when_it_is_typed_not_hours_later_in_a_worker():
     clear()
 
 
+def test_a_well_formed_dud_never_reaches_the_table():
+    print("test_a_well_formed_dud_never_reaches_the_table")
+    # THE HOLE THIS SUITE'S OWN TITLE CLAIMED WAS CLOSED. The test above is named "a key is
+    # checked when it is typed, not hours later in a worker" and it checked a SHAPE, so the one
+    # key a shape cannot catch went straight in: measured on an exported customer_voice box on
+    # 2026-09-17, `sk-ant-api03-` + 80 characters was stored, `can_think()` answered (True,
+    # 'api'), and /inbox/settings then stated "Drafts On. Ownbox writes a reply for every message
+    # that arrives" on a box where it never would.
+    from core import box_secrets as bs
+    dud = "sk-ant-api03-" + "A" * 80
+    clear()
+    with vendor(401):
+        try:
+            bs.put_anthropic(dud)
+            ok("a key the vendor refuses is not stored", False, "it was stored")
+        except bs.SecretRejected as e:
+            ok("a key the vendor refuses is not stored", bs.get(bs.ANTHROPIC) == "")
+            ok("...and the sentence sends them to the console, not to support",
+               "console" in str(e).lower(), str(e))
+    # 403 IS A DIFFERENT FIX FROM 401 AND SO IT IS A DIFFERENT SENTENCE. An account out of credit
+    # refuses a perfectly good key, and a person told "we did not recognise it" mints a second
+    # one and hits the identical wall.
+    with vendor(403):
+        try:
+            bs.put_anthropic(dud)
+            ok("a refusal for credit is not stored either", False, "it was stored")
+        except bs.SecretRejected as e:
+            ok("a refusal for credit is not stored either", bs.get(bs.ANTHROPIC) == "")
+            ok("...and says credit rather than telling them to re-copy the key",
+               "credit" in str(e).lower(), str(e))
+    clear()
+
+
+def test_unreachable_is_not_refused():
+    print("test_unreachable_is_not_refused")
+    # OSDEV5'S RULE FROM THE MAILBOX, AND IT BINDS HARDER HERE. Told "your key is wrong", a person
+    # goes to the console and makes a NEW key they did not need — and now has two, one of which
+    # they believe is broken. A bad minute must never produce that sentence.
+    from core import box_secrets as bs
+    good = "sk-ant-api03-" + "B" * 80
+    for label, answer in (("a rate limit", 429), ("a 5xx", 503),
+                          ("a dropped connection", APIConnectionError("reset")),
+                          ("a box whose own SDK will not import", None)):
+        clear()
+        ctx = no_vendor() if answer is None else vendor(answer)
+        with ctx:
+            try:
+                bs.put_anthropic(good)
+                ok(f"{label}: nothing is stored", False, "it was stored")
+            except bs.SecretRejected as e:
+                said = str(e).lower()
+                ok(f"{label}: nothing is stored", bs.get(bs.ANTHROPIC) == "")
+                ok(f"{label}: says try again, and does not condemn the key",
+                   "try again" in said and "did not recognise" not in said
+                   and "credit" not in said, str(e))
+    clear()
+
+
+def test_the_probe_is_built_with_the_pasted_key_and_does_not_wait_a_minute():
+    print("test_the_probe_is_built_with_the_pasted_key_and_does_not_wait_a_minute")
+    # TWO WAYS THIS COULD BE WRITTEN AND STILL LOOK GREEN. A probe built from `_client_()` would
+    # authenticate whatever is ALREADY on the box — so pasting a dud over a working key would
+    # report success. And a probe that inherited the worker's `max_retries=4` would back off four
+    # times on a dead network while a person watches a button that has not moved.
+    from core import box_secrets as bs
+    from core import brain
+    clear()
+    bs.put(bs.ANTHROPIC, "sk-ant-api03-" + "O" * 80)   # something already on the box
+    fresh = "sk-ant-api03-" + "N" * 80
+    with vendor(200) as Fake:
+        brain.verify_key(fresh)
+        ok("the probe carries the key that was just pasted", Fake.last.get("api_key") == fresh,
+           str(Fake.last.get("api_key"))[:20])
+        ok("...and does not inherit the worker's four retries",
+           Fake.last.get("max_retries") == 0, str(Fake.last.get("max_retries")))
+        ok("...and is bounded by a timeout a person would wait out",
+           0 < float(Fake.last.get("timeout") or 0) <= 30, str(Fake.last.get("timeout")))
+    clear()
+
+
+def test_a_refusal_days_later_reaches_both_screens_and_they_agree():
+    print("test_a_refusal_days_later_reaches_both_screens_and_they_agree")
+    # THE HALF THE PROBE CANNOT COVER. A key checked on Tuesday can be revoked on Friday, or its
+    # account can run out of credit — and the box finds out in the worker, where nobody is
+    # looking. Before this, Settings went on stating "Drafts On. Ownbox writes a reply for every
+    # message that arrives" and the thread note stayed silent, because both asked `is_set`.
+    from core import box_secrets as bs
+    from marketing.customer_voice import app as _app
+    clear()
+    with vendor(200):
+        bs.put_anthropic(KEY)
+    ok("a working key reads connected", bs.anthropic_state()["status"] == "connected")
+    ok("...and Settings says so", "On. Ownbox writes a reply" in _app._drafts_row())
+
+    bs.note_anthropic_status("needs_reauth", "401 invalid x-api-key")
+    row = _app._drafts_row()
+    ok("a revoked key moves the Settings row off On", "On. Ownbox writes a reply" not in row, row[:120])
+    ok("...and says what to do rather than naming a 401",
+       "Paste a new key" in row and "401" not in row, row[:160])
+
+    bs.note_anthropic_status("payment_required", "403 credit balance too low")
+    row = _app._drafts_row()
+    ok("an account out of credit gets its OWN sentence, not the re-paste one",
+       "credit" in row.lower() and "Paste a new key" not in row, row[:160])
+
+    # THE TWO SCREENS READ ONE VALUE. They disagreed by construction before: Settings asked
+    # `is_set` and so did the thread, so a refused key made both of them wrong in the same breath
+    # — and any future fix to one alone would have made them wrong in DIFFERENT directions.
+    import inspect
+    thread = inspect.getsource(_app)
+    ok("neither screen decides this from `is_set` any more",
+       "is_set(box_secrets.ANTHROPIC)" not in thread, "a screen still asks whether a key exists")
+
+    # THE THREAD NOTE ITSELF, RENDERED. `_compose` is called directly rather than through the
+    # page because a full thread needs a polled `account_id` and an open window to draw a reply
+    # box at all — and none of that is what this is about. `conv` carries what the compose box
+    # needs and nothing else.
+    conv = {"zernio_conversation_id": "c9", "platform": "messenger", "account_id": "acct_1",
+            "last_inbound_at": state._now(), "opted_out": 0}
+    bs.note_anthropic_status("needs_reauth", "401")
+    box = _app._compose("c9", conv)
+    ok("the thread says drafting is PAUSED, where the draft would have been",
+       "Drafts are paused" in box, box[-220:] if box else "(no reply box rendered)")
+    ok("...and does not claim they were never turned on",
+       "Drafts are off" not in box)
+    # EACH NOTE GOES WHERE ITS OWN FIX IS — #1356's rule, and the two paused states do not share
+    # a fix. A key the vendor no longer accepts is replaced in the key form; an account with no
+    # credit is fixed in the Anthropic console, and Settings is where that sentence and its link
+    # live. Sending the second one to the key form would offer a control that cannot help.
+    ok("...and sends them to the form that replaces the key, not to a menu",
+       'href="/inbox/drafts"' in box and "Paste a new one" in box, box[-260:])
+    bs.note_anthropic_status("payment_required", "403")
+    box = _app._compose("c9", conv)
+    ok("an account out of credit is told so on the thread too",
+       "needs credit" in box, box[-260:])
+    ok("...and goes to Settings, because the fix is a card in the console, not a field here",
+       'href="/inbox/settings"' in box and "/inbox/drafts" not in box, box[-260:])
+    bs.note_anthropic_status("needs_reauth", "401")
+    with vendor(200):
+        bs.put_anthropic(KEY)
+    ok("...and says nothing at all once the key works again",
+       "Drafts are paused" not in _app._compose("c9", conv))
+    bs.clear_anthropic()
+    ok("...while a box with no key still gets the original off note",
+       "Drafts are off" in _app._compose("c9", conv))
+    with vendor(200):
+        bs.put_anthropic(KEY)
+
+    # AND TURNING IT OFF TAKES THE STATUS WITH IT, or the next key inherits this refusal.
+    bs.clear_anthropic()
+    ok("turning drafts off clears the vendor's last word too",
+       bs.get(bs.ANTHROPIC_STATUS) == "" and bs.get(bs.ANTHROPIC_DETAIL) == "")
+    with vendor(200):
+        bs.put_anthropic(KEY)
+    ok("...so a fresh key is not greeted with the old one's refusal",
+       bs.anthropic_state()["status"] == "connected")
+    clear()
+
+
+def test_the_drafter_records_a_refusal_but_never_a_bad_minute():
+    print("test_the_drafter_records_a_refusal_but_never_a_bad_minute")
+    # THE JUDGEMENT THAT MATTERS MOST HERE. This runs unattended every few minutes; a rate limit
+    # that wrote `needs_reauth` would tell a buyer their working key had stopped working, and
+    # they would go and make a new one. Only a refusal is a refusal.
+    from core import box_secrets as bs
+    from marketing.customer_voice.drafter import draft as D
+    for label, exc, expected in (
+            ("a 401", _Refused(401), "needs_reauth"),
+            ("a 403", _Refused(403), "payment_required"),
+            ("a rate limit", _Refused(429), "connected"),
+            ("a 5xx", _Refused(503), "connected"),
+            ("a dropped connection", APIConnectionError("reset"), "connected"),
+            ("a cap, which is not the key's fault", ValueError("over budget"), "connected")):
+        clear()
+        with vendor(200):
+            bs.put_anthropic(KEY)
+        D._note_if_refused(exc)
+        ok(f"{label} -> {expected}", bs.anthropic_state()["status"] == expected,
+           bs.anthropic_state()["status"])
+    # AND A DRAFT THAT LANDS CLEARS IT, because `payment_required` is fixed in the console and
+    # nobody comes back to Settings to say so. Without this the row sticks red over a box that
+    # has quietly started drafting again.
+    bs.note_anthropic_status("payment_required", "403")
+    D._note_recovered()
+    ok("a draft that lands clears a standing refusal",
+       bs.anthropic_state()["status"] == "connected")
+
+    # AND THE SWEEP ACTUALLY CALLS IT. Everything above tests the two helpers directly, which is
+    # green whether or not `draft_one` ever reaches them — deleting the call site left this suite
+    # passing on the first run of it. So the last two go through the real path.
+    from core import brain, cost_guard
+    real_think, real_check = brain.think, cost_guard.check_vendor
+    try:
+        cost_guard.check_vendor = lambda *a, **k: None
+        clear()
+        with vendor(200):
+            bs.put_anthropic(KEY)
+        brain.think = lambda **kw: (_ for _ in ()).throw(_Refused(401))
+        D.draft_one(space="default", zcid="c1", in_reply_to="m1", inbound="hello", history=[])
+        ok("a refusal inside the sweep reaches the row a buyer reads",
+           bs.anthropic_state()["status"] == "needs_reauth", bs.anthropic_state()["status"])
+        brain.think = lambda **kw: "Sure — we open at nine."
+        D.draft_one(space="default", zcid="c2", in_reply_to="m2", inbound="hello", history=[])
+        ok("...and a draft that lands in the sweep clears it again",
+           bs.anthropic_state()["status"] == "connected", bs.anthropic_state()["status"])
+    finally:
+        brain.think, cost_guard.check_vendor = real_think, real_check
+    clear()
+
+
 def test_the_screen_shows_the_stores_own_refusal_not_one_of_its_own():
     print("test_the_screen_shows_the_stores_own_refusal_not_one_of_its_own")
     # SPLIT OUT OF THE TEST ABOVE, which is otherwise pure core and runs in every box. These two
@@ -439,5 +735,12 @@ if __name__ == "__main__":
     test_the_key_is_not_in_the_data_export()
     test_the_key_is_never_written_to_the_journal()
     test_a_key_is_checked_when_it_is_typed_not_hours_later_in_a_worker()
+    test_a_well_formed_dud_never_reaches_the_table()
+    test_unreachable_is_not_refused()
+    test_the_probe_is_built_with_the_pasted_key_and_does_not_wait_a_minute()
+    # BOTH NEED THE INBOX: one renders `_drafts_row`, the other imports the drafter.
+    if HAS_INBOX:
+        test_a_refusal_days_later_reaches_both_screens_and_they_agree()
+        test_the_drafter_records_a_refusal_but_never_a_bad_minute()
     print("\nall ok" if not _failed else f"\n{_failed} FAILED")
     sys.exit(1 if _failed else 0)

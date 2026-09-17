@@ -109,7 +109,14 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
         # load-bearing for reading or answering the inbox by hand.
         log.warning("drafter.think_failed", extra={"space": space, "conversation": zcid,
                                                    "error": f"{type(e).__name__}: {e}"[:160]})
+        _note_if_refused(e)
         return None
+
+    # A DRAFT THAT LANDED IS THE ONLY HONEST 'CONNECTED', and this write is what stops the row
+    # sticking red. `payment_required` is fixed in the Anthropic console, not on this box: the
+    # buyer adds a card, never touches Settings again, and without this the screen would go on
+    # telling them their account needs credit while drafts quietly arrived.
+    _note_recovered()
 
     text = str(text or "").strip()
     if not text:
@@ -119,6 +126,46 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
     log.info("drafter.drafted", extra={"space": space, "conversation": zcid,
                                        "in_reply_to": in_reply_to, "chars": len(text)})
     return text
+
+
+def _note_recovered() -> None:
+    """Anthropic answered, so whatever it last refused for is over. Only writes on a CHANGE."""
+    try:
+        from core import box_secrets
+        if box_secrets.get(box_secrets.ANTHROPIC_STATUS) not in ("", None, "connected"):
+            box_secrets.note_anthropic_status("connected")
+    except Exception:                            # noqa: BLE001 — never break a sweep over a row
+        pass
+
+
+def _note_if_refused(e: Exception) -> None:
+    """A REFUSAL MOVES THE SETTINGS ROW. A bad minute does not.
+
+    The key was checked with Anthropic when it was pasted (`box_secrets.put_anthropic`), so by the
+    time this file runs the only way it can be wrong is that something CHANGED: revoked in the
+    console, or an account out of credit. A buyer cannot find that out from here — the worker has
+    no screen — so the verdict is written where Settings and the thread both read it.
+
+    THE JUDGEMENT IS `brain._is_transient`, NOT A SECOND COPY OF IT. This runs unattended every
+    few minutes; a rate limit or a dropped connection that wrote `needs_reauth` would greet the
+    buyer with "your key stopped working" over a key that is fine, which is worse than saying
+    nothing. Only 401 and 403 are refusals, and they are different sentences because they are
+    different fixes: one is a key to re-copy, the other is a card to add.
+    """
+    try:
+        from core import box_secrets, brain
+        if brain._is_transient(e):
+            return
+        status = getattr(e, "status_code", None)
+        name = type(e).__name__
+        if status == 403 or name == "PermissionDeniedError":
+            box_secrets.note_anthropic_status("payment_required", str(e)[:200])
+        elif status == 401 or name == "AuthenticationError":
+            box_secrets.note_anthropic_status("needs_reauth", str(e)[:200])
+        # ANYTHING ELSE IS LEFT ALONE, deliberately. A bad request, a model name the account
+        # cannot reach, a cap — none of those are the buyer's key, and none should tell them it is.
+    except Exception:                            # noqa: BLE001 — recording a reason must never
+        pass                                     # be the thing that breaks the sweep
 
 
 def periodic() -> dict:

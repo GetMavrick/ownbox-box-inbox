@@ -83,6 +83,65 @@ def _client_():
     return _client
 
 
+def verify_key(value: str) -> tuple[bool, str]:
+    """Ask Anthropic whether this key works. Returns (ok, a sentence for the buyer).
+
+    WHY THIS LIVES HERE AND NOT IN `box_secrets`. This module owns the only Anthropic import in
+    the spine, and it owns `_is_transient` — the classifier that decides whether a failure is the
+    key's fault or the minute's. Putting the probe anywhere else would mean a second SDK import
+    and a second, drifting copy of that judgement.
+
+    IT ASKS `models.list`, NOT `messages.create`, AND THAT IS THE WHOLE DESIGN. Listing models
+    authenticates without generating a single token: it is not inference, so it does not belong
+    in `think()` (invariant 2 stays intact — nothing here reasons), and it is not billed, so
+    there is nothing for `cost_guard` to meter (invariant 4 has no work to do). A one-token
+    `messages.create` would have proved the same thing and cost money at the exact moment a
+    buyer is first trying to set their box up.
+
+    UNREACHABLE IS NOT REFUSED — the rule OSDev5 wrote into the mailbox path, and the difference
+    matters more here than anywhere. Told "your key is wrong", a person goes to the console and
+    makes a NEW key they did not need, and now has two. So a 401 or 403 is the only thing this
+    calls a bad key; a rate limit, a 5xx, a dropped connection or a box whose SDK is not
+    installed all come back as "try again", which is true and costs them nothing.
+    """
+    value = str(value or "").strip()
+    if not value:
+        return False, "Paste the key from your AI account, then turn drafts on."
+    try:
+        from anthropic import Anthropic  # lazily, exactly as `_client_` does
+    except Exception:                            # noqa: BLE001 — a box missing its own SDK is
+        # A BOX FAULT, NOT A BAD KEY, so it must not send anybody to the console. Every delivered
+        # box installs `anthropic>=0.40` (pyproject.toml:7), so this is the sandbox and the
+        # half-installed box — and in both the honest answer is that we could not ask.
+        log.warning("verify_key.no_sdk")
+        return False, ("Ownbox could not check that key just now. Nothing is saved — "
+                       "try again in a minute.")
+    # A THROWAWAY CLIENT, NEVER `_client_()`. That one is keyed by the STORED key and this key is
+    # not stored yet — calling it here would probe whatever is already on the box and report a
+    # verdict about the wrong credential. `max_retries=0` because a person is standing at the
+    # screen: four backoffs on a dead network is a minute of a blank button.
+    try:
+        probe = Anthropic(api_key=value, max_retries=0, timeout=15.0)
+        probe.models.list(limit=1)
+    except Exception as e:                       # noqa: BLE001 — every failure becomes a sentence
+        status = getattr(e, "status_code", None)
+        if status in (401, 403) or type(e).__name__ in (
+                "AuthenticationError", "PermissionDeniedError"):
+            log.info("verify_key.refused", status=status)
+            # TWO DIFFERENT FIXES, SO TWO DIFFERENT SENTENCES. 401 means the key is not valid;
+            # 403 is most often a console that has run out of credit, and a person told to
+            # re-paste a perfectly good key over that learns nothing.
+            if status == 403 or type(e).__name__ == "PermissionDeniedError":
+                return False, ("Your AI account refused that key — usually it means the account "
+                               "needs credit. Add some there, then paste it again.")
+            return False, ("Your AI account did not recognise that key. Copy it again from the "
+                           "console — a key is only shown once, when you make it.")
+        log.warning("verify_key.unreachable", error=f"{type(e).__name__}"[:60])
+        return False, ("Ownbox could not reach your AI account just now. Nothing is saved — "
+                       "try again in a minute.")
+    return True, "connected"
+
+
 def _model_for(task: str) -> str:
     cfg = get_config()
     tier = cfg["models"].get(task, cfg["models"]["default"])

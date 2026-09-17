@@ -200,6 +200,58 @@ else:
     print("  --   no lead machine in this box — nothing to check")
 
 
+# ── 6. and the buyer is told, on the page they live on ───────────────────────────────────
+print("\ntest_the_inbox_says_the_box_is_stopped")
+
+# THE GAP THIS CLOSES IS ONE THIS PR MADE. Stop moved into core and onto /dashboard, which says
+# plainly that the box is stopped — and the INBOX said nothing at all. Measured on an exported
+# customer_voice box: dashboard said stopped; inbox, thread and settings said nothing. New
+# messages just stop arriving, the screen looks normal, and the only conclusion available to the
+# buyer is that the thing is broken.
+#
+# ASKED ONLY WHERE THE INBOX EXISTS. This suite ships into every box, and a Lead box has no
+# `marketing/customer_voice` and therefore no /inbox routes — the shape that has bitten six
+# suites. A missing directory means this box has no inbox to check, not a failure.
+import pathlib as _pl  # noqa: E402
+
+_HAS_INBOX = (_pl.Path(__file__).resolve().parents[1] / "marketing" / "customer_voice").is_dir()
+if not _HAS_INBOX:
+    print("  --   no inbox on this box — nothing to check")
+else:
+    from marketing.customer_voice.inbox import store as _istore  # noqa: E402
+
+    _istore.upsert_conversation(space="default", zcid="c-stopped", platform="instagram",
+                                participant="Priya", last_inbound_at="2026-09-17T18:00:00Z",
+                                account_id="a1")
+    _istore.record_message(space="default", zcid="c-stopped", zmid="m-stopped", direction="in",
+                           sent_by="contact", body="Are you open Sunday?")
+
+    pause.resume()
+    running = OWNER.get("/inbox/inbox").get_data(as_text=True)
+    ok("a running box says nothing about being stopped", "box is stopped" not in running)
+
+    OWNER.post("/dash/stop")
+    stopped = OWNER.get("/inbox/inbox").get_data(as_text=True)
+    ok("A STOPPED BOX SAYS SO ON THE INBOX — the page the buyer actually lives on",
+       "box is stopped" in stopped)
+    ok("...and says what stopped: no new messages are arriving",
+       "no new messages are arriving" in stopped)
+    # HALF A FACT IS WORSE THAN NONE. core/pause is read by core/worker and nothing else, so the
+    # MACHINES stop and a person can still answer by hand. Saying "stopped" without that would
+    # have a buyer thinking a reply they typed went nowhere.
+    ok("...and names what STILL works, because a human send is not a machine",
+       "still reply" in stopped)
+    ok("...and offers the way back", 'href="/dashboard"' in stopped)
+
+    # THE THREAD IS DELIBERATELY NOT CHANGED. Replying works while stopped, so a note there would
+    # be telling someone that the thing they are doing does not work. The confusing state is
+    # "nothing NEW arrives", which is a list-level observation.
+    thread = OWNER.get("/inbox/inbox/c-stopped").get_data(as_text=True)
+    ok("the thread is left alone, because replying still works there",
+       "box is stopped" not in thread)
+    OWNER.post("/dash/resume")
+
+
 print("\n— and this file cannot silently fall out of CI —")
 import pathlib  # noqa: E402
 

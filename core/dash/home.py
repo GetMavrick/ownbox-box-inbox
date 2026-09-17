@@ -389,6 +389,53 @@ def _stop_card() -> str:
             f'<button type="submit">{_esc(word)}</button></form></div>')
 
 
+def _managed_card() -> str:
+    """The way to the cancel door, on the screen a buyer actually lands on.
+
+    THE DOOR WAS ALREADY OPEN AND NOTHING POINTED AT IT. #1229 shipped `/dash/managed` with
+    Ownbox's Stripe portal as the default, so the page works on every sold box and a buyer can
+    cancel from it. Measured on a box exported from main (2026-09-17): across every screen that
+    box serves — this one, the people page, and both of its machine's — there were zero
+    occurrences of `/dash/managed` or of the word Managed. The only way in was to know the URL.
+
+    THAT IS THE HALF THE LAW IS ABOUT. The owner's ruling (2026-09-15, OSDev2's session, on the
+    wall) is that Managed auto-renews at $99/mo after ninety days and needs "self-serve cancel in
+    the box, one click to the Stripe portal, as easy as ticking the box (FTC click-to-cancel)". A
+    page nobody can find is not one click, and the checkout copy promises cancelling before day 90
+    costs nothing — a promise the box could not keep from any screen it actually shows.
+
+    DRAWN ONLY WHEN MANAGED WAS BOUGHT. `provisioned_managed_until()` is written into
+    provision.json by the provisioner from the cart's line items, so most boxes have none. A card
+    about a subscription you never bought is a support ticket, and worse, it invites somebody to
+    go looking for a charge that does not exist.
+
+    OWNER ONLY, the same gate as Stop everything and for a narrower version of the same reason:
+    the Stripe portal signs in the person who PAID, so a member following this link gets an email
+    they will never receive. Hiding it is the courtesy; `/dash/managed` has its own gate.
+
+    IT NAMES THE DATE HERE RATHER THAN MAKING THEM CLICK TO FIND OUT. What a person wants from a
+    dashboard is whether anything is about to happen to their card; the page behind it is where
+    the detail and the button live.
+    """
+    from core import claim as _claim
+    from core.dash import session_user as _who
+    person = _who(request)
+    if not person or person.get("role") != "owner":
+        return ""
+    until = _claim.provisioned_managed_until()
+    if not until:
+        return ""
+    try:
+        from datetime import datetime as _dt
+        day = _dt.fromisoformat(until).strftime("%-d %B %Y")
+    except ValueError:
+        day = until                          # an unparseable date is still better shown than hidden
+    return ('<div class="card"><h2>Managed</h2>'
+            f'<p class="sub">Free until {_esc(day)}. Unless you cancel, it renews after that. '
+            'Cancelling does not touch the box — it keeps running and it stays yours.</p>'
+            '<p><a href="/dash/managed">Manage or cancel &rarr;</a></p></div>')
+
+
 def _home() -> str:
     view = report.view()
     if not view.get("exists"):
@@ -402,8 +449,11 @@ def _home() -> str:
                 'the numbers below are the last ones written, not this minute\'s.</span></div>'
                 if stale else "")
         body = note + _needs_card(view) + _segments(view)
-    # LAST ON THE PAGE, deliberately: it is the control you want findable and never the one you
-    # want your thumb near while reading the morning's numbers on a phone.
+    # BOTH LAST, AND IN THIS ORDER. Stop everything is the control you want findable and never
+    # the one you want your thumb near while reading the morning's numbers on a phone; Managed is
+    # a thing you go looking for on a particular day, so it sits below the numbers and above the
+    # one button on this page that changes what the box is doing.
+    body += _managed_card()
     body += _stop_card()
     return chrome("/dashboard", title="Dashboard",
                   lede=f"What your box did — {view.get('label') or 'today'}.",
