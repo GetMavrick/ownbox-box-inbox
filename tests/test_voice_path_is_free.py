@@ -96,8 +96,12 @@ from core import dash  # noqa: E402
 
 ok("no login landing names /voice", not any("/voice" in p for p in dash._LANDINGS), str(dash._LANDINGS))
 with app.test_request_context("/"):
-    ok("the landing this box actually serves is the inbox's", dash.landing().startswith("/inbox/")
-       or dash.landing() == "/dash/home", dash.landing())
+    # WHAT THIS GUARD OWNS IS "NOT /voice", NOT WHICH PAGE WINS. The landing order is decided in
+    # core/dash._LANDINGS, and on 2026-09-17 it moved to /dashboard for a buyer's box (owner: "They
+    # should go to /dashboard"). This assertion used to name the inbox, passed in CI (whose everything-app
+    # serves /dash/home) and FAILED inside the image v11 clone, where the true landing is /dashboard.
+    ok("the landing this box actually serves is not on the receptionist's path",
+       not dash.landing().startswith("/voice"), dash.landing())
 
 print("\n— the cut cannot quietly un-do itself —")
 URL_LITERAL = re.compile(r"""['"]/voice(?:[/'"?#]|$)""")
