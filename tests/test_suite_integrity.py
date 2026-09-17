@@ -302,10 +302,82 @@ def test_every_suite_is_actually_run_by_ci():
        + (f" — REMOVE: {now_run}" if now_run else ""), not now_run)
 
 
+# ─── a shipped suite may not read .github/ unguarded ─────────────────────────────────────────
+def _unguarded_github_reads(src: str) -> list[str]:
+    """Scopes (function names, or <module>) that name a `.github` path in CODE — never a docstring —
+    with no existence check and no FileNotFoundError/OSError handler anywhere in that same scope.
+
+    Deliberately narrow. A broad rule over docs/, sites/ and machine paths was measured on
+    2026-09-16 and flagged seven shipped suites, three of which pass inside the very box that ships
+    them — a guard that pages on noise is a guard people learn to skip. `.github` is the one that
+    RECURRED: eight suites in one day read .github/workflows/tests.yml to check they were listed in
+    CI, and every one crashed with FileNotFoundError inside a buyer's box, because a box has no
+    repository. Found by hand each time, and once only after a PR had merged."""
+    tree = ast.parse(src)
+    docs = set()
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and n.body:
+            f = n.body[0]
+            if isinstance(f, ast.Expr) and isinstance(f.value, ast.Constant) and isinstance(f.value.value, str):
+                docs.add(id(f.value))
+
+    def guarded(scope) -> bool:
+        for n in ast.walk(scope):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in (
+                    "exists", "is_dir", "is_file"):
+                return True
+            if isinstance(n, ast.Try) and any(
+                    h.type is None or re.search(r"FileNotFoundError|OSError|Exception", ast.unparse(h.type))
+                    for h in n.handlers):
+                return True
+        return False
+
+    owner = {}
+    for scope in [tree] + [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+        for n in ast.walk(scope):
+            if (isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs
+                    and re.search(r"(^|/)\.github(/|$)", n.value)):
+                owner[id(n)] = scope                      # an inner function overwrites the module
+    return sorted({getattr(sc, "name", "<module>") for sc in owner.values() if not guarded(sc)})
+
+
+_GITHUB_BAD = pathlib.Path(__file__).resolve().parent / "fixtures" / "reads_github_unguarded.py"
+_GITHUB_OK = pathlib.Path(__file__).resolve().parent / "fixtures" / "reads_github_guarded.py"
+
+
+def test_no_shipped_suite_reads_github_unguarded():
+    """EIGHT IN ONE DAY. A suite that ships into a buyer's box and reads .github/ crashes there,
+    and CI cannot see it — test_recipe_ships runs the shipped suites in a LEAD box only, while
+    every one of the eight shipped to a Customer Voice box. Caught here at write time instead."""
+    print("\n— a shipped suite may not read .github/ without checking it is the repo —")
+    ok("the check SEES an unguarded read (so a pass below means something)",
+       _GITHUB_BAD.exists() and _unguarded_github_reads(_GITHUB_BAD.read_text()) == ["test_listed_in_ci"])
+    ok("...and accepts one guarded on the directory existing",
+       _GITHUB_OK.exists() and _unguarded_github_reads(_GITHUB_OK.read_text()) == [])
+    exporter = ROOT.parent / "scripts" / "export_box.sh"
+    if not exporter.exists():
+        ok("not in a repo checkout, nothing to enforce here", True)
+        return
+    skip_src = exporter.read_text()
+    found = {}
+    for path in sorted(ROOT.glob("test_*.py")):
+        if f'"{path.name}"' in skip_src or path.name == "test_suite_integrity.py":
+            continue                                       # kept home: never reaches a box
+        try:
+            bad = _unguarded_github_reads(path.read_text())
+        except SyntaxError:
+            continue
+        if bad:
+            found[path.name] = bad
+    ok("no shipped suite reads .github/ unguarded — a box has no repository"
+       + (f" — GUARD ON (ROOT / '.github').is_dir(): {found}" if found else ""), not found)
+
+
 def main():
     test_the_scan_can_actually_SEE_an_orphan()
     test_every_test_in_every_suite_is_actually_reachable()
     test_every_export_driving_suite_is_kept_home()
+    test_no_shipped_suite_reads_github_unguarded()
     test_every_suite_is_actually_run_by_ci()
     test_the_db_guard_can_actually_SEE_the_defect()
     test_no_suite_can_open_the_live_db()
