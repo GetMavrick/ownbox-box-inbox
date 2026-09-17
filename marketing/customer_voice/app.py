@@ -25,7 +25,7 @@ from datetime import date
 
 from flask import Blueprint, redirect, request
 
-from core import dash
+from core import dash, shell
 from core.logging import get_logger
 
 log = get_logger(__name__)
@@ -279,7 +279,21 @@ a.row:active{background:var(--hair);border-radius:10px}
    and a second tag sliding straight under the channel logo, because a `flex:none` pill cannot
    shrink and simply overflowed its grid column. A half-shown tag is a half-shown fact, and
    "Opted ou" is worse than not saying it. So a busy row grows a line instead of hiding one. */
-.conv .s .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* AND THE GREY LINE IS WHAT GIVES WAY, WHICH IS THE HALF THE RULE ABOVE LEFT OUT. `min-width:0`
+   lets it shrink but flexbox decides to WRAP from each item's BASE size, before any shrinking —
+   so a long preview pushed the tag onto a second line even though the preview was the one thing
+   on the row that could have yielded. Measured at 390px: rows came out 85, 85, 85, 140, 112, 111
+   px tall, a 65% swing between neighbours in a list whose whole job is to be scanned.
+   `flex:1 1 0` makes its base size zero, so it never forces the wrap, takes whatever is left and
+   ellipses — which is what every mail app does with a preview, and what the tags must never do.
+
+   MIND THE PROSE IN HERE: this stylesheet is INLINED INTO EVERY PAGE, so a CSS comment is shipped
+   bytes, and `test_drafts_switch` reads the whole of /inbox/settings looking for fault-report
+   language. The first draft of the sentence above used one of the words it bans and turned that
+   suite red — a comment about layout, breaking a test about copy, because the guard cannot tell
+   the two apart from inside the page. It is RIGHT to scan the whole page; the fix belongs here.
+   Read that suite before writing prose in this string. */
+.conv .s .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 0}
 .conv .mk{grid-row:1/3;grid-column:3;flex:none;display:flex;align-items:center}
 .conv.out .av{background:var(--bubble-in);color:var(--dimmer)}
 
@@ -397,6 +411,48 @@ a.row:active{background:var(--hair);border-radius:10px}
 .chip.on{color:var(--accent-ink);background:var(--accent)}
 .chip.on .n{color:var(--accent-ink);opacity:.75}
 .chip .n{color:var(--dimmer);font-size:12px;font-variant-numeric:tabular-nums}
+
+/* ── the inbox on a screen with room ───────────────────────────────────────────────────────
+   Owner, 2026-09-17: "With the social media channels on the left, and they move horizontally at
+   the top on Mobile as you have it."
+
+   THE PHONE IS UNTOUCHED. Everything above this line is the layout he already approved, and it
+   stays the default — this block only runs where there is width to spend, which is the one place
+   a 620px column was throwing it away. `.ib` is set by the inbox page alone, so no other screen
+   in the app widens by accident.
+
+   THE CHIPS BECOME THE RAIL RATHER THAN BEING REPLACED BY ONE. Same links, same counts, same
+   current-chip rule — a second markup for the same list is how the two stop agreeing, and the
+   filter that works on a phone has to be the filter that works on a laptop. Only the axis changes.
+
+   IT STICKS, because the list it filters is the thing that scrolls. A channel rail that scrolls
+   away with 200 conversations is a rail you have to go back up to use. */
+@media (min-width:900px){
+  /* THE BAR IS A SIBLING OF THE COLUMN, so it has to widen with it or the name sits in the old
+     620px centre while everything under it starts 116px from the left — measured at 1280px, and
+     the kind of half-millimetre wrongness that makes a page feel unfinished without anyone being
+     able to say why. */
+  .ib .bar-in{max-width:1080px}
+  .ib .wrap{max-width:1080px;display:grid;grid-template-columns:224px minmax(0,1fr);
+    column-gap:32px;align-items:start}
+  .ib .wrap>h1{grid-column:1/-1}
+  .ib .wrap>.find,.ib .wrap>.card,.ib .wrap>.pager,.ib .wrap>.quiet,.ib .wrap>.hits{grid-column:2}
+  .ib .wrap>.chips{grid-column:1;grid-row:2/60;flex-direction:column;gap:2px;margin:12px 0 0;
+    overflow:visible;padding:0;position:sticky;top:74px}
+  /* A ROW, NOT A PILL. Stretched to the column width a 999px radius reads as a stadium button
+     the full width of the rail; at rail width the shape people know is a list row. */
+  .ib .wrap .chip{width:100%;justify-content:space-between;border-radius:10px;padding:9px 12px;
+    box-shadow:none;background:transparent}
+  .ib .wrap .chip:hover{background:var(--surface)}
+  /* A SELECTED ROW, NOT A BUTTON. The phone's pill is small and a solid accent reads as "you are
+     here"; stretched to a 224px rail the SAME fill becomes the heaviest object on the screen —
+     a call to action, for a filter that is on by default and does nothing when you press it.
+     Rendered at 1280px before changing it. The tint plus accent ink says selected just as
+     plainly, and the reference the owner gave us is minimal for exactly this reason. */
+  .ib .wrap .chip.on,.ib .wrap .chip.on:hover{background:var(--accent-soft);color:var(--accent);
+    font-weight:600}
+  .ib .wrap .chip.on .n{color:var(--accent);opacity:.7}
+}
 
 /* ── the thread ────────────────────────────────────────────────────────────────────────────
    Theirs left, ours right — the iMessage shape, which is the one everybody already reads. */
@@ -599,6 +655,50 @@ _TABS = (
 )
 
 
+# ── this machine's own place in the box's menu ───────────────────────────────────────────────
+#
+# THE FIRST MACHINE EVER TO REGISTER A SECTION, which makes these lines the point where the
+# plug-in model stops being a design and starts being behaviour a buyer can see. Owner,
+# 2026-09-17: *"Each machine will plug in different menu options"* and *"the Customer machine
+# plug-ins will add dashboard areas."* Core registers Dashboard and nothing else; this box grows
+# an Inbox row because it carries THIS machine, and a box sold without it has no Inbox row to
+# explain away. Nothing in `core/` names customer_voice to make that happen.
+#
+# TWO TAPS TO MESSAGES, which is exactly what he described: *"When people click inbox and then
+# messages, it launches into the exact inbox that you designed in that mock up."* So the section's
+# own href is `/inbox/` — the day — and Messages is a row beneath it rather than the section
+# itself. No shipped URL moves.
+#
+# THE ICONS ARE THE TAB BAR'S, LOOKED UP BY HREF RATHER THAN COPIED. Two menus drawing the same
+# destination with two different glyphs is the drift `rail_html` exists to prevent, and a
+# duplicated `d` string is how it would start — the reasoning behind these three shapes is in
+# `_TABS` above and it should not have to be true in two places.
+#
+# THE LABELS ARE DELIBERATELY NOT SHARED. The tab bar says "Inbox" because it sits at the bottom
+# of the whole app; the rail says "Messages" because it sits INSIDE a section already titled
+# Inbox, where a row called Inbox says nothing to the person reading it.
+_TAB_ICON = {href: d for href, _label, d in _TABS}
+
+shell.register_section(
+    "inbox", order=10, machine="customer_voice", title="Inbox",
+    href="/inbox/", icon=_TAB_ICON["/inbox/inbox"],
+    items=[
+        {"key": "messages", "label": "Messages", "href": "/inbox/inbox",
+         "icon": _TAB_ICON["/inbox/inbox"]},
+        {"key": "today", "label": "Today", "href": "/inbox/",
+         "icon": _TAB_ICON["/inbox/"]},
+        # SETTINGS STAYS A ROW HERE FOR NOW, and this is the one item with a question over it.
+        # `docs/PLAN_SCREENS.md` §4.3 argues inbox settings belong in the box's Settings registry
+        # rather than in a second settings screen inside the inbox — but that registry is OSDev4's
+        # #1326 and it is still a draft. Dropping the row before the replacement exists would
+        # orphan a shipped page from the menu, so it keeps its place and moves when there is
+        # somewhere to move it to. The owner's own words leave room for either: *"You also have
+        # the settings, so those are probably the settings for the inbox in particular."*
+        {"key": "settings", "label": "Settings", "href": "/inbox/settings",
+         "icon": _TAB_ICON["/inbox/settings"]},
+    ])
+
+
 def _tabbar(here: str) -> str:
     out = []
     for href, label, d in _TABS:
@@ -625,7 +725,7 @@ def _theme() -> str:
     return v if v in ("light", "dark") else ""
 
 
-def _shell(body: str, *, day: str = "", here: str = "") -> str:
+def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> str:
     brand = dash.brand()
     # HIS CHOICE IS STAMPED ON <html>. No stamp means he has never chosen, and that renders
     # WHITE — the OS is not consulted (owner, 2026-09-16: white screens first and foremost).
@@ -652,7 +752,8 @@ def _shell(body: str, *, day: str = "", here: str = "") -> str:
      Both cost one line and the failure they prevent is silent. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>{_esc(brand)} · Unified Inbox</title><style>{CSS}</style></head><body>
+<title>{_esc(brand)} · Unified Inbox</title><style>{CSS}</style></head>
+<body{' class="ib"' if wide else ''}>
 <div class="bar"><div class="bar-in"><span class="brand">{_esc(brand)}</span>
 <span class="day">{_esc(day)}</span></div></div>
 <div class="wrap">{body}</div>
@@ -1507,7 +1608,10 @@ def r_inbox():
             body = ('<h1>Inbox</h1><div class="quiet">No conversations yet. '
                     'The first person who messages you appears here, and you will get a '
                     'notification once this is installed on your phone.</div>')
-        return _shell(body), 200
+        # WIDE ON THE EMPTIES TOO. Every branch above still draws the chip row, so a reader who
+        # filtered to Instagram and found nothing must keep the rail that got them there —
+        # otherwise the layout moves under them at the exact moment they need to change filter.
+        return _shell(body, wide=True), 200
 
     rows = []
     for k in convs:
@@ -1535,7 +1639,7 @@ def r_inbox():
     return _shell(f'<h1>Inbox</h1>{_find(q, channel)}{_chips(space, channel, q=q)}'
                   f'{_hits(q, channel, len(convs), page=page, more=more)}'
                   f'<div class="card">{"".join(rows)}</div>'
-                  f'{_pager(q=q, channel=channel, page=page, more=more)}'), 200
+                  f'{_pager(q=q, channel=channel, page=page, more=more)}', wide=True), 200
 
 
 @blueprint.get("/inbox/inbox/<path:zcid>")

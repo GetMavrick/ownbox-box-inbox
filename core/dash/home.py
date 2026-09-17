@@ -238,8 +238,14 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
         # page's flow until it is asked for costs the page no height at all, so the phone can hold
         # the SAME menu the desktop holds, and back can mean the one thing it means on both: leave
         # this section. The owner's reference shows exactly one arrow, and now so does this.
+        # THE LABEL NAMES WHERE IT GOES, not where it is. This read `got.title` — the section the
+        # person is standing in — so the arrow out of the inbox said "Inbox" and the arrow out of
+        # Settings said "Settings", each naming the room being left while pointing at a different
+        # one. Owner, 2026-09-17: *"they can go back into the dashboard so there should be a back
+        # arrow with a dashboard label."* `back_label` resolves through the same chain as `back`,
+        # so the words and the link cannot come apart.
         head += (f'<a class="back" href="{_esc(got.back)}">{_svg(_CHEV_LEFT, 18)}'
-                 f'<span class="lbl">{_esc(got.title)}</span></a>')
+                 f'<span class="lbl">{_esc(got.back_label or got.title)}</span></a>')
     return (f'<nav class="rail" id="railnav" aria-label="Sections">{head}'
             f'<div class="nav">{"".join(rows)}</div>{_foot()}</nav>')
 
@@ -388,9 +394,24 @@ def dashboard():
     label inside the demo zone, and REDIRECTS rather than 404s for the owner — his own box is a
     public label and the session cookie is host-only, so a 404 here would lock him out of his own
     screen.
+
+    BUT NOT `owner_only`, AND THAT DEFAULT SHIPPED BROKEN. Reusing the function was right; taking
+    its LAST line along with the rest was not, and it is the same mistake as mirroring, arriving
+    from the other side — I inherited a reasoning without checking that it applied here.
+
+      · `/app/review` is owner-only because it publishes the meters, the monthly ceiling and the
+        AT-CAP line. That is a real reason and it still holds, for that page.
+      · THIS page carries no money. Measured on the rendered HTML, not assumed: no "$", no
+        "spend", no "cost", no "cap", no "ceiling". It is machine headlines and who is waiting.
+
+    WHAT IT COST, measured after OSDev4 reported it: a signed-in MEMBER got `/` -> `/dashboard`
+    -> `/dash/login` — shown a login page while holding a valid session, which reads as "my
+    password does not work". `/dash/home` returned 200 for that same member, so the bounce
+    arrived the moment #1331 moved the front door onto this route. The $499 card sells "each with
+    their own login"; this is the screen that login lands on.
     """
     from core.dash import review as _review
-    refuse = _review._admit()
+    refuse = _review._admit(owner_only=False)
     if refuse is not None:
         return refuse
     return _home(), 200

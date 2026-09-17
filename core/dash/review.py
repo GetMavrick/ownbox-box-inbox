@@ -301,7 +301,7 @@ def _meters(r: dict | None) -> str:
             + "</section>")
 
 
-def _admit():
+def _admit(*, owner_only: bool = True):
     """THE REVIEW IS AN OWNER SURFACE, so it asks for a credential on EVERY host — including a
     public label, which is the whole difference between this page and the app beside it.
 
@@ -336,7 +336,22 @@ def _admit():
     # an address it may answer on. Both registers are read from config by core.dash.
     if in_zone and label not in _dash.label_sources() and label not in _dash.space_labels():
         return "", 404
-    if not _dash.viewer_is_owner(request):
+    # WHO, NOT WHERE — and the two questions are deliberately separate. Everything above decides
+    # which ADDRESSES this page answers on at all, and every caller wants the same answer to that.
+    # Only this last line differs, so it is a flag rather than a second copy of the host rules:
+    # duplicating them is how `/app/review` came to be gated by a rule written for a sales page.
+    #
+    # `owner_only=False` IS FOR A PAGE THAT CARRIES NO MONEY, and `/dashboard` is the only one so
+    # far. The owner-only rule here exists because the REVIEW publishes the meters, the monthly
+    # ceiling and the AT-CAP line; a page with none of that on it does not inherit the rule just
+    # because it reuses this function. That inheritance is exactly what broke a member's login.
+    if owner_only:
+        if not _dash.viewer_is_owner(request):
+            return redirect("/dash/login")
+    elif _dash.session_user(request) is None and not _dash.viewer_is_owner(request):
+        # A REAL PERSON OR THE APP TOKEN. `session_user` refuses a session with no user on it, so
+        # "signed in" cannot mean "carries any cookie that parses" — the distinction
+        # `viewer_is_owner` spells out above, kept here for the same reason.
         return redirect("/dash/login")
     return None
 

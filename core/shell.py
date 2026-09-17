@@ -87,6 +87,13 @@ class Rail:
     back: str
     items: tuple[Item, ...]
     here: str
+    # WHERE BACK GOES, IN WORDS. `title` is the section you are STANDING IN; this is the one you
+    # ARRIVE AT, and they are not the same sentence. Rendered as "‹ Inbox" the arrow named the
+    # room the person was already in while carrying them somewhere else — a control that describes
+    # its origin. Owner, 2026-09-17, on the inbox: *"they can go back into the dashboard so there
+    # should be a back arrow with a dashboard label."* Defaulted rather than per-section, because
+    # the destination is the same for every section and a label that names it cannot be wrong.
+    back_label: str = ""
 
 
 _SECTIONS: dict[str, Section] = {}
@@ -173,6 +180,16 @@ def home_href() -> str:
     return got[0].href if got else "/dash/login"
 
 
+def home_title() -> str:
+    """The word the back arrow uses for `home_href()`. Same fallback chain, same order — one
+    resolution, so the label can never name a different place than the link goes to."""
+    for s in sections():
+        if s.home:
+            return s.title
+    got = sections()
+    return got[0].title if got else "Home"
+
+
 def _within(path: str, href: str) -> bool:
     """Is `path` this section's own page or something underneath it?
 
@@ -222,11 +239,43 @@ def rail(path: str) -> Rail:
     path = path or "/"
     here = current(path)
     if here is not None and here.items and not here.home:
-        return Rail(level=2, title=here.title, back=home_href(), items=here.items, here=path)
+        return Rail(level=2, title=here.title, back=home_href(), items=here.items, here=path,
+                    back_label=home_title())
     # LEVEL 1 — the sections themselves, rendered through the same `Item` the second level uses so
     # a template has one row to draw and not two.
     top = tuple(Item(key=s.key, label=s.title, href=s.href, icon=s.icon) for s in sections())
     return Rail(level=1, title="", back="", items=top, here=path)
+
+
+def current_item(path: str) -> Item | None:
+    """Which ROW of the second level this path is standing on, or None.
+
+    THE LONGEST MATCH WINS, and this function exists because that rule was written down twice and
+    only one copy was right. `crumb()` had it (OSDev1's review catch on #1317); `is_current()` did
+    not, and was a bare `_within` — so a section whose own index shares a prefix with its items lit
+    TWO rows at once.
+
+    NOT HYPOTHETICAL, AND NOT FOUND BY READING. It appeared the moment the inbox became the first
+    machine to register a section: its index is `/inbox/` and Messages is `/inbox/inbox`, so on the
+    Messages page `Today` matched as well and both rows drew `aria-current="page"`. Rendered, that
+    is a menu telling the person it does not know where they are — the exact failure `_within`'s
+    own docstring is about, one level further in.
+
+    Every section with an index page has this shape, so the next one would have hit it too. One
+    function now answers it, and `crumb()` and `is_current()` are both callers.
+
+    IT ANSWERS AT BOTH LEVELS, over whatever rows the rail is currently showing. The first version
+    returned None unless `level == 2` — copied from `crumb()`, where that guard is right because a
+    one-word trail is not a trail. Here it meant the level-1 rail marked NOTHING, so the Dashboard
+    row lost its highlight while you were standing on the dashboard. Caught by rendering the rail
+    and reading the rows back, not by reading this diff, which looked correct.
+    """
+    got = rail(path)
+    best = None
+    for it in got.items:
+        if _within(path, it.href) and (best is None or len(it.href) > len(best.href)):
+            best = it
+    return best
 
 
 def crumb(path: str) -> tuple[str, ...]:
@@ -239,20 +288,19 @@ def crumb(path: str) -> tuple[str, ...]:
     got = rail(path)
     if got.level != 2:
         return ()
-    # THE LONGEST MATCH, exactly as `current()` picks a section — OSDev1's review catch on #1317.
-    # Taking the FIRST match instead means an item at `/settings` swallows the crumb for its own
-    # sibling at `/settings/keys`, and the breadcrumb then names a page the person is not on. The
-    # two functions answer the same question at two depths; they must answer it the same way.
-    best = None
-    for it in got.items:
-        if _within(path, it.href) and (best is None or len(it.href) > len(best.href)):
-            best = it
+    best = current_item(path)
     return (got.title, best.label) if best is not None else (got.title,)
 
 
 def is_current(item: Item, path: str) -> bool:
-    """Is this the choice the person is looking at? Used to mark one row, and only one."""
-    return _within(path or "", item.href)
+    """Is this the choice the person is looking at? Used to mark one row, AND ONLY ONE.
+
+    ASKS THE WHOLE RAIL, not just this item, because "am I the current row" is a question about
+    SIBLINGS: `/inbox/inbox` is under `/inbox/` too, and an item cannot see that on its own. The
+    signature is unchanged so every caller keeps working and none of them keeps the old answer.
+    """
+    got = current_item(path)
+    return got is not None and got.key == item.key
 
 
 def _reset_for_tests() -> None:

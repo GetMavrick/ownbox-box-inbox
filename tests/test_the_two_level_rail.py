@@ -287,6 +287,67 @@ def test_home_href_terminates_on_a_box_with_nothing():
 
 # ── core stays core ─────────────────────────────────────────────────────────────────────────────
 
+def test_the_base_box_carries_the_choices_and_a_machine_only_ADDS():
+    """THE OWNER'S QUESTION, 2026-09-17: *"make sure that we are building the core box to have the
+    basic dashboard and settings choices. And then the Customer machine plug-ins will add dashboard
+    areas."* This is that contract, asserted in both directions, so it cannot drift into something
+    else while nobody is looking.
+
+    THE BASE IS CORE'S AND IT IS NEVER EMPTY. A box that carries no machine at all still has its
+    own home. That is what makes `register_section` an ADDITION rather than a construction kit:
+    nobody has to supply the floor.
+
+    A MACHINE ADDS ITS OWN ROW AND CHANGES NOTHING ELSE. Not core's row, not another machine's, not
+    the order of what was already there. Two boxes carrying different machines therefore differ by
+    exactly the machines they carry — which is the whole promise of selling the same binary four
+    ways.
+    """
+    shell._reset_for_tests()
+    shell.register_section("dashboard", order=0, machine="core", title="Dashboard",
+                           href="/dashboard", home=True)
+    base = [(s.key, s.machine) for s in shell.sections()]
+    ok("a box with no machine still has core's own home",
+       base == [("dashboard", "core")], str(base))
+    ok("...and it is the home the back arrow resolves to", shell.home_href() == "/dashboard")
+
+    shell.register_section("inbox", order=10, machine="customer_voice", title="Inbox",
+                           href="/inbox")
+    with_one = [(s.key, s.machine) for s in shell.sections()]
+    ok("a machine adds exactly one row",
+       with_one == base + [("inbox", "customer_voice")], str(with_one))
+
+    shell.register_section("outreach", order=20, machine="lead_machine", title="Outreach",
+                           href="/outreach")
+    with_two = [(s.key, s.machine) for s in shell.sections()]
+    ok("a second machine adds its own and disturbs neither",
+       with_two[:2] == with_one and with_two[2] == ("outreach", "lead_machine"), str(with_two))
+    ok("...core's row has not moved", with_two[0] == ("dashboard", "core"))
+
+    # THE OTHER DIRECTION: a box that does not carry a machine does not carry its row. Same
+    # registry, one import fewer — which is exactly what an exported box is.
+    shell._reset_for_tests()
+    shell.register_section("dashboard", order=0, machine="core", title="Dashboard",
+                           href="/dashboard", home=True)
+    shell.register_section("outreach", order=20, machine="lead_machine", title="Outreach",
+                           href="/outreach")
+    ok("the box without the inbox has no inbox row",
+       [s.key for s in shell.sections()] == ["dashboard", "outreach"],
+       str([s.key for s in shell.sections()]))
+    ok("...and core's row is identical in both boxes",
+       shell.sections()[0].machine == "core" and shell.sections()[0].href == "/dashboard")
+
+
+def test_a_machine_cannot_take_the_base_box_s_own_row():
+    """The floor is core's. A machine claiming `dashboard` would replace the one thing every box is
+    guaranteed to have, and `home_href()` resolves the back arrow through it."""
+    shell._reset_for_tests()
+    shell.register_section("dashboard", order=0, machine="core", title="Dashboard",
+                           href="/dashboard", home=True)
+    raises("a machine claiming core's key", shell.register_section, "dashboard", order=0,
+           machine="customer_voice", title="My Dashboard", href="/inbox/home")
+    ok("core still owns it", shell.current("/dashboard").machine == "core")
+
+
 def test_core_names_no_machine():
     """`core/` ships whole into every box. A rail that spelled out its sections would put one
     product's menu into every other product — what test_core_boundary exists to stop."""

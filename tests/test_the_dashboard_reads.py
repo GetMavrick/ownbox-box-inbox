@@ -77,8 +77,20 @@ def _wipe() -> None:
 
 
 def _reports(**by_machine) -> None:
-    """Register reporters and write a day, the way the worker does."""
+    """Register reporters and write a day, the way the worker does.
+
+    IT CLEARS THE REGISTRY FIRST, so each test declares the WHOLE box rather than adding to
+    whatever the last one left behind. `report.REPORTERS` is module-global, and without this the
+    machines of earlier tests leak into later ones — which is precisely what the assertion "a
+    machine this box does not carry has no area" exists to catch, so it was checking a box it had
+    not built. Found by running this suite in reverse: a failing `content_machine` reporter from
+    another test appeared in it as "could not report (ZeroDivisionError)".
+
+    The same leak in the shell registry was fixed earlier in this file; this is its twin, and the
+    lesson is that a module-global registry needs the fixture to own it, not append to it.
+    """
     _wipe()
+    report.REPORTERS.clear()
     for machine, rep in by_machine.items():
         report.register_reporter(machine, rep.get("title") or machine, lambda day, r=rep: r)
     report.snapshot()
@@ -467,6 +479,35 @@ def test_no_machine_page_stands_ahead_of_cores_own_home():
        lands_on(lead_box) == "/dashboard", str(lands_on(lead_box)))
     ok("...none of which depends on which machines THIS box happens to carry",
        lands_on(set()) is None)
+
+
+def test_a_box_shows_the_areas_of_the_machines_it_carries_and_no_others():
+    """THE OTHER HALF OF THE OWNER'S QUESTION, 2026-09-17: *"the Customer machine plug-ins will add
+    dashboard areas."* They do, and this is the assertion that keeps it true.
+
+    The page draws one area per machine that REPORTED. Nothing here enumerates machines, so a box
+    carrying one shows one, a box carrying three shows three, and neither needed core edited. This
+    is the same mechanism `register_reporter` has always used; what is new is that the buyer's
+    dashboard is now a second reader of it, and a second reader is where a contract quietly stops
+    being kept.
+    """
+    _reports(customer_voice={"title": "Unified Inbox",
+                             "headline": {"value": 72, "label": "conversations mirrored"}})
+    words = _text(_page())
+    ok("the machine this box carries has an area", "conversations mirrored" in words)
+    ok("...and a machine it does not carry has none", "emails sent" not in words, words[-200:])
+
+    _reports(customer_voice={"title": "Unified Inbox",
+                             "headline": {"value": 72, "label": "conversations mirrored"}},
+             lead_machine={"title": "Outreach",
+                           "headline": {"value": 48, "label": "emails sent"}})
+    words = _text(_page())
+    ok("a second machine adds its own area", "emails sent" in words)
+    ok("...without disturbing the first", "conversations mirrored" in words)
+
+    src = (pathlib.Path(__file__).resolve().parents[1] / "core" / "dash" / "home.py").read_text()
+    ok("and the page names no machine to do it",
+       not any(m in src for m in ("customer_voice", "lead_machine", "content_machine")))
 
 
 def test_the_suite_is_named_in_ci():
