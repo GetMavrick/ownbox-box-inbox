@@ -168,11 +168,52 @@ def _body(m) -> str:
     return str(_f(m, "body", "text", "message") or "")
 
 
+# WHAT THE VENDOR ACTUALLY SENDS (OSDev1, live read-only probe, 2026-09-16): `direction` is
+# "incoming" or "outgoing", and there is NO `fromMe` field at all. Neither word was in the list
+# below, and the `fromMe` fallback evaluated `None is False` — so this function kept 0 of 22 real
+# messages, the live box showed zero conversations, and every STOP sent by DM went unseen because
+# the opt-out scan reads this same list.
+#
+# BOTH DIRECTIONS ARE NAMED, AND OUTBOUND WINS. The tempting one-line fix adds "incoming" to the
+# inbound tuple and stops. That leaves the function with no opinion about "outgoing" beyond "not
+# in the inbound list" — so any future `or` clause, or any vendor that sends a contradictory pair
+# like direction=outgoing with fromMe=false, silently turns OUR OWN replies into customer
+# messages. The box would then answer itself, and `_is_stop` would scan our words for a STOP.
+#
+# MATCHED BY EQUALITY, NEVER BY SUBSTRING, and this is not a style preference: "outgoing" contains
+# "in". Any `"in" in direction` here reads every outbound message as inbound.
+# WHEN THE VENDOR SAYS IT HAPPENED. The live shape sends `sentAt` (OSDev1's probe) and this poller
+# read only createdAt/created_at/timestamp — so on real data every message's sort key was the empty
+# string. Two things ride on it and both fail silently:
+#   · `_newest_inbound` picks with max() over "" == "", so the "newest" message is whichever the
+#     vendor happened to list first — the opener answers an arbitrary message and the watermark
+#     advances to it
+#   · `last_inbound_at` is stored EMPTY, and `window.decide` reads an empty inbound clock as "no
+#     inbound message on record — every channel here is reply-only" and BLOCKS the reply. Every
+#     real conversation would show "No inbound yet" and refuse to send.
+# Listed vendor-first: `sentAt` is what actually arrives today.
+_SENT_AT_KEYS = ("sentAt", "sent_at", "createdAt", "created_at", "timestamp")
+
+_INBOUND_WORDS = frozenset({"in", "inbound", "incoming", "received"})
+_OUTBOUND_WORDS = frozenset({"out", "outbound", "outgoing", "sent"})
+
+
+def _is_inbound(m) -> bool:
+    """Did the CUSTOMER send this? Fail closed: anything we cannot read is not inbound."""
+    direction = str(_f(m, "direction", "type") or "").strip().lower()
+    if direction in _OUTBOUND_WORDS:
+        return False                      # authoritative — no later hint may override it
+    if direction in _INBOUND_WORDS:
+        return True
+    # NO DIRECTION WE RECOGNISE. `fromMe` is the older shape and still the right fallback, but only
+    # here, where the vendor told us nothing usable. An unreadable message is NOT inbound: a false
+    # negative delays one reply, a false positive makes the box talk to itself.
+    return _f(m, "fromMe", "from_me") is False
+
+
 def _inbound_msgs(msgs: list) -> list:
     """INBOUND messages in a page (tolerant of asc/desc ordering)."""
-    return [m for m in msgs
-            if str(_f(m, "direction", "type") or "").lower() in ("in", "inbound", "received")
-            or _f(m, "fromMe", "from_me") is False]
+    return [m for m in msgs if _is_inbound(m)]
 
 
 def _newest_inbound(msgs: list) -> dict | None:
@@ -180,7 +221,7 @@ def _newest_inbound(msgs: list) -> dict | None:
     inbound = _inbound_msgs(msgs)
     if not inbound:
         return None
-    return max(inbound, key=lambda m: str(_f(m, "createdAt", "created_at", "timestamp") or ""))
+    return max(inbound, key=lambda m: str(_f(m, *_SENT_AT_KEYS) or ""))
 
 
 def _lake_enqueue_messenger(zcid: str, psid: str, name: str | None,
@@ -274,7 +315,7 @@ def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, 
         psid = str(_f(conv, "participantId", "participant_id", "psid") or "")
         name = str(_f(conv, "participantName", "participant",
                       "contactName", "name") or "") or None
-        inbound_at = str(_f(target, "createdAt", "created_at", "timestamp") or "")
+        inbound_at = str(_f(target, *_SENT_AT_KEYS) or "")
         body = _body(target)
         # `account_id` is STORED, not only carried in the job. Until it was, the automated
         # opener could send and the screen could not: a person opening this thread later had

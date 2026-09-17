@@ -97,7 +97,17 @@ def _conv(cid, acct, activity, **extra):
 
 
 def _msg(mid, text, when):
-    return {"id": mid, "direction": "in", "message": text, "createdAt": when}
+    """THE SHAPE THE VENDOR ACTUALLY SENDS, not the one we assumed.
+
+    This fixture used to say `direction: "in"` and `createdAt`. Zernio sends `direction:
+    "incoming"` and `sentAt`, and carries no `fromMe` at all (OSDev1's live probe, 2026-09-16) —
+    so every suite built on this helper passed while the poller kept 0 of 22 real messages and the
+    live box showed zero conversations. A fixture written from an assumption can only ever prove
+    the code agrees with the assumption.
+
+    Both keys are kept: the old ones prove nothing that polled before this breaks."""
+    return {"_id": mid, "accountId": "acc-x", "conversationId": "conv-x",
+            "direction": "incoming", "senderId": "sender-x", "message": text, "sentAt": when}
 
 
 def _reset_sweep():
