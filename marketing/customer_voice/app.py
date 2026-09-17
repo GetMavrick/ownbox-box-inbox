@@ -1604,6 +1604,52 @@ def r_thread(zcid):
                   + _compose(zcid, conv) + back), 200
 
 
+# HOW EACH WINDOW STATE LOOKS. A table, not a branch — and keyed on `state`, which OSDev4 added
+# to `explain()` precisely so a screen can style a row "without matching on English or reading
+# `_RULES` — the second reader of that table this module refuses to have". A state this screen has
+# not met yet falls back to the calm tone rather than to no styling at all.
+_WINDOW_TONE = {
+    "open":    "good",
+    "tagged":  "warn",
+    "limited": "warn",
+    "closed":  "warn",
+    "no_lane": "dim",
+    "unknown": "dim",
+}
+
+
+def _window_note(conv: dict) -> str:
+    """The send window, in the buyer's words, above the box he is about to type in.
+
+    SILENT WHEN THE WINDOW IS SIMPLY OPEN. "You can reply now" over a reply box is the screen
+    narrating itself; the box being there already says it. The sentence earns its space only when
+    the answer is something other than yes — which is also the only time a person can act on it.
+
+    A FAILURE HERE COSTS THE NOTE, NEVER THE BOX. `explain()` is documented never to raise, but
+    this screen is the one place where being wrong about that would take away a working reply box
+    on a live conversation, so it is wrapped anyway.
+    """
+    try:
+        from marketing.customer_voice.inbox import window as _w
+        got = _w.explain(str(conv.get("platform") or ""), conv.get("last_inbound_at"))
+    except Exception as e:                       # noqa: BLE001 — no note is not a broken screen
+        log.info("voice.window_unreadable", extra={"error": type(e).__name__})
+        return ""
+    state = str(got.get("state") or "")
+    if state == "open":
+        return ""
+    head = str(got.get("headline") or "").strip()
+    if not head:
+        return ""
+    tone = _WINDOW_TONE.get(state, "dim")
+    detail = str(got.get("detail") or "").strip()
+    return (f'<div class="card win {_esc(state)}"><div class="row"><span class="t">'
+            f'<b class="{_esc(tone)}">{_esc(head)}</b>'
+            + (f'<span class="sub" style="display:block;margin-top:3px">{_esc(detail)}</span>'
+               if detail else "")
+            + '</span></div></div>')
+
+
 def _compose(zcid: str, conv: dict) -> str:
     """The reply box. Absent — not disabled — when this conversation cannot be replied to.
 
@@ -1662,6 +1708,19 @@ def _compose(zcid: str, conv: dict) -> str:
                 'mirrored before the box started recording which account owns it, so it cannot '
                 'be replied to from here yet. The next message on it fixes that.</span></div>'
                 '</div>')
+    # WHAT THE CHANNEL WILL PROBABLY DO, SAID BEFORE HE TYPES. OSDev4's `window.explain()`
+    # (#1290) turns the decision `decide()` already makes into a sentence for the person about to
+    # write. Bound to `state`, NEVER to `reason` or to the English: `reason` is dev-facing on
+    # purpose — "nobody has written the send rules for this platform" is an accurate sentence
+    # about OUR work and a baffling one to a plumber looking at his own inbox.
+    #
+    # IT NEVER STOPS A SEND, and this screen must not become the place that does. The window
+    # state is an INFERENCE from `last_inbound_at`, a column a poller fills; the vendor's answer
+    # is the fact. So a shut clock is a warning above a working box, not a missing box — which is
+    # also why this sits here, after the branches that return early for reasons the clock cannot
+    # change, rather than adding a new one.
+    win = _window_note(conv)
+
     # ONE NONCE PER RENDER. It is what "this particular attempt to send" means: a browser that
     # resubmits this same form (double tap, flaky connection, back button) carries the same one
     # and is refused, while a genuinely new reply comes from a new render and sends — even if the
@@ -1699,7 +1758,8 @@ def _compose(zcid: str, conv: dict) -> str:
     # `id` IS LOAD-BEARING NOW, not decoration: the inbox row's Reply item links to `#reply`,
     # and an anchor with no target scrolls nowhere and looks like a dead control. The two agree
     # on when it exists because they test the same two fields — see `_acts`.
-    return ('<form class="compose" id="reply" method="post" '
+    return (win
+            + '<form class="compose" id="reply" method="post" '
             'action="' + _esc(f"/voice/inbox/{zcid}/reply") + '">'
             f'<input type="hidden" name="n" value="{_esc(_reply.new_nonce())}">'
             + note +
