@@ -158,7 +158,13 @@ print("\ntest_it_behaves_like_an_installed_app")
 # reserve room for the bar — so deleting it from `.tabs` left the check green. Measured: the probe
 # ran, the edit applied, and the suite still exited 0. A check that cannot fail is not a check,
 # which is the second time that exact shape has turned up in this app's guards in one day.
-_tabs = re.search(r"\.tabs\{([^}]*)\}", CSS)
+# ANCHORED AT THE START OF A LINE, because `.tabs{` is a substring of `nav.tabs{` and the
+# stylesheet gained one of those (the desktop query hides the bar now that a rail replaces
+# it). Unanchored, this regex matched `nav.tabs{display:none}` — which appears EARLIER in
+# the file — and then checked that rule for the safe-area inset, so a green run said nothing
+# about the bar it was written to guard. The check itself was the thing that broke, not the
+# padding: `.tabs` still carries the inset, which is what the re-anchored search now reads.
+_tabs = re.search(r"^\.tabs\{([^}]*)\}", CSS, re.M)
 _bar = re.search(r"\.bar\{([^}]*)\}", CSS)
 ok("the tab bar rule exists to check", _tabs is not None)
 ok("the tab bar itself clears the home indicator",

@@ -549,8 +549,17 @@ def test_the_tab_bar_is_three_live_destinations_with_distinct_marks():
             r = c.get(href)
             ok(f"{label} goes somewhere real", r.status_code == 200, str(r.status_code))
             body = r.get_data(as_text=True)
+            # SCOPED TO THE TAB BAR, WHICH IS WHAT THIS LINE IS ABOUT. It counted the mark
+            # across the whole page and read 1 because the tab bar was the only navigation on
+            # it. The page now also carries the box's rail (core's drawer, 2026-09-18), which
+            # marks its own current row — so the page legitimately holds two, one per menu,
+            # and an unscoped count turned "the bar lights exactly one tab" into "the page has
+            # exactly one nav". The original intent is a bar that lights one tab and not zero
+            # or two, so the count now reads the bar's own markup.
+            _bar_markup = body.split('<nav class="tabs"', 1)[-1]
             ok(f"...and {label} is the one marked current",
-               body.count('aria-current="page"') == 1, body.count('aria-current="page"'))
+               _bar_markup.count('aria-current="page"') == 1,
+               _bar_markup.count('aria-current="page"'))
             ok(f"...and its own mark is on the page", d.split("M")[1][:12] in body)
     finally:
         cfg.get_config = real

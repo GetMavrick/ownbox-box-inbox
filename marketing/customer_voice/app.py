@@ -26,6 +26,7 @@ from datetime import date
 from flask import Blueprint, redirect, request
 
 from core import dash, shell
+from core.dash.home import RAIL_CSS as _RAIL_CSS
 from core.logging import get_logger
 
 log = get_logger(__name__)
@@ -184,6 +185,19 @@ CSS = """
   --bad:#c0392b; --bad-soft:#fdecea;
   --lift:0 1px 2px rgba(16,24,32,.05), 0 8px 24px -12px rgba(16,24,32,.18);
   --tab-bg:rgba(255,255,255,.88);
+  /* ── WHAT THE BOX'S RAIL NEEDS, ANSWERED IN THIS APP'S OWN COLOURS ────────────────────────
+     `core.dash.home.RAIL_CSS` draws the menu and asks for these eleven names. Every one is an
+     ALIAS onto a token already measured above rather than a new colour, which is the whole point
+     of importing the stylesheet instead of copying it: the dashboard's rail is blue-grey, this
+     one is this app's, and neither had to be drawn twice. The only value invented here is the
+     scrim, and it is declared in this block so it counts as palette rather than a stray literal.
+     --nav-ink IS WHY THIS COULD NOT BE A COPY. That rule shipped as `#333940`, a light-only
+     literal on a rail the dashboard never renders dark; pointed at --dim it reads in both. */
+  --card:var(--surface); --rail:var(--surface); --hover:var(--bubble-in);
+  --sel:var(--accent-soft); --nav-ink:var(--dim); --faint:var(--dimmer); --danger:var(--bad);
+  --av-ink:var(--accent); --av-a:var(--accent-soft); --av-b:var(--accent-soft);
+  --drawer-flat:none; --drawer-lift:var(--lift);
+  --scrim:rgba(26,29,31,.42);
 }
 :root[data-theme="dark"]{
   --bg:#0d0d0d; --surface:#171717; --raised:#1f1f1f;
@@ -195,6 +209,13 @@ CSS = """
   --bad:#f0857a; --bad-soft:#2a1613;
   --lift:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
   --tab-bg:rgba(13,13,13,.88);
+  /* The same eleven, this theme's values. --rail is one step LIGHTER than the page so the
+     drawer reads as lifted over it, which is the job the shadow does in light. */
+  --card:var(--surface); --rail:var(--raised); --hover:var(--raised);
+  --sel:var(--accent-soft); --nav-ink:var(--dim); --faint:var(--dimmer); --danger:var(--bad);
+  --av-ink:var(--accent); --av-a:var(--accent-soft); --av-b:var(--accent-soft);
+  --drawer-flat:none; --drawer-lift:var(--lift);
+  --scrim:rgba(0,0,0,.62);
 }
 
 /* THE SYSTEM FACE IS THE APPLE COPY. Installed to a home screen this renders in SF on iOS and
@@ -499,31 +520,38 @@ a.row:active{background:var(--hair);border-radius:10px}
 
    IT STICKS, because the list it filters is the thing that scrolls. A channel rail that scrolls
    away with 200 conversations is a rail you have to go back up to use. */
-@media (min-width:900px){
-  /* THE BAR IS A SIBLING OF THE COLUMN, so it has to widen with it or the name sits in the old
-     620px centre while everything under it starts 116px from the left — measured at 1280px, and
-     the kind of half-millimetre wrongness that makes a page feel unfinished without anyone being
-     able to say why. */
-  .ib .bar-in{max-width:1080px}
-  .ib .wrap{max-width:1080px;display:grid;grid-template-columns:224px minmax(0,1fr);
-    column-gap:32px;align-items:start}
-  .ib .wrap>h1{grid-column:1/-1}
-  .ib .wrap>.find,.ib .wrap>.card,.ib .wrap>.pager,.ib .wrap>.quiet,.ib .wrap>.hits{grid-column:2}
-  .ib .wrap>.chips{grid-column:1;grid-row:2/60;flex-direction:column;gap:2px;margin:12px 0 0;
-    overflow:visible;padding:0;position:sticky;top:74px}
-  /* A ROW, NOT A PILL. Stretched to the column width a 999px radius reads as a stadium button
-     the full width of the rail; at rail width the shape people know is a list row. */
-  .ib .wrap .chip{width:100%;justify-content:space-between;border-radius:10px;padding:9px 12px;
-    box-shadow:none;background:transparent}
-  .ib .wrap .chip:hover{background:var(--surface)}
-  /* A SELECTED ROW, NOT A BUTTON. The phone's pill is small and a solid accent reads as "you are
-     here"; stretched to a 224px rail the SAME fill becomes the heaviest object on the screen —
-     a call to action, for a filter that is on by default and does nothing when you press it.
-     Rendered at 1280px before changing it. The tint plus accent ink says selected just as
-     plainly, and the reference the owner gave us is minimal for exactly this reason. */
-  .ib .wrap .chip.on,.ib .wrap .chip.on:hover{background:var(--accent-soft);color:var(--accent);
-    font-weight:600}
-  .ib .wrap .chip.on .n{color:var(--accent);opacity:.7}
+@media (min-width:821px){
+  /* THE BAR SPANS THE RAIL AND THE LIST, so its content starts at the left edge like any app
+     header rather than floating in the old 620px phone centre. Measured at 1280px: centred, the
+     brand sat 190px in while the rail beneath it started at 0 and the list at 272px — three left
+     edges on one screen.
+     THE FILTER COLUMN IS GONE, and this is the change the rail paid for. It was a 224px column
+     holding two chips with 600px of empty grey under it (rendered at 1280x820 before this), and
+     it only ever existed because this screen had no other left edge to use. It has one now, and
+     it holds the box's sections — two stacked rails are two answers to "where am I". So the
+     chips keep the phone's shape at every width: a row, above the list they filter, which is
+     also where a filter belongs. The 900px grid and the chip-as-list-row styling it needed are
+     deleted rather than overridden — an overridden rule for a layout nobody renders is the dead
+     code the next person has to reason about. */
+  .ib .bar-in{max-width:none;padding-left:20px}
+  /* THE LIST KEEPS A BOUNDED WIDTH AND LEAVES THE DEAD SPACE ON THE RIGHT, not in the middle.
+     Two things decided this. A row stretched to the full 1008px put Len's whole message on one
+     line — the two-line preview the owner asked for only reads as two lines while the column is
+     narrow enough to wrap, so an unbounded row quietly undoes the change he approved last night.
+     And with a rail on the left, a column centred in what is left has a gutter on both sides and
+     reads as floating; aligned to the rail it reads as the second pane of an app, which is what
+     it is. 780px is the widest this list gets before the preview stops wrapping at 15px. */
+  .ib .wrap{max-width:780px;margin:0;padding:0 24px}
+  nav.tabs{display:none}
+  /* THE TAB BAR'S HEIGHT WAS PADDING AT THE FOOT OF THE PAGE, and with the bar gone that padding
+     is a blank strip. A phone's bottom bar pinned to the foot of a desktop window is the single
+     thing that made this screen read as unfinished. */
+  .wrap{padding-bottom:28px}
+  /* ONE BACK ARROW WHEN BOTH WOULD SHOW. Core's rail draws its own way out, and the bar directly
+     above it carries the one the owner asked for by name (2026-09-17: *"a back arrow with a
+     dashboard label"*). Both visible at once is a stutter, so the rail's stands down here. On a
+     phone the drawer covers the bar, so there the rail's IS the only one and it stays. */
+  .lay .rail .back{display:none}
 }
 
 /* ── the thread ────────────────────────────────────────────────────────────────────────────
@@ -612,7 +640,46 @@ a.row:active{background:var(--hair);border-radius:10px}
 
 @media (min-width:560px){ .figs{grid-template-columns:1fr 1fr 1fr} }
 @media (prefers-reduced-motion:reduce){ *{animation:none!important;transition:none!important} }
+
+/* ── WHERE THIS APP PUTS THE BOX'S MENU BUTTON ───────────────────────────────────────────────
+   The rail, the drawer and the scrim are imported below from `core.dash.home.RAIL_CSS`, so this
+   app and the dashboard cannot drift into two menus that look almost the same. What is NOT shared
+   is where the button sits: the dashboard hides its whole top bar above the breakpoint, and this
+   app's bar is visible at every width because it carries the brand and the date.
+   SO THE BUTTON HIDES, NOT THE BAR — above 820px the rail is on screen and a button that opens
+   what you can already see is the dead control this codebase keeps deleting. */
+.bar-in .ham{display:none;margin-left:-6px}
+.navtoggle:focus-visible~.bar .ham{outline:2px solid var(--accent);outline-offset:-2px}
+
+/* THE MENU BUTTON SHOWS ONLY WHERE THE RAIL IS HIDDEN — above the breakpoint the rail is on
+   screen, and a button that opens what you can already see is the dead control this codebase
+   keeps deleting. The bar itself stays at every width; it carries the brand and the date. */
+@media (max-width:820px){ .bar-in .ham{display:flex} }
+
+/* ── TWO RULES THAT LET THE IMPORTED RAIL SIT IN THIS APP'S PAGE ─────────────────────────────
+   `.main` is core's flex slot beside the rail, and it brings the dashboard's own page padding
+   with it. Here `.wrap` already owns content width and gutters at four breakpoints, so the slot
+   is emptied of both rather than fought with. Specificity, not order — core's rule is `.main`
+   and this is `.lay .main`, so it wins wherever the stylesheets end up concatenated.
+   AND THE RAIL'S HEAD IS A STUTTER ON A DESKTOP, where the bar directly above it already says
+   whose box this is. On a phone the drawer covers that bar, so there it is the only thing naming
+   the box and it stays. */
+.lay .main{padding:0;max-width:none}
+/* AND THE RAIL RUNS THE HEIGHT OF THE WINDOW. Core's `.lay{min-height:100%}` resolves against a
+   sized ancestor and this app never set one, so on a short list the rail stopped with the last
+   conversation and the page showed grey below a white column that had simply run out. A flex
+   column on `body` fixes it without a magic number for the bar's height: the bar takes what it
+   needs, `.lay` takes the rest. The tab bar is `position:fixed` and out of flow, so it does not
+   enter this calculation. */
+body{display:flex;flex-direction:column;min-height:100dvh}
+.lay{flex:1}
+@media (min-width:821px){ .lay .rail .who{display:none} }
 """
+
+# THE BOX'S RAIL, DRAWN BY CORE AND THEMED BY THE TOKENS ABOVE. Appended rather than pasted: one
+# copy of the drawer exists, in `core/dash/home.py`, and both consumers render the same furniture.
+CSS = CSS + _RAIL_CSS
+
 
 
 # THE ONLY SCRIPT ON THIS APP, and it does two things: register the worker, and report whether
@@ -833,7 +900,13 @@ def _tabbar(here: str) -> str:
             f'<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
             f'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
             f'<path d="{d}"/></svg>{mark}<span>{label}</span></a>')
-    return f'<nav class="tabs" aria-label="Sections"><div class="tabs-in">{"".join(out)}</div></nav>'
+    # NOT "Sections" ANY MORE, AND THAT IS NOT COSMETIC. Core's rail is `aria-label="Sections"`,
+    # and this page now carries both — two navigations with one accessible name, which a
+    # screen reader offers as "Sections navigation" twice with no way to tell them apart.
+    # They are different scopes and now say so: the rail lists the box's sections, this bar
+    # lists the three screens inside this one.
+    return (f'<nav class="tabs" aria-label="Inbox screens">'
+            f'<div class="tabs-in">{"".join(out)}</div></nav>')
 
 
 def _up() -> str:
@@ -889,6 +962,46 @@ def _theme() -> str:
     return v if v in ("light", "dark") else ""
 
 
+# ── the box's menu, on the one screen that never had it ──────────────────────────────────────
+#
+# OWNER, 2026-09-18: *"Why is there no hamburger menu."* There was one — `core.dash.home` has
+# shipped the drawer since the rail landed, and every page drawn by `chrome()` wears it. This app
+# draws its own page, so it wore none of it: no rail on a desktop, no menu on a phone, and the
+# only way to the rest of the box was the back arrow. The screen a buyer opens most was the screen
+# with the least navigation in it.
+#
+# IT IMPORTS THE RENDERER, IT DOES NOT REIMPLEMENT IT. `rail_html` resolves the sections from the
+# same registry the dashboard reads, refuses rows this build does not serve, and marks the current
+# one — so a machine that registers a section appears here on the day it ships, with no edit to
+# this file. A second hand-written menu would have been correct for about a week.
+def _rail(path: str) -> str:
+    """The box's sections, from core, or nothing at all if the registry cannot answer.
+
+    A FAILURE HERE COSTS THE MENU, NEVER THE PAGE — the same rule `_unread` follows for the dot.
+    This runs on every screen this app draws, including on a box mid-migration, and an inbox that
+    500s because its navigation could not resolve is a worse product than one with no navigation.
+    """
+    try:
+        from core.dash.home import rail_html
+        return rail_html(path)
+    except Exception as e:                       # noqa: BLE001 — see above
+        log.warning("voice.rail_unrenderable",
+                    extra={"error": f"{type(e).__name__}: {e}"[:160]})
+        return ""
+
+
+def _menu_button() -> str:
+    """The hamburger. CORE'S GLYPH, not a third drawing of three lines.
+
+    HIDDEN ABOVE 820px BY CSS, NOT BY PYTHON, because the rail it opens is on screen there and the
+    markup has to stay identical at every width — the drawer is a CSS-only checkbox, and a button
+    that exists at one width and not another cannot be the same label the stylesheet targets.
+    """
+    from core.dash.home import _HAM
+    return ('<label class="ham" for="navtoggle" role="button" aria-label="Menu" '
+            f'aria-controls="railnav">{_HAM}</label>')
+
+
 def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> str:
     brand = dash.brand()
     # HIS CHOICE IS STAMPED ON <html>. No stamp means he has never chosen, and that renders
@@ -918,9 +1031,13 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>{_esc(brand)} · Unified Inbox</title><style>{CSS}</style></head>
 <body{' class="ib"' if wide else ''}>
-<div class="bar"><div class="bar-in">{_up()}<span class="brand">{_esc(brand)}</span>
+<input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
+<div class="bar"><div class="bar-in">{_menu_button()}{_up()}
+<span class="brand">{_esc(brand)}</span>
 <span class="day">{_esc(day)}</span></div></div>
-<div class="wrap">{body}</div>
+<label class="scrim" for="navtoggle" aria-label="Close menu"></label>
+<div class="lay">{_rail(here or request.path)}
+<main class="main"><div class="wrap">{body}</div></main></div>
 {_tabbar(here or request.path)}
 <script>{JS}</script></body></html>"""
 

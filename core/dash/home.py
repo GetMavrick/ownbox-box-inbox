@@ -29,10 +29,12 @@ from flask import request
 from core import pause, report, shell
 from core.dash import blueprint, brand
 
-CSS = """
+_BASE = """
 :root{--bg:#f4f5f7;--card:#fff;--ink:#14171a;--dim:#6b7480;--faint:#98a1ac;--line:#e6e9ec;
 --hover:#f0f2f4;--sel:#eaedf1;--accent:#1a6ef5;--good:#0f8a4d;--warn:#9a6400;--danger:#e0392b;
---rail:#fbfbfc;--scrim:rgba(16,20,26,.42)}
+--rail:#fbfbfc;--scrim:rgba(16,20,26,.42);
+--nav-ink:#333940;--av-ink:#7a5a14;--av-a:#ffe4a3;--av-b:#f7c7a8;
+--drawer-flat:0 0 0 rgba(0,0,0,0);--drawer-lift:0 12px 40px rgba(16,20,26,.18)}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,
@@ -40,20 +42,40 @@ body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,
 a{color:inherit;text-decoration:none}
 svg{flex:none}
 
-/* the checkbox that opens the drawer — focusable, never visible. A drawer built on a hidden
+"""
+
+# ── THE RAIL AND THE DRAWER, ON ITS OWN SO THERE IS ONE COPY OF IT ──────────────────────────
+#
+# EXTRACTED 2026-09-18, prompted by a question the owner asked about a screen: *"Why is there no
+# hamburger menu"* on the inbox. The answer was that this drawer has always existed and `chrome()`
+# was the only thing wearing it — so the screen a buyer opens twenty times a day was the one
+# screen without the box's menu. A machine that draws its own page could not reuse this without
+# copying it, and a copied menu is two menus by the end of the month.
+#
+# THE INBOX DRAWS ITS OWN PAGE ON PURPOSE, which is why importing a string is the fix and calling
+# `chrome()` is not: that page carries the PWA manifest, the apple-touch icon, a theme-color that
+# has to follow his light/dark choice, and the stamp on `<html>` that makes white the default.
+# `chrome()` carries none of it, and an installed phone app quietly loses its identity if you swap
+# one for the other.
+#
+# WHAT IS *NOT* IN HERE IS EACH CONSUMER'S OWN TOP BAR. `.topbar` is the dashboard's bar and it
+# lives below with the dashboard's own rules, because it is `display:none` until the breakpoint —
+# the inbox's bar is visible at every width and would have vanished on a desktop the moment it
+# imported this. The shared part is the rail, the scrim, the hamburger's own box and the drawer
+# behaviour; where the button SITS is the consumer's business.
+#
+# EVERY COLOUR IN HERE IS A TOKEN, WHICH IS WHAT MAKES IT SHARED RATHER THAN COPIED. This block
+# used to carry five literals — `#333940` on a nav row, the account avatar's gradient, the
+# drawer's shadow. The dashboard is light-only so they were invisible there; the inbox is
+# theme-stamped, and `#333940` text on a dark rail is exactly the unreadable-app bug its own
+# design suite refuses. The values above are unchanged, so this rail looks as it always did.
+RAIL_CSS = """/* the checkbox that opens the drawer — focusable, never visible. A drawer built on a hidden
    input cannot be reached by keyboard, so this is offscreen rather than `hidden`. */
 .navtoggle{position:absolute;width:1px;height:1px;opacity:0;margin:0;pointer-events:none}
 
-.topbar{display:none;position:sticky;top:env(safe-area-inset-top,0px);z-index:30;
-align-items:center;gap:12px;height:52px;padding:0 6px 0 4px;background:var(--card);
-border-bottom:1px solid var(--line)}
 .ham{display:flex;align-items:center;justify-content:center;width:42px;height:42px;
 border-radius:10px;cursor:pointer;color:var(--ink)}
 .ham:hover{background:var(--hover)}
-.navtoggle:focus-visible~.topbar .ham{outline:2px solid var(--accent);outline-offset:-2px}
-.mark{font-weight:650;letter-spacing:-.01em}
-.grow{flex:1}
-
 .scrim{display:none;position:fixed;inset:0;z-index:35;background:var(--scrim);opacity:0;
 pointer-events:none;transition:opacity .2s ease}
 
@@ -63,8 +85,8 @@ pointer-events:none;transition:opacity .2s ease}
 padding:0 10px 14px;display:flex;flex-direction:column}
 .who{display:flex;align-items:center;gap:11px;padding:15px 8px 13px}
 .who .av{width:38px;height:38px;border-radius:11px;flex:none;display:flex;align-items:center;
-justify-content:center;font-weight:700;font-size:16px;color:#7a5a14;
-background:linear-gradient(145deg,#ffe4a3,#f7c7a8)}
+justify-content:center;font-weight:700;font-size:16px;color:var(--av-ink);
+background:linear-gradient(145deg,var(--av-a),var(--av-b))}
 .who .id{min-width:0;display:flex;flex-direction:column;line-height:1.25}
 .who b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .who span{color:var(--dim);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -75,7 +97,7 @@ border-radius:9px;font-weight:600;color:var(--ink)}
 
 .nav{display:flex;flex-direction:column;gap:1px}
 .nav a{display:flex;align-items:center;gap:11px;min-height:42px;padding:8px 10px;
-border-radius:9px;color:#333940;font-size:15px}
+border-radius:9px;color:var(--nav-ink);font-size:15px}
 .nav a:hover{background:var(--hover)}
 .nav a[aria-current]{background:var(--sel);color:var(--ink);font-weight:600}
 .nav a.danger{color:var(--danger)}
@@ -89,6 +111,40 @@ color:var(--faint);font-size:12.5px;line-height:1.4}
 .railfoot b{display:block;color:var(--dim);font-weight:600;font-size:12.5px}
 
 .main{flex:1;min-width:0;padding:22px 26px 56px;max-width:1000px}
+@media (prefers-reduced-motion: reduce){.rail,.scrim{transition:none}}
+
+/* THE PHONE — A DRAWER OVER THE PAGE, NOT A BLOCK ABOVE IT.
+   Measured first, in Chromium at 375x780: stacked, the owner's own ten-item Settings menu is
+   538px tall, which put the page title at 585px and the first field card at 673px. A buyer who
+   tapped Settings -> Profile scrolled a full screen of menu to reach the one thing he opened it
+   to change. The drawer is the owner's reference and it is better than the two answers I reached
+   on my own: the menu keeps BOTH levels and all its choices, and it costs the page no height at
+   all, because it is not in the page's flow until it is asked for.
+   No JavaScript: one offscreen checkbox, a label for the hamburger and a label for the scrim, so
+   tapping outside closes it exactly as tapping the button does. */
+@media (max-width:820px){
+ .scrim{display:block}
+ .lay{display:block}
+ .rail{position:fixed;top:0;bottom:0;left:0;width:86vw;max-width:340px;z-index:40;
+  border-right:1px solid var(--line);transform:translateX(-101%);transition:transform .22s ease;
+  overflow-y:auto;padding-top:env(safe-area-inset-top,0px);box-shadow:var(--drawer-flat)}
+ .navtoggle:checked~.lay .rail{transform:none;box-shadow:var(--drawer-lift)}
+ .navtoggle:checked~.scrim{opacity:1;pointer-events:auto}
+ .main{padding:18px 16px 48px;max-width:none}
+}
+"""
+
+# ── THIS PAGE'S OWN CHROME: the bar that holds the hamburger, and the cards under it ─────────
+_PAGE = """.topbar{display:none;position:sticky;top:env(safe-area-inset-top,0px);z-index:30;
+align-items:center;gap:12px;height:52px;padding:0 6px 0 4px;background:var(--card);
+border-bottom:1px solid var(--line)}
+.navtoggle:focus-visible~.topbar .ham{outline:2px solid var(--accent);outline-offset:-2px}
+.mark{font-weight:650;letter-spacing:-.01em}
+.grow{flex:1}
+
+@media (max-width:820px){
+ .topbar{display:flex}
+}
 .crumb{color:var(--dim);font-size:13px;margin-bottom:10px}
 .crumb b{color:var(--ink);font-weight:600}
 h1{margin:0 0 4px;font-size:26px;letter-spacing:-.01em}
@@ -105,29 +161,11 @@ a.row:hover{color:var(--accent)}
 .quiet{color:var(--dim)}
 .stale{color:var(--warn)}
 
-@media (prefers-reduced-motion: reduce){.rail,.scrim{transition:none}}
-
-/* THE PHONE — A DRAWER OVER THE PAGE, NOT A BLOCK ABOVE IT.
-   Measured first, in Chromium at 375x780: stacked, the owner's own ten-item Settings menu is
-   538px tall, which put the page title at 585px and the first field card at 673px. A buyer who
-   tapped Settings -> Profile scrolled a full screen of menu to reach the one thing he opened it
-   to change. The drawer is the owner's reference and it is better than the two answers I reached
-   on my own: the menu keeps BOTH levels and all its choices, and it costs the page no height at
-   all, because it is not in the page's flow until it is asked for.
-   No JavaScript: one offscreen checkbox, a label for the hamburger and a label for the scrim, so
-   tapping outside closes it exactly as tapping the button does. */
-@media (max-width:820px){
- .topbar{display:flex}
- .scrim{display:block}
- .lay{display:block}
- .rail{position:fixed;top:0;bottom:0;left:0;width:86vw;max-width:340px;z-index:40;
-  border-right:1px solid var(--line);transform:translateX(-101%);transition:transform .22s ease;
-  overflow-y:auto;padding-top:env(safe-area-inset-top,0px);box-shadow:0 0 0 rgba(0,0,0,0)}
- .navtoggle:checked~.lay .rail{transform:none;box-shadow:0 12px 40px rgba(16,20,26,.18)}
- .navtoggle:checked~.scrim{opacity:1;pointer-events:auto}
- .main{padding:18px 16px 48px;max-width:none}
-}
 """
+
+# ORDER IS THE ORDER IT ALWAYS WAS — the phone's overrides sit last, after the base rules they
+# are written to override. Verified by rendering both and diffing every computed property.
+CSS = _BASE + _PAGE + RAIL_CSS
 
 
 def _esc(s) -> str:

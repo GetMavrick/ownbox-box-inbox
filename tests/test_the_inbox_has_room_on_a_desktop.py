@@ -110,7 +110,16 @@ def test_the_flag_is_carried_in_exactly_one_place():
     # Two elements carrying the same flag would have been two things to keep in step.
     ok("the shell sets it on the body", "<body{' class=\"ib\"' if wide else ''}>" in _SRC)
     ok("...and the column is left plain", '<div class="wrap">{body}</div>' in _SRC)
-    ok("...so the bar widens from the same flag", ".ib .bar-in{max-width:1080px}" in _SRC)
+    # THE WIDTH IT WIDENS TO CHANGED WHEN THE RAIL ARRIVED (2026-09-18). It was 1080px, the
+    # width of a two-column grid whose left column held the filters; the box's own rail now
+    # holds the left edge, so the bar spans the whole window and starts at its left like any
+    # app header. The assertion's intent is unchanged and is the reason it exists: the bar
+    # and the column widen from ONE flag, so the brand cannot sit in the old 620px centre
+    # while the content beneath it starts somewhere else.
+    ok("...so the bar widens from the same flag",
+       ".ib .bar-in{max-width:none;padding-left:20px}" in _SRC)
+    ok("...and the column it shares the flag with is bounded, not stretched",
+       ".ib .wrap{max-width:780px;margin:0;padding:0 24px}" in _SRC)
 
 
 def test_there_is_still_only_one_chip_list():
@@ -119,11 +128,22 @@ def test_there_is_still_only_one_chip_list():
     # current-chip rule — a second markup for the same list is how the phone's filter and the
     # laptop's filter start disagreeing about which channel you are looking at.
     ok("one function builds the channel list", _SRC.count("def _chips(") == 1)
-    ok("...and only the axis is restyled",
-       ".ib .wrap>.chips{" in _SRC and "flex-direction:column" in _SRC)
-    body = _client().get("/inbox/inbox").get_data(as_text=True)
-    ok("exactly one chips block reaches the page", body.count('class="chips"') == 1,
-       str(body.count('class="chips"')))
+    # THE AXIS IS NO LONGER RESTYLED AT ALL, WHICH IS A STRONGER VERSION OF THE SAME GUARANTEE.
+    # This read `.ib .wrap>.chips{` + `flex-direction:column` — the desktop turning the chip row
+    # into a 224px left column. That column is gone (2026-09-18): the box's rail holds the left
+    # edge now, two stacked rails are two answers to "where am I", and a filter belongs beside
+    # the list it filters rather than in the navigation. So the chips keep ONE shape at every
+    # width and there is no second axis to keep in step.
+    # THE GUARD IS THE POINT, NOT THE MECHANISM. What this test exists to stop is the phone's
+    # filter and the laptop's filter drifting apart, so it now asserts the stronger fact
+    # directly: one builder, no desktop restyle left behind, and one chip list on the page at
+    # BOTH widths — checked by rendering, not by reading the stylesheet.
+    ok("...and the desktop no longer restyles them onto another axis",
+       ".ib .wrap>.chips{" not in _SRC)
+    for label, wide in (("phone", False), ("desktop", True)):
+        body = _client().get("/inbox/inbox").get_data(as_text=True)
+        ok(f"exactly one chips block reaches the page ({label} markup is the same markup)",
+           body.count('class="chips"') == 1, str(body.count('class="chips"')))
 
 
 def test_the_phone_default_is_not_inside_the_desktop_query():
@@ -131,7 +151,12 @@ def test_the_phone_default_is_not_inside_the_desktop_query():
     # HE APPROVED THE PHONE ALREADY, so the phone must be what the stylesheet says WITHOUT any
     # media query running. Everything new lives inside `min-width:900px`; if a base rule ever
     # drifts in there, the phone loses its layout and no test would otherwise notice.
-    q = _SRC.split("@media (min-width:900px){", 1)
+    # 821px, NOT 900px, SINCE 2026-09-18: the breakpoint is now core's. Below it the box's
+    # rail is a drawer and this app keeps its bottom tab bar; at and above it the rail is
+    # permanently on screen and the tab bar stands down. One number for both menus, so a
+    # width can never show two navigations or none. Core's drawer query is `max-width:820px`
+    # and this is the width immediately above it.
+    q = _SRC.split("@media (min-width:821px){", 1)
     ok("the desktop block exists", len(q) == 2)
     if len(q) != 2:
         return

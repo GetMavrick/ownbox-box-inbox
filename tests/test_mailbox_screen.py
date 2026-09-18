@@ -163,9 +163,16 @@ def test_day_one_tells_a_stuck_person_where_to_look():
     ok("2-Step Verification comes BEFORE App passwords", 0 <= i2 < iapp, f"{i2} vs {iapp}")
     ok("...and the dead end is named before they hit it",
        "administrator has switched it off" in words)
+    # COUNTED INSIDE THE FORM, NOT ON THE PAGE. This app's shell gained the box's menu on
+    # 2026-09-18, and core's drawer is a CSS-only checkbox — so every screen it draws now
+    # carries one `<input>` that is not a field anybody fills. A page-wide count read 3 and
+    # said "three fields", which was never what this line meant: it means the form asks for a
+    # host and a password and offers one button. Scoped, it says exactly that, and it would
+    # still catch a third field appearing in the form.
+    _form = body.split("<form", 1)[-1].split("</form>", 1)[0]
     ok("there are two fields and one button",
-       body.count("<input") == 2 and body.count("</button>") == 1,
-       f"{body.count('<input')} inputs")
+       _form.count("<input") == 2 and body.count("</button>") == 1,
+       f"{_form.count('<input')} fields in the form, {body.count('<input')} inputs on the page")
     ok("...and the password field is a password field", 'type="password"' in body)
 
 
@@ -242,7 +249,11 @@ def test_an_administrator_switching_it_off_offers_no_button_to_press():
     body = c.get("/inbox/mailbox").get_data(as_text=True)
     words = _text(body)
     ok("it says who can fix it", "administrator" in words and "Admin console" in words)
-    ok("...and offers no field that cannot succeed", "<input" not in body, body.count("<input"))
+    # NO FORM AT ALL, which is the strongest way to say "no field that cannot succeed" and is
+    # immune to the shell's own furniture. This read `"<input" not in body` and went red when
+    # the box's menu arrived, because that drawer is a checkbox — an input, but not a field.
+    ok("...and offers no field that cannot succeed",
+       "<form" not in body, f"a form is still rendered: {body.count('<form')}")
     ok("...and says the rest of the box is unaffected", "nothing else about your box" in words)
 
 
