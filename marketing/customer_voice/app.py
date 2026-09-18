@@ -3259,7 +3259,9 @@ def r_drafts():
             # `put_ai_credential`; if this screen still took API keys only, a buyer who pasted a
             # subscription token HERE would be told their token was not an Anthropic key — while
             # the other screen accepted it. One rule, or the box contradicts itself.
-            box_secrets.put_ai_credential(str(request.form.get("key") or ""), user_id=whoami)
+            box_secrets.put_ai_credential(
+                str(request.form.get("key") or ""),
+                consented=bool(request.form.get("subscription_consent")), user_id=whoami)
             return redirect("/inbox/settings")
         except box_secrets.SecretRejected as e:
             # Never a lecture and never an echo — the same discipline as the claim form. The
@@ -3277,9 +3279,16 @@ def r_drafts():
       + note +
       '<form class="compose" method="post" action="/inbox/drafts">'
       '<input type="password" name="key" autocomplete="off" spellcheck="false"'
-      ' aria-label="Paste your key" placeholder="Paste your key" '
+      ' aria-label="Paste your API key or subscription token" '
+      'placeholder="Paste your API key or subscription token" '
       'style="width:100%;font:inherit;font-size:16px;padding:12px 14px;'
       'border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)">'
+      # THE SAME GATE THIS SCREEN'S STORE NOW ENFORCES. Without the tick HERE, a buyer pasting a
+      # subscription token into Settings would be refused by `put_claude_oauth` with no way on the
+      # page to satisfy it — a door that asks for a key it does not hand out. Rendered from the
+      # same contract the set-up screen uses, so the two cannot drift apart in wording.
+      + _setup_consent(next((e for e in box_secrets.SETUP_STEPS
+                             if e.get("key") == "anthropic"), {})) +
       '<button class="btn" type="submit">Turn drafts on</button>'
       '</form>'
       # THE SAME PROMISE THE CONNECT SCREEN MAKES, NOW THAT THIS SCREEN CAN KEEP IT. `_connect_
@@ -3454,7 +3463,9 @@ def _setup_save(which: str, form, *, user_id: str | None) -> None:
         # sk-ant-oat… subscription token is stored as one and selects the claude_code backend; an
         # API key takes the verified path it always did. A buyer knows which of the two they hold
         # and should not have to tell a form so when the credential itself says it.
-        box_secrets.put_ai_credential(str(form.get("key") or ""), user_id=user_id)
+        box_secrets.put_ai_credential(str(form.get("key") or ""),
+                                      consented=bool(form.get("subscription_consent")),
+                                      user_id=user_id)
     else:
         raise box_secrets.SecretRejected("That form is not one this screen knows.")
 
@@ -3514,7 +3525,43 @@ def _setup_field(f: dict, value: str = "") -> str:
             f'style="{style}"></label>')
 
 
-def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None) -> str:
+def _setup_consent(e: dict) -> str:
+    """Both vendors' terms, one click away, at the moment a person is deciding.
+
+    IT INFORMS; IT DOES NOT GATE. Owner, 2026-09-18: "We are not policing people's usage of their
+    own property... they can review their own fucking terms... we're going above and beyond by
+    putting a link to Anthropic terms and to OpenAI terms right there on the page." Nothing here
+    is `required`, nothing is withheld if the box is left unticked, and the store refuses nothing.
+    The buyer owns this machine; what we owe them is the information, not a permission slip.
+
+    RENDERED ONLY FOR A STEP THAT DECLARES ONE, so this stays a contract like every other part of
+    the set-up screen rather than a branch on a step's name. A step with no `consent_field` draws
+    nothing and is unchanged.
+    """
+    field = e.get("consent_field")
+    if not field:
+        return ""
+    warn = e.get("terms_warning") or ""
+    links = "".join(
+        f'<a href="{_esc(u)}" target="_blank" rel="noopener noreferrer" '
+        f'style="color:var(--accent)">{_esc(t)}</a>'
+        + ('<span class="quiet"> · </span>' if i < len(e.get("terms_links") or ()) - 1 else "")
+        for i, (t, u) in enumerate(e.get("terms_links") or ()))
+    return (
+        '<div style="margin-top:14px;padding:12px 14px;border:1px solid var(--line);'
+        'border-radius:12px;background:var(--card)">'
+        f'<p class="t" style="margin:0 0 8px;font-size:13.5px;line-height:1.5">{_esc(warn)}</p>'
+        + (f'<p style="margin:0 0 10px;font-size:13.5px">{links}</p>' if links else "")
+        + f'<label style="display:flex;gap:10px;align-items:flex-start;font-size:13.5px;'
+          f'line-height:1.5;cursor:pointer">'
+          f'<input type="checkbox" name="{_esc(field)}" value="yes" '
+          f'style="margin-top:3px;flex:none;width:18px;height:18px">'
+          f'<span>{_esc(e.get("consent_label") or "")}</span></label>'
+        '</div>')
+
+
+def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
+                owner: bool) -> str:
     """ONE ENTRY, RENDERED THE SAME WAY WHATEVER IT IS. This is the whole point of the contract:
     two vendors, two kinds of secret, one shape — a number, a title, why it is wanted, what is
     set, the instructions, the fields, and whatever the buyer can press."""
@@ -3534,6 +3581,9 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None) -
                     f'<span class="t">{_esc(t)}</span></div>'
                     for i, t in enumerate(e.get("steps") or (), 1))
     fields = "".join(_setup_field(f, typed.get(f.get("name"), "")) for f in e.get("fields") or ())
+    # BELOW THE FIELD, ABOVE SUBMIT — where the owner asked for it, and where a person reads it
+    # before they press anything rather than after.
+    fields += _setup_consent(e)
 
     link = e.get("link") or {}
     if link and link.get("enabled"):
@@ -3560,6 +3610,21 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None) -
             f'<p class="quiet" style="margin:2px 0 0">{_esc(e.get("why"))}</p>'
             f'<p class="quiet" style="margin:6px 0 0"><b class="{_esc(tone)}">{_esc(said)}</b>'
             + (f' — {_esc(detail)}' if detail else "") + '</p>'
+            # THE ONE-PRESS ROUTE FIRST, ABOVE THE INSTRUCTIONS FOR THE LONG WAY ROUND. A step
+            # that declares `action_href` has a door a buyer can simply walk through; drawing it
+            # under four numbered steps would hide the easy path behind the hard one. A step that
+            # declares none renders exactly as it did — this is a contract, not a special case.
+            #
+            # AND NOT DRAWN AT ALL FOR SOMEBODY WHO WOULD BE REFUSED AT IT. Connecting an AI
+            # account bills the whole box, so `/inbox/connect-claude` answers 403 to a member —
+            # and this card was offering them the button anyway. A door you are shown and then
+            # turned away from reads as the product being broken, not as a permission you lack.
+            # Caught by test_a_buyer_can_walk_every_screen, which walks as a member on purpose.
+            + (f'<div class="card">'
+               f'<p style="margin:0 0 10px">{_esc(e.get("action_why") or "")}</p>'
+               f'<p style="margin:0"><a class="btn" href="{_esc(e.get("action_href"))}">'
+               f'{_esc(e.get("action_label") or "Connect")}</a></p></div>'
+               if e.get("action_href") and owner else "")
             + (f'<div class="card">{steps}</div>' if steps else "")
             + (f'<p class="quiet">{_esc(e.get("note"))}</p>' if e.get("note") else "")
             + note
@@ -3569,6 +3634,102 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None) -
                f'{fields}<p style="margin:12px 0 0">'
                f'<button class="btn" type="submit">{verb}</button></p></form>' if fields else "")
             + out + '</section>')
+
+
+@blueprint.route("/inbox/connect-claude", methods=["GET", "POST"])
+def r_connect_claude():
+    """Sign in to Claude from the box. Owner, 2026-09-18: "There's no key. It's a login."
+
+    THE SCREEN IS TWO STATES AND NOTHING ELSE, because a person doing this once should never have
+    to understand it. Press Connect, and the box starts the login and shows a link. Follow the
+    link, sign in AT claude.com, and paste the short code it gives you back here.
+
+    THE BOX NEVER SEES A PASSWORD and never asks for one. It sees a code that is useless to
+    anybody else and is spent the moment it is used.
+
+    OWNER-ONLY, like every other credential door on this box: `dash` already answers who is
+    signed in, and a member pressing this would be minting a credential the whole box then thinks
+    on, billed to whoever's subscription it was.
+    """
+    gate = _gate()
+    if gate is not None:
+        return gate
+    from core import claude_login
+
+    try:
+        who = dash.session_user(request) or {}
+    except Exception:                                    # noqa: BLE001
+        who = {}
+    if (who.get("role") or "") != "owner":
+        return _shell('<div class="card"><p>Only the owner of this box can connect an AI '
+                      'account.</p><p><a href="/inbox/setup">Back to set up</a></p></div>',
+                      here="/inbox/setup"), 403
+
+    note, url = "", ""
+    if request.method == "POST":
+        action = str(request.form.get("do") or "")
+        try:
+            if action == "start":
+                url = claude_login.start()
+            elif action == "code":
+                claude_login.finish(str(request.form.get("code") or ""), user_id=who.get("id"))
+                return redirect("/inbox/setup")
+            elif action == "cancel":
+                claude_login.cancel()
+                return redirect("/inbox/setup")
+        except claude_login.LoginError as e:
+            # THE SENTENCE IS THE PRODUCT HERE. `claude_login` raises only things a person can act
+            # on, and never quotes the CLI's transcript at them — see `_sayable` for what that
+            # looked like before it was stopped.
+            note = str(e)
+
+    # COMING BACK IS THE NORMAL CASE, NOT AN EDGE ONE. Signing in happens in another tab, and a
+    # person who reloads this one — or reaches it again from set-up — was being offered a Connect
+    # button for a login already running, which then replaced the login whose code they were
+    # holding. The session outlives the request now, so the link it is waiting on can be drawn
+    # again instead.
+    if not url:
+        url = claude_login.pending_url()
+
+    body = ['<div class="card"><h2 style="margin-top:0">Connect your Claude subscription</h2>'
+            '<p>Sign in to Claude and this box will draft on your own subscription. '
+            'You will not need an API key.</p></div>']
+    if note:
+        body.append(f'<div class="card"><p>{_esc(note)}</p></div>')
+
+    if url:
+        body.append(
+            '<div class="card">'
+            '<p><b>1.</b> Open this link and sign in to Claude, then approve access.</p>'
+            f'<p style="margin:12px 0"><a class="btn" href="{_esc(url)}" target="_blank" '
+            'rel="noopener noreferrer">Sign in to Claude &rarr;</a></p>'
+            '<p class="quiet" style="word-break:break-all">' + _esc(url) + '</p>'
+            '<p><b>2.</b> Claude will show you a short code. Paste it here.</p>'
+            '<form class="compose" method="post" action="/inbox/connect-claude">'
+            '<input type="hidden" name="do" value="code">'
+            '<input name="code" autocomplete="off" spellcheck="false" aria-label="Paste the code" '
+            'placeholder="Paste the code from Claude" style="width:100%;font:inherit;'
+            'font-size:16px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;'
+            'background:var(--card);color:var(--ink)">'
+            '<button class="btn" type="submit">Finish</button></form>'
+            '<form method="post" action="/inbox/connect-claude" style="margin-top:10px">'
+            '<input type="hidden" name="do" value="cancel">'
+            '<button class="btn" type="submit">Cancel</button></form>'
+            '</div>')
+    else:
+        # THE LINK IS NOT DRAWN BEFORE IT EXISTS. Starting the login takes a few seconds and can
+        # fail; a button that says "Sign in to Claude" and leads nowhere is the dead end this
+        # whole screen was written to remove.
+        body.append(
+            '<div class="card">'
+            '<form method="post" action="/inbox/connect-claude">'
+            '<input type="hidden" name="do" value="start">'
+            '<button class="btn" type="submit">Connect</button></form>'
+            '<p class="quiet" style="margin-top:12px">This box never sees your password. You sign '
+            'in at claude.com and paste back a short code.</p>'
+            '<p class="quiet"><a href="/inbox/setup">Paste a key instead</a></p>'
+            '</div>')
+    return _shell("".join(body), here="/inbox/setup")
 
 
 # NOT `@blueprint.post`. tests/test_customer_voice.py scans this department for a CALL named
@@ -3640,7 +3801,8 @@ def r_setup():
             if done < len(steps) else
             '<h1>You are set up.</h1><p class="quiet">Everything below is connected. Change any '
             'of it whenever you like.</p>')
-    body = head + "".join(_setup_step(i, e, note=notes.get(e.get("key"), ""), typed=typed)
+    body = head + "".join(_setup_step(i, e, note=notes.get(e.get("key"), ""), typed=typed,
+                                      owner=(_u.get("role") or "") == "owner")
                           for i, e in enumerate(steps, 1))
     body += ('<p style="margin-top:22px"><a href="/inbox/settings" '
              'style="color:var(--accent)">← Settings</a></p>')

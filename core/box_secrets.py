@@ -42,11 +42,23 @@ ANTHROPIC_DETAIL = "anthropic_detail"
 # have to review their own terms and be responsible for themselves. We are not the police." The box
 # therefore OFFERS the choice, LINKS the terms, and does not make it for anyone.
 CLAUDE_OAUTH = "claude_code_oauth_token"
+# THE RECORD THAT THE PERSON TICKED THE BOX, kept because legal counsel asked for the gate and a
+# gate nobody can evidence afterwards is decoration (owner, 2026-09-18, relaying his counsel). It
+# holds WHEN and WHO, never the token. `put_claude_oauth` refuses without it, so this row exists
+# for every stored subscription token on every box, with no path that writes one and not the other.
+CLAUDE_OAUTH_CONSENT = "claude_code_oauth_consent"
 CLAUDE_OAUTH_STATUS = "claude_code_oauth_status"
 CLAUDE_OAUTH_DETAIL = "claude_code_oauth_detail"
 # Anthropic's own terms, linked on the set-up screen so the choice is made with them in front of
 # the person making it rather than described second-hand by us.
 ANTHROPIC_TERMS_URL = "https://www.anthropic.com/legal/consumer-terms"
+# BOTH VENDORS, because a buyer's subscription may be either and the point is that they can read
+# the terms of THEIRS without going looking. Owner, 2026-09-18: "a link to Anthropic terms and to
+# OpenAI terms right there on the page so they can review the terms of their subscription in
+# particular."
+OPENAI_TERMS_URL = "https://openai.com/policies/terms-of-use"
+TERMS_LINKS = (("Anthropic's consumer terms", ANTHROPIC_TERMS_URL),
+               ("OpenAI's terms of use", OPENAI_TERMS_URL))
 # THE BUYER'S MAILBOX, FOR READING (SPEC #1226). Three values useless apart, so they are stored and
 # replaced as ONE row: a half-updated credential is an auth failure nobody can explain.
 # THE BUYER'S OWN ZERNIO ACCOUNT (owner, 2026-09-16). Ruled after checking all 60 SDK resources:
@@ -349,7 +361,7 @@ def validate(name: str, value: str) -> str:
     # been written, so the box was left with a half-written status AND an exception in the poller.
     # Reproduced, then moved. A guard placed after the thing it guards is not a guard.
     if name in (EMAIL, EMAIL_DETAIL, ZERNIO_DETAIL, ZERNIO_PROFILE, ANTHROPIC_DETAIL,
-                CLAUDE_OAUTH_DETAIL):
+                CLAUDE_OAUTH_DETAIL, CLAUDE_OAUTH_CONSENT):
         return str(value or "")
     value = str(value or "").strip()
     if not value:
@@ -438,7 +450,8 @@ def claude_oauth_token() -> str:
     return (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip() or get(CLAUDE_OAUTH)
 
 
-def put_claude_oauth(value: str, *, user_id: str | None = None) -> None:
+def put_claude_oauth(value: str, *, consented: bool = False,
+                     user_id: str | None = None) -> None:
     """Store the buyer's subscription token, and say plainly what was NOT checked.
 
     NO VENDOR PROBE, AND THAT IS NOT AN OVERSIGHT. `put_anthropic` asks Anthropic whether an API
@@ -453,7 +466,25 @@ def put_claude_oauth(value: str, *, user_id: str | None = None) -> None:
     watchdog's backend probe is what turns `saved` into a verdict, on the box, against the real CLI.
     """
     value = validate(CLAUDE_OAUTH, value)
+    # NOTHING IS REFUSED HERE, AND THAT IS THE RULING. An earlier cut of this made the tick a
+    # CONDITION and would not store a token without it. The owner ruled otherwise on 2026-09-18: we
+    # do not police what a person does with property they bought, the terms of their own subscription
+    # are theirs to review, and what we owe them is the information — in his words, "a link to
+    # Anthropic terms and to OpenAI terms right there on the page."
+    #
+    # THE QUOTE IS TRIMMED ON PURPOSE AND THE RULING IS NOT. `core/` ships wholesale into every box, so
+    # a buyer who opens the source of the thing they own reads these comments — which is a line we sell
+    # on. His decision belongs here; his phrasing that afternoon does not.
+    #
+    # He is right about whose box it is. A buyer owns this machine outright; a vendor that refused
+    # to store their own credential until they ticked our box would be holding their property
+    # hostage to our comfort. What we owe them is the INFORMATION — both vendors' terms, one click
+    # away, at the moment they are deciding — and that is what the screen now gives.
     put(CLAUDE_OAUTH, value, user_id=user_id)
+    # The tick is still RECORDED when it is given, because it costs the buyer nothing and answers
+    # the question later if anyone asks it. It is never required, and never checked before a store.
+    if consented:
+        put(CLAUDE_OAUTH_CONSENT, f"{state._now()} {user_id or 'unknown'}"[:300], user_id=user_id)
     put(CLAUDE_OAUTH_STATUS, "saved", user_id=user_id)
     clear(CLAUDE_OAUTH_DETAIL, user_id=user_id)
     # THE TWO CREDENTIALS ARE EXCLUSIVE, AND LEAVING THE OLD ONE BEHIND IS HOW A BOX ENDS UP
@@ -477,7 +508,7 @@ def note_claude_oauth_status(status: str, detail: str = "", *, user_id: str | No
 
 def clear_claude_oauth(*, user_id: str | None = None) -> None:
     """Forget the subscription token — the box falls back to an API key, or to nothing."""
-    for name in (CLAUDE_OAUTH, CLAUDE_OAUTH_STATUS, CLAUDE_OAUTH_DETAIL):
+    for name in (CLAUDE_OAUTH, CLAUDE_OAUTH_STATUS, CLAUDE_OAUTH_DETAIL, CLAUDE_OAUTH_CONSENT):
         clear(name, user_id=user_id)
 
 
@@ -487,7 +518,8 @@ def claude_oauth_state() -> dict:
             "detail": get(CLAUDE_OAUTH_DETAIL)}
 
 
-def put_ai_credential(value: str, *, user_id: str | None = None) -> str:
+def put_ai_credential(value: str, *, consented: bool = False,
+                      user_id: str | None = None) -> str:
     """ONE FIELD, EITHER CREDENTIAL. Returns which path was taken: "subscription" or "api".
 
     The buyer knows whether they have an API key or a Claude subscription; they should not have to
@@ -495,10 +527,18 @@ def put_ai_credential(value: str, *, user_id: str | None = None) -> str:
     and nothing else is, so the routing is exact rather than a guess.
     """
     if looks_like_subscription(value):
-        put_claude_oauth(value, user_id=user_id)
+        put_claude_oauth(value, consented=consented, user_id=user_id)
         return "subscription"
+    # AN API KEY IS NOT GATED, and letting the tick leak across to it would be a worse bug than a
+    # missing gate: it would turn a box a buyer is entitled to use into one that refuses them over
+    # a condition that does not apply to their credential at all.
     put_anthropic(value, user_id=user_id)
     return "api"
+
+
+def oauth_consent_record() -> str:
+    """When the subscription tick was given and by whom, for whoever has to answer that later."""
+    return get(CLAUDE_OAUTH_CONSENT)
 
 
 def note_anthropic_status(status: str, detail: str = "", *, user_id: str | None = None) -> None:
@@ -551,6 +591,23 @@ def anthropic_state() -> dict:
     "not connected" there would send its owner to buy a key he already has, and the row would stay
     red forever no matter what he pasted.
     """
+    # THE STEP IS ONE STEP AND IT TAKES TWO CREDENTIALS, so this must ask about BOTH. Measured
+    # 2026-09-18 by posting a real subscription token through the real form: it stored, the brain
+    # switched to claude_code, `can_think()` said ready — and this still returned `not_connected`,
+    # because it asked only about the API key. So the screen read "Not connected yet" and the
+    # dashboard kept counting three things to connect, over a box that was working.
+    #
+    # THAT IS THE WORST SHAPE A BUG CAN HAVE ON THIS SCREEN: the product works and tells its owner
+    # it does not. He pastes the token he was asked for, nothing on screen changes, and the only
+    # sane conclusion is that it failed. He would have filmed exactly that.
+    if claude_oauth_token():
+        st = get(CLAUDE_OAUTH_STATUS)
+        # `saved` is this store's honest word for "not tested yet" — see `put_claude_oauth`. The
+        # SCREEN's vocabulary is a closed set that has no such member, and inventing one here is a
+        # blank row in front of a paying customer. It is connected as far as this screen is
+        # concerned: the credential is stored and the brain is using it.
+        return {"status": "connected" if st in ("saved", "connected", "", None) else st,
+                "user": None, "detail": get(CLAUDE_OAUTH_DETAIL)}
     if not anthropic_key():
         return {"status": "not_connected", "user": None, "detail": ""}
     # A KEY WITH NO STATUS ROW IS CONNECTED, and that default is what keeps every box already in
@@ -621,28 +678,51 @@ SETUP_STEPS = (
 # gateway every machine reasons through, and a box with no key cannot draft, summarise or route
 # anything, whichever machines it carries. There is nothing to register it, so core asks for it.
 _AI_STEP = {
-    "key": "anthropic", "title": "Your AI key",
+    # TITLED FOR THE ANSWER, NOT THE FALLBACK. It read "Your AI key" while the button beneath it
+    # said "Sign in to Claude", which is the contradiction the owner named in the first place —
+    # "There's no key. It's a login." A heading that argues with its own primary control is the
+    # thing a person reads first and the thing they film. The step's identity stays `anthropic`;
+    # only the words a buyer sees change.
+    "key": "anthropic", "title": "Your AI account",
     "why": "This is what writes the replies. Your box drafts with your own key on your own bill, "
            "so your customers' messages are never on anybody else's account. Nothing is sent "
            "automatically — the box writes, you read it, and you decide.",
     "fields": ({"name": "key", "label": "Anthropic API key or Claude subscription token",
                 "type": "password", "placeholder": "sk-ant-..."},),
-    "steps": ("EITHER — if you have a Claude Pro or Max subscription: install the Claude Code "
-              "CLI, run `claude setup-token` on your own computer, and paste the sk-ant-oat… "
-              "value it prints. Your box then drafts on your subscription.",
-              "OR — if you have an Anthropic API account: open API keys, create one, add a "
-              "payment method, and paste the sk-ant-api… value. Drafting is billed to you.",
-              "Either way it goes in the one box below — your box can tell which you pasted.",
+    # THE BUTTON IS THE ANSWER FOR A SUBSCRIPTION; THE FIELD IS THE FALLBACK. Owner, 2026-09-18:
+    # "What am I going to click on to authorize Claude subscription? There's no key. It's a login."
+    # He was right. Asking for an sk-ant-oat token asks a person to install a CLI and run a command
+    # on their laptop to produce the OUTPUT of a login — which is a wall, not onboarding. The box
+    # runs that login itself now and hands them a link (`core/claude_login.py`).
+    "action_href": "/inbox/connect-claude",
+    "action_label": "Sign in to Claude",
+    "action_why": "Have a Claude Pro or Max subscription? Sign in and this box drafts on it — no "
+                  "key to find, nothing to install. You sign in at claude.com; the box never sees "
+                  "your password.",
+    "steps": ("If you have a Claude Pro or Max subscription, use Sign in to Claude above. It takes "
+              "about twenty seconds and there is no key to find.",
+              "If you have an Anthropic API account instead: open API keys, create one, add a "
+              "payment method, and paste the sk-ant-api… value below. Drafting is billed to you.",
+              "Already generated a subscription token yourself? Paste it below — the field takes "
+              "either, and your box can tell which you gave it.",
               "Your box keeps a hard spending cap on top of whatever you set at Anthropic."),
     # HIS WORDS, HIS RULING, AND THE LINK IS THE POINT OF IT. Owner, 2026-09-18: "that should be
     # the choice of the client... they have to review their own terms and be responsible for
     # themselves. We are not the police" — plus "we can put a link to Anthropic terms so they can
     # review". So the box states the condition once, links the terms, and does not decide.
     "terms_url": ANTHROPIC_TERMS_URL,
-    "terms_note": "Using a Claude subscription here is your choice to make. Anthropic's consumer "
-                  "terms are per person — review them, and your own intended use, before you "
-                  "connect a subscription token. An API key has no such condition. If you would "
-                  "rather we set this up for you, write to help@ownbox.io.",
+    # THE WARNING, THE LINK AND THE TICK — the shape legal counsel asked for (owner, 2026-09-18).
+    # It is only reached by someone pasting a SUBSCRIPTION token; an API key carries no such
+    # condition and must not be made to wade through one.
+    "terms_warning": "This is your box and your account — how you use your own subscription is "
+                     "between you and your provider. Their terms are linked here so you can "
+                     "check yours in particular before you connect it.",
+    "terms_links": TERMS_LINKS,
+    "consent_field": "subscription_consent",
+    "consent_label": "I have reviewed my provider's terms and want to use my subscription with "
+                     "this box.",
+    "terms_note": "Optional — nothing here is withheld either way. If you would rather we set "
+                  "this up for you, write to help@ownbox.io.",
     "note": "Without this the box still reads everything and still shows you every message — it "
             "simply will not write the drafts.",
 }

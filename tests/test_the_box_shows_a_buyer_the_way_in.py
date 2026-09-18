@@ -133,7 +133,7 @@ connect_mailbox()
 h = home()
 ok("the count moves as steps are connected", "1 of 3 connected" in h, h[h.find("Finish"):][:160])
 ok("...and names which ones are left, so nobody hunts",
-   "Your social accounts" in h and "Your AI key" in h)
+   "Your social accounts" in h and "Your AI account" in h)
 # FOUND BY READING THE RENDERED CARD, not the code: with the mailbox connected it still said
 # "Nothing arrives until at least one of these is connected" over a box already receiving mail.
 ok("...and no longer claims nothing arrives, because something does",

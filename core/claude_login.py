@@ -1,0 +1,590 @@
+"""Sign in to Claude from the box — a login, not a key to find and paste.
+
+WHY THIS EXISTS. Owner, 2026-09-18: *"What am I going to click on to authorize Claude
+subscription? There's no key. It's a login."* He was right, and the set-up screen was wrong. It
+asked for an `sk-ant-oat…` token, which is the OUTPUT of a login somebody has to perform somewhere
+else, on a laptop, in a terminal, having first installed a CLI. For the people we sell to that is
+not onboarding; it is a wall.
+
+WHAT THE CLI ACTUALLY DOES WITH NO BROWSER, measured on 2026-09-18:
+
+    $ claude setup-token
+    This will guide you through long-lived (1-year) auth token setup...
+    Browser didn't open? Use the url below to sign in
+    https://claude.com/cai/oauth/authorize?code=true&client_id=…&redirect_uri=…
+    Paste code here if prompted >
+
+That printed URL is the whole product. On a laptop the browser opens and the URL is invisible; on
+a server it is printed and the process WAITS. So a box can run the login on the buyer's behalf,
+hand them the link, and take back the short code Claude shows them. They never see a credential.
+
+THE FLOW, AND WHO HOLDS WHAT:
+  1. `start()`  — the box runs the CLI, captures the authorize URL, and keeps the process waiting.
+  2. the buyer  — clicks the link, signs in AT claude.com, approves. Their password never comes
+                  near this box; we see a short code and nothing else.
+  3. `finish()` — feeds that code to the waiting login, which mints a 1-year token. Stored through
+                  `box_secrets.put_claude_oauth`, the same door a pasted token uses.
+
+WHOSE AUTHORIZATION THIS IS. The client is Claude Code's, exactly as it is when the buyer runs the
+command on their own laptop — the box is hosting the terminal, not impersonating anybody. Nothing
+here depends on Ownbox being registered as an OAuth client; that question only decides whose name
+appears on the consent screen.
+
+NO REASONING HAPPENS HERE (spec §11-6). This is authentication: a subprocess, a URL and a code.
+Nothing routes through `brain.think()`, nothing is metered, and there is nothing for `cost_guard`
+to meter — the same argument `brain.verify_key` makes for the API key's probe.
+
+────────────────────────────────────────────────────────────────────────────────────────────────
+WHY THE SESSION IS NOT A VARIABLE (OSDev1, 2026-09-18, before this could reach a buyer)
+
+The first cut kept the waiting process in a module global. That is correct in one process, and a
+box serves this app with TWO:
+
+    ExecStart=…/gunicorn --worker-class gthread --workers 2 --threads 8 …
+    pgrep -fa gunicorn  ->  3 processes (master + 2 workers)      [measured on image 246025588]
+
+`start()` and `finish()` are separate HTTP requests with a trip to claude.com in between, and
+nothing pins them to the same worker. About half the time the code came back to the worker that
+had never heard of the login, and the buyer was told *"that sign-in has expired"* — on a box that
+was still waiting for them. Pressing the button again re-rolled the same coin. It is the trap in
+`reference_aios_two_processes_module_globals` wearing new clothes.
+
+A pty and a live child cannot be shared between processes, so they do not live in a request
+handler at all. `start()` spawns a DETACHED HELPER — this same module, run as `-m core.claude_login
+--serve <dir>` — which owns the pty and the CLI for the life of the login. Both workers reach it
+through a session directory beside the box's database:
+
+    <dir>/pid      the helper, so any worker can reap it
+    <dir>/url      the authorize URL, written once captured
+    <dir>/status   starting | awaiting_code | done | error   (renamed into place, never half-read)
+    <dir>/error    a sentence for the buyer
+    <dir>/code     a FIFO: whichever worker takes the code writes it here
+    <dir>/user     who is signing in, so the helper stores the token against them
+
+Every file is written to a temporary name and renamed, so a worker reading while the helper writes
+sees the old value or the new one and never half of either.
+
+THE RELOAD IS NOT A DEAD END EITHER. The buyer leaves this tab to authorize and may well come back
+to a reloaded page; the URL now survives in the session, so `pending_url()` can draw the link again
+instead of offering a Connect button for a login already running.
+"""
+from __future__ import annotations
+
+import errno
+import os
+import pathlib
+import pty
+import re
+import select
+import signal
+import subprocess
+import sys
+import time
+
+from core import box_secrets
+from core.logging import get_logger
+
+log = get_logger(__name__)
+
+# WHAT THE CLI PRINTS. The URL is matched on claude.com's authorize path rather than on "https://"
+# so a different link in the same output (docs, a status page) can never be handed to a buyer as
+# their login. The terminator class excludes the BEL and ESC that hyperlink escapes wrap it in.
+_URL = re.compile(r"https://claude\.com/[^\s\x07\x1b\"']+/authorize\?[^\s\x07\x1b\"']+")
+# AND THE HYPERLINK ESCAPE, WHICH IS THE ONLY COMPLETE COPY. The CLI prints the URL twice: once
+# inside an OSC-8 hyperlink, BEL-terminated and exact, and once as visible text the terminal WRAPS
+# across lines and positions with cursor-moves instead of spaces. Reading the visible copy means
+# joining those lines — and whatever follows has no whitespace to stop the match either. Measured
+# on this machine 2026-09-18, and reproduced independently by OSDev1 on his own cut:
+#
+#   ...&state=BpZywyWl-…-DsHoldShiftwhileselectingtouseyourterminal
+#   ...&state=…L9UhOVYPastecodehereifprompted>
+#
+# Claude refuses both. The buyer clicks, it fails, and the box looks broken on the one screen it
+# cannot afford to — while every assertion of the form "a claude.com URL came back" stays green.
+_URL_LINK = re.compile(r"\x1b\]8;[^;]*;(https://claude\.com/[^\x07\x1b]+/authorize\?[^\x07\x1b]+)\x07")
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[=>78]|\x1b\][^\x1b]*\x1b\\")
+# THE TOKEN, WHICH IS THE ONLY THING WORTH READING OUT OF THE SUCCESS OUTPUT.
+_TOKEN = re.compile(r"sk-ant-oat[A-Za-z0-9_\-]{20,}")
+
+START_TIMEOUT_S = 60.0     # the CLI fetches its OAuth parameters before it can print a URL
+FINISH_TIMEOUT_S = 90.0    # minting the token is a round trip to Anthropic
+_STALE_AFTER_S = 900.0     # a login nobody finished is reaped rather than left holding a pty
+
+_DIRNAME = ".claude-login"
+
+
+def _clean(raw: bytes) -> str:
+    """Terminal output as readable text.
+
+    THE CLI POSITIONS EVERY WORD WITH A CURSOR-MOVE rather than spaces — `\\x1b[2GPaste\\x1b[8Gcode`
+    — so stripping escapes yields `Pastecodehere`, with no spaces at all. Every match on this text
+    must therefore be space-insensitive; a probe of mine looked for "Paste code here" and reported
+    the prompt missing while it was on screen. Cost: one wrong answer to the owner, nearly two.
+    """
+    return _ANSI.sub("", raw.decode("utf-8", "replace")).replace("\r", "")
+
+
+def find_url(raw: bytes, stripped: str) -> str:
+    """The sign-in link, read from the hyperlink escape where there is one.
+
+    NOTHING IS RETURNED UNLESS IT CARRIES THE PARAMETERS THAT MAKE IT AN AUTHORISATION. A
+    truncated link, or a docs page, handed over as a sign-in is a dead end that looks like a
+    working feature — and that is precisely the shape the corruption above produced.
+    """
+    text = raw.decode("utf-8", "replace")
+    hit = _URL_LINK.search(text)
+    url = hit.group(1) if hit else ""
+    if not url:
+        # NO HYPERLINK ESCAPE EXISTS ON A BOX, so this is the path that actually runs. Measured
+        # from the raw pty on 2026-09-18, with the box's own TERM=dumb and NO_COLOR=1:
+        #
+        #   authorize?code=true&client_id=9d1c250a-e61b-44d9-88\r\r\ned-5944d1962f5e&...
+        #   ...&state=FjmDPKkGaWmEgwcyxWSlshro49DDIjV1_SRAEHUi7dY\r\r\n\r\r\n\r\r\n
+        #   \x1b[2GPaste\x1b[8Gcode\x1b[13Ghere\x1b[18Gif\x1b[21Gprompted\x1b[30G>
+        #
+        # `\x1b]8;` never appears — the OSC-8 read is inert here and only helps a terminal that
+        # emits hyperlinks. Two true facts are in tension on this path: the CLI HARD-WRAPS the
+        # URL at the terminal width, so the newlines inside it must be joined; and it prints its
+        # prompt after a BLANK LINE, so joining every newline welds `Paste code here if
+        # prompted >` onto `state` and the buyer's link is refused. Both of us shipped the second
+        # half of that and asserted `client_id=` was present, which is true of the broken link.
+        #
+        # The blank line is the boundary the CLI actually gives us. Join wraps within a block;
+        # never across one.
+        for block in re.split(r"\n[ \t]*\n", text.replace("\r", "")):
+            hit2 = _URL.search(_ANSI.sub("", block).replace("\n", ""))
+            if hit2:
+                url = hit2.group(0)
+                break
+    if not url or "client_id=" not in url or "code_challenge=" not in url or "state=" not in url:
+        return ""
+    # WHAT THE CLI SAYS NEXT IS NEVER PART OF THE LINK. Belt and braces over the structural fix
+    # above, because this is the failure that survives every plausible-looking assertion.
+    if "pastecode" in _squash(url) or ">" in url:
+        return ""
+    return url
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", "", text).lower()
+
+
+def _sayable(text: str) -> str:
+    """The tail of the CLI's output, fit to show a person.
+
+    NEVER RAW. The first cut handed the buyer the end of the transcript, which is the wrapped
+    authorize URL — `claude.co m%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=…`
+    — as the explanation for their failed sign-in. That is worse than saying nothing: it looks like
+    the box broke, and it puts a code_challenge on screen. URLs, percent-encoded runs and long
+    opaque strings come out; if nothing readable is left, the caller says nothing instead.
+    """
+    t = re.sub(r"https?://\S+", " ", text)
+    t = re.sub(r"[A-Za-z0-9_%\-]{24,}", " ", t)          # challenges, states, wrapped URL pieces
+    t = re.sub(r"[^A-Za-z0-9 .,:;!?'()\-]+", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    # A fragment with no sentence in it is noise. Two words is the floor for something worth
+    # quoting back to somebody who is already stuck.
+    return t[-160:] if len(t.split()) >= 2 else ""
+
+
+class LoginError(RuntimeError):
+    """Something a person in front of the screen can act on. The message is for them."""
+
+
+# ── the session on disk, which is what makes this work across workers ────────────────────────────
+
+def _dir() -> pathlib.Path:
+    """Beside the box's database, which is the one writable place every worker agrees on.
+
+    IMPORTED INSIDE THE FUNCTION on purpose: a module-scope read of config freezes it at import and
+    defeats every test that points the box somewhere else (`reference_config_bound_at_import`).
+    """
+    from core.config import settings
+    return pathlib.Path(settings.db_path).resolve().parent / _DIRNAME
+
+
+def _read(d: pathlib.Path, name: str) -> str:
+    try:
+        return (d / name).read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+
+
+def _write(d: pathlib.Path, name: str, value: str) -> None:
+    """Rename into place. A worker polling `status` must never read a half-written word."""
+    tmp = d / f".{name}.{os.getpid()}"
+    tmp.write_text(value, encoding="utf-8")
+    os.replace(tmp, d / name)
+
+
+def _alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError as e:
+        return e.errno == errno.EPERM      # running, owned by somebody else
+    return True
+
+
+def _reap(why: str) -> None:
+    """End any live login and remove its session. Never raises: cleanup is not a place to fail."""
+    d = _dir()
+    if not d.exists():
+        return
+    try:
+        pid = int(_read(d, "pid") or 0)
+    except ValueError:
+        pid = 0
+    if _alive(pid):
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(pid, sig)          # the helper is a session leader, so kill the group
+            except OSError:
+                try:
+                    os.kill(pid, sig)
+                except OSError:
+                    pass
+            for _ in range(20):
+                if not _alive(pid):
+                    break
+                time.sleep(0.05)
+            if not _alive(pid):
+                break
+    for f in ("pid", "url", "status", "error", "code", "user", "log"):
+        try:
+            (d / f).unlink()
+        except OSError:
+            pass
+    try:
+        d.rmdir()
+    except OSError:
+        pass
+    log.info("claude_login.reaped", why=why)
+
+
+def cli_present() -> bool:
+    import shutil
+    return bool(shutil.which("claude"))
+
+
+def _live_dir() -> pathlib.Path | None:
+    """The session directory IF a login is genuinely still running in it."""
+    d = _dir()
+    if not d.is_dir():
+        return None
+    try:
+        pid = int(_read(d, "pid") or 0)
+    except ValueError:
+        return None
+    if not _alive(pid):
+        return None
+    try:
+        age = time.time() - (d / "pid").stat().st_mtime
+    except OSError:
+        return None
+    if age > _STALE_AFTER_S:
+        return None
+    return d if _read(d, "status") in ("starting", "awaiting_code") else None
+
+
+def in_progress() -> bool:
+    return _live_dir() is not None
+
+
+def pending_url() -> str:
+    """The link a login already in flight is waiting on, so a reloaded page is not a dead end."""
+    d = _live_dir()
+    return _read(d, "url") if d is not None else ""
+
+
+def start() -> str:
+    """Begin a login and return the URL the buyer must open. Raises LoginError with a sentence."""
+    if not cli_present():
+        raise LoginError("This box cannot sign in to Claude yet — the Claude Code CLI is not "
+                         "installed on it. Ask support@ownbox.io and we will put it on.")
+    # STARTING A SECOND ONE ENDS THE FIRST rather than refusing — the common case is a person who
+    # closed the tab and pressed the button again, and telling them "a login is already in
+    # progress" when they cannot see it is a dead end.
+    _reap("a new login replaces the old one")
+
+    d = _dir()
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(d, 0o700)
+    fifo = d / "code"
+    try:
+        os.mkfifo(fifo, 0o600)
+    except FileExistsError:
+        pass
+    _write(d, "status", "starting")
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    try:
+        logf = open(d / "log", "wb")                     # noqa: SIM115 — handed to the child
+    except OSError as e:
+        raise LoginError(f"This box could not start the Claude sign-in ({type(e).__name__}).") from e
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "core.claude_login", "--serve", str(d)],
+            cwd=str(root), stdin=subprocess.DEVNULL, stdout=logf, stderr=logf,
+            close_fds=True, start_new_session=True,
+            env={**os.environ, "PYTHONPATH": str(root)})
+    except Exception as e:                               # noqa: BLE001
+        logf.close()
+        _reap("helper would not start")
+        raise LoginError(f"This box could not start the Claude sign-in ({type(e).__name__}).") from e
+    finally:
+        try:
+            logf.close()
+        except OSError:
+            pass
+    _write(d, "pid", str(proc.pid))
+
+    deadline = time.time() + START_TIMEOUT_S
+    while time.time() < deadline:
+        url = _read(d, "url")
+        if url:
+            log.info("claude_login.started")
+            return url
+        if _read(d, "status") == "error":
+            why = _read(d, "error")
+            _reap("the login could not start")
+            raise LoginError(why or "Claude did not return a sign-in link. Try again, or paste a "
+                                    "token instead.")
+        if not _alive(proc.pid):
+            break
+        time.sleep(0.4)
+
+    tail = _sayable(_clean(_read(d, "log").encode()))
+    _reap("no url")
+    raise LoginError("Claude did not return a sign-in link"
+                     + (f" — it said: {tail}" if tail else " and said nothing.")
+                     + " Try again, or paste a token instead.")
+
+
+def finish(code: str, *, user_id: str | None = None) -> None:
+    """Hand Claude's code to the waiting login. Stores the token, or raises LoginError."""
+    code = (code or "").strip()
+    if not code:
+        raise LoginError("Paste the code Claude showed you after you signed in.")
+    d = _live_dir()
+    if d is None or _read(d, "status") != "awaiting_code":
+        raise LoginError("That sign-in has expired. Press Connect again to start a new one.")
+
+    # WHO, BEFORE WHAT. The helper stores the token against this person, so the name has to be in
+    # place before the code that mints it goes down the pipe.
+    if user_id:
+        _write(d, "user", str(user_id))
+    try:
+        fd = os.open(str(d / "code"), os.O_WRONLY | os.O_NONBLOCK)
+    except OSError as e:
+        _reap("the login was not listening")
+        raise LoginError("The sign-in stopped before the code reached it. Please try again.") from e
+    try:
+        os.write(fd, (code + "\n").encode())
+    except OSError as e:
+        _reap("write failed")
+        raise LoginError("The sign-in stopped before the code reached it. Please try again.") from e
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+    deadline = time.time() + FINISH_TIMEOUT_S
+    while time.time() < deadline:
+        status = _read(d, "status")
+        if status == "done":
+            _reap("signed in")
+            log.info("claude_login.connected", user=user_id)
+            return
+        if status == "error":
+            why = _read(d, "error")
+            _reap("the cli refused it")
+            raise LoginError(why or "Claude did not accept that code. Press Connect to start "
+                                    "again, and paste the new code as soon as Claude shows it.")
+        try:
+            pid = int(_read(d, "pid") or 0)
+        except ValueError:
+            pid = 0
+        if not _alive(pid):
+            break
+        time.sleep(0.4)
+
+    # NOTHING FROM THE TRANSCRIPT ON THIS PATH. What sits at the end of the buffer here is the
+    # wrapped authorize URL, and terminal wrapping breaks it into pieces too short for any
+    # sanitiser to recognise — two attempts at quoting it put `scope user 3Ainference
+    # code_challenge …` in front of the buyer as the reason their sign-in failed. A person cannot
+    # act on a CLI transcript. They can act on a sentence that tells them what to do next.
+    _reap("no token")
+    raise LoginError("The sign-in did not complete — Claude did not return a token. This usually "
+                     "means the code was wrong or had already expired. Press Connect to start "
+                     "again, and paste the new code as soon as Claude shows it.")
+
+
+def cancel() -> None:
+    _reap("cancelled by the buyer")
+
+
+# ── the helper: one process, one pty, one login, for as long as the buyer needs ──────────────────
+
+def _serve(d: pathlib.Path) -> int:
+    """Own the CLI for the life of one login. Runs detached; both workers talk to it through `d`.
+
+    It writes what it learns into the session directory and takes the buyer's code off the FIFO.
+    Every exit path leaves a terminal status behind, because a worker polling `status` must never
+    be left reading `awaiting_code` at a corpse.
+    """
+    buf = b""
+
+    def fail(sentence: str) -> int:
+        _write(d, "error", sentence)
+        _write(d, "status", "error")
+        return 1
+
+    master, slave = pty.openpty()
+    # TERM=dumb KEEPS THE OUTPUT PARSEABLE and, more importantly, keeps the CLI from drawing a
+    # full-screen interface we would have to reverse-engineer. The URL and the prompt still print.
+    env = {**os.environ, "TERM": "dumb", "NO_COLOR": "1"}
+    # The box's own token must not be inherited into a process whose whole job is to mint a new
+    # one for somebody else — that is how a login "succeeds" without the person ever signing in.
+    env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    try:
+        proc = subprocess.Popen(["claude", "setup-token"], stdin=slave, stdout=slave, stderr=slave,
+                                env=env, close_fds=True)
+    except Exception as e:                               # noqa: BLE001
+        os.close(master)
+        os.close(slave)
+        return fail(f"This box could not start the Claude sign-in ({type(e).__name__}).")
+    os.close(slave)
+
+    # ── 1. wait for the authorize URL ────────────────────────────────────────────────────────
+    deadline = time.time() + START_TIMEOUT_S
+    url = ""
+    while time.time() < deadline and not url:
+        r, _, _ = select.select([master], [], [], 1.0)
+        if r:
+            try:
+                chunk = os.read(master, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk
+        found = find_url(buf, _clean(buf))
+        if found:
+            url = found
+            break
+        if proc.poll() is not None:
+            break
+    if not url:
+        tail = _sayable(_clean(buf))
+        if proc.poll() is None:
+            proc.kill()
+        os.close(master)
+        return fail("Claude did not return a sign-in link"
+                    + (f" — it said: {tail}" if tail else " and said nothing.")
+                    + " Try again, or paste a token instead.")
+    _write(d, "url", url)
+    _write(d, "status", "awaiting_code")
+
+    # ── 2. wait for the buyer's code, without holding the FIFO open against them ─────────────
+    # O_RDONLY|O_NONBLOCK returns immediately with no writer, which is what lets this wait be
+    # interruptible and bounded rather than a block with no way out.
+    try:
+        cfd = os.open(str(d / "code"), os.O_RDONLY | os.O_NONBLOCK)
+    except OSError as e:
+        proc.kill()
+        os.close(master)
+        return fail(f"This box could not wait for your code ({type(e).__name__}).")
+    code = b""
+    deadline = time.time() + _STALE_AFTER_S
+    while time.time() < deadline and not code.strip():
+        r, _, _ = select.select([cfd, master], [], [], 1.0)
+        if cfd in r:
+            try:
+                code += os.read(cfd, 4096)
+            except OSError:
+                pass
+        if master in r:
+            try:
+                buf += os.read(master, 65536) or b""
+            except OSError:
+                pass
+        if proc.poll() is not None and not code.strip():
+            os.close(cfd)
+            os.close(master)
+            return fail("The sign-in ended before your code arrived. Press Connect to start again.")
+    os.close(cfd)
+    if not code.strip():
+        if proc.poll() is None:
+            proc.kill()
+        os.close(master)
+        return fail("That sign-in expired while it waited. Press Connect to start a new one.")
+
+    # HOW MANY TIMES IT HAS ASKED, BEFORE WE ANSWER. If the CLI asks AGAIN after our code, the
+    # code was refused — that is the fastest and most reliable signal it gives, because it does
+    # not always print the word "invalid". Without this a wrong code sat until the timeout and
+    # then reported as if the box had failed rather than the code.
+    asked_before = _squash(_clean(buf)).count("pastecodehere")
+    try:
+        os.write(master, code.strip() + b"\n")
+    except OSError:
+        proc.kill()
+        os.close(master)
+        return fail("The sign-in stopped before the code reached it. Please try again.")
+
+    # ── 3. the token, or the reason there is not one ─────────────────────────────────────────
+    deadline = time.time() + FINISH_TIMEOUT_S
+    while time.time() < deadline:
+        r, _, _ = select.select([master], [], [], 1.0)
+        if r:
+            try:
+                chunk = os.read(master, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk
+        text = _clean(buf)
+        # THE TOKEN IS SEARCHED FOR IN THE WHOLE TRANSCRIPT, not only the newest chunk: it is
+        # printed across a wrapped line, and a chunk boundary can land in the middle of it.
+        tok = _TOKEN.search(re.sub(r"\s+", "", text))
+        if tok:
+            user = _read(d, "user") or None
+            box_secrets.put_claude_oauth(tok.group(0), consented=True, user_id=user)
+            _write(d, "status", "done")
+            if proc.poll() is None:
+                proc.kill()
+            os.close(master)
+            return 0
+        flat = _squash(text)
+        if flat.count("pastecodehere") > asked_before:
+            proc.kill()
+            os.close(master)
+            return fail("Claude did not accept that code. Press Connect to start again, and paste "
+                        "the new code as soon as Claude shows it to you.")
+        # A REFUSED CODE IS THE LIKELY FAILURE and it must not read as a timeout. The CLI says so
+        # in words; the words are matched space-insensitively for the reason `_clean` explains.
+        for bad, said in (("invalid", "Claude did not accept that code."),
+                          ("expired", "That code had expired."),
+                          ("failed", "Claude refused the sign-in.")):
+            if bad in flat:
+                proc.kill()
+                os.close(master)
+                return fail(said + " Start again and paste the new code promptly.")
+        if proc.poll() is not None:
+            break
+    if proc.poll() is None:
+        proc.kill()
+    os.close(master)
+    return fail("The sign-in did not complete — Claude did not return a token. This usually means "
+                "the code was wrong or had already expired. Press Connect to start again, and "
+                "paste the new code as soon as Claude shows it.")
+
+
+if __name__ == "__main__":                               # pragma: no cover — the detached helper
+    if len(sys.argv) == 3 and sys.argv[1] == "--serve":
+        raise SystemExit(_serve(pathlib.Path(sys.argv[2])))
+    print("usage: python -m core.claude_login --serve <session-dir>", file=sys.stderr)
+    raise SystemExit(2)
