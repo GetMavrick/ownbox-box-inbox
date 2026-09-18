@@ -136,7 +136,12 @@ def test_the_clock_prints_when_it_changes_and_not_when_it_does_not():
                                  ("in", "second", 90, "contact"),
                                  ("in", "third", 5, "contact")])
     words = _text(_page("t4"))
-    stamps = re.findall(r"\d{2}:\d{2}", words)
+    # \d{1,2}, NOT \d{2}. The stamp is built with "%-H:%M" — the hour is deliberately NOT
+    # zero-padded, because a person reading a thread reads "7:03" and not "07:03". A two-digit
+    # regex therefore matches nothing between midnight and 09:59 on the box's own clock, so this
+    # suite went red every night and green again every morning, for no reason a reader could see.
+    # Caught on 2026-09-18 with the box rendering 7:03 and 8:28; it had passed an hour earlier.
+    stamps = re.findall(r"\d{1,2}:\d{2}", words)
     ok("three messages are on the page",
        all(w in words for w in ("first", "second", "third")))
     ok("...but the same minute is printed once, not twice",

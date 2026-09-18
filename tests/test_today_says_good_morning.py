@@ -300,6 +300,60 @@ ok("...and the screen actually passes it",
    "space=_space()" in _inspect.getsource(_app.r_today))
 
 
+# ── WHAT A BUYER MEETS, MEASURED ON AN EXPORTED BOX ───────────────────────────────────────────
+print("\ntest_nothing_a_buyer_reads_is_hidden_or_said_twice")
+# BOTH OF THESE WERE FOUND BY EXPORTING A BOX WITH NOTHING CONNECTED AND READING THE SCREENS,
+# on the morning we started bringing customers on. Neither was visible in a diff.
+
+# 1. THE ORB IS OPAQUE AND RISES ABOVE THE BAR. The bar is frosted, so content passing under it
+# stays legible by design; the bead simply hides what it covers. The page's bottom padding cleared
+# the BAR and not the BEAD, so the last line of Today came to rest underneath it — measured as
+# "Every figure here is read from your own rails." half-covered. Derive both numbers from the
+# stylesheet rather than restating them, so changing the lift without the padding fails here.
+_pad = re.search(r"padding-bottom:calc\((\d+)px \+ env\(safe-area-inset-bottom", _app.CSS)
+_lift = re.search(r"\.tabs-in \.orb \.bead\{[^}]*?transform:translateY\(-(\d+)px\)", _app.CSS, re.S)
+_barh = re.search(r"^\.tabs\{[^}]*?height:(\d+)px", _app.CSS, re.M | re.S)
+ok("the page declares a bottom padding", _pad is not None)
+ok("...the bead declares a lift", _lift is not None)
+if _pad and _lift:
+    _p, _l = int(_pad.group(1)), int(_lift.group(1))
+    _bar = int(_barh.group(1)) if _barh else 59
+    ok("...and the padding clears the bar AND the bead's overhang",
+       _p >= _bar + _l, f"padding {_p}px vs bar {_bar}px + lift {_l}px")
+
+# 2. TWO RAILS ASKING FOR THE SAME THING MUST NOT USE THE SAME WORDS. uptime and pagespeed both
+# want a website address, and both said "tell Ownbox your website address and it will watch it for
+# you" — byte-identical, stacked, under different labels, on a buyer's first screen.
+_prompts = [v[1] for v in _rep.LABEL.values()]
+_dupes = sorted({p for p in _prompts if _prompts.count(p) > 1})
+ok("no two rails prompt with the same sentence", not _dupes, str(_dupes))
+ok("...and every prompt says something", all(p.strip() for p in _prompts))
+
+
+# ── EVERY SEGMENT ON THE APPEARANCE SWITCH HAS TO BE TRUE ─────────────────────────────────────
+print("\ntest_the_appearance_switch_offers_only_states_it_has")
+# It shipped three segments over two states. The third said "System", was the one SELECTED on an
+# untouched box, and could not follow the system: `?to=system` merely deleted the cookie, and the
+# prefers-color-scheme block had been removed (correctly) on 2026-09-16 to honour "white screens
+# first and foremost". So it rendered white on a dark phone while claiming to follow it, and was
+# byte-for-byte the same state as Light. Owner, 2026-09-18: drop it.
+_sw = _c().get("/inbox/settings").get_data(as_text=True)
+_segs = re.findall(r'<a class="([^"]*)" href="/inbox/theme\?to=([a-z]+)">([^<]+)</a>', _sw)
+ok("the switch offers exactly the states this app has", len(_segs) == 2, str([x[2] for x in _segs]))
+ok("...which are Light and Dark", [x[2] for x in _segs] == ["Light", "Dark"], str(_segs))
+ok("...and nothing claims to follow the operating system",
+   not any("system" in x[1].lower() or "System" in x[2] for x in _segs), str(_segs))
+ok("an untouched box shows LIGHT selected, which is what it renders",
+   [lbl for cls, to, lbl in _segs if "on" in cls] == ["Light"],
+   str([(lbl, cls) for cls, to, lbl in _segs]))
+# THE OLD URL STILL LANDS SOMEWHERE SAFE. A bookmark or a restored tab must not wedge the app.
+_old = _c().get("/inbox/theme?to=system")
+ok("a stale ?to=system clears the cookie rather than 500ing", _old.status_code == 303,
+   str(_old.status_code))
+ok("...and clears it, so the box lands on white",
+   "Max-Age=0" in " ".join(v for k, v in _old.headers if k == "Set-Cookie"))
+
+
 # ── CI runs this file ─────────────────────────────────────────────────────────────────────────
 print("\ntest_ci_actually_runs_this_file")
 # GUARDED: this suite ships with the machine, and a buyer's box is not a repository.

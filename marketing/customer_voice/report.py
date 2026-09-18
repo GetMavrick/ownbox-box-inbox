@@ -48,8 +48,19 @@ TITLE = "Unified Inbox"
 # buyer to a screen that cannot help him is the same defect wearing politer words. When the field
 # exists, these gain "in Settings" and not before.
 LABEL = {
-    "uptime": ("Site", "tell Ownbox your website address and it will watch it for you"),
-    "pagespeed": ("Speed", "tell Ownbox your website address and it will watch it for you"),
+    # TWO RAILS, ONE ADDRESS, AND THEY MUST NOT SAY THE SAME SENTENCE. These two carried copy
+    # that was byte-identical, so a buyer on day one read the same words twice under different
+    # labels and could only conclude the screen was repeating itself. Found by rendering a box
+    # exported with nothing connected and reading it, not by reading the dict.
+    #
+    # EACH ROW STILL NAMES THE MISSING FACT ON ITS OWN. My first fix made the second row read
+    # "the same address, and ..." — which only parses while the first row is directly above it,
+    # and these rows appear independently (a box can own `pagespeed` and not `uptime`).
+    # test_customer_voice caught it, and its rule is the older scar: a hint owes the reader the
+    # missing fact in his own words, never a config key. So both lead with the same ask, which is
+    # the truth — one address, two different things watched — and differ where the eye lands.
+    "uptime": ("Site", "tell Ownbox your website address and it will watch that it stays up"),
+    "pagespeed": ("Speed", "tell Ownbox your website address and it will watch how fast it loads"),
     "reviews": ("Reviews", "connect your Google Business Profile"),
     "comments": ("Comments", "connect your Facebook and Instagram accounts"),
     "seo": ("Search", "connect Search Console and Analytics"),

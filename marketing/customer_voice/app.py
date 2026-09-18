@@ -287,8 +287,13 @@ body{background:var(--bg);color:var(--ink);
      rendering in. */
   font:16px/1.5 "Public Sans",-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
   -webkit-font-smoothing:antialiased;
-  /* THE TAB BAR IS FIXED, so the last row of every screen would sit under it without this. */
-  padding-bottom:calc(64px + env(safe-area-inset-bottom,0px));}
+  /* THE TAB BAR IS FIXED, so the last row of every screen would sit under it without this —
+     AND THE ORB RISES 16px ABOVE THE BAR, which 64px did not account for. Measured on a box
+     exported with nothing connected, scrolled to the end: the bead sat on top of "Every figure
+     here is read from your own rails." The bar is frosted and content passing under it is
+     legible by design; the bead is opaque and simply hides what it covers. 81px = the bar plus
+     the bead's overhang, so nothing can come to rest beneath it. */
+  padding-bottom:calc(81px + env(safe-area-inset-bottom,0px));}
 a{color:inherit;text-decoration:none}
 .wrap{max-width:620px;margin:0 auto;padding:0 16px}
 
@@ -1111,7 +1116,13 @@ _THEME_BG = {"light": "#eff2f4", "dark": "#0d0d0d"}
 
 
 def _theme() -> str:
-    """'light' | 'dark' | '' — empty means he has never chosen and the OS decides."""
+    """'light' | 'dark' | '' — and EMPTY MEANS WHITE, not "ask the OS".
+
+    This said "the OS decides" until 2026-09-18, which stopped being true on 09-16 when the
+    prefers-color-scheme block was removed to honour "white screens first and foremost". The
+    sentence outliving the behaviour is how the Settings screen came to offer a "System" segment
+    that could not follow the system.
+    """
     try:
         v = (request.cookies.get(THEME_COOKIE) or "").strip().lower()
     except Exception:                            # noqa: BLE001 — no request, no cookie
@@ -2921,9 +2932,20 @@ def r_settings():
     def seg(value, label):
         on = " on" if cur == value else ""
         return f'<a class="seg-a{on}" href="/inbox/theme?to={value}">{label}</a>'
+    # TWO SEGMENTS, BECAUSE THERE ARE TWO STATES. A third read "System" and was the one selected
+    # on an untouched box — while the app rendered WHITE on a dark phone, because the
+    # prefers-color-scheme block was removed on 2026-09-16 to honour "white screens first and
+    # foremost" and `?to=system` only deleted the cookie. So it could not follow the system, it
+    # was identical to Light, and it told a buyer his phone was being followed while he looked at
+    # a white screen. Owner, 2026-09-18, choosing between fixing it and dropping it: drop it.
+    #
+    # AN UNTOUCHED BOX SHOWS LIGHT SELECTED, which is what it actually renders. `?to=system` is
+    # not routed away or 404'd — anything that is not light or dark still clears the cookie and
+    # lands on white, so an old bookmark or a browser-restored URL cannot wedge anything.
     switch = ('<div class="seg">'
-              + seg("light", "Light") + seg("dark", "Dark")
-              + f'<a class="seg-a{"" if cur else " on"}" href="/inbox/theme?to=system">System</a>'
+              + f'<a class="seg-a{" on" if cur in ("", "light") else ""}"'
+              ' href="/inbox/theme?to=light">Light</a>'
+              + seg("dark", "Dark")
               + '</div>').replace("seg-a", "")
     body = (
       '<h1>Settings</h1>'
