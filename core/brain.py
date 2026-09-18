@@ -174,7 +174,31 @@ def _estimate_usd(model: str, prompt: str, cached_context: str | None,
 
 
 def _backend() -> str:
-    return (get_config().get("brain") or {}).get("backend", "api")
+    """Which backend this box thinks on, answered from what the BUYER connected.
+
+    IT USED TO BE CONFIG ALONE, and on a sold box that made the choice unreachable. `export_box.sh`
+    writes `backend: api` into every box it builds, so a buyer who has a Claude subscription and no
+    API account at all — which the owner says is most of the people we sell to, and is the owner
+    himself as customer #1 — had a set-up screen that could only ask for a thing they do not have.
+    Owner, 2026-09-18: "I am going to sign up as Customer number one and that must be available
+    when I set up my box... I don't have an API key."
+
+    ORDER, AND EVERY LINE OF IT IS DELIBERATE:
+      1. config `claude_code` still wins outright — the owner's existing box keeps behaving
+         exactly as it does today, token in .env, nothing re-decided underneath it.
+      2. otherwise a subscription token the buyer connected selects `claude_code`. This is the new
+         path and it is the whole point: connecting one IS choosing it.
+      3. otherwise `api`, which is what every box does now and what every box with an API key
+         keeps doing.
+
+    A box that has connected NEITHER lands on `api` and `can_think()` says so in a sentence —
+    the same honest "not set up yet" it has always given, never a silent failure.
+    """
+    configured = (get_config().get("brain") or {}).get("backend", "api")
+    if configured == "claude_code":
+        return "claude_code"
+    from core import box_secrets
+    return "claude_code" if box_secrets.claude_oauth_token() else "api"
 
 
 def _cli_model(model_id: str) -> str:
@@ -276,8 +300,27 @@ def _run_claude(cmd: list[str], *, timeout: float) -> tuple[int, str, str]:
         # It explains every symptom the outage had and none of the theories did: 0.2% CPU while
         # "hung" (blocked on a read, not computing), indifferent to prompt size, unchanged on an
         # idle box, and invisible from outside the process.
+        # THE TOKEN REACHES THE CLI THROUGH THE ENVIRONMENT, WHICH IS THE ONLY DOOR IT HAS.
+        # On the owner's box it is already in /opt/aios/.env and inherited, and this changes
+        # nothing for it. On a SOLD box the buyer pastes it into Set up, so it lives in the
+        # secrets table and would otherwise never reach the subprocess at all — the CLI would
+        # run unauthenticated and fail with a login prompt nobody can see.
+        #
+        # A COPY, NOT os.environ ITSELF. Mutating the process environment to pass one argument
+        # leaks a live credential into every unrelated subprocess this box ever spawns — ffmpeg,
+        # git, the installer — and into anything that dumps its own environment on a crash.
+        env = dict(os.environ)
+        try:
+            from core import box_secrets
+            tok = box_secrets.claude_oauth_token()
+            if tok:
+                env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
+        except Exception as e:                       # noqa: BLE001
+            # Bookkeeping must never be what stops a box thinking: if the table cannot be read,
+            # fall through on whatever the environment already carries and let the CLI say so.
+            log.warning("brain.oauth_token_unreadable", error=f"{type(e).__name__}: {e}")
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                              stdin=subprocess.DEVNULL)
+                              stdin=subprocess.DEVNULL, env=env)
     finally:
         _CLI_LOCK.release()
     return proc.returncode, proc.stdout or "", proc.stderr or ""
@@ -414,8 +457,13 @@ def can_think() -> tuple[bool, str]:
     if be == "claude_code":
         if not shutil.which("claude"):
             return False, "brain.backend=claude_code but the `claude` CLI is not on PATH"
-        if not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
-            return False, "brain.backend=claude_code needs CLAUDE_CODE_OAUTH_TOKEN in the environment"
+        # ONE RESOLUTION RULE, SHARED WITH THE THING BEING ASKED ABOUT. Reading os.environ here
+        # while `_run_claude` reads `box_secrets.claude_oauth_token()` is how the two would come to
+        # disagree — the exact defect `probe_backend` was fixed for on 2026-09-16, one file over.
+        from core import box_secrets
+        if not box_secrets.claude_oauth_token():
+            return False, ("this box thinks on a Claude subscription but no token is connected — "
+                           "add one in Set up, or set CLAUDE_CODE_OAUTH_TOKEN in the environment")
         return True, "claude_code"
     # THE BUYER'S KEY COUNTS, and asking the environment alone is what made this answer wrong on
     # a delivered box: a customer who has typed their key into Settings has a box that can think,

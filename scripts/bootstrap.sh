@@ -145,6 +145,12 @@ fi
 echo "== 6/6 durability (off-box DB replication) =="
 bash scripts/install_litestream.sh || true
 
+# AND THE CLAUDE CLI, IF THE IMAGE DID NOT CARRY IT. Boxes built from an image cut before 2026-09-18
+# have no `claude` binary, and bootstrap is the only place that runs again for them. Idempotent: on a
+# baked image this finds the binary and does nothing. `|| true` because a box that cannot reach
+# claude.ai must still finish booting — it simply cannot draft until the binary arrives.
+bash scripts/install_claude_code.sh || true
+
 echo ""
 echo "== bootstrap complete — final gate =="
 "$AIOS/.venv/bin/python" scripts/doctor.py || true

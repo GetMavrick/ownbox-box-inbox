@@ -30,6 +30,23 @@ ANTHROPIC = "anthropic_api_key"
 # revoked. Same shape as EMAIL_STATUS and ZERNIO_STATUS, and read through `anthropic_state()`.
 ANTHROPIC_STATUS = "anthropic_status"
 ANTHROPIC_DETAIL = "anthropic_detail"
+# THE BUYER'S CLAUDE SUBSCRIPTION, AS AN ALTERNATIVE TO AN API KEY (owner, 2026-09-18). Many of the
+# people we sell to are one person with a Claude subscription and no API account at all — the owner
+# is the first of them: "I am going to sign up as Customer number one and that must be available
+# when I set up my box... I don't have an API key."
+#
+# WHOSE DECISION THIS IS, RECORDED BECAUSE IT WAS CHANGED DELIBERATELY. Anthropic's consumer terms
+# are per-person, so an earlier reading of them kept this off any box but the owner's. He reviewed
+# the terms himself and ruled otherwise, 2026-09-18: "that should be the choice of the client. They
+# are taking ownership of these boxes and they're using them most often for an individual so they
+# have to review their own terms and be responsible for themselves. We are not the police." The box
+# therefore OFFERS the choice, LINKS the terms, and does not make it for anyone.
+CLAUDE_OAUTH = "claude_code_oauth_token"
+CLAUDE_OAUTH_STATUS = "claude_code_oauth_status"
+CLAUDE_OAUTH_DETAIL = "claude_code_oauth_detail"
+# Anthropic's own terms, linked on the set-up screen so the choice is made with them in front of
+# the person making it rather than described second-hand by us.
+ANTHROPIC_TERMS_URL = "https://www.anthropic.com/legal/consumer-terms"
 # THE BUYER'S MAILBOX, FOR READING (SPEC #1226). Three values useless apart, so they are stored and
 # replaced as ONE row: a half-updated credential is an auth failure nobody can explain.
 # THE BUYER'S OWN ZERNIO ACCOUNT (owner, 2026-09-16). Ruled after checking all 60 SDK resources:
@@ -78,6 +95,12 @@ class SecretRejected(ValueError):
 # What this catches is the mistake people actually make: pasting the wrong thing entirely —
 # an email, a URL, a password, half a key with the front chewed off by a copy.
 _ANTHROPIC_SHAPE = ("sk-ant-", 40)
+
+# A SUBSCRIPTION TOKEN IS A DIFFERENT THING WITH A LONGER PREFIX, and the prefix is what lets one
+# field take either. `claude setup-token` mints `sk-ant-oat...`; an API key is `sk-ant-api...`. Both
+# start `sk-ant-`, so the ORDER of the test matters: the longer prefix is asked about first, or
+# every subscription token is misfiled as an API key and sent to an endpoint that will refuse it.
+_CLAUDE_OAUTH_SHAPE = ("sk-ant-oat", 40)
 
 # WHAT A GOOGLE APP PASSWORD LOOKS LIKE: sixteen letters, which Google DISPLAYS as four groups of four.
 # People paste it with the spaces in, every time, because that is how it is shown to them. Stripping
@@ -325,7 +348,8 @@ def validate(name: str, value: str) -> str:
     # `.strip()` turned that into "" and the empty check raised — after the status row had already
     # been written, so the box was left with a half-written status AND an exception in the poller.
     # Reproduced, then moved. A guard placed after the thing it guards is not a guard.
-    if name in (EMAIL, EMAIL_DETAIL, ZERNIO_DETAIL, ZERNIO_PROFILE, ANTHROPIC_DETAIL):
+    if name in (EMAIL, EMAIL_DETAIL, ZERNIO_DETAIL, ZERNIO_PROFILE, ANTHROPIC_DETAIL,
+                CLAUDE_OAUTH_DETAIL):
         return str(value or "")
     value = str(value or "").strip()
     if not value:
@@ -339,7 +363,24 @@ def validate(name: str, value: str) -> str:
         if not value.startswith(prefix) or len(value) < least:
             raise SecretRejected(f"That does not look like an Anthropic key — they start "
                                  f"with {prefix} and are longer than that.")
+    if name == CLAUDE_OAUTH:
+        prefix, least = _CLAUDE_OAUTH_SHAPE
+        if not value.startswith(prefix) or len(value) < least:
+            raise SecretRejected("That does not look like a Claude subscription token — run "
+                                 "`claude setup-token` and paste the sk-ant-oat... value.")
     return value
+
+
+def looks_like_subscription(value: str) -> bool:
+    """Is this pasted credential a subscription token rather than an API key?
+
+    THE ROUTER FOR ONE FIELD TAKING TWO THINGS. The set-up screen asks for "your Anthropic key or
+    your Claude subscription token" in a single box, because a buyer knows which of the two they
+    have and does not want to pick a radio button to prove it. A wrong answer here is not a
+    cosmetic slip: an API key sent down the subscription path, or the reverse, fails at the vendor
+    with a message about the wrong credential entirely.
+    """
+    return str(value or "").strip().startswith(_CLAUDE_OAUTH_SHAPE[0])
 
 
 def put(name: str, value: str, *, user_id: str | None = None) -> None:
@@ -384,6 +425,81 @@ def anthropic_key() -> str:
     return ((os.environ.get("ANTHROPIC_API_KEY") or "").strip()
             or (getattr(settings, "anthropic_api_key", "") or "").strip()
             or get(ANTHROPIC))
+
+def claude_oauth_token() -> str:
+    """The buyer's Claude subscription token, environment first — the same order as the API key.
+
+    ENVIRONMENT FIRST KEEPS THE OWNER BOX EXACTLY AS IT IS. It already carries
+    CLAUDE_CODE_OAUTH_TOKEN in /opt/aios/.env, installed by scripts/install_claude_code.sh, and
+    nothing about that changes. The table is consulted only where the environment is empty, which
+    is precisely the delivered-box hole this is here to close.
+    """
+    import os
+    return (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip() or get(CLAUDE_OAUTH)
+
+
+def put_claude_oauth(value: str, *, user_id: str | None = None) -> None:
+    """Store the buyer's subscription token, and say plainly what was NOT checked.
+
+    NO VENDOR PROBE, AND THAT IS NOT AN OVERSIGHT. `put_anthropic` asks Anthropic whether an API
+    key works, because `models.list` is free and answers in a second. There is no equivalent for a
+    subscription token: the only way to test one is to spend a real inference call through the CLI,
+    which is slow, is charged against the person's own subscription quota, and needs the CLI
+    already installed. Spending somebody's quota to decorate a form is the wrong trade.
+
+    So the status written here is `saved`, NOT `connected` — the distinction this file already
+    draws for the mailbox (`put_email`), for exactly this reason. A screen that says "connected"
+    about something nobody has tested is the claim this repo has spent whole nights deleting. The
+    watchdog's backend probe is what turns `saved` into a verdict, on the box, against the real CLI.
+    """
+    value = validate(CLAUDE_OAUTH, value)
+    put(CLAUDE_OAUTH, value, user_id=user_id)
+    put(CLAUDE_OAUTH_STATUS, "saved", user_id=user_id)
+    clear(CLAUDE_OAUTH_DETAIL, user_id=user_id)
+    # THE TWO CREDENTIALS ARE EXCLUSIVE, AND LEAVING THE OLD ONE BEHIND IS HOW A BOX ENDS UP
+    # THINKING ON A BILL ITS OWNER THOUGHT THEY HAD STOPPED USING. Someone moving from an API key
+    # to their subscription means it; the key does not sit there as a silent fallback.
+    for name in (ANTHROPIC, ANTHROPIC_STATUS, ANTHROPIC_DETAIL):
+        clear(name, user_id=user_id)
+    log.info("box_secret.claude_oauth_saved", user=user_id)
+
+
+def note_claude_oauth_status(status: str, detail: str = "", *, user_id: str | None = None) -> None:
+    """What the box learned about that token when it actually tried to think with it."""
+    if status not in ("saved", "connected", "needs_reauth", "no_cli"):
+        raise ValueError(f"unknown claude_code status {status!r}")
+    put(CLAUDE_OAUTH_STATUS, status, user_id=user_id)
+    if detail and status != "connected":
+        put(CLAUDE_OAUTH_DETAIL, detail[:300], user_id=user_id)
+    else:
+        clear(CLAUDE_OAUTH_DETAIL, user_id=user_id)
+
+
+def clear_claude_oauth(*, user_id: str | None = None) -> None:
+    """Forget the subscription token — the box falls back to an API key, or to nothing."""
+    for name in (CLAUDE_OAUTH, CLAUDE_OAUTH_STATUS, CLAUDE_OAUTH_DETAIL):
+        clear(name, user_id=user_id)
+
+
+def claude_oauth_state() -> dict:
+    """What the set-up and settings screens read. `saved` until something has really thought."""
+    return {"status": get(CLAUDE_OAUTH_STATUS) or ("saved" if get(CLAUDE_OAUTH) else ""),
+            "detail": get(CLAUDE_OAUTH_DETAIL)}
+
+
+def put_ai_credential(value: str, *, user_id: str | None = None) -> str:
+    """ONE FIELD, EITHER CREDENTIAL. Returns which path was taken: "subscription" or "api".
+
+    The buyer knows whether they have an API key or a Claude subscription; they should not have to
+    tell a form which, when the credential itself says so. `sk-ant-oat...` is a subscription token
+    and nothing else is, so the routing is exact rather than a guess.
+    """
+    if looks_like_subscription(value):
+        put_claude_oauth(value, user_id=user_id)
+        return "subscription"
+    put_anthropic(value, user_id=user_id)
+    return "api"
+
 
 def note_anthropic_status(status: str, detail: str = "", *, user_id: str | None = None) -> None:
     """The drafter says why Anthropic turned it away, so a screen can say something actionable.
@@ -509,13 +625,24 @@ _AI_STEP = {
     "why": "This is what writes the replies. Your box drafts with your own key on your own bill, "
            "so your customers' messages are never on anybody else's account. Nothing is sent "
            "automatically — the box writes, you read it, and you decide.",
-    "fields": ({"name": "key", "label": "Anthropic API key", "type": "password",
-                "placeholder": "sk-ant-..."},),
-    "steps": ("Create an Anthropic account, or sign in to the one you have.",
-              "Add a payment method — the drafting is billed to you, not to us.",
-              "Open API keys, create one, and copy it.",
-              "Paste it here. Your box keeps a hard spending cap on top of whatever you set "
-              "at Anthropic."),
+    "fields": ({"name": "key", "label": "Anthropic API key or Claude subscription token",
+                "type": "password", "placeholder": "sk-ant-..."},),
+    "steps": ("EITHER — if you have a Claude Pro or Max subscription: install the Claude Code "
+              "CLI, run `claude setup-token` on your own computer, and paste the sk-ant-oat… "
+              "value it prints. Your box then drafts on your subscription.",
+              "OR — if you have an Anthropic API account: open API keys, create one, add a "
+              "payment method, and paste the sk-ant-api… value. Drafting is billed to you.",
+              "Either way it goes in the one box below — your box can tell which you pasted.",
+              "Your box keeps a hard spending cap on top of whatever you set at Anthropic."),
+    # HIS WORDS, HIS RULING, AND THE LINK IS THE POINT OF IT. Owner, 2026-09-18: "that should be
+    # the choice of the client... they have to review their own terms and be responsible for
+    # themselves. We are not the police" — plus "we can put a link to Anthropic terms so they can
+    # review". So the box states the condition once, links the terms, and does not decide.
+    "terms_url": ANTHROPIC_TERMS_URL,
+    "terms_note": "Using a Claude subscription here is your choice to make. Anthropic's consumer "
+                  "terms are per person — review them, and your own intended use, before you "
+                  "connect a subscription token. An API key has no such condition. If you would "
+                  "rather we set this up for you, write to help@ownbox.io.",
     "note": "Without this the box still reads everything and still shows you every message — it "
             "simply will not write the drafts.",
 }

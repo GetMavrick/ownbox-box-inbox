@@ -196,6 +196,13 @@ for u in deploy/aios-*.service deploy/aios-*.timer; do
 done
 systemctl daemon-reload
 bash scripts/install_litestream.sh || true   # binary + unit; stays disabled with no .env to read
+# THE CLAUDE CLI, BAKED. A buyer may connect an OAuth token instead of an API key — the owner ruled
+# that choice is the CLIENT's (2026-09-18) — and #1380 routes an `sk-ant-oat` credential to the
+# claude_code backend. That backend shells out to `claude`, so a box without the binary stores the
+# token, reports the CLI missing and drafts NOTHING: the one failure a buyer reads as "it does not
+# work". Baked here rather than fetched at first boot so a customer's box never waits on
+# claude.ai being up at the moment they are watching it start.
+bash scripts/install_claude_code.sh || true   # idempotent; a failure must not stop an image cut
 
 echo "== 4/5 the stamp =="
 cat > image.json <<JSON

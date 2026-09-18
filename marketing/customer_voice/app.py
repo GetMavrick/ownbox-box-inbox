@@ -3255,7 +3255,11 @@ def r_drafts():
             # `put_anthropic`, NOT `put`: the front door that asks Anthropic whether the key
             # works before it is stored, the same as the Zernio and mailbox doors. A bare `put`
             # took a well-formed dud and left this screen saying drafts were on.
-            box_secrets.put_anthropic(str(request.form.get("key") or ""), user_id=whoami)
+            # BOTH DOORS TAKE BOTH CREDENTIALS. Set up routes by prefix through
+            # `put_ai_credential`; if this screen still took API keys only, a buyer who pasted a
+            # subscription token HERE would be told their token was not an Anthropic key — while
+            # the other screen accepted it. One rule, or the box contradicts itself.
+            box_secrets.put_ai_credential(str(request.form.get("key") or ""), user_id=whoami)
             return redirect("/inbox/settings")
         except box_secrets.SecretRejected as e:
             # Never a lecture and never an echo — the same discipline as the claim form. The
@@ -3446,7 +3450,11 @@ def _setup_save(which: str, form, *, user_id: str | None) -> None:
         # — which is the argument FOR asking them, not against it. What it was really refusing
         # was a guessed regex, and `put_anthropic` still keeps the shape check that catches the
         # wrong thing entirely; it just no longer stops there.
-        box_secrets.put_anthropic(str(form.get("key") or ""), user_id=user_id)
+        # ONE FIELD, EITHER CREDENTIAL. `put_ai_credential` reads the prefix and routes: an
+        # sk-ant-oat… subscription token is stored as one and selects the claude_code backend; an
+        # API key takes the verified path it always did. A buyer knows which of the two they hold
+        # and should not have to tell a form so when the credential itself says it.
+        box_secrets.put_ai_credential(str(form.get("key") or ""), user_id=user_id)
     else:
         raise box_secrets.SecretRejected("That form is not one this screen knows.")
 
