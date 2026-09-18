@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import functools
 import html
+import pathlib
 from datetime import date
 
 from flask import Blueprint, redirect, request
@@ -140,6 +141,25 @@ def _scrub_token_from_the_url():
 # `dash.brand()` for the name, per box, exactly as every other surface — nothing here spells
 # anybody's name (owner, 2026-09-06: "Get Mavrick off this app. It's Brian MacDonald at the top.")
 CSS = """
+/* ── THE TWO TYPEFACES, SERVED BY THIS BOX ───────────────────────────────────────────────────
+   Owner, 2026-09-18: "A all the way." Archivo for headings, Public Sans for body.
+
+   SERVED FROM /inbox/font/, NOT FROM GOOGLE. A single-tenant box installed to a home screen
+   must not need a third party to draw its own text, and must not report every open to one.
+   `marketing/customer_voice/fonts/README.md` carries the reasoning and the OFL licences.
+
+   `swap`, SO TEXT IS NEVER INVISIBLE. The fallback stack paints immediately and the real face
+   replaces it; on a box serving its own 30 KB file that is a single frame. `block` would trade
+   a readable inbox for a tidier one, which is the wrong way round on the screen a person opens
+   twenty times a day.
+
+   ONE FILE PER FAMILY, VARIABLE WEIGHT. `font-weight: 400 700` covers the whole range this app
+   uses — 400 body, 500 read rows, 650-700 headings and unread names — out of 35 KB and 27 KB
+   rather than six static cuts. */
+@font-face{font-family:"Archivo";src:url("/inbox/font/head.woff2") format("woff2");
+  font-weight:400 700;font-style:normal;font-display:swap}
+@font-face{font-family:"Public Sans";src:url("/inbox/font/body.woff2") format("woff2");
+  font-weight:400 700;font-style:normal;font-display:swap}
 *{box-sizing:border-box;margin:0;padding:0}
 
 /* ── DUAL TOKEN SET, WHITE BY DEFAULT ───────────────────────────────────────────────────────
@@ -198,6 +218,33 @@ CSS = """
   --av-ink:var(--accent); --av-a:var(--accent-soft); --av-b:var(--accent-soft);
   --drawer-flat:none; --drawer-lift:var(--lift);
   --scrim:rgba(26,29,31,.42);
+  /* ── THE ORB'S GLASS ──────────────────────────────────────────────────────────────────────
+     Owner, 2026-09-18: "make it look really cool like glass".
+
+     WHAT SEPARATES GLASS FROM PLASTIC IS THE BOTTOM EDGE, and this was found by rendering four
+     versions side by side rather than by reasoning about it. Plastic has one broad diffuse
+     highlight and a DARK inside bottom. Glass is dark through the middle and BRIGHT along the
+     bottom inside edge, because light passes through the sphere and concentrates there — so
+     the caustic is its own gradient under the body, the inside-bottom shadow is inverted to a
+     warm rim light, and the specular is small and hard rather than broad and soft.
+
+     Two layers that seemed obvious were measured and dropped: a chromatic warm/cool split at
+     the left and right edges is invisible at 54px, and a second pinpoint reflection reads as a
+     dead pixel rather than as a reflection. At this size the sphere gets the caustic, one
+     specular, a 1px lit rim and a floor shadow, and nothing else earns its bytes.
+
+     EVERY VALUE IS DECLARED HERE because the stylesheet may not carry a colour of its own —
+     tests/test_inbox_design.py refuses one, and a shadow is a colour. */
+  --orb-glass:radial-gradient(ellipse 58% 40% at 50% 104%, rgba(255,226,206,.95) 0%,
+     rgba(255,190,158,0) 62%),
+   radial-gradient(circle at 37% 24%, rgba(255,255,255,1) 0%, rgba(255,210,186,.99) 11%,
+     rgba(231,104,58,.98) 40%, rgba(131,37,9,.99) 78%, rgba(104,28,5,.99) 100%);
+  --orb-sheen:radial-gradient(ellipse 26% 17% at 32% 19%, rgba(255,255,255,1) 0%,
+     rgba(255,255,255,.5) 44%, rgba(255,255,255,0) 74%);
+  --orb-lift:0 14px 26px -7px rgba(138,44,13,.5), 0 3px 7px rgba(26,29,31,.22),
+     inset 0 1px 1.5px rgba(255,255,255,1), inset 0 -2px 3px rgba(255,205,178,.95),
+     inset 0 0 0 1px rgba(255,255,255,.28);
+  --orb-floor:rgba(138,44,13,.34);
 }
 :root[data-theme="dark"]{
   --bg:#0d0d0d; --surface:#171717; --raised:#1f1f1f;
@@ -216,12 +263,29 @@ CSS = """
   --av-ink:var(--accent); --av-a:var(--accent-soft); --av-b:var(--accent-soft);
   --drawer-flat:none; --drawer-lift:var(--lift);
   --scrim:rgba(0,0,0,.62);
+  /* The same layers, this theme's values — not an inversion of light's. The body barely moves
+     (a lit sphere looks the same in either room); what changes is what is around it: the floor
+     shadow goes nearly black and the caustic and rim come down, because at light's brightness
+     they blow out against a dark bar and the sphere flattens into a sticker. */
+  --orb-glass:radial-gradient(ellipse 58% 40% at 50% 104%, rgba(255,214,190,.82) 0%,
+     rgba(255,180,146,0) 62%),
+   radial-gradient(circle at 37% 24%, rgba(255,255,255,.99) 0%, rgba(255,204,178,.97) 11%,
+     rgba(233,110,64,.98) 40%, rgba(120,34,8,.99) 78%, rgba(92,24,4,.99) 100%);
+  --orb-sheen:radial-gradient(ellipse 26% 17% at 32% 19%, rgba(255,255,255,.98) 0%,
+     rgba(255,255,255,.46) 44%, rgba(255,255,255,0) 74%);
+  --orb-lift:0 14px 28px -7px rgba(0,0,0,.7), 0 3px 8px rgba(0,0,0,.5),
+     inset 0 1px 1.5px rgba(255,255,255,.9), inset 0 -2px 3px rgba(255,192,162,.8),
+     inset 0 0 0 1px rgba(255,255,255,.2);
+  --orb-floor:rgba(0,0,0,.58);
 }
 
 /* THE SYSTEM FACE IS THE APPLE COPY. Installed to a home screen this renders in SF on iOS and
    Roboto on Android — the same face as every native app beside it, which no webfont can buy. */
 body{background:var(--bg);color:var(--ink);
-  font:16px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  /* PUBLIC SANS FIRST, THE OLD STACK BEHIND IT. The fallback is not decoration:
+     it is what paints during `swap`, and what a box whose font file 404s keeps
+     rendering in. */
+  font:16px/1.5 "Public Sans",-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
   -webkit-font-smoothing:antialiased;
   /* THE TAB BAR IS FIXED, so the last row of every screen would sit under it without this. */
   padding-bottom:calc(64px + env(safe-area-inset-bottom,0px));}
@@ -245,7 +309,12 @@ a{color:inherit;text-decoration:none}
 .up svg{display:block;flex:none}
 .up:hover{color:var(--ink);background:var(--bubble-in)}
 .day{margin-left:auto;font-size:13px;color:var(--dimmer)}
-h1{font-size:22px;font-weight:670;letter-spacing:-.022em;margin:18px 0 2px;color:var(--ink)}
+/* HEADINGS ARE THE ONLY PLACE THE DISPLAY FACE SPEAKS, and there is not much of it: every
+   heading in this app is one word — Inbox, Search, Today, Settings. That is precisely why the
+   greeting on Today was worth building; it is the one heading long enough to have a shape. */
+h1{font-family:"Archivo",-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+  font-size:22px;font-weight:670;letter-spacing:-.022em;margin:18px 0 2px;color:var(--ink)}
+.head .v,.hello h1{font-family:"Archivo",-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
 h1 .chan{vertical-align:middle}
 .sub{color:var(--dim);font-size:15px;margin:0 0 14px}
 
@@ -253,6 +322,17 @@ h1 .chan{vertical-align:middle}
    KINSO'S PHONE SCREEN IS A BRIEFING — "Good morning, Sarah. You've got 4 new and 9 active
    conversations." Ours already was one; this gives it their shape: a sentence, not a dashboard,
    with the numbers carried in the accent inside running text rather than parked in tiles. */
+/* ── the greeting Today opens with ───────────────────────────────────────────────────────────
+   Owner, 2026-09-18: build the Today header. It replaces an `<h1>Today</h1>` that was telling
+   him the one fact already on the date line above it and on the tab he pressed to get here.
+   THE SENTENCE IS THE POINT, not the greeting. "Good morning" is furniture; "you have 4 unread,
+   and 9 people waiting on a reply" is the reason to have opened the app — so it gets a readable
+   size and the numbers get the weight. */
+.hello{padding:14px 2px 4px}
+.hello h1{margin:0;font-size:30px;line-height:1.1;font-weight:680;letter-spacing:-.03em}
+.hello .line{margin:7px 0 0;font-size:16.5px;line-height:1.42;color:var(--dim)}
+.hello .line b{font-weight:650;color:var(--ink)}
+
 .head{padding:8px 2px 18px}
 .head .v{font-size:34px;line-height:1.15;font-weight:680;letter-spacing:-.03em}
 .head .v em{font-style:normal;color:var(--accent)}
@@ -608,6 +688,35 @@ a.row:active{background:var(--hair);border-radius:10px}
    rendered at 4x and compared: 6/6 covered a stroke, 1/11 floated free of the icon and crowded
    the bar's top edge, 3/9 sits on the icon's shoulder with both strokes readable. It still
    overlaps the svg's BOUNDING BOX, which is mostly empty space — the strokes are what matters. */
+/* ── the orb ─────────────────────────────────────────────────────────────────────────────────
+   Owner, 2026-09-18: in place, glass, and doing nothing yet. It is a decorative span, so it
+   takes `pointer-events:none` — a tap goes through it to the bar, with no press state and no
+   destination. See `_tabbar` for why it is not a disabled button.
+   IT SITS IN A TAB-WIDTH SLOT and lifts out of the bar rather than growing it: the bar keeps
+   its 62px so nothing below the list moves, and the orb overhangs the top edge. */
+.tabs-in .orb{flex:1;display:flex;justify-content:center;align-items:flex-start;
+  pointer-events:none}
+.tabs-in .orb .bead{position:relative;width:54px;height:54px;flex:none;border-radius:50%;
+  transform:translateY(-17px);
+  background:var(--orb-glass);
+  /* THE FILL IS NEAR-OPAQUE ON PURPOSE. The first version was properly translucent and the
+     conversation list read straight THROUGH it — legible words inside the bead, which looks
+     like a rendering fault rather than like glass. Real glass this thick does not act as a
+     window either; it refracts and darkens, which is what the dark middle and bright bottom
+     edge are doing. The small blur stays for the rim only. */
+  backdrop-filter:blur(8px) saturate(150%);-webkit-backdrop-filter:blur(8px) saturate(150%);
+  box-shadow:var(--orb-lift)}
+/* THE SPECULAR IS ITS OWN ELEMENT, not a second background layer, so the blur underneath is
+   not smeared through it — a highlight that blurs with the glass stops reading as a reflection
+   ON the surface and starts reading as paint IN it. */
+.tabs-in .orb .bead::before{content:"";position:absolute;inset:0;border-radius:50%;
+  background:var(--orb-sheen)}
+/* AND A SHADOW ON THE FLOOR. Without it the orb hangs in the air; with it, it sits on the bar. */
+.tabs-in .orb .bead::after{content:"";position:absolute;left:50%;bottom:-5px;width:30px;
+  height:8px;margin-left:-15px;border-radius:50%;background:var(--orb-floor);filter:blur(4px)}
+/* A FLAT ORB ON A DESKTOP WOULD BE A MYSTERY, because the bar it belongs to is gone there. */
+@media (min-width:821px){ .tabs-in .orb{display:none} }
+
 .tab{position:relative}
 .tab .mark{position:absolute;top:3px;left:50%;margin-left:9px;width:8px;height:8px;
   border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--tab-bg)}
@@ -919,6 +1028,35 @@ def _tabbar(here: str) -> str:
             f'<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
             f'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
             f'<path d="{d}"/></svg>{mark}<span>{label}</span></a>')
+    # ── THE ORB, DEAD CENTRE, DOING NOTHING ─────────────────────────────────────────────────
+    #
+    # OWNER, 2026-09-18: *"Ship the orb in place and make it look really cool like glass, but
+    # don't make it do anything yet."* His call, made after I argued the other way: a control
+    # that does nothing is the dead control this app keeps deleting. Recorded because the
+    # objection was mine and it lost, and because the next person will want to wire it up.
+    #
+    # SO IT IS NOT A CONTROL AT ALL. Not a disabled button, which reads as broken, and not a
+    # link to somewhere unrelated, which is worse — a decorative `span`, `aria-hidden`, out of
+    # the focus order, with `pointer-events: none` so a tap falls through rather than lighting
+    # a press state that leads nowhere. Nothing is announced to a screen reader, nothing is
+    # reachable by keyboard, and nobody is promised anything.
+    #
+    # WHAT IT IS FOR is voice, which does not exist yet: speech has to be captured, transcribed
+    # by a vendor, metered through `cost_guard` before the call and recorded after, and only
+    # then reasoned about through `brain.think()`. The day that lands, this span becomes a
+    # button and this comment goes with it.
+    #
+    # IT NEEDS AN EVEN NUMBER OF TABS EITHER SIDE and there are exactly four, which is why the
+    # search screen had to be real before this could be centred. With three it would have sat
+    # on top of the middle one.
+    # THE SLOT AND THE BEAD ARE TWO ELEMENTS, and the first version made them one: `flex:1`
+    # beat `width:54px`, so the glass painted on a 78x54 box with `border-radius:50%` — an
+    # ellipse. Measured, not noticed: the render reported width 78. The slot takes the flex
+    # share; the bead is the circle inside it.
+    orb = ('<span class="orb" aria-hidden="true">'
+           '<span class="bead"></span></span>')
+    out.insert(len(out) // 2, orb)
+
     # NOT "Sections" ANY MORE, AND THAT IS NOT COSMETIC. Core's rail is `aria-label="Sections"`,
     # and this page now carries both — two navigations with one accessible name, which a
     # screen reader offers as "Sections navigation" twice with no way to tell them apart.
@@ -1115,12 +1253,75 @@ def _first_run() -> str:
                '</p></div></div>' if go else ""))
 
 
+# ── the greeting this screen now opens with ─────────────────────────────────────────────────
+#
+# OWNER, 2026-09-18, after putting a competitor's phone screen beside ours: build the Today
+# header. Theirs opens with a greeting and one plain sentence — "You've got 4 new and 9 active
+# conversations" — where ours opened with the word "Today" in an h1.
+#
+# "Today" WAS TELLING HIM NOTHING HE DID NOT ALREADY KNOW. The date is in the bar directly above
+# it and the word is on the tab he pressed to get here, so the largest type on the first screen
+# of the app was spent on the one fact already stated twice. The greeting takes that space.
+#
+# IT COMPUTES NOTHING, WHICH IS THE RULE THIS SCREEN LIVES BY. Every number here is read out of
+# the figures the REPORT produced — the same producer as the 8am message — so the sentence a
+# person reads at breakfast and the one on the screen can never disagree. That is why `unread`
+# was added to `report()` rather than counted here, and it is the same count the dot on the Inbox
+# tab uses, so the phone's mark cannot drift from the morning's sentence either.
+#
+# AND THERE IS NO NAME IN IT. Theirs says "Good morning, Sarah." This box does not know a first
+# name — `dash.brand()` is the BUSINESS, and greeting a plumber by his company name reads like a
+# utility bill. A greeting with no name is better than a greeting with the wrong one, and better
+# than one invented for a mock.
+def _hello(figs: dict) -> str:
+    """Time of day, then one true sentence built from the report's own figures."""
+    from datetime import datetime
+    # THE BOX'S OWN TIMEZONE, and the helper is `tz`. #1081 asked for `zone`, got an ImportError
+    # a bare except swallowed, and every timestamp in the lead app read UTC for days. A greeting
+    # that says "Good evening" over somebody's breakfast is the same class of wrong.
+    try:
+        from core.report import tz
+        hour = datetime.now(tz()).hour
+    except Exception:                            # noqa: BLE001 — a greeting, never a 500
+        hour = datetime.now().hour
+    word = "Good morning" if hour < 12 else ("Good afternoon" if hour < 17 else "Good evening")
+
+    # NO INBOX SEGMENT, NO SENTENCE. The report stays silent about the inbox on a box that has
+    # never had a conversation, and inventing "you have 0 of everything" for it is the row of
+    # zeroes this page exists not to show. The greeting stands alone and the report's own
+    # headline speaks underneath.
+    if "inbox_waiting" not in (figs or {}):
+        return f'<div class="hello"><h1>{word}.</h1></div>'
+
+    def _n(key: str) -> int:
+        try:
+            return int((figs.get(key) or {}).get("value") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    unread, waiting = _n("inbox_unread"), _n("inbox_waiting")
+    who = "person" if waiting == 1 else "people"
+    if unread and waiting:
+        line = (f'You have <b>{unread} unread</b>, and <b>{waiting} {who}</b> '
+                f'waiting on a reply.')
+    elif unread:
+        line = f'You have <b>{unread} unread</b>. Nobody is waiting on a reply.'
+    elif waiting:
+        line = f'Nothing unread. <b>{waiting} {who}</b> waiting on a reply.'
+    else:
+        # THE GOOD STATE, SAID OUT LOUD. A screen that only speaks when something is wrong is a
+        # screen that only ever nags, and this is the one moment the app has something to tell
+        # him that is not a job.
+        line = 'Nothing unread, and nobody waiting. You are caught up.'
+    return f'<div class="hello"><h1>{word}.</h1><p class="line">{line}</p></div>'
+
+
 @blueprint.get("/inbox/")
 @blueprint.get("/inbox")
 def r_today():
     """WHAT HAPPENED TODAY, off the report this machine already writes.
 
-    `marketing/customer_voice/report.report(day)` is the source and it is unchanged — this screen
+    `marketing/customer_voice/report.report(day, space=…)` is the source — this screen
     adds no figure of its own and computes nothing. That is deliberate: the 8am message and this
     page must never be able to disagree, and the only way to guarantee that is one producer.
 
@@ -1133,7 +1334,9 @@ def r_today():
     label = day.strftime("%a %-d %b") if isinstance(day, date) else str(day)
     try:
         from marketing.customer_voice.report import report as _report
-        v = _report(day)
+        # THE SPACE THIS SCREEN IS SHOWING, not the box's first one. Without this the figures
+        # above the list belong to a different tenant than the list — see `report()`.
+        v = _report(day, space=_space())
     except Exception as e:                       # noqa: BLE001 — the front page outranks the cause
         log.warning("voice.report_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
         # A BOX NOTHING CAN REACH LEADS WITH THE SET-UP HERE TOO — and STILL SAYS THE REPORT
@@ -1170,9 +1373,23 @@ def r_today():
         parts = [_first_run()]
     else:
         head = v.get("headline") or {}
-        parts = [f'<h1>Today</h1><div class="head">'
-                 f'<div class="v">{_esc(head.get("value") or "—")}</div>'
-                 f'<div class="l">{_esc(head.get("label") or "")}</div></div>']
+        # THE GREETING IS THE HEADING NOW, and the report's own headline keeps its block right
+        # under it. Deleting that block to make room would have thrown away the report's lead
+        # figure for a nicer opening, which is a trade this page should never make.
+        parts = [_hello(v.get("figures") or {})]
+        # A DASH IS NOT A FIGURE, and under the new greeting it was actively bad: rendered on a
+        # box with no website, this block put a huge "—" captioned "good checks today" directly
+        # beneath "you have 4 unread, and 5 people waiting on a reply". The greeting had just
+        # said something true and useful, and the largest thing under it was a shrug.
+        #
+        # THE ADJACENCY IS WHAT MADE IT WRONG, so it is mine to fix rather than inherited: the
+        # block was fine under an `<h1>Today</h1>` that promised nothing. It is kept whenever it
+        # carries a real value — a box that watches a website still sees its headline.
+        _hv = str(head.get("value") or "").strip()
+        if _hv and _hv != "—":
+            parts.append(f'<div class="head">'
+                         f'<div class="v">{_esc(_hv)}</div>'
+                         f'<div class="l">{_esc(head.get("label") or "")}</div></div>')
 
     # ORDER IS THE MESSAGE: what needs him, then what happened, then what to keep an eye on. The
     # report already ranks them that way for the 8am send and this screen does not re-sort them.
@@ -1181,10 +1398,18 @@ def r_today():
 
     figs = v.get("figures") or {}
     if figs:
+        # A DASH IS NOT A FIGURE HERE EITHER, and it is the same rule as the headline above. On
+        # an inbox-only box — which is most boxes this product is sold to — the website segment
+        # contributes "— of checks answered today", so the greeting's real sentence was landing
+        # on top of a tile that shrugs. A figure with nothing in it is the row of zeroes this
+        # screen's own comments keep deleting; it is dropped, and the tiles that know something
+        # close the gap.
         cells = "".join(f'<div class="fig"><div class="v">{_esc(f.get("value"))}</div>'
                         f'<div class="l">{_esc(f.get("label"))}</div></div>'
-                        for f in figs.values())
-        parts.append(f'<div class="figs">{cells}</div>')
+                        for f in figs.values()
+                        if str(f.get("value") or "").strip() not in ("", "—"))
+        if cells:
+            parts.append(f'<div class="figs">{cells}</div>')
 
     if v.get("happened"):
         parts.append('<h1>What happened</h1>' + _rows(v["happened"]))
@@ -2824,6 +3049,48 @@ def r_icon_512():
     from flask import Response
     return Response(_png(512), mimetype="image/png",
                     headers={"Cache-Control": "public, max-age=86400"})
+
+
+# ── the two typefaces, served by the box itself ─────────────────────────────────────────────
+#
+# OWNER, 2026-09-18, choosing between three pairings rendered on the real screen: "A all the
+# way." Archivo for headings, Public Sans for body.
+#
+# THEY ARE NOT ON A CDN, AND THAT IS THE WHOLE POINT. A box is single-tenant, cloned per
+# customer and installed to a home screen as a PWA. A `<link>` to fonts.googleapis.com would
+# mean a business's own machine cannot draw its own text without reaching a third party — on a
+# train, behind a corporate proxy, or on the day that host is slow — and would tell that host
+# every time a buyer opened their inbox. 62 KB of latin-subset variable woff2 lives in the
+# repository instead, which is less than one channel logo would cost as a PNG.
+#
+# THE NAME IS A KEY, NEVER A PATH. `name` arrives from the URL and is only ever looked up in
+# `_FONTS`; it is not joined to a directory, so `../` and an absolute path are not traversals
+# here, they are simply misses. Serving a file whose name a stranger chose is how a settings
+# page becomes a file browser.
+_FONTS = {"head": "archivo-latin-var.woff2", "body": "public-sans-latin-var.woff2"}
+
+
+@blueprint.get("/inbox/font/<name>.woff2")
+def r_font(name: str):
+    """One of exactly two files, or a 404. Both are OFL 1.1; the licences sit beside them."""
+    from flask import Response
+    fn = _FONTS.get(str(name or "").strip().lower())
+    if not fn:
+        return ("", 404)
+    try:
+        blob = (pathlib.Path(__file__).resolve().parent / "fonts" / fn).read_bytes()
+    except OSError as e:
+        # A MISSING FONT COSTS THE TYPEFACE, NEVER THE PAGE. `font-display: swap` means the
+        # fallback stack is already on screen, so a 404 here is a screen that looks ordinary
+        # rather than one that fails to render.
+        log.warning("voice.font_unreadable", extra={"font": fn, "error": type(e).__name__})
+        return ("", 404)
+    # THIRTY DAYS, AND DELIBERATELY NOT `immutable`. These URLs carry no content hash, so a
+    # clone that takes a new file by `git pull` serves it at the same address — a year-long
+    # immutable cache would leave installed home-screen apps drawing last month's font until
+    # 2027. A month is long enough that nobody fetches this twice in a session.
+    return Response(blob, mimetype="font/woff2",
+                    headers={"Cache-Control": "public, max-age=2592000"})
 
 
 # THE WORKER DOES NOT CACHE ANYTHING YET, and that is the right stage-3 answer. A cache on a page

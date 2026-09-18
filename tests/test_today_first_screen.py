@@ -77,7 +77,11 @@ def _with(*, listening: bool, report, path: str = "/inbox/"):
         box_secrets.email_credential = (lambda: {"user": "a@b.c", "password": "x"}) if listening \
             else (lambda: {})
         spaces.all_spaces = lambda: [{"name": "default"}]
-        rep.report = report if callable(report) else (lambda day, r=report: dict(r, title="Today"))
+        rep.report = report if callable(report) else (
+            # **kw, NOT (day): the real report takes the Space this request is showing, and a stub
+            # of the OLD signature raises TypeError inside r_today's guard — which degrades the
+            # screen to "could not be read" and takes eight assertions down with it, silently.
+            lambda day, r=report, **kw: dict(r, title="Today"))
         app, c = _signed_in()
         return app, c.get(path).get_data(as_text=True)
     finally:

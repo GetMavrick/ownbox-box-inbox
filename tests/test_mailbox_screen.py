@@ -330,7 +330,7 @@ def test_the_connect_button_now_reaches_somewhere_that_can_act():
     keep = (spaces.all_spaces, rep.report)
     try:
         spaces.all_spaces = lambda: [{"name": "default"}]
-        rep.report = lambda day: {"headline": {}, "needs_you": [], "figures": [],
+        rep.report = lambda day, **kw: {"headline": {}, "needs_you": [], "figures": [],
                                   "happened": [], "watch": []}
         app, c = _c()
         body = c.get("/inbox/").get_data(as_text=True)
@@ -434,7 +434,7 @@ def test_the_button_says_what_the_screen_it_reaches_actually_offers():
     keep = (spaces.all_spaces, rep.report, store.list_conversations)
     try:
         spaces.all_spaces = lambda: [{"name": "default"}]
-        rep.report = lambda day: {"headline": {}, "needs_you": [], "figures": {},
+        rep.report = lambda day, **kw: {"headline": {}, "needs_you": [], "figures": {},
                                   "happened": [], "watch": []}
         store.list_conversations = lambda space, **kw: []
         app, c = _c()

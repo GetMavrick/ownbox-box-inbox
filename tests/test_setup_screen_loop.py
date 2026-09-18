@@ -272,7 +272,7 @@ def test_the_connect_button_now_reaches_the_set_up_screen():
     keep = (spaces.all_spaces, rep.report, store.list_conversations)
     try:
         spaces.all_spaces = lambda: [{"name": "default"}]
-        rep.report = lambda day: {"headline": {}, "needs_you": [], "figures": {},
+        rep.report = lambda day, **kw: {"headline": {}, "needs_you": [], "figures": {},
                                   "happened": [], "watch": []}
         store.list_conversations = lambda space, **kw: []
         app, c = _c()

@@ -105,7 +105,23 @@ def _rail_line(rail: str, st: str) -> dict | None:
     return None                                     # ok rails speak through their numbers below
 
 
-def report(day: date) -> dict:
+def report(day: date, space: str | None = None) -> dict:
+    """The morning page for `day`, for `space` — or for this box's own Space when none is named.
+
+    THE ARGUMENT EXISTS BECAUSE THE SCREEN AND THE MAIL ARE NOT ALWAYS ABOUT THE SAME TENANT,
+    which was a live bug found on 2026-09-18 while building Today's greeting. `_space_name()`
+    answers "the FIRST Space", and `app._space()` answers "the Space this request is in". On a
+    sold box there is one Space and they agree. On the owner's multi-Space box they do not — so
+    `/inbox/` was rendering one tenant's inbox figures directly above another tenant's
+    conversation list, and the greeting built on those figures would have said "4 unread" about
+    people who were not in the list underneath it.
+    ONE PRODUCER IS STILL THE RULE. This is the same function, the same predicates and the same
+    window whoever asks; only the tenant it is asked about moves. The 8am send calls it with no
+    space, exactly as `register_reporter` always has, so nothing about the mail changes.
+    THE MAIL'S OWN SCOPE IS STILL AN OPEN QUESTION on a multi-Space box — reporting only the
+    first Space is a choice nobody has revisited — and it is a product question, not a bug to
+    quietly redefine here.
+    """
     lo, hi = window(day)
     owned = rails.declared()
     figures: dict = {}
@@ -206,10 +222,26 @@ def report(day: date) -> dict:
     # adds nothing here rather than a row of zeroes — the same rule as a rail nobody owns. Zeroes
     # on the first morning read as a broken machine, which is exactly what the module header says
     # this page exists not to do.
-    inbox_space = _space_name()
+    inbox_space = space or _space_name()
     counts = inbox_store.day_counts(inbox_space, lo, hi)
     waiting = inbox_store.awaiting_reply(inbox_space)
-    if counts["inbound"] or waiting or counts["new_people"]:
+    # UNREAD IS PRODUCED HERE BECAUSE THE SCREEN IS NOT ALLOWED TO COMPUTE IT. `r_today` adds no
+    # figure of its own on purpose — one producer is the only way the 8am message and the screen
+    # can never disagree — and the greeting it now opens with needs this number. It is the same
+    # count the dot on the Inbox tab uses, read through the same predicate, so the phone's mark
+    # and the morning's sentence cannot drift apart either.
+    #
+    # WRAPPED, BECAUSE A REPORT MUST NOT DIE FOR A GREETING. A box mid-migration can be missing
+    # `read_at`; this segment is worth more than the number, so an unreadable count is 0 and the
+    # rest of the report still writes.
+    try:
+        unread = inbox_store.unread_conversations(inbox_space)
+    except Exception:                            # noqa: BLE001 — a figure, never the report
+        unread = 0
+    # UNREAD JOINS THE GUARD. A message that arrived yesterday and has not been opened is the
+    # exact case this segment exists for, and on a quiet morning `counts["inbound"]` is 0 — so
+    # keying only on today's traffic would hide the one thing he needs to see.
+    if counts["inbound"] or waiting or counts["new_people"] or unread:
         if counts["inbound"]:
             happened.append({"text": "messages came in", "value": counts["inbound"]})
         if counts["new_people"]:
@@ -217,6 +249,8 @@ def report(day: date) -> dict:
         if counts["drafts"]:
             happened.append({"text": "replies written for you", "value": counts["drafts"]})
         figures["inbox_waiting"] = {"value": waiting, "label": "waiting on you"}
+        if unread:
+            figures["inbox_unread"] = {"value": unread, "label": "not opened yet"}
         if counts["inbound"]:
             figures["inbox_today"] = {"value": counts["inbound"], "label": "messages today"}
         if waiting:
