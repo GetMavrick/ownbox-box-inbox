@@ -801,6 +801,18 @@ _TABS = (
   ("/inbox/inbox", "Inbox",
    "M3.5 12.5v5.6a1.4 1.4 0 0 0 1.4 1.4h14.2a1.4 1.4 0 0 0 1.4-1.4v-5.6h-4.3l-1.3 2.2H9.1"
    "l-1.3-2.2zM7.6 4.3 9.9 9.6M16.4 4.3 14.1 9.6"),
+  # SEARCH EARNED A TAB WHEN IT EARNED A SCREEN (2026-09-18). It had no address: the field lives
+  # on the list, so reaching "search" meant first loading fifty conversations you did not want,
+  # and on a phone the field then sits at the top of the screen where a thumb cannot go.
+  #
+  # THE GLYPH IS `_find`'s OWN, not a second magnifier. Two drawings of one destination is the
+  # drift `_TAB_ICON` exists to prevent, and it starts with a convenient local copy.
+  #
+  # AND IT IS THE FOURTH, WHICH IS A NUMBER THAT MATTERS. The owner chose the competitor's bar
+  # with a hero button dead centre (2026-09-18); a centred button needs an EVEN number of tabs
+  # around it or it lands on top of the middle one. Three screens could not carry it. Four can.
+  ("/inbox/search", "Search",
+   "M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13M16 16l4.2 4.2"),
   # A COG IS A MACHINE'S ICON AND THIS IS NOT A MACHINE HE OPERATES. The old one was the
   # standard 12-tooth gear — the single most-drawn glyph in software, and the exact "basic as
   # hell" the owner named. Two sliders say what this screen is: a small number of his own
@@ -843,6 +855,13 @@ shell.register_section(
          "icon": _TAB_ICON["/inbox/inbox"]},
         {"key": "today", "label": "Today", "href": "/inbox/",
          "icon": _TAB_ICON["/inbox/"]},
+        # SEARCH IS LISTED HERE BECAUSE IT IS A SCREEN OF THIS SECTION, and leaving it out was a
+        # real defect rather than an omission: `shell.is_current` falls back to the section's own
+        # href for a path no item claims, so standing on /inbox/search the rail lit *Today*. A
+        # menu that tells you that you are somewhere you are not is worse than a menu with a gap
+        # in it. Found by rendering the four screens and reading which row came back marked.
+        {"key": "search", "label": "Search", "href": "/inbox/search",
+         "icon": _TAB_ICON["/inbox/search"]},
         # SETTINGS STAYS A ROW HERE FOR NOW, and this is the one item with a question over it.
         # `docs/PLAN_SCREENS.md` §4.3 argues inbox settings belong in the box's Settings registry
         # rather than in a second settings screen inside the inbox — but that registry is OSDev4's
@@ -1778,7 +1797,7 @@ def _head(n: int) -> str:
 
 
 def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: str = "") -> str:
-    """All / Unanswered / From an ad — and each one only when it can change the screen.
+    """All / Unanswered / Leads — and each one only when it can change the screen.
 
     A FILTER THAT CANNOT CHANGE THE SCREEN IS NOT SHIPPED HERE, which is the same rule `_chips`
     applies to a box with one channel. With nothing waiting, Unanswered leads to an empty list a
@@ -1789,9 +1808,13 @@ def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: 
     EACH IS STILL DRAWN WHILE ITS OWN FILTER IS ON AND ITS COUNT HAS FALLEN TO ZERO — answering
     the last one must not delete the way back to All under his thumb.
 
-    "FROM AN AD", NOT "LEADS". Everyone in this inbox is arguably a lead; the thing this filter
-    actually knows is narrower and far more useful — these people clicked something he PAID for.
-    Said plainly it needs no legend, and it cannot be read as a judgement the box did not make.
+    "LEADS" — OWNER, 2026-09-18, ASKED DIRECTLY AND ANSWERED IN ONE WORD. This read "From an ad"
+    and this paragraph used to argue for it: everyone in the inbox is arguably a lead, while the
+    thing the filter actually knows is narrower — these people clicked something he PAID for.
+    That case is recorded because it is a real one, and it LOST. The decision is his and it is
+    made, so the argument is history rather than a live objection sitting next to the code.
+    Nothing about the filter changed: it is still `from_ad`, still the poller's `ad_meta_id`, and
+    still a fact the box already had. Only the word a buyer reads is different.
     """
     show_wait = counts.get("waiting", 0) > 0 or waiting
     show_ad = counts.get("from_ad", 0) > 0 or from_ad
@@ -1814,7 +1837,7 @@ def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: 
     if show_wait:
         out.append(pill("Unanswered", waiting, waiting=not waiting, from_ad=from_ad))
     if show_ad:
-        out.append(pill("From an ad", from_ad, waiting=waiting, from_ad=not from_ad))
+        out.append(pill("Leads", from_ad, waiting=waiting, from_ad=not from_ad))
     return f'<div class="chips pills">{"".join(out)}</div>'
 
 
@@ -3742,3 +3765,39 @@ def r_install():
         '</span></div></div>'
         '<div class="foot"><a href="/inbox/">← Today</a></div>')
     return _shell(body), 200
+
+
+# ── search, as a screen of its own ──────────────────────────────────────────────────────────
+@blueprint.get("/inbox/search")
+def r_search():
+    """The place you go to look for something, rather than a field you find on the way past.
+
+    WHY THIS EXISTS AT ALL, recorded because it looks redundant next to `_find`. Search had no
+    address: the field lives on the list, so "search" was a control you could only reach by first
+    loading 50 conversations you did not want. That is fine on a laptop and wrong on a phone,
+    where the field sits at the top of a screen your thumb cannot reach.
+
+    IT DOES NOT SEARCH. Every result, every empty state and all five of the ways this box can
+    legitimately have nothing to show already live on `/inbox/inbox?q=`, which took a long time
+    to get right. Reimplementing any of it here would be a second answer to one question — so
+    this screen is the DOOR and the list stays the room: `_find` is the same GET form it is
+    everywhere else, and submitting it lands on the list with `q` bound exactly as before.
+
+    AND IT SAYS WHAT SEARCH ACTUALLY READS. `search_conversations` matches message BODIES, not
+    just the names on the rows — a fact that has been true for weeks and that no screen has ever
+    told a buyer. Someone who assumes it only matches names will not try the word they remember.
+    """
+    space = _space()
+    channel = (request.args.get("channel") or "").strip().lower()[:40]
+    body = (
+        '<h1>Search</h1>'
+        + _find("", channel)
+        # NARROW BEFORE YOU TYPE, on the boxes where that is a real choice. `_chips` draws
+        # nothing at all on a box with one channel, which is the rule this app applies to every
+        # filter: a control with one option cannot change anything.
+        + _chips(space, channel, q="")
+        + '<div class="card"><div class="row"><span class="t">Search reads what people actually '
+          'wrote, not just their names — so the word you remember from the message is '
+          'usually enough to find it again.</span></div></div>'
+        + '<div class="foot"><a href="/inbox/inbox">← All conversations</a></div>')
+    return _shell(body, here="/inbox/search"), 200

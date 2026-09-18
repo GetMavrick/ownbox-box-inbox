@@ -300,15 +300,26 @@ def test_a_box_that_runs_no_ads_is_offered_no_ad_filter():
     _talk("a", "Dana", [("in", "sink backing up")])
     app, c = _c()
     html_ = c.get("/inbox/inbox").get_data(as_text=True)
-    ok("no ad pill is drawn", ">From an ad<" not in html_)
+    # "Leads" SINCE 2026-09-18, the owner's word. The filter is unchanged — still `from_ad`,
+    # still the poller's ad id — so these assertions still guard the same behaviour and only the
+    # label they look for moved.
+    ok("no ad pill is drawn", ">Leads<" not in html_)
     ok("...but the filter row is still there for Unanswered", 'class="chips pills"' in html_)
     # STANDING IN IT ANYWAY, by a hand-typed URL: it must still say something true and offer a
     # way out, not render a bare empty list.
     words = _text(c.get("/inbox/inbox?from_ad=1").get_data(as_text=True))
     ok("reached by hand, it explains itself",
        "No conversation here started from one of your ads" in words, words[:220])
+    # SCOPED TO THE EMPTY STATE, WHICH IS WHAT THIS LINE IS ABOUT. It read the WHOLE page for the
+    # word "lead" — fine while the pill said "From an ad", and wrong the moment the owner renamed
+    # it (2026-09-18), because the pill is now legitimately on the page saying exactly that. The
+    # intent was never "this word is banned from the app": it is that the sentence explaining an
+    # empty filter must not blame the buyer, and must not quietly relabel their customers as
+    # leads while telling them there are none. So it reads the explanation, not the furniture.
+    _explain = words[words.lower().find("no conversation here"):]
+    _explain = _explain[:_explain.find("Show every conversation")] or _explain
     ok("...without calling it a fault or calling them leads",
-       "lead" not in words.lower() and "error" not in words.lower())
+       "lead" not in _explain.lower() and "error" not in _explain.lower(), _explain[:200])
     ok("...and offers the way back", "Show every conversation" in words)
 
 
@@ -373,7 +384,7 @@ def test_the_two_filters_compose_rather_than_replacing_each_other():
     ok("the Unanswered pill can turn itself off while keeping the ad filter",
        'href="/inbox/inbox?from_ad=1">Unanswered' in pills, pills)
     ok("...and the ad pill likewise, keeping Unanswered",
-       'href="/inbox/inbox?waiting=1">From an ad' in pills, pills)
+       'href="/inbox/inbox?waiting=1">Leads' in pills, pills)
     ok("...and both read as pressed, not as one radio choice",
        pills.count('aria-pressed="true"') == 2, pills)
     ok("...with All offering to clear both", 'href="/inbox/inbox">All' in pills, pills)
