@@ -416,6 +416,18 @@ def _stop_card() -> str:
     person = _who(_rq)
     if not person or person.get("role") != "owner":
         return ""
+    # IT STANDS DOWN ONLY WHILE NOTHING HAS STARTED. On a buyer's first sign-in this was the most
+    # prominent control on the page — a button to stop a box that had not begun, above a line
+    # saying there was nothing to report. `_setup_card` draws in its place.
+    #
+    # THE FIRST VERSION ASKED THE WRONG QUESTION and undid #1341 for a whole class of box: it
+    # stood down whenever set-up was UNFINISHED, so a box with the mailbox connected and two
+    # steps outstanding — receiving mail, worker sweeping, entirely operational — offered its
+    # owner no way to stop it. Not hidden for taste either way: an offer to halt work that has
+    # not started is a control that cannot do what it says, and removing the control from a box
+    # that IS working is worse than the thing it was meant to fix.
+    if _nothing_has_started():
+        return ""
     paused = pause.is_paused()
     word = "Start it again" if paused else "Stop everything"
     sub = ("Nothing is running. Every machine on this box is stopped until you start it again."
@@ -425,6 +437,118 @@ def _stop_card() -> str:
             f'<p class="sub">{_esc(sub)}</p>'
             f'<form method="post" action="/dash/{"resume" if paused else "stop"}">'
             f'<button type="submit">{_esc(word)}</button></form></div>')
+
+
+def _setup_progress():
+    """`(done, total, waiting_titles)` for this box, or None when it cannot say.
+
+    ONE QUESTION, ASKED IN ONE PLACE. `_stop_card` used to decide by calling `_setup_card()` and
+    asking whether it drew anything — which tied "should the stop button show" to "does the set-up
+    card render", two questions whose answers differ (see `_stop_card`, and the box it broke).
+
+    IT IS STILL TWO READS PER RENDER, not one, and saying otherwise would be the kind of comment
+    this file keeps deleting. `_home` asks once through `_setup_card` and once through
+    `_stop_card`; that was also true before the split, so nothing got cheaper — what changed is
+    that the two callers now ask the questions they actually mean. Both are one indexed read of a
+    three-row table and neither is worth threading an argument through two signatures the tests
+    call directly; if this page ever gets expensive, that is the change to make.
+    """
+    try:
+        from core import box_secrets
+        steps = box_secrets.setup_state()
+    except Exception:                            # noqa: BLE001 — a box too old for the seam is
+        return None                              # not a broken dashboard
+    if not steps:
+        return None
+    waiting = [w for w in (str(r.get("title") or "").strip() for r in steps
+                           if str(r.get("status") or "") in ("", "not_connected")) if w]
+    done = sum(1 for r in steps if str(r.get("status") or "") not in ("", "not_connected"))
+    return done, len(steps), waiting
+
+
+def _nothing_has_started() -> bool:
+    """Is there NO connected step at all — nothing listening, nothing to stop?
+
+    THE PREDICATE THE STOP BUTTON ACTUALLY NEEDS, and my first version got it wrong in a way that
+    undid #1341. That version hid `Stop everything` while set-up was UNFINISHED, which is not the
+    same question: a box with the mailbox connected and two steps outstanding is RECEIVING MAIL —
+    the machines are running, the worker is sweeping — and its owner could not stop it, because
+    he had not finished connecting things he may never connect at all. A person who cannot stop a
+    thing he owns does not really own it, which is the whole argument #1341 was built on.
+
+    So: nothing connected means nothing has started. One connected step means the box is working
+    and the button comes back, whatever else is outstanding.
+
+    A BOX THAT CANNOT ANSWER KEEPS ITS BUTTON. `None` here means the set-up seam is unreadable,
+    and the safe answer to "may I take away the stop control" is always no.
+    """
+    got = _setup_progress()
+    return bool(got) and got[0] == 0
+
+
+def _setup_card() -> str:
+    """The way in, on the screen a buyer actually lands on.
+
+    THE BEST SCREEN IN THE PRODUCT WAS REACHABLE BY ACCIDENT. Measured on a box exported from
+    release/2026.09.18.3 and signed into with nothing connected: this page carried ZERO links to
+    the set-up screen, the box's settings page carried ZERO, and the rail did not list it. The
+    only link anywhere was one on the inbox page. So the first thing a buyer read after signing
+    in was "Nothing to report yet", with **Stop everything** as the loudest control on the screen
+    — on a box that had not started. Same shape as the Managed door yesterday: the work was
+    already done and the door had no handle.
+
+    IT COUNTS, BECAUSE A NUMBER IS THE DIFFERENCE BETWEEN A CHORE AND A FINISH LINE. "Two of
+    three connected" tells a person how much is left and that some of it is already behind them;
+    "Set up your box" tells them nothing and reads the same on the third visit as the first.
+
+    IT GOES AWAY WHEN IT IS DONE. A set-up card that outlives set-up is the banner every SaaS
+    product trains its users to stop reading, and the one screen that must survive that training
+    is this one.
+
+    THE DESTINATION COMES FROM THE REGISTRY, NEVER FROM A URL WRITTEN HERE. `shell.setup_href()`
+    answers with whatever machine on this box serves a set-up screen; a box where none does gets
+    "" and this card does not draw. That is the honest behaviour rather than a fallback: a card
+    offering a way in, on a box with no way in, is worse than no card.
+    """
+    # OWNER ONLY, and this was missing in the first version. Measured: a member saw "Finish
+    # setting up your box", followed the link, and could not finish it — the set-up screen takes
+    # their POST and stores nothing, because these are the box owner's credentials. So the card
+    # was a task a member cannot do, pointing at a form that will not accept them, which is the
+    # dead-control rule this codebase keeps deleting by name. Same gate as Stop and Managed.
+    from core.dash import session_user as _who
+    person = _who(request)
+    if not person or person.get("role") != "owner":
+        return ""
+    got = _setup_progress()
+    if not got:
+        return ""
+    done, total, waiting = got
+    if done >= total:
+        return ""
+    href = shell.setup_href()
+    if not href:
+        return ""
+    # WHAT IS ACTUALLY LEFT, BY NAME — but only once something is done. "One of three" leaves a
+    # person hunting for WHICH one, so the names earn their place there; with nothing connected
+    # the list is every step and repeats the count in different words, which is the stutter this
+    # codebase keeps deleting. The titles are already written for a buyer rather than for us
+    # ("Your inbox", "Your AI key"), so they can be printed as they stand.
+    if done:
+        line = f"{done} of {total} connected."
+        if waiting:
+            line += " Still to connect: " + ", ".join(waiting) + "."
+    else:
+        line = f"{total} things to connect, and only you can do them."
+    # THE SENTENCE IS ONLY TRUE WHILE NOTHING IS CONNECTED, so it is only printed then. Caught by
+    # reading the rendered card rather than the code: with the mailbox connected and two steps
+    # left it said "Nothing arrives until at least one of these is connected" over a box that was
+    # already receiving mail. A screen that tells a buyer his working channel is not working is
+    # worse than one that says nothing.
+    if not done:
+        line += " Nothing arrives until at least one of these is connected."
+    return ('<div class="card"><h2>Finish setting up your box</h2>'
+            f'<p class="sub">{_esc(line)}</p>'
+            f'<p><a href="{_esc(href)}">Set up your box &rarr;</a></p></div>')
 
 
 def _managed_card() -> str:
@@ -487,6 +611,11 @@ def _home() -> str:
                 'the numbers below are the last ones written, not this minute\'s.</span></div>'
                 if stale else "")
         body = note + _needs_card(view) + _segments(view)
+    # THE WAY IN GOES FIRST, ABOVE THE NUMBERS, and only while there is set-up left to do. A box
+    # with nothing connected has no numbers worth reading — "Nothing to report yet" is the whole
+    # of what the section above can say — so the first thing on the page should be the thing that
+    # changes that. It removes itself when the last step is connected.
+    body = _setup_card() + body
     # BOTH LAST, AND IN THIS ORDER. Stop everything is the control you want findable and never
     # the one you want your thumb near while reading the morning's numbers on a phone; Managed is
     # a thing you go looking for on a particular day, so it sits below the numbers and above the

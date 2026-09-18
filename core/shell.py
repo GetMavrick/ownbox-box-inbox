@@ -169,6 +169,35 @@ def sections() -> tuple[Section, ...]:
     return tuple(sorted(_SECTIONS.values(), key=lambda s: (s.order, s.key)))
 
 
+# THE KEY A MACHINE USES TO SAY "MY SET-UP SCREEN IS HERE". One string, named once, because the
+# machine that registers it and the core screens that look for it must not drift.
+SETUP_KEY = "setup"
+
+
+def setup_href() -> str:
+    """Where a buyer with nothing connected should be sent, or "" when this box has nowhere.
+
+    CORE KNOWS WHETHER SET-UP IS FINISHED AND NOT WHERE IT LIVES. `box_secrets.setup_state()` is
+    core's and answers the first half on every box type. The screen itself belongs to whichever
+    machine serves it — `/inbox/setup` on the box we sell today, something else on the next one —
+    and core must not learn a machine's URL to find it (`tests/test_core_boundary.py` refuses
+    exactly that, and rightly: core growing an arm per product is what the ratchet exists to stop).
+
+    SO THE REGISTRY ANSWERS IT. A machine registers an item keyed `setup` in its own section and
+    core asks the rail, the same way it already asks for the home href. A box whose machines
+    register none gets "" and the screens that call this draw nothing — which is honest, and the
+    correct behaviour on a Lead box that has no set-up screen at all.
+
+    FIRST IN RAIL ORDER WINS, deliberately: with two machines carrying set-up screens the buyer
+    should meet the one whose section the rail puts first, not whichever module imported first.
+    """
+    for sec in sections():
+        for item in sec.items:
+            if item.key == SETUP_KEY and item.href:
+                return item.href
+    return ""
+
+
 def home_href() -> str:
     """Where the back arrow goes. The registered home, else the first section, else the login —
     which is the only page every box is guaranteed to serve (`core.dash` says so about its own

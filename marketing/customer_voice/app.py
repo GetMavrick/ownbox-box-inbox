@@ -985,6 +985,18 @@ shell.register_section(
         # the settings, so those are probably the settings for the inbox in particular."*
         {"key": "settings", "label": "Settings", "href": "/inbox/settings",
          "icon": _TAB_ICON["/inbox/settings"]},
+        # SET UP IS IN THE MENU NOW, and until today it was in no menu at all. Measured on a box
+        # exported from .18.3 and signed into with nothing connected: `/dashboard` carried ZERO
+        # links to this screen, `/inbox/settings` carried ZERO, and the rail did not list it — the
+        # only link in the whole product was one on the inbox page. So the best screen we have,
+        # the one that says "Three things only you can do", was reachable by accident.
+        #
+        # `shell.SETUP_KEY` IS THE POINT OF THE KEY. Core's dashboard asks the registry for an item
+        # keyed `setup` rather than learning this machine's URL, so the card it draws works on any
+        # box that has a set-up screen and draws nothing on one that does not. This line is what
+        # makes this box one of the former.
+        {"key": shell.SETUP_KEY, "label": "Set up", "href": "/inbox/setup",
+         "icon": _TAB_ICON.get("/inbox/settings", "")},
     ])
 
 
@@ -3326,6 +3338,17 @@ def _mailbox_form(*, user: str = "", note: str = "", verb: str = "Start reading 
             f'<button class="btn" type="submit">{_esc(verb)}</button></form>')
 
 
+def _mailbox_no_password_yet() -> str:
+    """The line that joins the form to the instructions under it.
+
+    THE FORM COMES FIRST NOW, and without a sentence the four numbered steps beneath it read as
+    an afterthought rather than as the answer to the obvious question. One line, phrased as the
+    question a person actually has.
+    """
+    return ('<p class="quiet" style="margin-top:14px">Do not have one yet? '
+            'It takes about a minute:</p>')
+
+
 def _mailbox_steps() -> str:
     items = "".join(f'<div class="row"><span class="n">{i}</span>'
                     f'<span class="t">{_esc(t)}</span></div>'
@@ -3589,9 +3612,12 @@ def r_setup():
         steps = _setup_source()
     except Exception as e:                       # noqa: BLE001 — the set-up page outranks the cause
         log.warning("voice.setup_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
+        # `here` IS THIS SCREEN, EVEN WHEN IT CANNOT DRAW ITS LIST. A failure branch that lights a
+        # different row tells a person they are somewhere they are not, on the screen where they
+        # are least sure what is happening.
         return _shell('<h1>Set-up</h1><div class="quiet">This box could not read its own set-up '
                       'list. Nothing you have already connected is affected.</div>',
-                      here="/inbox/settings"), 200
+                      here="/inbox/setup"), 200
 
     done = sum(1 for e in steps if e.get("status") == "connected")
     # COUNTED, NOT WRITTEN. This read "Two things only you can do" while the list had two entries,
@@ -3610,7 +3636,16 @@ def r_setup():
                           for i, e in enumerate(steps, 1))
     body += ('<p style="margin-top:22px"><a href="/inbox/settings" '
              'style="color:var(--accent)">← Settings</a></p>')
-    return _shell(body, here="/inbox/settings"), 200
+    # THIS SCREEN LIGHTS ITS OWN ROW. Until #1374 there was no Set up row, so pointing `here` at
+    # Settings was the honest answer — set-up had no seat in the rail and Settings was the nearest
+    # true thing. Adding the row without moving this left the bar lighting Settings on the one
+    # screen go-to-market funnels every buyer to, and the new row never lit at all. Found by
+    # OSDev5 reading the rendered bar on this branch, not the diff.
+    #
+    # DELIBERATELY NOT A SWEEP. `r_drafts` (line ~3269) carries the identical line and must KEEP
+    # it — it is a screen of Settings and has no row of its own. A sed across this file would
+    # have been right twice and wrong once, which is the revert OSDev5 has already paid for.
+    return _shell(body, here="/inbox/setup"), 200
 
 
 # NOT `@blueprint.post`. tests/test_customer_voice.py scans this department for a CALL named
@@ -3676,8 +3711,13 @@ def r_mailbox():
                 'revokes an app password whenever the account password changes, so this is '
                 'usually what happened — make a new one and paste it here.</p>'
                 + (f'<p class="quiet">Google said: {_esc(detail)}</p>' if detail else "")
-                + _mailbox_steps()
+                # SAME ORDER, AND THE CASE IS STRONGER HERE: this person HAS had a working app
+                # password, so they know the drill and may already have made the replacement.
+                # Making them scroll past the tutorial they no longer need, to reach the field
+                # they came for, is the fold bug with an extra insult on top.
                 + _mailbox_form(user=who, note=note, verb="Use this password instead")
+                + _mailbox_no_password_yet()
+                + _mailbox_steps()
                 + '<p style="margin-top:14px"><a href="/inbox/settings" '
                   'style="color:var(--accent)">← Settings</a></p>')
     elif status == "admin_disabled":
@@ -3715,8 +3755,21 @@ def r_mailbox():
                 '<p class="quiet">Google will not take your ordinary password for this, and it '
                 'should not — an <b>app password</b> is sixteen letters that only Ownbox uses and '
                 'that you can revoke on its own, without changing anything else.</p>'
-                + _mailbox_steps()
+                # THE FORM IS ABOVE THE INSTRUCTIONS. Measured in a real browser at 390x844 by
+                # OSDev5 and reproduced here: with the four steps first, the email field sat at
+                # y=809 in an 844px viewport — below the fold and behind the tab bar, with 154
+                # words above it. A buyer read a wall of Google instructions and never learned
+                # there WAS a form until they scrolled, on the screen that is step one of set-up.
+                # Same browser, same viewport, after the swap: y=398.
+                #
+                # IT SERVES BOTH PEOPLE WHO ARRIVE HERE. Somebody who already has an app password
+                # — the returning buyer, and anyone who read the instructions on a laptop — can
+                # paste it without reading anything. Somebody who does not gets the line below
+                # and the steps directly under it, which is the shape `/inbox/connect` already
+                # uses and which measures at y=294.
                 + _mailbox_form(user=typed, note=note)
+                + _mailbox_no_password_yet()
+                + _mailbox_steps()
                 + '<p style="margin-top:14px"><a href="/inbox/settings" '
                   'style="color:var(--accent)">← Settings</a></p>')
     return _shell(body, here="/inbox/settings"), 200

@@ -306,6 +306,77 @@ def _lake_enqueue_messenger(zcid: str, psid: str, name: str | None,
         log.warning("inbox.lake_enqueue_failed", conversation=zcid, error=str(e)[:120])
 
 
+def _mirror_page(space: str, ch, zcid: str, msgs: list) -> int:
+    """Record every message on a fetched page, both directions. Returns how many.
+
+    IT RUNS BEFORE THE SKIP NOW, AND THAT IS THE WHOLE FIX. This body used to sit BELOW the
+    newest-inbound check, so a conversation whose newest inbound had not changed re-stamped its
+    watermark and `continue`d — throwing away a page it had already paid to fetch. Measured by
+    OSDev1 on release/2026.09.18.4 (2026-09-18), with #1334 and migration 52 both live: 82 of 91
+    watermarks re-stamped, so the re-read really did happen, and yet in=72, outbound=0, waiting=72
+    and not one `inbox.page_mirrored` line in the journal.
+
+    That is the cruellest arrangement the two fixes could have had. #1334 taught the poller to
+    mirror both directions; migration 52 cleared the skip-marker so every existing conversation
+    would be re-read; and the re-read then hit a SECOND skip and dropped the page on the floor.
+    Both fixes were live, correct, and invisible.
+
+    THE TWO QUESTIONS ARE NOT THE SAME QUESTION, which is why this is a move rather than a
+    condition. "What did this page contain" is bookkeeping and is always worth recording, since
+    the page is already in memory and `record_message` is INSERT OR IGNORE. "Is there a new
+    inbound to act on" decides whether to ENQUEUE an opener, and it is right that it skips. Gating
+    the first on the second is what made the box unable to learn that its owner had answered
+    somebody from his phone — the one thing this mirror exists to learn.
+
+    A FUNCTION, NOT A HOISTED BLOCK, so the next person cannot reintroduce the ordering by
+    accident: there is now exactly one call site, immediately after the fetch.
+    """
+# MIRROR THE WHOLE PAGE, IN BOTH DIRECTIONS. Until now this recorded ONE message — the
+    # target — and hardcoded direction="in". The page at `msgs` above already carries our own
+    # replies and `_direction_of` already classifies them, so the box FETCHED the outbound
+    # side and threw it away.
+    #
+    # WHAT THAT COST, measured on the live box by OSDev1 (2026-09-17): inbox_messages held 72
+    # rows and every one of them said "in". `store.awaiting_reply` calls a thread waiting when
+    # its newest message is inbound, so all 72 counted as waiting — including threads the
+    # owner had already answered inside Instagram (the probe saw 15 outgoing across 3). The
+    # 8 AM email would have opened with "72 people are waiting" when 2 had an inbound that
+    # week. A notification that wrong is worse than no notification: it is read once, trusted
+    # once, and never again.
+    #
+    # REPLIES SENT THROUGH THE BOX WERE ALREADY MIRRORED (reply.py, handler.py). This is for
+    # the ones sent anywhere else — the phone, the Instagram app, a laptop at midnight — which
+    # is how a small business actually answers its customers, and the only place the box can
+    # learn about them is this page.
+    #
+    # IDEMPOTENT, so re-polling a conversation rewrites nothing: `record_message` keys on the
+    # vendor's message id. Cheap, too — this page was already fetched and is capped at
+    # `_MSG_PAGE`; the loop adds no vendor call.
+    mirrored = 0
+    for m in msgs:
+        way = _direction_of(m)
+        if way is None:
+            log.warning("inbox.message_direction_unreadable", space=space,
+                        channel=ch.key, conversation=zcid)
+            continue
+        store.record_message(
+            space=space, zcid=zcid,
+            zmid=str(_f(m, "id", "_id", "message_id") or "") or None,
+            # `sent_by` IS THE DOCUMENTED SET — contact | ai | human — not a fourth word.
+            # An outbound message we learn about HERE was sent by a person, from the phone or
+            # the Instagram app, so "human" is what it is. The thread renders that by looking
+            # the sender up on the send ledger, finds no row (there was no send through the
+            # box) and falls back to "you", which is exactly right. A message the box itself
+            # sent is already mirrored with sent_by="ai" and wins on INSERT OR IGNORE, so
+            # this can never relabel the machine's own words as the owner's.
+            direction=way, sent_by="contact" if way == "in" else "human",
+            body=_body(m), sent_at=str(_f(m, *_SENT_AT_KEYS) or "") or None)
+        mirrored += 1
+    log.info("inbox.page_mirrored", space=space, channel=ch.key,
+             conversation=zcid, messages=mirrored, of=len(msgs))
+    return mirrored
+
+
 def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, int]:
     """One channel's page of conversations for one Space → (scanned, enqueued).
 
@@ -351,6 +422,25 @@ def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, 
             log.warning("inbox.poll_msgs_failed", space=space, channel=ch.key,
                         conversation=zcid, error=str(e)[:120])
             continue
+        # THE CONVERSATION ROW EXISTS BEFORE ITS MESSAGES DO. Moving the mirror above the skip
+        # moved it above the `upsert_conversation` further down, and the case that exposes is the
+        # one OSDev1 named: a page with NO inbound at all — the business messaged first from its
+        # phone — takes the `continue` below, so the messages would have been written for a
+        # conversation that was never created. No foreign key would have caught it (measured
+        # 2026-09-12: every connection reports foreign_keys = 0) and the screen reads FROM
+        # conversations, so those rows would simply have been invisible.
+        #
+        # PARTIAL, AND THAT IS SAFE BY CONSTRUCTION: every column in that upsert is
+        # `COALESCE(excluded.x, existing.x)`, so passing only what is known here cannot null
+        # anything, and the fuller upsert below still fills in the ad attribution and the inbound
+        # timestamp when there is one.
+        store.upsert_conversation(space=space, zcid=zcid, platform=ch.key,
+                                  participant=str(_f(conv, "participantName", "participant",
+                                                     "contactName", "name") or "") or None,
+                                  account_id=acctid or None)
+        # MIRRORED BEFORE ANY SKIP. The page is in hand; what it contains is recorded now,
+        # whatever the decision below turns out to be.
+        _mirror_page(space, ch, zcid, msgs)
         newest = _newest_inbound(msgs)
         newest_id = str(_f(newest, "id", "_id", "message_id") or "") if newest else None
         if not newest or not newest_id or (wm and wm.get("last_seen_msg_id") == newest_id):
@@ -388,49 +478,6 @@ def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, 
             ad_meta_id=ad_id, ad_title=ad_title,
             participant=name, last_inbound_at=inbound_at or None,
             account_id=acctid or None)
-        # MIRROR THE WHOLE PAGE, IN BOTH DIRECTIONS. Until now this recorded ONE message — the
-        # target — and hardcoded direction="in". The page at `msgs` above already carries our own
-        # replies and `_direction_of` already classifies them, so the box FETCHED the outbound
-        # side and threw it away.
-        #
-        # WHAT THAT COST, measured on the live box by OSDev1 (2026-09-17): inbox_messages held 72
-        # rows and every one of them said "in". `store.awaiting_reply` calls a thread waiting when
-        # its newest message is inbound, so all 72 counted as waiting — including threads the
-        # owner had already answered inside Instagram (the probe saw 15 outgoing across 3). The
-        # 8 AM email would have opened with "72 people are waiting" when 2 had an inbound that
-        # week. A notification that wrong is worse than no notification: it is read once, trusted
-        # once, and never again.
-        #
-        # REPLIES SENT THROUGH THE BOX WERE ALREADY MIRRORED (reply.py, handler.py). This is for
-        # the ones sent anywhere else — the phone, the Instagram app, a laptop at midnight — which
-        # is how a small business actually answers its customers, and the only place the box can
-        # learn about them is this page.
-        #
-        # IDEMPOTENT, so re-polling a conversation rewrites nothing: `record_message` keys on the
-        # vendor's message id. Cheap, too — this page was already fetched and is capped at
-        # `_MSG_PAGE`; the loop adds no vendor call.
-        mirrored = 0
-        for m in msgs:
-            way = _direction_of(m)
-            if way is None:
-                log.warning("inbox.message_direction_unreadable", space=space,
-                            channel=ch.key, conversation=zcid)
-                continue
-            store.record_message(
-                space=space, zcid=zcid,
-                zmid=str(_f(m, "id", "_id", "message_id") or "") or None,
-                # `sent_by` IS THE DOCUMENTED SET — contact | ai | human — not a fourth word.
-                # An outbound message we learn about HERE was sent by a person, from the phone or
-                # the Instagram app, so "human" is what it is. The thread renders that by looking
-                # the sender up on the send ledger, finds no row (there was no send through the
-                # box) and falls back to "you", which is exactly right. A message the box itself
-                # sent is already mirrored with sent_by="ai" and wins on INSERT OR IGNORE, so
-                # this can never relabel the machine's own words as the owner's.
-                direction=way, sent_by="contact" if way == "in" else "human",
-                body=_body(m), sent_at=str(_f(m, *_SENT_AT_KEYS) or "") or None)
-            mirrored += 1
-        log.info("inbox.page_mirrored", space=space, channel=ch.key,
-                 conversation=zcid, messages=mirrored, of=len(msgs))
         # WS2: de-anonymize the CTM-ad lead into the People lake. OBSERVE-SAFE —
         # identity capture at poll time, independent of inbox.autonomy (capturing a
         # psid is not an auto-DM). Idempotent by psid → a re-poll never double-lakes.

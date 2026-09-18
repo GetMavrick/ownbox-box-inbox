@@ -152,6 +152,17 @@ ok("the route itself checks the owner session, not the page that drew the button
 # ── 4. the button is on the box's home ───────────────────────────────────────────────────
 print("\ntest_the_owner_can_find_it")
 
+# THE BOX HAS TO HAVE STARTED BEFORE THERE IS ANYTHING TO STOP, and since 2026-09-18 the
+# dashboard says so: `_setup_card` takes the page while set-up is unfinished and `_stop_card`
+# stands down behind it, because an offer to halt work that has not begun is a control that
+# cannot do what it says. That is a real rule, so this suite states its precondition rather than
+# asserting through it — the fixture connects the box, which is the state every assertion below
+# was always about.
+from core import box_secrets as _bs                                      # noqa: E402
+_bs.put(_bs.EMAIL, json.dumps({"host": "imap.gmail.com", "user": "a@b.co", "password": "x" * 16}))
+_bs.put(_bs.ZERNIO, "z" * 67)
+_bs.put(_bs.ANTHROPIC, "sk-ant-" + "A" * 60)
+
 body = OWNER.get("/dashboard").get_data(as_text=True)
 ok("the owner sees Stop everything on /dashboard", "Stop everything" in body)
 ok("...as a POST, so a crawler or a link preview cannot flip the box",

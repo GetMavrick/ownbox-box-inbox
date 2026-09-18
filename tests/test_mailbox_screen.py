@@ -20,6 +20,7 @@ Run: python tests/test_mailbox_screen.py
 """
 import os
 import pathlib
+import json as _json
 import re
 import sys
 import tempfile
@@ -450,6 +451,54 @@ def test_the_button_says_what_the_screen_it_reaches_actually_offers():
         spaces.all_spaces, rep.report, store.list_conversations = keep
 
 
+def test_the_form_is_not_buried_under_the_instructions():
+    """The fields come BEFORE the four Google steps, on every branch that shows both.
+
+    MEASURED IN A REAL BROWSER, NOT INFERRED. OSDev5, 2026-09-18, on a 390x844 phone: the email
+    field sat at y=809 in an 844px viewport — below the fold and behind the tab bar, with 154
+    words of instructions above it. A buyer read a wall of Google steps and never learned there
+    WAS a form until they scrolled, on the screen that is step one of set-up. Reproduced on main
+    at 809 and measured at 398 with the order swapped, same browser and viewport.
+
+    THE GUARD IS ON THE ORDER, NOT ON A PIXEL. A y-coordinate assertion would need a browser in
+    CI and would break on any font or padding change that did not matter; what must not come back
+    is the ORDER, and DOM position is exactly that, cheaply. 398 is the consequence of the order
+    and it is recorded above so the next person knows what number to expect.
+
+    BOTH BRANCHES THAT SHOW BOTH. First run, and `needs_reauth` — and the case is stronger on the
+    second, where the person has already had a working app password and may have made the
+    replacement before arriving.
+    """
+    # `ok` IN THIS FILE IS ok(what, cond, got) — LABEL FIRST, unlike the suites I wrote this
+    # week. I got it backwards on the first pass and every assertion printed "ok True": a
+    # non-empty string as the condition is always truthy, so the test could not fail. Caught by
+    # reading the output rather than the exit code, which is the only way that shape ever shows.
+    from core import box_secrets as bs
+    app, c = _c()
+
+    def order(html_: str):
+        """(index of the first credential field, index of step 1) in the raw HTML."""
+        return html_.find('name="user"'), html_.find("In your Google Account")
+
+    bs.clear(bs.EMAIL)
+    field, steps = order(c.get("/inbox/mailbox").get_data(as_text=True))
+    ok("first run: the screen shows both a form and the steps", field > 0 and steps > 0,
+       f"field={field} steps={steps}")
+    ok("first run: the form comes BEFORE the wall of instructions", field < steps,
+       f"field at {field}, steps at {steps} — a buyer scrolls past 150 words to find the field")
+
+    # `needs_reauth` — a person who HAS had a working password and is being refused.
+    bs.put(bs.EMAIL, _json.dumps({"host": "imap.gmail.com", "user": "a@b.co",
+                                  "password": "x" * 16}))
+    bs.note_email_status("needs_reauth", "Google refused it")
+    field, steps = order(c.get("/inbox/mailbox").get_data(as_text=True))
+    ok("refused: the screen shows both", field > 0 and steps > 0, f"field={field} steps={steps}")
+    ok("refused: the replacement field comes first, not the tutorial again", field < steps,
+       f"field at {field}, steps at {steps}")
+    bs.clear(bs.EMAIL)
+    bs.clear(bs.EMAIL_STATUS)
+
+
 def test_ci_actually_runs_this_file():
     wf = pathlib.Path(__file__).resolve().parents[1] / ".github/workflows/tests.yml"
     me = pathlib.Path(__file__).stem
@@ -485,6 +534,7 @@ if __name__ == "__main__":
                test_settings_can_still_reach_it_after_it_is_set_up,
                test_the_row_is_absent_on_a_box_that_does_not_serve_the_screen,
                test_the_button_says_what_the_screen_it_reaches_actually_offers,
+               test_the_form_is_not_buried_under_the_instructions,
                test_ci_actually_runs_this_file):
         print(fn.__name__)
         fn()

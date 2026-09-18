@@ -92,6 +92,48 @@ ok("...and the reply is attributed to a person, not to the machine",
 ok("THE THREAD IS NOT WAITING — the bug that would have said '72 people are waiting'",
    store.awaiting_reply(SPACE) == 0, f"awaiting_reply={store.awaiting_reply(SPACE)}")
 
+# ── 1b. THE SECOND SKIP, WHICH MADE ALL OF THE ABOVE INVISIBLE ON THE LIVE BOX ──────────
+print("\ntest_a_re_read_mirrors_the_page_it_already_fetched")
+# WHAT OSDEV1 MEASURED ON release/2026.09.18.4 (2026-09-18), with #1334 and migration 52 BOTH
+# live: 82 of 91 watermarks re-stamped — so the re-read really happened — and still in=72,
+# outbound=0, waiting=72, with not one `inbox.page_mirrored` line in the journal.
+#
+# The cause was ordering, not logic. The mirror sat BELOW the newest-inbound check, so a
+# conversation whose newest inbound had not changed re-stamped its watermark and `continue`d,
+# throwing away a page it had already paid to fetch. Every assertion above passed throughout,
+# because they all sweep a conversation for the FIRST time — the state the live box was never in.
+Z_RE = "conv-re-read"
+FIRST = [msg("r1", "incoming", "Can you fit me in Friday?", "2026-09-16T10:00:00Z")]
+sweep(Z_RE, FIRST, "2026-09-16T10:01:00Z")
+ok("first sweep: the customer is waiting", store.awaiting_reply(SPACE) >= 1)
+# HE ANSWERS FROM HIS PHONE. The newest INBOUND has not changed — only an outbound was added —
+# so this is exactly the page the old order threw away.
+AGAIN = FIRST + [msg("r2", "outgoing", "Friday at 2 works.", "2026-09-16T18:00:00Z")]
+sweep(Z_RE, AGAIN, "2026-09-16T18:01:00Z")
+got = rows(Z_RE)
+ok("the re-read MIRRORS the page instead of dropping it",
+   [r["direction"] for r in got] == ["in", "out"], str([r["direction"] for r in got]))
+ok("...so the thread he answered stops counting as waiting",
+   not any(r["direction"] == "in" for r in rows(Z_RE)[-1:]),
+   str([r["direction"] for r in got]))
+
+# THE NO-INBOUND PAGE, which is the case lifting the mirror could have broken. A conversation
+# whose page carries only outbound — the business messaged first from its phone — takes the skip
+# below, so its messages would have been written for a conversation row that was never created.
+# No foreign key would have caught it and the screen reads FROM conversations, so the rows would
+# simply have been invisible.
+Z_OUT = "conv-we-went-first"
+sweep(Z_OUT, [msg("o1", "outgoing", "Your part is in.", "2026-09-17T09:00:00Z")],
+      "2026-09-17T09:01:00Z")
+ok("a page with no inbound at all is still mirrored",
+   [r["direction"] for r in rows(Z_OUT)] == ["out"], str([r["direction"] for r in rows(Z_OUT)]))
+ok("...and its conversation row EXISTS, so the message is not an orphan",
+   store.get_conversation(SPACE, Z_OUT) is not None)
+ok("...and nobody is waiting on a thread where we spoke last",
+   not any(c.get("zernio_conversation_id") == Z_OUT
+           for c in store.list_conversations(SPACE, limit=50, waiting=True)))
+
+
 Z2 = "conv-really-waiting"
 sweep(Z2, [msg("m3", "outgoing", "Thanks for calling.", "2026-09-16T10:00:00Z"),
            msg("m4", "incoming", "One more question", "2026-09-16T11:00:00Z")],
