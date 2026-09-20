@@ -24,11 +24,8 @@ the owner's address lives in my/settings.yaml, never in source.
 from __future__ import annotations
 
 import html as _html
-import json as _json
 
-from core import cost_guard, net, report, state
-from core.config import settings
-from core.exceptions import RetryableError, VendorError
+from core import box_mail, report
 from core.logging import get_logger
 
 log = get_logger(__name__)
@@ -38,13 +35,9 @@ log = get_logger(__name__)
 # page's; it is not his reading order, so it is not reused here.
 ORDER = ("lead_machine", "content_machine", "customer_voice")
 SENDER_NAME = "Morning Review"
-_URL = "https://api.resend.com/emails"
-# RESEND SITS BEHIND CLOUDFLARE, and Cloudflare refuses urllib's default signature. Measured on the
-# box 2026-09-10: core.net.post_public with no User-Agent got 403 "error code: 1010"; the identical
-# call with one got Resend's own 401. core.net sets none by design (each caller names itself, as
-# site_email does), so this caller must, or no morning email leaves the box at all.
-_UA = "AIOS-MorningReview/1.0"
-_TRANSIENT = {408, 429, 500, 502, 503, 504, 529}
+# THE TRANSPORT CONSTANTS MOVED WITH THE TRANSPORT (core.box_mail): the Resend URL, the
+# User-Agent that Cloudflare requires, and the retryable status set. They are not duplicated here,
+# because two copies of a retryable-status set is one of them being wrong later.
 _RANK = {"fail": 0, "warn": 1, "connect": 2}
 _MARK = {"fail": "!!", "warn": "!", "connect": "→"}
 
@@ -163,40 +156,22 @@ def html(e: dict) -> str:
 
 
 def from_address() -> str:
-    from core.config import get_config          # per call: config bound at import defeats a patch
-    cfg = dict(get_config().get("review") or {})
-    return str(cfg.get("email_from") or getattr(settings, "gtm_from_email", "") or "").strip()
+    """Kept as this module's own name because callers and tests use it; the answer comes from
+    `box_mail`, so the review email and a box notification can never disagree about who the box
+    is."""
+    return box_mail.from_address()
 
 
 def send(to: str, subject: str, text_body: str, html_body: str, *, idem_key: str) -> str:
     """One email through Resend. -> the Resend message id. Raises; the caller decides what a failure
-    costs. Metered before the call, recorded after it, exactly once per message id."""
-    key = (getattr(settings, "resend_api_key", "") or "").strip()
-    if not key:
-        raise VendorError("resend", "config", "RESEND_API_KEY is not set")
-    sender = from_address()
-    if not sender:
-        raise VendorError("resend", "config", "no from-address: set review.email_from or GTM_FROM_EMAIL")
-    to = (to or "").strip()
-    if "@" not in to:
-        raise VendorError("resend", "config", "review.email_to is not an address")
-    cost_guard.check_vendor("resend", 1)
-    payload = {"from": f"{SENDER_NAME} <{sender}>", "to": [to], "subject": subject,
-               "text": text_body, "html": html_body}
-    headers = {"Authorization": f"Bearer {key}", "Idempotency-Key": idem_key, "User-Agent": _UA}
-    try:
-        status, body = net.post_public(_URL, json=payload, headers=headers, timeout=30)
-    except net.PostRefused as e:
-        raise RetryableError(f"resend transport: {str(e)[:160]}") from e
-    if status in _TRANSIENT:
-        raise RetryableError(f"resend HTTP {status}: {body[:160]}")
-    if not 200 <= status < 300:
-        raise VendorError("resend", status, body[:200])
-    try:
-        ref = (_json.loads(body) or {}).get("id")
-    except ValueError as e:
-        raise VendorError("resend", status, f"non-JSON: {e}") from e
-    if not ref:
-        raise VendorError("resend", "shape", f"no message id: {body[:160]}")
-    state.record_vendor_usage("resend", 1, idem_key=f"resend:{ref}", note="morning_review")
-    return ref
+    costs. Metered before the call, recorded after it, exactly once per message id.
+
+    THE TRANSPORT MOVED TO `core.box_mail`, unchanged, when the inbox needed to tell the owner his
+    box had messages waiting. Two senders, one door: the alternative was a second copy of the
+    Resend call, the meter and the ledger note, and a second place to fix them.
+
+    THIS FUNCTION'S CONTRACT IS UNCHANGED — same arguments, same return, same exceptions, same
+    `morning_review` ledger note — and this module's suite is what proves the move was faithful.
+    """
+    return box_mail.send(to, subject, text_body, html_body, idem_key=idem_key,
+                         sender_name=SENDER_NAME, note="morning_review")

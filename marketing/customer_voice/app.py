@@ -24,7 +24,7 @@ import html
 import pathlib
 from datetime import date
 
-from flask import Blueprint, redirect, request
+from flask import Blueprint, jsonify, redirect, request
 
 from core import dash, shell
 from core.dash.home import RAIL_CSS as _RAIL_CSS
@@ -831,6 +831,60 @@ JS = """
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { shut(null); } });
 })();
 """
+
+PUSH_JS = """  // TURNING NOTIFICATIONS ON, exposed for whichever screen earns the right to ask. The owner ruled
+  // the moment (2026-09-20): "after the buyer has seen their first real message, never on first
+  // load." An iOS denial is close to permanent — it can only be undone in Settings, which nobody
+  // does — so the cost of asking early is the whole channel, for good. Nothing here calls it; the
+  // inbox does, once it has something worth being told about.
+  window.ownboxCanBeRung = function () {
+    // ON IPHONE THE HOME SCREEN APP IS THE ONLY THING THAT CAN RECEIVE A PUSH. A Safari tab cannot,
+    // whatever the permission says, so offering the prompt there is a dead end that burns the ask.
+    var standalone = (window.navigator.standalone === true) ||
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    return !!(standalone && 'Notification' in window && 'PushManager' in window &&
+              navigator.serviceWorker);
+  };
+
+  window.ownboxEnableNotifications = function () {
+    if (!window.ownboxCanBeRung()) {
+      return Promise.resolve({ ok: false, why: 'add the box to your Home Screen first' });
+    }
+    return fetch('/inbox/push/key', { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (k) {
+        if (!k.available || !k.key) { return { ok: false, why: k.why || 'this box has no push keys yet' }; }
+        return Notification.requestPermission().then(function (p) {
+          if (p !== 'granted') { return { ok: false, why: 'you said no — Settings can undo it' }; }
+          return navigator.serviceWorker.ready.then(function (reg) {
+            // RE-SUBSCRIBE EVERY TIME, not just when there is none: iOS drops a subscription after
+            // long disuse or cleared storage, and the box would keep pushing at an endpoint that
+            // stopped existing. Asking the browser again is cheap and idempotent.
+            return reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: (function (b64) {
+                var pad = '='.repeat((4 - b64.length % 4) % 4);
+                var raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+                var out = new Uint8Array(raw.length);
+                for (var i = 0; i < raw.length; i++) { out[i] = raw.charCodeAt(i); }
+                return out;
+              })(k.key)
+            });
+          }).then(function (sub) {
+            var j = sub.toJSON();
+            return fetch('/inbox/push/subscribe', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys })
+            }).then(function (r) { return r.json(); })
+              .then(function (o) { return { ok: !!o.ok, why: o.error || '' }; });
+          });
+        });
+      })
+      .catch(function (e) { return { ok: false, why: String(e && e.message || e) }; });
+  };
+"""
+
 
 
 # ── the channels, as their own marks ────────────────────────────────────────────────────────
@@ -3734,6 +3788,54 @@ def r_connect_claude():
 
 # NOT `@blueprint.post`. tests/test_customer_voice.py scans this department for a CALL named
 # `post`, and a decorator is a call — the same two extra characters r_drafts spends.
+@blueprint.route("/inbox/push/subscribe", methods=["POST"])
+def r_push_subscribe():
+    """A browser hands over the endpoint its push service issued. We store it against the person.
+
+    NOT OWNER-ONLY. Every seat on this box gets their own phone rung — a member handling the inbox
+    needs the notification more than the owner does. The row is keyed to whoever is signed in, and
+    `subscriptions_for` never crosses users.
+
+    THE BODY IS A SUBSCRIPTION, NOT A MESSAGE. It carries an endpoint and two public key halves,
+    all of them issued by the browser; nothing a customer wrote passes through here.
+    """
+    gate = _gate()
+    if gate is not None:
+        return gate
+    from core import push
+    try:
+        who = dash.session_user(request) or {}
+    except Exception:                                    # noqa: BLE001
+        who = {}
+    if not who.get("id"):
+        return jsonify({"ok": False, "error": "sign in first"}), 403
+    body = request.get_json(silent=True) or {}
+    keys = body.get("keys") or {}
+    try:
+        fresh = push.save_subscription(user_id=str(who["id"]),
+                                       endpoint=str(body.get("endpoint") or ""),
+                                       p256dh=str(keys.get("p256dh") or ""),
+                                       auth=str(keys.get("auth") or ""))
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True, "new": fresh})
+
+
+@blueprint.route("/inbox/push/key", methods=["GET"])
+def r_push_key():
+    """The box's own VAPID public key, for `applicationServerKey`.
+
+    An empty key is an answer, not a failure: a box whose release predates the crypto dependency
+    cannot mint one, and the screen needs to say so rather than offer a button that cannot work.
+    """
+    gate = _gate()
+    if gate is not None:
+        return gate
+    from core import push
+    ok, why = push.available()
+    return jsonify({"key": push.public_key(), "available": ok, "why": why})
+
+
 @blueprint.route("/inbox/setup", methods=["GET", "POST"])
 def r_setup():
     """EVERY CREDENTIAL THE BUYER SUPPLIES, ON ONE SCREEN, IN THE OWNER'S ORDER.
@@ -3804,6 +3906,10 @@ def r_setup():
     body = head + "".join(_setup_step(i, e, note=notes.get(e.get("key"), ""), typed=typed,
                                       owner=(_u.get("role") or "") == "owner")
                           for i, e in enumerate(steps, 1))
+    # THE PHONE STEP'S SCRIPT, loaded only by this screen. It is not in the inbox's own JS block
+    # because that block is guarded against fetch and timers — the inbox must never imply it is
+    # live-updating — and this belongs to set-up, where the phone step lives.
+    body += f'<script>{PUSH_JS}</script>'
     body += ('<p style="margin-top:22px"><a href="/inbox/settings" '
              'style="color:var(--accent)">← Settings</a></p>')
     # THIS SCREEN LIGHTS ITS OWN ROW. Until #1374 there was no Set up row, so pointing `here` at

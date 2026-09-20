@@ -194,8 +194,27 @@ def password_problem(password: str, *, email: str = "", code: str = "") -> str |
     return None
 
 
+# WHAT THE BROWSER SAID, CHECKED BEFORE IT IS KEPT. An IANA zone name is the only thing this
+# accepts: it goes into `ZoneInfo` later to decide when a box mails its owner, and a value that
+# raises there would be discovered at eight in the morning inside a worker rather than here.
+#
+# A BAD ONE IS NOT A REFUSAL, IT IS A BLANK. This arrives from a hidden field on the one form
+# every buyer fills in; failing the claim over it would be the tail wagging the dog, and the
+# resolver already falls back to the box's own timezone when this is empty.
+def _clean_tz(value: str) -> str | None:
+    name = str(value or "").strip()
+    if not name or len(name) > 64:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(name)
+    except Exception:                          # noqa: BLE001 — unknown zone, no tzdata, anything
+        return None
+    return name
+
+
 def claim_box(*, code: str, email: str, password: str,
-              ip: str = "", user_agent: str = "") -> dict:
+              ip: str = "", user_agent: str = "", timezone: str = "") -> dict:
     """Claim this box. Returns the owner row. Raises ClaimRefused, having changed nothing.
 
     ORDER OF CHECKS IS THE POINT. The code is proven BEFORE the email and password are looked
@@ -245,9 +264,9 @@ def claim_box(*, code: str, email: str, password: str,
         try:
             c.execute(
                 "INSERT INTO box_claim (id, claimed_at, order_id, user_id, email, pw_hash, "
-                "ip, user_agent) VALUES (1,?,?,?,?,?,?,?)",
+                "ip, user_agent, timezone) VALUES (1,?,?,?,?,?,?,?,?)",
                 (now, provisioned_order(), owner["id"], email, pw_hash,
-                 str(ip or "")[:64], str(user_agent or "")[:200]))
+                 str(ip or "")[:64], str(user_agent or "")[:200], _clean_tz(timezone)))
         except Exception as e:              # noqa: BLE001 — the loser of a race, almost surely
             log.warning("claim.refused_second", error=type(e).__name__)
             raise ClaimRefused("This box has already been set up. Sign in instead.") from e

@@ -17,7 +17,7 @@ from core.worker import register, register_periodic
 
 from core.vendors import zernio
 
-from . import handler, poller
+from . import handler, notices, poller
 
 log = get_logger(__name__)
 
@@ -56,6 +56,19 @@ register_periodic(poller.poll_sweep,
                   interval_s=int((get_config().get("inbox", {}) or {})
                                  .get("poll_interval_s", 45)),
                   name="inbox_poll")
+# THE NOTIFIER REGISTERS EITHER WAY, AND THAT PLACEMENT IS THE DECISION — the same one the read
+# tools are about, one line down. Everything above is fail-closed on the Zernio SDK, correctly:
+# polling and sending on an SDK nobody can verify is what that gate is for. `notices.tick` touches
+# no vendor SDK. It counts rows already on this box and mails the box's own owner, so an
+# EMAIL-ONLY BOX — no Zernio key at all, which is a shape we sell — must still tell him somebody
+# is waiting. Registering it inside the gate would have made the notification a feature you only
+# get if you also connected Instagram.
+#
+# FIFTEEN MINUTES, not the slot length. The slot is four hours wide and the marker makes the send
+# once-per-slot, so this interval only decides how soon after 08:00 the mail goes and how much a
+# restart costs. Quarter-hourly is inside the noise on a $12 box: sixteen hours a day it is
+# arithmetic on the clock that returns before touching the database.
+register_periodic(notices.tick, interval_s=900, name="inbox_notify")
 
 # THE READ TOOLS REGISTER EITHER WAY, and that placement is the decision. Everything above is
 # fail-closed on the vendor SDK, correctly: polling and sending on an SDK nobody can verify is the

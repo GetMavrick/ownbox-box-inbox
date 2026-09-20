@@ -37,6 +37,38 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# ── SWAP, BEFORE ANYTHING ELSE NEEDS IT ──────────────────────────────────────────────────────────
+# NO BOX WE SELL HAS ANY. The owner's own box has a 2G swapfile he made by hand on 2026-06-10;
+# nothing in this script or the image ever created one, so every box shipped to a customer has run
+# with no cushion at all. Measured on a $6 droplet (s-1vcpu-1gb) built from the current image:
+#
+#   RAM 961MB total, 487MB used at rest, 473MB available, swap 0
+#   `claude` peaks at 224MB just to start and fail auth — before it drafts anything
+#
+# That is ~250MB of headroom on the box's one job. Without swap the ceiling is the OOM killer
+# taking whichever process it likes; with it, a spike is slow instead of fatal. On a 2GB box it is
+# margin nobody will notice; on a 1GB box it is the difference between viable and not.
+#
+# CREATED AT FIRST BOOT, NOT BAKED INTO THE IMAGE: a 2G file in the snapshot would add 2G to every
+# image we cut and to its min_disk_size, which is the number that decides whether a box can be a
+# $6 droplet at all. Skipped entirely when the machine already has swap — the owner's box keeps
+# the file he made, and re-running bootstrap never stacks a second one.
+# EMPTINESS, NOT A LINE COUNT. `swapon --show --noheadings | wc -l` reads 0 when the output has
+# no trailing newline, which would make an existing swapfile look absent and stack a second one.
+# A non-empty string is the same answer without depending on how the tool terminates a line.
+if [ -z "$(swapon --show --noheadings 2>/dev/null)" ] && [ ! -e /swapfile ]; then
+  echo "== 0/6 swap (2G, because a box with none dies rather than slows) =="
+  if fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none; then
+    chmod 600 /swapfile
+    mkswap -q /swapfile >/dev/null 2>&1 && swapon /swapfile 2>/dev/null || true
+    grep -q '^/swapfile ' /etc/fstab 2>/dev/null || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    echo "   swap: $(free -m | awk '/Swap:/{print $2}')MB"
+  else
+    # A BOX THAT CANNOT MAKE SWAP STILL BOOTS. Saying so beats refusing to build someone's box.
+    echo "   swap: could not be created — continuing without it"
+  fi
+fi
+
 echo "== 1/6 system packages (python3.12, git, sqlite3, curl; ffmpeg only with the Content Machine) =="
 export DEBIAN_FRONTEND=noninteractive
 # A FRESH IMAGE IS STILL INSTALLING ITSELF. On a new DigitalOcean/Ubuntu droplet, cloud-init and

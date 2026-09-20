@@ -1052,6 +1052,15 @@ def _claim_form_body(code: str, *, email: str = "", problem: str = "") -> str:
   {note}
   <form method="post" action="/claim">
     <input type="hidden" name="c" value="{code}">
+    <!-- WHERE THE BUYER IS, ASKED OF THE BROWSER AND NOT OF HIM. The owner ruled two emails a
+         day, "an 8 AM and a 5 PM email"; a sold box ships `cost.timezone` as UTC and nothing
+         sets it to his, so 8 AM would reach a Pacific buyer at one in the morning. This adds no
+         question to the one form every buyer fills in.
+
+         IT CANNOT COST THE CLAIM. The field posts empty when scripting is off or the browser
+         declines, and the server stores NULL and falls back to the box's own timezone. A claim
+         that failed over a notification preference would be the tail wagging the dog. -->
+    <input type="hidden" name="tz" id="claim-tz" value="">
     <label for="claim-email">Your email address</label>
     <input id="claim-email" type="email" name="email" autocomplete="username"
            value="{html.escape(email)}" required>
@@ -1061,7 +1070,13 @@ def _claim_form_body(code: str, *, email: str = "", problem: str = "") -> str:
     <button type="submit">Create my login</button>
   </form>
   <p class="small">This link works once. After you use it nobody else can claim this box
-     — including us.</p>"""
+     — including us.</p>
+  <script>
+    try {{
+      var _tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (_tz) {{ document.getElementById('claim-tz').value = _tz; }}
+    }} catch (e) {{ /* the claim does not depend on this */ }}
+  </script>"""
     return body
 
 
@@ -1088,7 +1103,8 @@ def claim_submit():
         owner = _claim.claim_box(code=request.form.get("c", ""),
                                  email=request.form.get("email", ""),
                                  password=request.form.get("password", ""),
-                                 ip=ip, user_agent=request.headers.get("User-Agent", ""))
+                                 ip=ip, user_agent=request.headers.get("User-Agent", ""),
+                                 timezone=request.form.get("tz", ""))
     except _claim.ClaimRefused as e:
         # EVERY refusal counts against the throttle, including a too-short password — an attempt
         # is an attempt, and a state that were free would be the cheapest way to probe this box.

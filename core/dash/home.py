@@ -460,6 +460,12 @@ def _setup_progress():
         return None                              # not a broken dashboard
     if not steps:
         return None
+    # OPTIONAL STEPS ARE NOT PART OF "FINISHED". "Your phone" is a device the box may never see —
+    # email is the floor and many buyers will never install anything — so counting it would hold a
+    # working box at "3 of 4" for good, nagging about a choice the buyer already made.
+    steps = [r for r in steps if not r.get("optional")]
+    if not steps:
+        return None
     waiting = [w for w in (str(r.get("title") or "").strip() for r in steps
                            if str(r.get("status") or "") in ("", "not_connected")) if w]
     done = sum(1 for r in steps if str(r.get("status") or "") not in ("", "not_connected"))

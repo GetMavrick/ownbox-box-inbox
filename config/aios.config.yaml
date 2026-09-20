@@ -70,6 +70,28 @@ customer_voice:
 # THE MORNING REVIEW — one report per machine per day, sent at breakfast and kept forever
 # (core/report.py, docs/PLAN_MORNING_REVIEW.md). Owner, 2026-09-09: "a crucial feature that
 # every business owner will want to receive. Every single morning."
+# ── NOTIFICATIONS ────────────────────────────────────────────────────────────────────────
+# The box emailing ITS OWN OWNER that somebody is waiting on him. Not browser push: that needs
+# VAPID (ECDSA P-256) and an AES-GCM payload, so a new COMPILED dependency in the hash-pinned lock
+# on every sold box — and every notification's endpoint would transit Google's, Mozilla's or
+# Apple's push service. Email rides the Resend account the box already has: no new dependency, no
+# new sub-processor, and it reaches a phone with no permission prompt (owner's call, 2026-09-17).
+#
+# It can only reach people on THIS box's users table (core/box_mail.to_box_people) — there is no
+# path from here to a customer or a prospect, by construction rather than by care.
+notify:
+  enabled: true
+  # WHEN: RULED. Owner, 2026-09-17, relayed by OSDev1 — "For right now an 8 AM and a 5 PM email
+  # will work." Two a day, skipped when nobody is waiting. The hours live in `core/notify.SLOTS`
+  # rather than here because they are his ruling, not a per-box setting; a settings area for
+  # frequency is scoped separately and will put them back under config when he rules on it.
+  #
+  # WHERE THE BUYER IS. Empty means: use what his browser told us when he claimed the box, and
+  # failing that `cost.timezone` below. This is the override — the only one a person can correct
+  # after the fact. cost.timezone is the BOX's, and on a sold box it is UTC, which would have put
+  # the 8 AM email at one in the morning for a Pacific buyer.
+  timezone: ""
+
 review:
   enabled: true
   hour_local: 8              # first worker tick at/after this hour (cost.timezone) sends the DM

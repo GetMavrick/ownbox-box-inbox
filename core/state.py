@@ -227,6 +227,26 @@ CREATE TABLE IF NOT EXISTS box_claim (
   user_agent  TEXT
 );
 
+-- ── THE PHONES THIS BOX MAY RING ───────────────────────────────────────────────────────────
+-- IN SCHEMA *AND* IN MIGRATION 54, which is the rule: the migration heals a box that already
+-- exists, and SCHEMA is what a brand-new box gets at init without replaying anything. A table
+-- defined only inside a migration is one a restart cannot heal — test_schema_integrity refuses
+-- it, and rightly: it caught this one.
+--
+-- ENDPOINT IS THE IDENTITY, hence UNIQUE on it rather than on the user. A box seats three, and
+-- one person has a phone and a laptop: keyed on the user, opening the inbox at a desk would
+-- silently replace their phone and nobody would be told it stopped ringing.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  user_id     TEXT NOT NULL,
+  endpoint    TEXT NOT NULL UNIQUE,   -- what the push service issued; the device's identity
+  p256dh      TEXT NOT NULL,          -- the browser's public key half
+  auth        TEXT NOT NULL,          -- the browser's auth secret
+  created_at  TEXT NOT NULL,
+  last_ok_at  TEXT,
+  last_error  TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_push_subscriptions_user ON push_subscriptions(user_id);
+
 -- ── AN INVITATION TO SIGN IN, ISSUED BY THE BOX'S OWNER (docs/DESIGN_PER_PERSON_LOGIN.md) ──
 -- SCHEMA, not MIGRATIONS: a brand-new table needs no version number (the rule above).
 --
@@ -597,7 +617,7 @@ def _replay_machine(conn, machine: str, upto: int) -> None:
 # concurrent migrators: worker, dispatch, and watchdog can all boot and call init_db;
 # exactly one runs the steps, the rest wait on the lock then see the bumped version.
 
-SCHEMA_VERSION = 52
+SCHEMA_VERSION = 54
 
 
 def _migration_1(c) -> None:
@@ -1593,6 +1613,51 @@ def _migration_52(c) -> None:
         c.execute("UPDATE inbox_state SET last_activity = NULL")
 
 
+def _migration_53(c) -> None:
+    """WHERE THE BUYER ACTUALLY IS, so a notification does not arrive at one in the morning.
+
+    OSDev1 measured it (2026-09-17): a sold box ships `cost.timezone` as UTC, and nothing in the
+    provisioner ever sets it to the buyer's. The owner ruled two emails a day, "an 8 AM and a 5 PM
+    email" — and 8 AM UTC is one in the morning for a Pacific buyer. A schedule in the wrong
+    timezone is not a smaller version of the feature; it is the feature waking somebody nightly.
+
+    THE BROWSER ALREADY KNOWS, AND ASKS NOBODY. `Intl.DateTimeFormat().resolvedOptions().timeZone`
+    is an IANA name the claim page can post in a hidden field — zero questions added to the one
+    form every buyer fills in. NULL is the honest value when scripting is off or the browser
+    declines, and the resolver falls back to the box's own `cost.timezone` rather than guessing.
+
+    ON `box_claim` BECAUSE IT IS A CLAIM FACT: one row, written once, by the person who took the
+    box, next to the ip and user-agent already kept for the same reason. A later settings screen
+    overrides it in config; this is the answer for every box where nobody ever opens that screen.
+    """
+    if _table_exists(c, "box_claim"):
+        _add_column_if_missing(c, "box_claim", "timezone", "TEXT")
+
+
+def _migration_54(c) -> None:
+    """The phones a box is allowed to ring.
+
+    Owner, 2026-09-20: notifications on a phone are "a critical business function with the unified
+    inbox", and his own argument for why it must be web push rather than Slack — "if they get the
+    notification on Slack, then they're totally outside of our environment on their phone." Only a
+    notification from the installed web app opens the inbox when it is tapped.
+
+    CORE, NOT customer_voice, and deliberately untagged in `_MIGRATION_OWNER`. The inbox is the
+    first thing that will ring a phone, but "tell this person something happened" belongs to no
+    machine — a Lead box with a hot prospect wants it too. A table every box carries costs seven
+    empty columns; a table only one machine carries costs a migration the day a second one needs it.
+
+    `endpoint` IS THE IDENTITY, hence UNIQUE on it rather than on the user. A box seats three, and
+    one person has a phone and a laptop: keyed on the user, opening the inbox at a desk would
+    silently replace their phone, and the phone would simply stop ringing with nobody told.
+    """
+    c.execute("CREATE TABLE IF NOT EXISTS push_subscriptions ("
+              "user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, "
+              "auth TEXT NOT NULL, created_at TEXT NOT NULL, last_ok_at TEXT, last_error TEXT)")
+    c.execute("CREATE INDEX IF NOT EXISTS ix_push_subscriptions_user "
+              "ON push_subscriptions(user_id)")
+
+
 MIGRATIONS = {
     46: _migration_46,   # the schema split's bootstrap (kernel step)
     1: _migration_1, 2: _migration_2, 3: _migration_3, 4: _migration_4,
@@ -1608,7 +1673,8 @@ MIGRATIONS = {
               39: _migration_39, 40: _migration_40, 41: _migration_41,
               42: _migration_42, 43: _migration_43, 44: _migration_44,
               45: _migration_45, 47: _migration_47, 48: _migration_48,
-              49: _migration_49, 50: _migration_50, 51: _migration_51, 52: _migration_52}
+              49: _migration_49, 50: _migration_50, 51: _migration_51, 52: _migration_52,
+              53: _migration_53, 54: _migration_54}
 
 
 # init_db IS SAFE TO CALL FROM MANY THREADS AND PROCESSES AT ONCE. Main went red on 2026-09-06

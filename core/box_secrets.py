@@ -649,9 +649,20 @@ SETUP_STEPS = (
                "Paste those here with your email address. The spaces do not matter."),
      "note": "If App passwords is missing, your Google administrator has switched it off for your "
              "organisation — ask them to allow it."},
+    # NAME THE THING BEFORE ASKING FOR A KEY TO IT. Owner, 2026-09-19: "does that screen explain
+    # that it's a necessary step and how to do it? We should explain that that's the API we used to
+    # run the communications." It did not. It said messages "reach the box through a Zernio
+    # account" and then asked for an API key — which reads, to anyone who has not heard the name,
+    # as a paid account for reasons nobody gave. It also read as COMPULSORY: the page says "three
+    # things only you can do", and nothing said a box with only Gmail connected is a finished box.
+    # It is: `inbox/poller.py` sweeps email on its own credential and says so in its own words —
+    # "a buyer who connects Gmail and nothing else is a box with no Zernio key at all".
     {"key": "zernio", "title": "Your social accounts",
-     "why": "Instagram and Facebook messages reach the box through a Zernio account. It is yours, "
-            "on your own bill, so your conversations are never on ours.",
+     "why": "Skip this if email is all you need — your box is already finished without it. "
+            "Zernio is the service that carries Instagram, Facebook and TikTok messages: those "
+            "networks do not hand direct messages to just anybody, so a licensed one relays them, "
+            "and Zernio is the one this box speaks. The account is yours, on your own bill, so "
+            "your conversations are never on ours.",
      "fields": ({"name": "key", "label": "Zernio API key", "type": "password",
                  "placeholder": "paste the key from your Zernio account"},),
      "steps": ("Create a Zernio account, or sign in to the one you have.",
@@ -668,7 +679,8 @@ SETUP_STEPS = (
               "new_tab": True,
               "after": "Come back to this page when you are done — connected accounts appear here."},
      "note": "A key with no payment method on the account still saves, and says so: connecting an "
-             "account is what needs the card, not the key."},
+             "account is what needs the card, not the key. Leaving this step alone costs you "
+             "nothing and breaks nothing — email keeps arriving either way."},
 )
 
 
@@ -727,14 +739,78 @@ _AI_STEP = {
             "simply will not write the drafts.",
 }
 
-SETUP_STEPS = SETUP_STEPS + (_AI_STEP,)
+
+
+# NOTIFICATIONS ON A PHONE — A CORE STEP, FOR EVERY MACHINE. Owner, 2026-09-20, ruling on where it
+# belongs: "Yes in onboarding, all machines will need this." The inbox is what rings first, but a
+# Lead box with a hot prospect wants a phone rung too, so this sits in core beside the AI account
+# rather than inside customer_voice.
+#
+# INSTALLING IS HERE; ASKING IS NOT. The owner's other ruling the same day: ask for permission
+# "after the buyer has seen their first real message, never on first load." Those are not in
+# tension — they are two different acts with opposite costs. Adding the app to a Home Screen is
+# free and reversible, and on iPhone NOTHING can ring without it, so it belongs in onboarding at
+# the start. The permission prompt is close to permanent if denied, so it waits for a moment that
+# has earned it. This step therefore teaches the install and never fires a prompt.
+#
+# WHAT THE SERVER CAN HONESTLY SAY IS LIMITED, and the status here reflects that. A subscription
+# row proves SOME device is set up, never that the one in your hand is: the same person reading
+# this on a laptop has a phone the box cannot see. So the status answers "has anybody here got
+# this working", and the page refines the line for the device actually looking at it.
+_PHONE_STEP = {
+    "key": "phone", "title": "Your phone",
+    "why": "Add this box to your phone's Home Screen and it can tell you when a customer writes — "
+           "a notification that opens straight into your inbox, not into somebody else's app. "
+           "Email keeps working either way; this is the faster way to hear about it.",
+    "fields": (),
+    "steps": ("On iPhone: open this box in Safari, tap the Share button, then Add to Home Screen. "
+              "It has to be the Home Screen app — Safari tabs cannot receive notifications at all.",
+              "On Android: open the browser menu and choose Install app, or take the install "
+              "banner when it appears.",
+              "Open the box from the new icon. It fills the screen, with no browser bar.",
+              "Turning notifications ON comes later, on the inbox itself, once you have had a "
+              "message worth being told about."),
+    # NOT STARTING WITH THE STEP'S OWN TITLE. It read "Your phone asks you once" directly under a
+    # heading that already says "Your phone" — redundant to read, and it tripped the guard that
+    # refuses anything rendered twice on the set-up page.
+    "note": "iOS asks you once, and a refusal is hard to undo — so the box waits until it has "
+            "something real to show you before it asks.",
+    # IT COUNTS FOR NOTHING, AND THAT IS THE POINT. The other three steps are credentials only the
+    # buyer can supply and without which the box cannot work; this one is a phone the box may never
+    # see, because email is the floor and plenty of people will never install anything. Counted
+    # like the others it would hold every box at "3 of 4" forever — a permanent nag for declining
+    # something optional, on a box that is finished. It renders in onboarding (owner, 2026-09-20:
+    # "Yes in onboarding, all machines will need this") and is excluded from the count.
+    "optional": True,
+}
+
+
+def phone_state() -> dict:
+    """Whether ANY device on this box is set up for notifications — never whether yours is.
+
+    Guarded, because push is inert until `cryptography` is in the lock: a box that cannot mint an
+    identity still renders this step, it simply cannot be finished yet.
+    """
+    try:
+        from core import state
+        with state.connect() as c:
+            n = c.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0]
+    except Exception:                                    # noqa: BLE001 — a screen must still draw
+        return {"status": "not_connected"}
+    return {"status": "connected" if n else "not_connected",
+            "detail": f"{n} device{'s' if n != 1 else ''} set up" if n else ""}
+
+
+SETUP_STEPS = SETUP_STEPS + (_AI_STEP, _PHONE_STEP)
 
 # ONE STATE READER PER STEP, BY NAME. This was `email_state() if key == "email" else zernio_state()`
 # — a binary that was correct while there were exactly two steps and silently wrong the moment
 # there was a third: the AI key would have rendered Zernio's status, so a buyer with a connected
 # Zernio account would have read "Connected" under a key he had never pasted. A map cannot do that;
 # an unknown key gets nothing rather than the last branch's answer.
-_STATE_READERS = {"email": email_state, "zernio": zernio_state, "anthropic": anthropic_state}
+_STATE_READERS = {
+    "email": email_state, "zernio": zernio_state, "anthropic": anthropic_state,
+    "phone": phone_state}
 
 
 def setup_state() -> list[dict]:

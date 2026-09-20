@@ -10,6 +10,11 @@ dependencies = [
   "pyyaml>=6.0",
   "requests>=2.31",
   "python-dotenv>=1.0",
+  "cryptography>=41",         # Web push: VAPID is ECDSA P-256 and the payload is AES-GCM, neither
+                              # of which the standard library has. Owner, 2026-09-20: notifications
+                              # on a phone are "the whole entire point of having this app", and a
+                              # push is the only notification that OPENS the inbox when tapped.
+                              # Prebuilt manylinux wheels, so nothing compiles on a $6 droplet.
   "slack_sdk>=3.27",
   "pillow>=10.0",             # Carousel slide renderer (impl B — bold-run rich text layout).
                               # Pure wheels, ms-per-slide on the 1 vCPU box. Owner-approved

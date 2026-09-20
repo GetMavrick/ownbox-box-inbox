@@ -64,8 +64,13 @@ print("\ntest_the_screen_asks_for_the_key_the_box_cannot_draft_without")
 
 keys = [e["key"] for e in bs.setup_state()]
 ok("the AI key is a set-up step", "anthropic" in keys, str(keys))
+# AFTER THE CHANNELS, NOT NECESSARILY LAST. It was asserted as last until "Your phone" joined the
+# list (owner, 2026-09-20: "Yes in onboarding, all machines will need this"). The reason for the
+# rule is unchanged — the AI key is what the box DOES with the channels, so it cannot sit above
+# them — and pinning it to the final index tested the length of the list rather than the ordering
+# that matters.
 ok("...and it comes after the channels, because it is what the box DOES with them",
-   keys.index("anthropic") == len(keys) - 1, str(keys))
+   keys.index("anthropic") > max(keys.index("email"), keys.index("zernio")), str(keys))
 
 step = next(e for e in bs.setup_state() if e["key"] == "anthropic")
 ok("it says plainly that the key is the buyer's own, on the buyer's own bill",
@@ -92,6 +97,8 @@ ok("AND THE AI KEY DOES NOT — the old binary would have handed it Zernio's ans
    got["anthropic"] == "not_connected", str(got))
 ok("...nor does the mailbox, which is the other half of the same mistake",
    got["email"] == "not_connected", str(got))
+ok("...nor the phone, which no credential on this screen can turn on",
+   got["phone"] == "not_connected", str(got))
 
 ok("an unknown step key resolves to nothing, never to the last branch's answer",
    bs._STATE_READERS.get("a-step-nobody-wrote") is None)
@@ -112,7 +119,12 @@ ok("with the channels connected the box is NOT finished any more",
 quiet(bs.put, bs.ANTHROPIC, GOOD_KEY)
 ok("the key is stored and reads connected",
    {e["key"]: e["status"] for e in bs.setup_state()}["anthropic"] == "connected")
-ok("...and now only the mailbox is outstanding", done_count() == total - 1, f"{done_count()}/{total}")
+# `total` counts every rendered step, including the optional phone one that no credential on
+# this screen can finish — so "everything but the mailbox" is total minus the mailbox minus
+# the optional steps, not total minus one.
+_optional = sum(1 for e in bs.setup_state() if e.get("optional"))
+ok("...and now only the mailbox is outstanding", done_count() == total - 1 - _optional,
+   f"{done_count()}/{total} with {_optional} optional")
 
 
 # ── 4. the shape check, and what it deliberately does not do ─────────────────────────────
