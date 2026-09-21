@@ -70,6 +70,7 @@ def seed():
 
 
 INBOX_TOOLS = ("aios.inbox.list_conversations", "aios.inbox.search", "aios.inbox.read_conversation")
+WRITE_TOOL = "aios.inbox.draft_reply"
 
 
 def test_the_inbox_is_actually_offered():
@@ -147,17 +148,49 @@ def test_a_real_call_through_the_connector_returns_the_inbox():
 
 def test_nothing_here_can_speak_as_the_business():
     print("test_nothing_here_can_speak_as_the_business")
-    # READ ONLY IS A DECISION, NOT A FIRST STEP. The owner's standing rule is that a reply goes
-    # out when a person presses send; a connector tool that could answer a customer would move
-    # that decision into a model without anyone choosing to.
+    # THIS GUARD USED TO SAY "no draft either", AND IT WAS NARROWED ON 2026-09-21 RATHER THAN
+    # DELETED. Its real job is the sentence in its own name: nothing reachable from a connector
+    # seat may SPEAK AS THE BUSINESS. A draft does not speak — it lands on the screen under the
+    # send button a person was always going to press. The owner's instruction that day was that
+    # an AI coworker has to be able to operate the box, not only look at it.
+    #
+    # SO THE BAR MOVED UP, NOT DOWN. Before, one line asserted "no write exists". Now four lines
+    # assert what a write may be: act-role, write:proposals, invisible to a read seat, and
+    # REFUSED to one that asks anyway. A deleted guard would have proven none of that.
     inbox = {n: t for n, t in registry.registry().items() if ".inbox." in n}
-    ok("every inbox tool is read-role", all(t.get("min_role") == "read" for t in inbox.values()),
-       str({n: t.get("min_role") for n, t in inbox.items()}))
-    ok("...and every one declares a read capability",
-       all(str(t.get("capability", "")).startswith("read:") for t in inbox.values()),
-       str({n: t.get("capability") for n, t in inbox.items()}))
-    banned = [n for n in inbox if any(w in n for w in ("send", "reply", "draft", "post", "publish"))]
-    ok("no tool name offers to send, reply, draft or publish", not banned, str(banned))
+    banned = [n for n in inbox if any(w in n for w in ("send", "publish", "post"))]
+    ok("no tool name offers to send or publish", not banned, str(banned))
+
+    readers = {n: t for n, t in inbox.items() if n in INBOX_TOOLS}
+    ok("every reader is still read-role", all(t.get("min_role") == "read" for t in readers.values()),
+       str({n: t.get("min_role") for n, t in readers.items()}))
+    ok("...and every reader declares a read capability",
+       all(str(t.get("capability", "")).startswith("read:") for t in readers.values()),
+       str({n: t.get("capability") for n, t in readers.items()}))
+
+    writers = {n: t for n, t in inbox.items() if n not in INBOX_TOOLS}
+    ok("the only write on this lane is draft_reply", set(writers) == {WRITE_TOOL}, str(sorted(writers)))
+    ok("...and it is act-role, on write:proposals",
+       all(t.get("min_role") == "act" and t.get("capability") == "write:proposals"
+           for t in writers.values()),
+       str({n: (t.get("min_role"), t.get("capability")) for n, t in writers.items()}))
+
+    # A READ SEAT MUST NOT EVEN SEE IT. `visible_to` is the thing `tools/list` answers with, and
+    # the note on it says why hiding beats refusing: a model that can see a tool will try it and
+    # then explain the refusal to a customer as if the box were broken.
+    seen_read = {t["name"] for t in registry.visible_to({"role": "read"})}
+    seen_act = {t["name"] for t in registry.visible_to({"role": "act"})}
+    ok("a read seat cannot SEE draft_reply", WRITE_TOOL not in seen_read,
+       str(sorted(n for n in seen_read if "inbox" in n)))
+    ok("...and an act seat can", WRITE_TOOL in seen_act,
+       str(sorted(n for n in seen_act if "inbox" in n)))
+
+    # AND SEEING IS NOT THE ONLY DOOR. A seat that names the tool directly, without listing, is
+    # refused by `call` on the same rank check — belt and braces, because the two have been
+    # allowed to disagree before.
+    _payload, status = registry.call(WRITE_TOOL, {"id": "c1", "body": "hello"},
+                                  {"id": "seat_readonly", "role": "read"})
+    ok("a read seat's direct call to draft_reply is refused", status >= 400, f"status {status}")
 
 
 def test_the_readers_answer_with_this_boxs_own_rows():
@@ -191,6 +224,56 @@ def test_a_seat_cannot_widen_what_it_sees():
        inbox_tools.read_conversation(id="x1")["messages"] == [])
 
 
+def test_a_coworker_can_leave_a_draft_and_nothing_more():
+    """The one write: a draft waiting on the screen, and NOTHING leaves the box.
+
+    RUNS LAST ON PURPOSE. It has to give the seeded inbound message a `zernio_message_id` —
+    `newest_inbound` will not answer without one, because `put()` keys its uniqueness on that id —
+    and the readers above assert on exactly what this box holds.
+    """
+    print("test_a_coworker_can_leave_a_draft_and_nothing_more")
+    from marketing.customer_voice.drafter import store as drafts
+    with state.connect() as c:
+        c.execute("UPDATE inbox_messages SET zernio_message_id = 'm1' "
+                  " WHERE space = ? AND zernio_conversation_id = 'c1'", (SPACE,))
+
+    first = inbox_tools.draft_reply(id="c1", body="We can be there Thursday morning.")
+    ok("a draft is written", first.get("written") is True, str(first))
+    ok("...against the message that was actually waiting", first.get("replying_to") == "m1", str(first))
+    held = drafts.for_inbound(SPACE, "m1")
+    ok("...and it is on the screen, in the buyer's own words", 
+       held and held.get("body") == "We can be there Thursday morning.", str(held))
+
+    # A MODEL RETRIES. `put()` is INSERT OR IGNORE on UNIQUE (space, in_reply_to), so the second
+    # call must leave ONE draft and say so, rather than raising at a caller that did nothing wrong.
+    again = inbox_tools.draft_reply(id="c1", body="A completely different answer.")
+    ok("a second call leaves one draft, not two", again.get("written") is False, str(again))
+    with state.connect() as c:
+        n = c.execute("SELECT COUNT(*) FROM inbox_drafts WHERE space = ? AND in_reply_to = 'm1'",
+                      (SPACE,)).fetchone()[0]
+    ok("...and the table agrees there is exactly one", n == 1, f"{n} rows")
+
+    # NOTHING LEFT THE BOX. The ledger is where a send would be recorded; a draft must never
+    # reach it. This is the assertion that would go red if draft_reply ever grew a send.
+    with state.connect() as c:
+        sends = c.execute("SELECT COUNT(*) FROM inbox_send_ledger").fetchone()[0]
+    ok("nothing was sent", sends == 0, f"{sends} rows in inbox_send_ledger")
+
+    # THE REFUSALS, each saying which kind of nothing it is.
+    unknown = inbox_tools.draft_reply(id="nosuch", body="hello")
+    ok("an unknown conversation is refused, not invented", unknown.get("written") is False
+       and "no conversation" in str(unknown.get("note", "")), str(unknown))
+    other = inbox_tools.draft_reply(id="x1", body="hello")
+    ok("another tenant's conversation reads as absent", other.get("written") is False, str(other))
+    store.set_opted_out(SPACE, "c1")
+    quiet = inbox_tools.draft_reply(id="c1", body="one more thing")
+    ok("somebody who asked us to stop gets no draft written for them",
+       quiet.get("written") is False and "not to be contacted" in str(quiet.get("note", "")),
+       str(quiet))
+    ok("...and an empty body is refused rather than stored",
+       "error" in inbox_tools.draft_reply(id="c1", body="   "), "")
+
+
 def test_a_caller_cannot_ask_for_the_whole_box_at_once():
     print("test_a_caller_cannot_ask_for_the_whole_box_at_once")
     ok("a huge limit is clamped", inbox_tools._clamp(99999, 25) == inbox_tools.MAX_LIMIT)
@@ -211,5 +294,6 @@ if __name__ == "__main__":
     test_the_readers_answer_with_this_boxs_own_rows()
     test_a_seat_cannot_widen_what_it_sees()
     test_a_caller_cannot_ask_for_the_whole_box_at_once()
+    test_a_coworker_can_leave_a_draft_and_nothing_more()
     print("\nall ok" if not _failed else f"\n{_failed} FAILED")
     sys.exit(1 if _failed else 0)

@@ -3022,7 +3022,7 @@ def r_settings():
       # Reading the mail is what the box IS; the channels widen what it reads; drafting is what it
       # does with what it read, and a row for the last above the first asks somebody to configure
       # an answer to a question nothing is yet asking.
-      + _mailbox_row() + _channels_row() + _drafts_row() +
+      + _mailbox_row() + _channels_row() + _drafts_row() + _coworkers_row(_is_owner()) +
       '<div class="setrow"><b>Appearance</b>'
       '<span>System follows your phone, including its own light and dark schedule.</span>'
       f'{switch}</div>'
@@ -4419,3 +4419,182 @@ def r_search():
           'usually enough to find it again.</span></div></div>'
         + '<div class="foot"><a href="/inbox/inbox">← All conversations</a></div>')
     return _shell(body, here="/inbox/search"), 200
+
+
+# ── AI COWORKERS: the handle on the inside of a door that has been shut since it was built ─────
+# WHAT WAS TRUE BEFORE THIS. `core/connector` is finished work: a per-seat credential, a
+# constant-time compare, per-seat revocation, an audit row per call, a capability list, and four
+# tools behind it. `core/dispatch._seat_authorized` says it plainly — "a box with no seats minted
+# refuses everything, which is the shipped state of every box until somebody deliberately mints
+# one". NOBODY COULD. `seats.mint()` was called from tests and from nowhere else in the product,
+# there is no screen and no CLI on a delivered box, and the provisioning key is removed at first
+# boot, so not even we can reach in. Every box ever sold has carried a connector that no buyer
+# could switch on, under a $499 card that says "Claude and ChatGPT, connected".
+#
+# OWNER-ONLY, and for the same reason the AI account and the app password are: this mints a
+# credential that reads every customer message on the box.
+_ROLE_CHOICES = (
+    ("read", "Read only",
+     "It can read your conversations and your morning report. It cannot write anything."),
+    ("act", "Read and draft replies",
+     "Everything above, plus it can leave a suggested reply waiting on the screen. It still "
+     "cannot send - you press send, or you do not."),
+)
+
+
+def _is_owner() -> bool:
+    """ONE ANSWER TO THIS QUESTION, used by the row and by the screen it links to.
+
+    Two scopes that resolve it differently would eventually disagree, and the shape of that
+    disagreement is a link drawn for somebody the next screen refuses.
+    """
+    try:
+        return (( dash.session_user(request) or {}).get("role") or "") == "owner"
+    except Exception:                                    # noqa: BLE001 — an unreadable session is
+        return False                                     # not the owner, and never a 500
+
+
+def _coworkers_row(owner: bool) -> str:
+    """The row a member sees is the same sentence WITHOUT the link.
+
+    NO DOOR A PERSON IS REFUSED AT. `/inbox/agent` 403s anyone who is not the owner, because the
+    credential it mints reads every message on the box — so drawing the link for a member would
+    hand them a dead end, which is what tests/test_a_buyer_can_walk_every_screen exists to stop
+    (it caught exactly that here). The row itself stays: a member should know the box can do this
+    and who to ask, rather than wondering why their colleague has a screen they cannot find.
+    """
+    if owner:
+        return ('<div class="setrow"><b>AI coworkers</b>'
+                '<span>Let Claude, ChatGPT or Grok read this inbox and draft replies for you. '
+                '<a href="/inbox/agent" style="color:var(--accent)">Connect one</a>.</span></div>')
+    return ('<div class="setrow"><b>AI coworkers</b>'
+            '<span>This box can be connected to Claude, ChatGPT or Grok. The owner of the box '
+            'sets that up.</span></div>')
+
+
+def _agent_seat_rows(seats_list: list) -> str:
+    """The seats that exist, so revoking is possible without remembering what you made.
+
+    A REVOKED SEAT IS STILL LISTED. It is the audit trail: "this assistant had access between
+    these dates" is a question a buyer will eventually be asked by somebody else.
+    """
+    if not seats_list:
+        return ('<div class="card"><div class="row"><span class="t">Nothing is connected to '
+                'this box yet.</span></div></div>')
+    out = ['<div class="card">']
+    for s in seats_list:
+        label = _esc(str(s.get("label") or ""))
+        role = str(s.get("role") or "")
+        human = next((t for r, t, _ in _ROLE_CHOICES if r == role), role)
+        if s.get("revoked_at"):
+            out.append(f'<div class="setrow"><b>{label}</b>'
+                       f'<span>Revoked. It can no longer reach this box.</span></div>')
+        else:
+            out.append(
+                f'<div class="setrow"><b>{label}</b><span>{_esc(human)}. '
+                f'<a href="/inbox/agent?revoke={_esc(str(s.get("id") or ""))}" '
+                f'style="color:var(--accent)">Revoke</a></span></div>')
+    out.append('</div>')
+    return "".join(out)
+
+
+def _agent_form(note: str = "") -> str:
+    opts = "".join(
+        f'<label style="display:block;margin:8px 0"><input type="radio" name="role" '
+        f'value="{r}"{" checked" if r == "read" else ""}> <b>{t}</b><br>'
+        f'<span class="quiet" style="margin-left:22px">{w}</span></label>'
+        for r, t, w in _ROLE_CHOICES)
+    return (note +
+            '<form method="post" class="card">'
+            '<input type="hidden" name="do" value="mint">'
+            '<div class="setrow"><b>What should it be called?</b>'
+            '<span>A name you will recognise later, so you know what you are revoking.</span>'
+            '</div>'
+            '<input name="label" maxlength="60" placeholder="Grok on X" '
+            'style="width:100%;padding:10px;margin:8px 0" required>'
+            '<div class="setrow"><b>What may it do?</b></div>'
+            + opts +
+            '<button class="btn" type="submit" style="margin-top:10px">Create the connection'
+            '</button></form>')
+
+
+def _agent_credential(label: str, credential: str, url: str) -> str:
+    """Shown ONCE. `seats.mint` never stores the secret, so there is no second chance by design.
+
+    THE PAGE SAYS SO BEFORE THE STRING, not after it. Somebody who scrolls past a key and closes
+    the tab has lost it, and the only repair is revoking a seat they never used and making
+    another.
+    """
+    return (
+        '<h1>Copy this now.</h1>'
+        f'<p class="quiet">This is the only time <b>{_esc(label)}</b>\'s key will ever be shown. '
+        'The box keeps a one-way hash of it and nothing else, so if you lose it, revoke this '
+        'connection and make another - there is no way to look it up.</p>'
+        '<div class="card"><div class="setrow"><b>Key</b></div>'
+        f'<p style="word-break:break-all;font-family:ui-monospace,monospace;font-size:14px;'
+        f'margin:6px 0">{_esc(credential)}</p></div>'
+        '<div class="card"><div class="setrow"><b>Address</b>'
+        '<span>Give your assistant this address and that key. It speaks MCP.</span></div>'
+        f'<p style="word-break:break-all;font-family:ui-monospace,monospace;font-size:14px;'
+        f'margin:6px 0">{_esc(url)}</p></div>'
+        '<div class="foot"><a href="/inbox/agent">← AI coworkers</a></div>')
+
+
+@blueprint.route("/inbox/agent", methods=["GET", "POST"])
+def r_agent():
+    """Connect an AI coworker to this box, or take its access away.
+
+    NOT A NEW DOOR - the handle on one that has been shut since it was built. Everything this
+    screen calls already existed and was already tested: `seats.mint`, `seats.revoke`,
+    `seats.all_seats`. What did not exist was any way for the person who owns the box to reach
+    them.
+    """
+    from core.connector import seats
+    gate = _gate()
+    if gate is not None:
+        return gate
+
+    try:
+        who = dash.session_user(request) or {}
+    except Exception:                                    # noqa: BLE001 — an unreadable session is
+        who = {}                                         # not a reason to 500 a settings screen
+    if not _is_owner():
+        return _shell('<div class="card"><p>Only the owner of this box can connect an AI '
+                      'coworker, because the connection can read every message on it.</p>'
+                      '<p><a href="/inbox/settings">Back to settings</a></p></div>',
+                      here="/inbox/settings"), 403
+
+    note = ""
+    revoke = (request.args.get("revoke") or "").strip()
+    if revoke:
+        seats.revoke(revoke)
+        return redirect("/inbox/agent", code=303)
+
+    if request.method == "POST" and str(request.form.get("do") or "") == "mint":
+        label = str(request.form.get("label") or "").strip()[:60]
+        role = str(request.form.get("role") or "read").strip()
+        if role not in [r for r, _, _ in _ROLE_CHOICES]:
+            role = "read"
+        try:
+            _sid, credential = seats.mint(label, role)
+        except ValueError as e:
+            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
+        else:
+            root = str(request.host_url or "").rstrip("/")
+            # NEVER A REDIRECT AND NEVER A QUERY STRING. The credential is rendered into this
+            # one response and then it is gone: a redirect would put it in a URL, and gunicorn
+            # logs raw query strings.
+            return _shell(_agent_credential(label, credential, f"{root}/api/v1/mcp"),
+                          here="/inbox/settings"), 200
+
+    body = ('<h1>AI coworkers.</h1>'
+            '<p class="quiet">Your box can be read by an assistant you already pay for - Claude, '
+            'ChatGPT, Grok - so you can ask it about your customers in the place you already '
+            'work, instead of opening another app. You give it a key, you choose what it may do, '
+            'and you can take that key away at any moment without changing anything else.</p>'
+            '<p class="quiet">Nothing you connect here can send a message as your business. '
+            'The most a coworker can do is leave a reply waiting on the screen for you.</p>'
+            + _agent_form(note)
+            + _agent_seat_rows(seats.all_seats())
+            + '<div class="foot"><a href="/inbox/settings">← Settings</a></div>')
+    return _shell(body, here="/inbox/settings"), 200

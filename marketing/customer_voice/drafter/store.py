@@ -105,3 +105,25 @@ def needs_a_draft(space: str, *, limit: int = 5) -> list[dict]:
             "                    WHERE d.space = k.space AND d.in_reply_to = m.zernio_message_id) "
             " ORDER BY m.created_at DESC LIMIT ?", (space, int(limit))).fetchall()
     return [dict(r) for r in rows]
+
+
+def newest_inbound(space: str, zcid: str) -> dict | None:
+    """The message a reply would be answering: the newest INBOUND one in this conversation.
+
+    WHY A CALLER CANNOT NAME `in_reply_to` ITSELF. `put()` keys its uniqueness on that id, so a
+    caller that chose it could write a second draft against an older message and get two drafts
+    waiting on one conversation — the exact thing `UNIQUE (space, in_reply_to)` exists to stop.
+    Resolving it here means "one draft per conversation that is waiting on us" holds no matter
+    who is asking, the sweep or a connector seat.
+
+    OUTBOUND IS NOT A CANDIDATE. A draft answers a customer; the newest message in a thread is
+    often our own last reply, and treating that as the thing to answer would have the box
+    replying to itself.
+    """
+    with state.connect() as c:
+        row = c.execute(
+            "SELECT zernio_message_id AS id, body, created_at FROM inbox_messages "
+            " WHERE space = ? AND zernio_conversation_id = ? AND direction = 'in' "
+            "   AND zernio_message_id IS NOT NULL "
+            " ORDER BY created_at DESC LIMIT 1", (space, zcid)).fetchone()
+    return dict(row) if row else None

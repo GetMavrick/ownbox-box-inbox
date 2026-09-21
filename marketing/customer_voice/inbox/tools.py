@@ -8,11 +8,22 @@ and for the list of tools, and nothing about a single message. The door was buil
 shut — `core/dispatch._seat_authorized` is a real per-seat credential with per-seat revocation —
 there was simply nothing behind it.
 
-READ ONLY, AND THAT IS A DECISION RATHER THAN A FIRST STEP. There is no send, no draft and no
-reply here. A seat that can speak as the business is a different thing from a seat that can read
-it: the owner's standing rule is that a reply goes out when a person presses send, and a tool
-that let an assistant answer a customer would move that decision into a model without anyone
-choosing to. The reply path stays on the screen, where a human is looking at it.
+READ, AND SINCE 2026-09-21 ONE WRITE - WHICH IS A DRAFT, NOT A REPLY. The paragraph that stood
+here said there was "no send, no draft and no reply", and the reasoning it gave was about a seat
+that could SPEAK AS THE BUSINESS. That reasoning survives intact, and `draft_reply` does not
+touch it: a draft lands in `inbox_drafts`, on the screen, under the same send button a person
+was always going to press. Nothing reachable from a connector seat sends, and the structural
+guarantee still holds - tests/test_customer_voice.py bans a CALL named `post` in this whole lane.
+
+WHAT CHANGED IS THE OWNER'S INSTRUCTION, 2026-09-21: an AI coworker has to be able to OPERATE
+the box, not only look at it. A connector that can read every customer message and cannot offer
+a single sentence back is a demo, not a colleague. `write:proposals` has been granted to the
+`act` and `service` roles since the capability list was written and NO TOOL HAS EVER HELD IT -
+this is the tool that lane was shaped for, and `annotations_for` already answers for it: our
+writes are proposals a human approves.
+
+A `read` SEAT STILL CANNOT REACH IT. `draft_reply` is `min_role="act"`, so the credential a
+buyer mints for a read-only assistant does not silently gain a write the day this ships.
 
 WHY THIS FILE IS IMPORTED OUTSIDE THE SDK GATE. `inbox/__init__.py` is fail-closed: a drifted or
 unverifiable `zernio-sdk` leaves the department INERT, because sending on a vendor SDK nobody can
@@ -155,4 +166,71 @@ tools.register(
                  "description": "The conversation id from list_conversations or search."},
           "limit": {"type": "integer", "required": False,
                     "description": "How many messages, 1-500. Defaults to 100."}},
+)
+
+
+def draft_reply(id=None, body=None):
+    """Leave a reply WAITING ON THE SCREEN for one conversation. Nothing here sends it.
+
+    THE WHOLE POINT OF THE SHAPE: this writes a row to `inbox_drafts` and stops. The person who
+    owns the box opens the conversation, reads what their coworker wrote, edits it or throws it
+    away, and presses send themselves. That is the same path the box's own drafter has always
+    used, and a connector seat gets no shortcut around it.
+
+    IT CANNOT WRITE TWICE AGAINST ONE MESSAGE. `put()` is `INSERT OR IGNORE` on
+    `UNIQUE (space, in_reply_to)`, so a model that retries - and they retry - leaves one draft,
+    not two, and finds out which happened from `written`. A refusal here is reported as a fact
+    rather than an error for the same reason: a tool that 500s on a duplicate teaches a model to
+    treat a working box as broken.
+
+    AN OPTED-OUT CONVERSATION IS REFUSED. `needs_a_draft` already excludes them, with the note
+    that drafting for somebody who asked us to stop is work whose only use is a send. A seat
+    naming the conversation directly must not get what the sweep is denied.
+    """
+    from marketing.customer_voice.drafter import store as drafts
+    from marketing.customer_voice.inbox import store
+
+    zcid = str(id or "").strip()
+    text = str(body or "").strip()
+    if not zcid:
+        return {"error": "give the conversation id from list_conversations or search"}
+    if not text:
+        return {"error": "give the reply to leave on the screen, as body"}
+
+    space = _space()
+    convo = store.get_conversation(space, zcid)
+    if convo is None:
+        # Same discipline as read_conversation: says which kind of nothing this is, because an
+        # id belonging to another Space must not read like an empty thread.
+        return {"id": zcid, "written": False,
+                "note": "no conversation on this box with that id"}
+    if convo.get("opted_out"):
+        return {"id": zcid, "written": False,
+                "note": "this person asked not to be contacted, so nothing was drafted"}
+
+    inbound = drafts.newest_inbound(space, zcid)
+    if inbound is None:
+        return {"id": zcid, "written": False,
+                "note": "nobody has written in on this conversation, so there is nothing to reply to"}
+
+    written = drafts.put(space=space, zcid=zcid, in_reply_to=inbound["id"], body=text)
+    log.info("inbox.tool_draft_reply", space=space, conversation=zcid, written=written,
+             chars=len(text))
+    return {"id": zcid, "written": written, "replying_to": inbound["id"],
+            "note": ("waiting on the screen - the owner of this box sends it, or does not"
+                     if written else
+                     "a draft was already waiting for that message, so this one was not added")}
+
+
+tools.register(
+    "draft_reply",
+    fn=draft_reply, machine=MACHINE, min_role="act",
+    capability="write:proposals",
+    description="Leave a suggested reply waiting on the screen for one conversation. It is NOT "
+                "sent: the person who owns this box reads it, edits it, and presses send "
+                "themselves. One draft per incoming message.",
+    args={"id": {"type": "string", "required": True,
+                 "description": "The conversation id from list_conversations or search."},
+          "body": {"type": "string", "required": True,
+                   "description": "The reply to leave on the screen, in the business's own voice."}},
 )
