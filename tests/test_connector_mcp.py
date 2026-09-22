@@ -332,21 +332,39 @@ print("\n— a buyer is shown ONE address, everywhere —")
 #
 # THE LONG FORM STAYS MOUNTED (anything already configured keeps working); it is simply never
 # what we PRINT.
+# THIS SCAN READS THE WHOLE TREE, NOT ONE FILE, and that is the repair. It used to name
+# `marketing/customer_voice/app.py`, so the day the address moved to `core/dash/box_settings.py`
+# with the box steps, the scan found no `{root}/mcp` anywhere it was looking and went red —
+# reporting a buyer-facing regression that had not happened. A guard that names the file it
+# guards fails every time that file is refactored, which trains everyone to relax it.
+#
+# WHAT IT PROVES AND WHAT IT DOES NOT. It proves no shipped module BUILDS the long form into a
+# string for a person, and that at least one still builds the short one. It is a source scan, so
+# it cannot prove the screen holding that line is reachable — `/mcp is mounted` above and
+# tests/test_box_connect_surface.py are what answer that.
 import pathlib as _pl3  # noqa: E402
 import re as _re3  # noqa: E402
 
-_app = _pl3.Path(__file__).resolve().parents[1] / "marketing/customer_voice/app.py"
-if _app.is_file():
-    _src = _app.read_text()
-    # only lines that BUILD a string for a person, not comments and not route decorators
-    _printed = [ln.strip() for ln in _src.splitlines()
-                if "/api/v1/mcp" in ln and not ln.strip().startswith("#")]
-    ok("no screen prints the long form", not _printed, str(_printed)[:120])
-    ok("...and the short one is what they get",
-       _re3.search(r'f"\{root\}/mcp"', _src) is not None,
-       "nothing renders <root>/mcp")
-else:
-    print("  --   no customer_voice here — nothing to check")
+_root_dir = _pl3.Path(__file__).resolve().parents[1]
+_printed, _short = [], []
+for _f in sorted((*_root_dir.glob("core/**/*.py"), *_root_dir.glob("marketing/**/*.py"))):
+    try:
+        _src = _f.read_text()
+    except OSError:                                 # noqa: PERF203 — a scan never dies on one file
+        continue
+    _rel = _f.relative_to(_root_dir).as_posix()
+    # `core/connector/mcp.py` MOUNTS the long form and must keep doing so — anything already
+    # configured against it keeps working. Route decorators are not printing, so skip them.
+    _printed += [f"{_rel}: {ln.strip()[:60]}" for ln in _src.splitlines()
+                 if "/api/v1/mcp" in ln
+                 and not ln.strip().startswith(("#", "@blueprint", "@app"))]
+    if _re3.search(r'f"\{root\}/mcp"', _src):
+        _short.append(_rel)
+
+ok("no screen prints the long form", not _printed, str(_printed)[:160])
+ok("...and the short one is what they get", bool(_short),
+   "nothing anywhere in core/ or marketing/ renders <root>/mcp")
+print(f"       (rendered by: {', '.join(_short) or 'nothing'})")
 
 print()
 if _failed:

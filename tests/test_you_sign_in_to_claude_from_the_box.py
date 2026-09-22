@@ -84,28 +84,33 @@ def owner_client():
 print("\ntest_the_setup_screen_offers_a_login_rather_than_a_key_hunt")
 
 step = next(e for e in bs.SETUP_STEPS if e["key"] == "anthropic")
+# THE DOOR IS CORE'S SINCE 2026-09-22 (owner: "Step three and step four should be a core setting.
+# The LLM and the phone."). Nothing about signing in to Claude was ever the inbox's business —
+# `core.brain` is what the credential feeds, for every machine on the box.
 ok("the AI step declares a door a buyer can press",
-   step.get("action_href") == "/inbox/connect-claude", str(step.get("action_href")))
+   step.get("action_href") == "/settings/ai", str(step.get("action_href")))
+ok("...and that door is the box's, not a machine's",
+   not step.get("action_href", "").startswith("/inbox/"), str(step.get("action_href")))
 ok("...labelled as a sign-in, because that is what it is",
    "sign in" in (step.get("action_label") or "").lower(), str(step.get("action_label")))
 
-html = owner_client().get("/inbox/setup").get_data(as_text=True)
-ok("...and the rendered set-up screen actually links to it",
-   "/inbox/connect-claude" in html)
+# THE STEP RENDERS ON THE BOX'S OWN SETTINGS NOW, not in the machine's wizard.
+html = owner_client().get("/settings").get_data(as_text=True)
+ok("...and the box's Settings actually links to it", "/settings/ai" in html)
 ok("...and still offers the paste-a-key fallback for anyone who has one",
-   'name="key"' in html)
+   'name="key"' in owner_client().get("/settings/ai").get_data(as_text=True))
 
 # THE OLD COPY TOLD A BUYER TO INSTALL A CLI AND RUN A COMMAND. That is the wall the owner hit,
 # and a suite that let it come back would let the wall come back.
 ok("...and no longer instructs the buyer to run a terminal command to get in",
    "claude setup-token" not in html,
-   "the set-up screen still tells people to run `claude setup-token` themselves")
+   "the settings screen still tells people to run `claude setup-token` themselves")
 
 
 # ── 2. the connect screen itself ─────────────────────────────────────────────────────────
 print("\ntest_the_connect_screen_says_what_happens_and_asks_for_nothing_secret")
 
-r = owner_client().get("/inbox/connect-claude")
+r = owner_client().get("/settings/ai")
 body = r.get_data(as_text=True)
 ok("the connect screen answers", r.status_code == 200, str(r.status_code))
 ok("...and offers Connect before any link exists, rather than a button to nowhere",
@@ -113,7 +118,9 @@ ok("...and offers Connect before any link exists, rather than a button to nowher
 ok("...promises the box never sees a password, which is the thing a person worries about",
    "never sees your password" in body)
 ok("...and leaves a way back to pasting a key",
-   "/inbox/setup" in body)
+   'name="do" value="key"' in body)
+ok("...and a way back to the settings it was opened from",
+   'href="/settings"' in body)
 
 # NO LINK IS DRAWN BEFORE THERE IS ONE. Starting the login takes seconds and can fail; a
 # "Sign in to Claude" button that leads nowhere is the dead end this screen exists to remove.
@@ -127,9 +134,9 @@ print("\ntest_a_member_cannot_connect_an_account_the_whole_box_would_bill")
 sam = state.add_user("sam@acme.co", name="Sam", role="member")
 mc = app.test_client()
 mc.set_cookie(dash.COOKIE, dash.new_session(sam["id"]))
-mr = mc.get("/inbox/connect-claude")
+mr = mc.get("/settings/ai")
 ok("a member is refused the connect screen", mr.status_code == 403, str(mr.status_code))
-mp = mc.post("/inbox/connect-claude", data={"do": "start"})
+mp = mc.post("/settings/ai", data={"do": "start"})
 ok("...and refused the POST too, not merely the page",
    mp.status_code == 403, str(mp.status_code))
 

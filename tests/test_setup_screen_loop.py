@@ -110,12 +110,34 @@ def test_the_screen_exists_and_is_shut_to_a_stranger():
 
 
 def test_it_renders_the_contract_in_the_contract_s_order():
-    """GMAIL FIRST, ZERNIO SECOND — and from the DATA, not from this screen's opinion."""
+    """GMAIL FIRST, ZERNIO SECOND — and from the DATA, not from this screen's opinion.
+
+    THIS ASSERTION USED TO SAY *EVERY* STEP AND IT WAS RIGHT TO, until 2026-09-22. What it
+    encoded is that this screen is the box's set-up CONTRACT made visible rather than the inbox's
+    own wizard — so it could not show a subset of the contract, and OSDev5 correctly reverted a
+    change that made it try (`docs/SCOPE_BOX_STEPS_NEED_CORE_DOORS.md`).
+
+    THE CONTRACT SPLIT INSTEAD OF THE SCREEN LYING ABOUT IT. Owner, 2026-09-22: *"Step four and
+    five should not be in this wizard any longer"* — the AI account, the phone and the AI
+    coworkers are the box's, finished in the box's own drawer on core screens. So a step now
+    declares which surface it belongs to and this screen renders the MACHINE's.
+
+    THE TEETH ARE KEPT, WHICH IS THE WHOLE POINT OF THIS DOCSTRING. It asserts a DEFINED SET —
+    every machine step in the contract, in contract order — not "whatever happens to render".
+    Deleting `surface` from a step, or filtering one out of the wizard for a reason nobody wrote
+    down, still turns this red.
+    """
     _reset()
     app, c = _c()
     words = _text(c.get("/inbox/setup").get_data(as_text=True))
-    titles = [s["title"] for s in bs.SETUP_STEPS]
-    ok("every step in the contract is on the screen", all(t in words for t in titles), str(titles))
+    machine_steps = [s for s in bs.SETUP_STEPS if bs.surface_of(s) == bs.SURFACE_MACHINE]
+    box_steps = [s for s in bs.SETUP_STEPS if bs.surface_of(s) == bs.SURFACE_BOX]
+    ok("the contract still has a machine side and a box side",
+       bool(machine_steps) and bool(box_steps),
+       f"machine={[s['key'] for s in machine_steps]} box={[s['key'] for s in box_steps]}")
+    titles = [s["title"] for s in machine_steps]
+    ok("every MACHINE step in the contract is on the screen",
+       all(t in words for t in titles), str(titles))
     # `.find`, NEVER `.index`. A missing substring RAISES and a raise ends the whole file — it
     # did, on the probe, and every test below this line silently never ran. Third time tonight I
     # have written `.index` in a test; it is a habit, so this file has none left.
@@ -123,11 +145,17 @@ def test_it_renders_the_contract_in_the_contract_s_order():
     ok("...in the contract's order, not alphabetical or arbitrary",
        all(i >= 0 for i in seen) and seen == sorted(seen), str(seen))
     ok("...numbered, so a person knows there are two", "1. " + titles[0] in words)
-    for s in bs.SETUP_STEPS:
+    for s in machine_steps:
         ok(f"{s['key']}: its reason is shown", s["why"][:40] in words)
         ok(f"{s['key']}: its instructions are shown",
            all(step[:30] in words for step in s["steps"]), s["steps"][0][:40])
         ok(f"{s['key']}: its note is shown", s["note"][:40] in words)
+    # AND THE OTHER HALF, WHICH IS THE ASSERTION THE OWNER ACTUALLY ASKED FOR. A box step
+    # reappearing here is the wizard growing back the two steps he had removed, and it would do
+    # so silently — the page would simply be longer.
+    for s in box_steps:
+        ok(f"{s['key']}: the box's own step is NOT in the machine's wizard",
+           s["title"] not in words, s["title"])
 
 
 def test_the_renderer_knows_no_step_by_name():

@@ -36,7 +36,11 @@ from core import state                                      # noqa: E402
 state.init_db()
 
 from core import box_secrets, shell                         # noqa: E402
-from core.dash import home                                  # noqa: E402
+from core.dash import box_settings, home                    # noqa: E402
+
+# THE DOORS CORE ACTUALLY SERVES, read off the module that serves them rather than
+# copied into this file — a list typed here would agree with itself forever.
+bs_doors = set(box_settings.registered_doors())
 
 _failed = 0
 
@@ -113,26 +117,43 @@ def test_core_does_not_know_where_set_up_lives():
     ok("every row points somewhere", bool(hrefs), str(hrefs))
     # THE LINKS CORE SYNTHESISES — the ones this screen builds — follow the registry. That is the
     # invariant this file owns and it is asserted strictly.
+    #
+    # NO BOX STEP SYNTHESISES ONE TODAY, since 2026-09-22: all three now declare a core door of
+    # their own, so `built` is legitimately empty on a real box. THAT IS NOT A REASON TO DROP THE
+    # ASSERTION — the fallback is live code that the next box-level step will land on, and an
+    # invariant nobody exercises is one a refactor deletes unnoticed. So it is exercised directly,
+    # with a step that declares no door at all.
     built = [h for h in hrefs if "#" in h]
     ok("every link core builds follows the machine that registered set-up",
-       built and all(h.startswith("/widgets/first-run#") for h in built), str(built))
+       all(h.startswith("/widgets/first-run#") for h in built), str(built))
+
+    _real = box_secrets.setup_state
+    try:
+        box_secrets.setup_state = lambda: [
+            {"key": "anthropic", "title": "Your AI account", "status": "not_connected",
+             "detail": ""}]                      # no `link`, no `action_href` — the fallback path
+        fallback = re.findall(r'href="([^"]+)"', _rows())
+    finally:
+        box_secrets.setup_state = _real
+    ok("a step with no door of its own falls back to the registry, not to a written URL",
+       fallback == ["/widgets/first-run#anthropic"], str(fallback))
     ok("no row hardcodes the inbox's set-up screen",
        not any("/inbox/setup" in h for h in hrefs), str(hrefs))
 
-    # A STEP'S OWN DECLARED LINK IS NOT THIS FILE'S TO SYNTHESISE, AND ONE OF THEM IS NOT
-    # PORTABLE. `_AGENT_STEP` in core/box_secrets.py declares `/inbox/agent` — a machine path, in
-    # CORE step data — so on a box carrying some other machine that row points at a 404. It
-    # arrived with #1410 (OSDev1, merged b9d257c0) and it is his data, not this screen's bug:
-    # the renderer is doing exactly what a declared link asks of it.
+    # THE EXCEPTION THIS TEST NAMED HAS ENDED THE WAY IT SAID IT WOULD (OSDev4, 2026-09-22).
     #
-    # ASSERTED RATHER THAN IGNORED, and deliberately NOT as a failure. Turning CI red on merged
-    # work the night of the owner's demo helps nobody, and a quiet `all(...)` that simply tolerates
-    # it would let the next machine-shaped URL in unnoticed. So the exception is named, and the
-    # moment `/inbox/agent` moves behind the registry this line fails and gets deleted — which is
-    # the correct way for a known exception to end. Raised with OSDev1 on the wall.
+    # OSDev5 wrote it as a known, named exception rather than a silent tolerance: `_AGENT_STEP`
+    # declared `/inbox/agent` — a machine path, in CORE step data — so on a box carrying some
+    # other machine that row pointed at a 404. His words were "the moment `/inbox/agent` moves
+    # behind the registry this line fails and gets deleted — which is the correct way for a known
+    # exception to end." It moved. The owner ruled the three box-level steps into core's own
+    # drawer and their doors moved with them, so this is now the strong form of the assertion:
+    # every link a step declares is a path CORE serves, on any box, whatever machine it carries.
     declared = [h for h in hrefs if "#" not in h]
-    ok("the only non-registry link is the agent step's declared one (OSDev1's, #1410)",
-       declared == ["/inbox/agent"], str(declared))
+    ok("every declared link is a path core serves on any box",
+       declared and all(h in bs_doors for h in declared), str(declared))
+    ok("...and not one of them names a machine",
+       not any(h.startswith("/inbox/") for h in declared), str(declared))
 
 
 def test_a_member_is_never_offered_a_door_they_are_refused_at():
@@ -148,12 +169,18 @@ def test_a_member_is_never_offered_a_door_they_are_refused_at():
     member = _rows(owner=False)
     ok("a member still sees what is set", "Your AI account" in member and "Your phone" in member)
     ok("...and is never pointed at a machine's own door",
-       "/inbox/agent" not in member, str(_re.findall(r'href="([^"]+)"', member)))
-    ok("...but the set-up screen, whose gate core knows, is still offered",
-       "/widgets/first-run#phone" in member,
+       "/inbox/" not in member, str(_re.findall(r'href="([^"]+)"', member)))
+    # THE SPLIT IS BY WHO KNOWS THE GATE, and core knows its own. A phone belongs to a person
+    # rather than to whoever bought the box, so a member is offered it — properly, for the first
+    # time. The two that bill or read the whole box declare `owner_only` and are not drawn.
+    ok("...but the phone, which is theirs and whose gate core knows, IS offered",
+       "/settings/phone" in member, str(_re.findall(r'href="([^"]+)"', member)))
+    ok("...and the two the box would refuse them at are not drawn",
+       "/settings/ai" not in member and "/settings/agent" not in member,
        str(_re.findall(r'href="([^"]+)"', member)))
     owner_view = _rows(owner=True)
-    ok("the owner is still offered all of it", "/inbox/agent" in owner_view,
+    ok("the owner is still offered all of it",
+       all(h in owner_view for h in ("/settings/ai", "/settings/phone", "/settings/agent")),
        str(_re.findall(r'href="([^"]+)"', owner_view)))
     src = (pathlib.Path(__file__).resolve().parents[1] / "core/dash/home.py").read_text()
     ok("and the source does not carry that URL either", "/inbox/setup" not in src)

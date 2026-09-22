@@ -311,7 +311,10 @@ def test_with_an_EMPTY_seam_the_old_contract_still_renders_in_full():
     ok("the seam really is empty", onboarding.steps() == [], str(onboarding.steps()))
     app, c = _c()
     words = _text(c.get("/inbox/setup").get_data(as_text=True))
-    titles = [s["title"] for s in bs.SETUP_STEPS]
+    # THE MACHINE'S SIDE OF THE CONTRACT. The box's three (AI account, phone, AI coworkers) moved
+    # to core's drawer on 2026-09-22 and are asserted absent by test_setup_screen_loop; what this
+    # test is about is the FALLBACK — an empty seam must not blank the page.
+    titles = [s["title"] for s in bs.SETUP_STEPS if bs.surface_of(s) == bs.SURFACE_MACHINE]
     ok("every step of the old contract is still on the screen",
        all(t in words for t in titles), str(titles))
     seen = [words.find(t) for t in titles]
@@ -344,9 +347,14 @@ def test_a_seam_step_never_renders_twice():
        str(words.count("Connect your gutter pigeons")))
     dupes = [t for t in [s["title"] for s in bs.SETUP_STEPS] if words.count(t) > 1]
     ok("...and NOTHING on the page is rendered twice", not dupes, str(dupes))
-    ok("...and the box's own credentials are still offered, which is the bug this replaced",
-       all(s["title"] in words for s in bs.SETUP_STEPS),
-       str([s["title"] for s in bs.SETUP_STEPS if s["title"] not in words]))
+    # THE BUG THIS REPLACED was one registration deleting every unmigrated step from the buyer's
+    # screen. Scoped to the machine's side since 2026-09-22 — the box's three are asserted present
+    # on core's Settings by tests/test_the_box_settings_are_the_boxs_own.py, and asserted ABSENT
+    # here by test_setup_screen_loop. Between the two, a step cannot go missing unnoticed.
+    _machine = [s for s in bs.SETUP_STEPS if bs.surface_of(s) == bs.SURFACE_MACHINE]
+    ok("...and the machine's own credentials are still offered, which is the bug this replaced",
+       all(s["title"] in words for s in _machine),
+       str([s["title"] for s in _machine if s["title"] not in words]))
 
 
 def test_ci_actually_runs_this_file():

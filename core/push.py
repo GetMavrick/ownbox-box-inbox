@@ -65,7 +65,19 @@ def available() -> tuple[bool, str]:
     """
     try:
         from cryptography.hazmat.primitives.asymmetric import ec  # noqa: F401
-    except Exception as e:                                        # noqa: BLE001
+    # `BaseException`, AND THE DOCSTRING ABOVE IS WHY. This caught `Exception`, which is the right
+    # instinct and the wrong class: `cryptography` is a NATIVE extension, and a broken one does not
+    # raise ImportError. Measured 2026-09-22 on an install whose Rust bindings did not match the
+    # interpreter — `pyo3_runtime.PanicException`, which inherits from BaseException and went
+    # straight past this handler and out of the request as a 500. So the one screen whose entire
+    # job is to say "this box cannot ring a phone yet" was the screen that crashed instead.
+    #
+    # A MISMATCHED WHEEL IS NOT AN EXOTIC STATE on a box that self-updates unattended at 08:00 and
+    # 20:00 and has ~250MB of headroom on the $6 size. Whatever the import does, this function
+    # answers the question it was asked.
+    except (Exception, BaseException) as e:                       # noqa: BLE001
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):        # never swallow a shutdown
+            raise
         return False, f"this box has no push keys yet ({type(e).__name__})"
     return True, ""
 
@@ -301,3 +313,69 @@ def send(subscription: dict, *, waiting: int | None = None, navigate: str = "/in
         return True, str(status)
     note_result(endpoint, ok=False, detail=f"HTTP {status}")
     return False, f"HTTP {status}"
+
+
+# ── the client half ──────────────────────────────────────────────────────────────────────────────
+# IT MOVED HERE WITH ITS ENDPOINTS, and that is the whole reason it can live in core at all. The two
+# routes it fetches used to be a machine's, so this string named that machine twice and belonged to
+# it. They are `/settings/push/*` now — core's own — so the script names nobody, and a box carrying
+# no inbox at all gets the same working code.
+#
+# NOTHING HERE ASKS. Owner, 2026-09-20, on when the prompt fires: "after the buyer has seen their
+# first real message, never on first load." An iOS denial can only be undone in Settings, which
+# nobody does, so asking early costs the whole channel for good. This exposes two functions and
+# calls neither; the screen that has earned the right to ask calls them.
+#
+# THE ASK CANNOT MOVE TO /settings, AND THAT IS A BROWSER RULE RATHER THAN A PREFERENCE.
+# `navigator.serviceWorker.ready` resolves to the registration whose scope covers THE PAGE YOU ARE
+# ON, and this box's worker is registered by a machine, under that machine's own scope. On any
+# other path that promise never settles — no error, no rejection, a button that spins forever. So
+# the endpoints are core's and the asking stays where the worker is. Whoever gives core a
+# root-scoped worker can move it.
+CLIENT_JS = """  window.ownboxCanBeRung = function () {
+    // ON IPHONE THE HOME SCREEN APP IS THE ONLY THING THAT CAN RECEIVE A PUSH. A Safari tab cannot,
+    // whatever the permission says, so offering the prompt there is a dead end that burns the ask.
+    var standalone = (window.navigator.standalone === true) ||
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    return !!(standalone && 'Notification' in window && 'PushManager' in window &&
+              navigator.serviceWorker);
+  };
+
+  window.ownboxEnableNotifications = function () {
+    if (!window.ownboxCanBeRung()) {
+      return Promise.resolve({ ok: false, why: 'add the box to your Home Screen first' });
+    }
+    return fetch('/settings/push/key', { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (k) {
+        if (!k.available || !k.key) { return { ok: false, why: k.why || 'this box has no push keys yet' }; }
+        return Notification.requestPermission().then(function (p) {
+          if (p !== 'granted') { return { ok: false, why: 'you said no — Settings can undo it' }; }
+          return navigator.serviceWorker.ready.then(function (reg) {
+            // RE-SUBSCRIBE EVERY TIME, not just when there is none: iOS drops a subscription after
+            // long disuse or cleared storage, and the box would keep pushing at an endpoint that
+            // stopped existing. Asking the browser again is cheap and idempotent.
+            return reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: (function (b64) {
+                var pad = '='.repeat((4 - b64.length % 4) % 4);
+                var raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+                var out = new Uint8Array(raw.length);
+                for (var i = 0; i < raw.length; i++) { out[i] = raw.charCodeAt(i); }
+                return out;
+              })(k.key)
+            });
+          }).then(function (sub) {
+            var j = sub.toJSON();
+            return fetch('/settings/push/subscribe', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys })
+            }).then(function (r) { return r.json(); })
+              .then(function (o) { return { ok: !!o.ok, why: o.error || '' }; });
+          });
+        });
+      })
+      .catch(function (e) { return { ok: false, why: String(e && e.message || e) }; });
+  };
+"""

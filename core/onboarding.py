@@ -93,6 +93,12 @@ class Step:
     note: str = ""
     link: Mapping | None = field(default=None)
     settings: tuple = ()
+    # WHICH SCREEN RENDERS IT — `box_secrets.SURFACE_MACHINE` or `SURFACE_BOX`. The default is the
+    # machine's own set-up screen, which is where every step registered before 2026-09-22 already
+    # rendered; a default that moved somebody's step into core's Settings on upgrade would be the
+    # worst kind of quiet. A machine declares `surface="box"` only for something every machine on
+    # the box would need, and `core/dash/home.py` is what draws those.
+    surface: str = "machine"
 
 
 _STEPS: dict[str, Step] = {}
@@ -100,7 +106,7 @@ _STEPS: dict[str, Step] = {}
 
 def register_step(key: str, *, order: int, machine: str, title: str, why: str, fields, steps,
                   state: Callable[[], Mapping], save: Callable[..., None], note: str = "",
-                  link: Mapping | None = None, settings=()) -> None:
+                  link: Mapping | None = None, settings=(), surface: str = "machine") -> None:
     """Called by a machine at import. Idempotent for the same machine, so a re-import cannot stack
     two; refused for a key another machine already holds, so one machine cannot overwrite another's
     step by choosing the same word. Everything is checked here, at import, where a mistake is a
@@ -118,6 +124,11 @@ def register_step(key: str, *, order: int, machine: str, title: str, why: str, f
         raise ValueError(f"set-up step {key!r} needs a title and a reason a buyer can read")
     if not callable(state) or not callable(save):
         raise ValueError(f"set-up step {key!r} needs callable state() and save()")
+    # CHECKED HERE RATHER THAN READ LENIENTLY LATER. A typo — "Box", "core", "system" — would
+    # otherwise fall through `surface_of`'s default and the step would simply render on the wrong
+    # screen, which is a bug nobody would think to look for.
+    if surface not in ("box", "machine"):
+        raise ValueError(f"set-up step {key!r}: surface must be 'box' or 'machine', got {surface!r}")
     fields = tuple(dict(f) for f in (fields or ()))
     if not fields:
         raise ValueError(f"set-up step {key!r} asks for nothing — a step with no field is not a step")
@@ -171,7 +182,7 @@ def register_step(key: str, *, order: int, machine: str, title: str, why: str, f
             raise ValueError(f"set-up step {key!r}: a link needs a label and an https:// url")
     _STEPS[key] = Step(key=key, order=order, machine=machine, title=title, why=why, fields=fields,
                        steps=steps, state=state, save=save, note=note or "", link=link,
-                       settings=tuple(settings))
+                       settings=tuple(settings), surface=surface)
     log.info("onboarding.step_registered", key=key, machine=machine, order=order)
 
 
@@ -220,7 +231,7 @@ def steps() -> list[dict]:
                  "detail": live["detail"],
                  # COPIED, NEVER HANDED OUT. The same rule the fields follow one line up: a screen
                  # that mutated this would be editing the registry every other screen reads.
-                 "settings": [dict(o) for o in step.settings]}
+                 "settings": [dict(o) for o in step.settings], "surface": step.surface}
         if step.link:
             enabled = live["status"] != "not_connected"
             entry["link"] = dict(step.link, enabled=enabled,

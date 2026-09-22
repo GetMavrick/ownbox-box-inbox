@@ -1627,3 +1627,10 @@ from core.dash import review as _review  # noqa: E402,F401
 # by whoever happens to need it: a blueprint stops accepting routes the moment it is registered on
 # an app, so a page imported later is a silent 404 in production and an AssertionError in a test.
 from core.dash import home as _home  # noqa: E402,F401
+
+# THE BOX'S OWN SET-UP DOORS mount last, because they render through `home.chrome`. Owner ruled on
+# 2026-09-22 that the AI account, the phone and the AI coworkers are the box's settings rather than
+# a machine's; until today all three were finished inside the inbox, so a Lead box could reach none
+# of them. Imported HERE for the reason above it: a blueprint stops accepting routes the moment it
+# is registered on an app.
+from core.dash import box_settings as _box_settings  # noqa: E402,F401

@@ -912,60 +912,6 @@ JS = """
 })();
 """
 
-PUSH_JS = """  // TURNING NOTIFICATIONS ON, exposed for whichever screen earns the right to ask. The owner ruled
-  // the moment (2026-09-20): "after the buyer has seen their first real message, never on first
-  // load." An iOS denial is close to permanent — it can only be undone in Settings, which nobody
-  // does — so the cost of asking early is the whole channel, for good. Nothing here calls it; the
-  // inbox does, once it has something worth being told about.
-  window.ownboxCanBeRung = function () {
-    // ON IPHONE THE HOME SCREEN APP IS THE ONLY THING THAT CAN RECEIVE A PUSH. A Safari tab cannot,
-    // whatever the permission says, so offering the prompt there is a dead end that burns the ask.
-    var standalone = (window.navigator.standalone === true) ||
-      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
-    return !!(standalone && 'Notification' in window && 'PushManager' in window &&
-              navigator.serviceWorker);
-  };
-
-  window.ownboxEnableNotifications = function () {
-    if (!window.ownboxCanBeRung()) {
-      return Promise.resolve({ ok: false, why: 'add the box to your Home Screen first' });
-    }
-    return fetch('/inbox/push/key', { credentials: 'same-origin' })
-      .then(function (r) { return r.json(); })
-      .then(function (k) {
-        if (!k.available || !k.key) { return { ok: false, why: k.why || 'this box has no push keys yet' }; }
-        return Notification.requestPermission().then(function (p) {
-          if (p !== 'granted') { return { ok: false, why: 'you said no — Settings can undo it' }; }
-          return navigator.serviceWorker.ready.then(function (reg) {
-            // RE-SUBSCRIBE EVERY TIME, not just when there is none: iOS drops a subscription after
-            // long disuse or cleared storage, and the box would keep pushing at an endpoint that
-            // stopped existing. Asking the browser again is cheap and idempotent.
-            return reg.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: (function (b64) {
-                var pad = '='.repeat((4 - b64.length % 4) % 4);
-                var raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
-                var out = new Uint8Array(raw.length);
-                for (var i = 0; i < raw.length; i++) { out[i] = raw.charCodeAt(i); }
-                return out;
-              })(k.key)
-            });
-          }).then(function (sub) {
-            var j = sub.toJSON();
-            return fetch('/inbox/push/subscribe', {
-              method: 'POST', credentials: 'same-origin',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys })
-            }).then(function (r) { return r.json(); })
-              .then(function (o) { return { ok: !!o.ok, why: o.error || '' }; });
-          });
-        });
-      })
-      .catch(function (e) { return { ok: false, why: String(e && e.message || e) }; });
-  };
-"""
-
-
 
 # ── the channels, as their own marks ────────────────────────────────────────────────────────
 # THE REAL LOGOS, AT THEIR OFFICIAL COLOURS (owner, 2026-09-15: "yes, of course we have to get
@@ -2393,6 +2339,100 @@ def _stopped_note() -> str:
             '<a href="/dashboard" style="color:var(--accent)">Start it again</a>.</div>')
 
 
+# ── THE ASK: the one thing that was never wired, and without it none of push exists ─────────────
+# MEASURED 2026-09-22, AFTER THE OWNER SAID "it still hasn't done what you're saying it will do":
+# `ownboxEnableNotifications` is DEFINED and called by nothing, anywhere in the product. Not on a
+# screen, not on a timer, not behind a button. So `pushManager.subscribe` never ran, no endpoint
+# was ever stored, `push.subscriptions_for()` returns empty on every box we have sold, and every
+# notification the poller tries to send is a loop over zero rows.
+#
+# EVERYTHING ELSE WAS FINISHED. A VAPID identity, RFC 8291 encryption written against the RFCs, a
+# service worker, subscription storage, `notify._ring` wired into the poller's pass. A complete
+# channel with no front door — which is exactly the shape of the connector bug #1409 fixed, and of
+# `/deploy` before #1414: built, correct, and unreachable.
+#
+# WHEN IT ASKS IS THE OWNER'S RULING, 2026-09-20: "after the buyer has seen their first real
+# message, never on first load." So this renders ONLY on an inbox that already has conversations
+# in it. An iOS denial can only be undone in Settings, which nobody does, so a prompt fired at an
+# empty box spends the whole channel on somebody with nothing to be notified about.
+#
+# THREE STATES, AND ONLY ONE OF THEM ASKS:
+#   default  — offer the button. Pressing it is what fires the prompt; the page never does.
+#   granted  — say nothing and re-subscribe quietly. That is not a prompt, it is honouring a
+#              decision already made — and it repairs the case `core.push.CLIENT_JS` warns about,
+#              where iOS drops a subscription after long disuse and the box keeps pushing at a
+#              dead endpoint forever.
+#   denied   — say nothing at all. The browser will not ask again and a button that cannot work
+#              is the dead control this app keeps deleting.
+_RING_OFFER = ('<div class="card" id="ownbox-ring" hidden>'
+               '<div class="setrow"><b>Get these on your phone</b>'
+               '<span>This box can tell you the moment a customer writes, instead of you '
+               'checking. You can turn it off again whenever you like.</span></div>'
+               '<p style="margin:10px 0 0">'
+               '<button class="btn" type="button" id="ownbox-ring-yes">Turn on notifications'
+               '</button> '
+               '<button type="button" id="ownbox-ring-no" '
+               'style="background:none;border:0;color:var(--dim);font:inherit;cursor:pointer">'
+               'Not now</button></p>'
+               '<p class="quiet" id="ownbox-ring-said" style="margin:8px 0 0"></p></div>')
+
+def _push_client_js() -> str:
+    """ONE COPY OF THE CLIENT, loaded by both screens that need it.
+
+    It lives in `core.push` because the two endpoints it fetches are core's. Loaded through a
+    function rather than imported at module scope so a box whose release predates it still serves
+    every other screen: an inbox that 500s because push is missing is a worse box than one that
+    cannot ring.
+    """
+    try:
+        from core import push
+        return push.CLIENT_JS
+    except Exception:                                    # noqa: BLE001 — a screen outranks a feature
+        return ""
+
+
+_RING_JS = """(function () {
+  var box = document.getElementById('ownbox-ring');
+  if (!box || !window.ownboxCanBeRung || !window.ownboxEnableNotifications) { return; }
+  // ON IPHONE ONLY THE HOME SCREEN APP CAN RECEIVE A PUSH. Offering this in a Safari tab spends
+  // the one answer a person ever gets on a surface that could not have delivered anyway.
+  if (!window.ownboxCanBeRung()) { return; }
+  var perm = (window.Notification && Notification.permission) || 'default';
+  if (perm === 'denied') { return; }
+  if (perm === 'granted') {
+    // ALREADY SAID YES. Re-subscribe quietly rather than ask again: this fires no prompt, and it
+    // repairs a subscription iOS dropped while the box went on believing it could ring.
+    window.ownboxEnableNotifications();
+    return;
+  }
+  // AND NOT AGAIN TODAY IF THEY SAID "not now". Per viewer, per browser; it is a convenience and
+  // the page renders correctly when it cannot be read.
+  try { if (localStorage.getItem('ownbox.ring.hidden')) { return; } } catch (e) {}
+  box.hidden = false;
+  var said = document.getElementById('ownbox-ring-said');
+  document.getElementById('ownbox-ring-no').addEventListener('click', function () {
+    box.hidden = true;
+    try { localStorage.setItem('ownbox.ring.hidden', '1'); } catch (e) {}
+  });
+  document.getElementById('ownbox-ring-yes').addEventListener('click', function (ev) {
+    ev.target.disabled = true;
+    said.textContent = 'Asking your phone…';
+    window.ownboxEnableNotifications().then(function (r) {
+      if (r && r.ok) {
+        said.textContent = 'Done. This phone will be told when something arrives.';
+        document.getElementById('ownbox-ring-yes').style.display = 'none';
+        document.getElementById('ownbox-ring-no').textContent = 'Close';
+      } else {
+        // THE REASON, NOT "something went wrong". Every branch of the client returns one a person
+        // can act on, and the commonest is "you said no", which nothing here can undo.
+        said.textContent = 'Not turned on — ' + ((r && r.why) || 'your phone declined') + '.';
+        ev.target.disabled = false;
+      }
+    });
+  });
+})();"""
+
+
 @blueprint.get("/inbox/inbox")
 def r_inbox():
     """Who has spoken to this business, most recent first."""
@@ -2600,7 +2640,11 @@ def r_inbox():
                   f'{_chips(space, channel, q=q, waiting=waiting, from_ad=from_ad)}'
                   f'{_hits(q, channel, len(convs), page=page, more=more)}'
                   f'<div class="card">{"".join(rows)}</div>'
-                  f'{_pager(q=q, channel=channel, page=page, more=more, waiting=waiting, from_ad=from_ad)}',
+                  f'{_pager(q=q, channel=channel, page=page, more=more, waiting=waiting, from_ad=from_ad)}'
+                  # THIS BRANCH IS THE ONE WITH CONVERSATIONS IN IT, which is the whole condition
+                  # the owner set. The four empty states above render none of this.
+                  + _RING_OFFER
+                  + f'<script>{_push_client_js()}</script><script>{_RING_JS}</script>',
                   wide=True), 200
 
 
@@ -3586,7 +3630,19 @@ def _setup_source() -> list:
     # Whatever the seam holds that core does not: appended in the order its machines declared,
     # which is what `onboarding.steps()` already sorts by.
     out.extend(dict(e) for k, e in seam.items() if k not in taken)
-    return out
+    # AND THE BOX'S OWN STEPS ARE NOT THIS SCREEN'S, as of 2026-09-22. Owner: "Step four and five
+    # should not be in this wizard any longer" — the AI account, the phone and the AI coworkers
+    # are the box's settings and are finished in the box's own drawer, on core screens.
+    #
+    # FILTERED HERE, AT THE SOURCE, RATHER THAN IN THE RENDERER. This function is the answer to
+    # "what does this screen show", and every counter, progress bar and assertion downstream
+    # derives from it — `_setup_progress` counts what it is handed. A filter applied later would
+    # leave the bar counting steps that are not on the page, which is the "3 of 5" on a finished
+    # screen that nobody could explain.
+    #
+    # A STEP THAT DECLARES NOTHING IS STILL THIS SCREEN'S. `surface_of` defaults to the machine,
+    # so every machine written before today keeps every step it had.
+    return [e for e in out if box_secrets.surface_of(e) == box_secrets.SURFACE_MACHINE]
 
 
 def _setup_save(which: str, form, *, user_id: str | None) -> None:
@@ -3864,7 +3920,7 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
             # declares none renders exactly as it did — this is a contract, not a special case.
             #
             # AND NOT DRAWN AT ALL FOR SOMEBODY WHO WOULD BE REFUSED AT IT. Connecting an AI
-            # account bills the whole box, so `/inbox/connect-claude` answers 403 to a member —
+            # account bills the whole box, so its door answers 403 to a member —
             # and this card was offering them the button anyway. A door you are shown and then
             # turned away from reads as the product being broken, not as a permission you lack.
             # Caught by test_a_buyer_can_walk_every_screen, which walks as a member on purpose.
@@ -3882,152 +3938,6 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
                f'{fields}<p style="margin:12px 0 0">'
                f'<button class="btn" type="submit">{verb}</button></p></form>' if fields else "")
             + out + f'</{tag}>')
-
-
-@blueprint.route("/inbox/connect-claude", methods=["GET", "POST"])
-def r_connect_claude():
-    """Sign in to Claude from the box. Owner, 2026-09-18: "There's no key. It's a login."
-
-    THE SCREEN IS TWO STATES AND NOTHING ELSE, because a person doing this once should never have
-    to understand it. Press Connect, and the box starts the login and shows a link. Follow the
-    link, sign in AT claude.com, and paste the short code it gives you back here.
-
-    THE BOX NEVER SEES A PASSWORD and never asks for one. It sees a code that is useless to
-    anybody else and is spent the moment it is used.
-
-    OWNER-ONLY, like every other credential door on this box: `dash` already answers who is
-    signed in, and a member pressing this would be minting a credential the whole box then thinks
-    on, billed to whoever's subscription it was.
-    """
-    gate = _gate()
-    if gate is not None:
-        return gate
-    from core import claude_login
-
-    try:
-        who = dash.session_user(request) or {}
-    except Exception:                                    # noqa: BLE001
-        who = {}
-    if (who.get("role") or "") != "owner":
-        return _shell('<div class="card"><p>Only the owner of this box can connect an AI '
-                      'account.</p><p><a href="/inbox/setup">Back to set up</a></p></div>',
-                      here="/inbox/setup"), 403
-
-    note, url = "", ""
-    if request.method == "POST":
-        action = str(request.form.get("do") or "")
-        try:
-            if action == "start":
-                url = claude_login.start()
-            elif action == "code":
-                claude_login.finish(str(request.form.get("code") or ""), user_id=who.get("id"))
-                return redirect("/inbox/setup")
-            elif action == "cancel":
-                claude_login.cancel()
-                return redirect("/inbox/setup")
-        except claude_login.LoginError as e:
-            # THE SENTENCE IS THE PRODUCT HERE. `claude_login` raises only things a person can act
-            # on, and never quotes the CLI's transcript at them — see `_sayable` for what that
-            # looked like before it was stopped.
-            note = str(e)
-
-    # COMING BACK IS THE NORMAL CASE, NOT AN EDGE ONE. Signing in happens in another tab, and a
-    # person who reloads this one — or reaches it again from set-up — was being offered a Connect
-    # button for a login already running, which then replaced the login whose code they were
-    # holding. The session outlives the request now, so the link it is waiting on can be drawn
-    # again instead.
-    if not url:
-        url = claude_login.pending_url()
-
-    body = ['<div class="card"><h2 style="margin-top:0">Connect your Claude subscription</h2>'
-            '<p>Sign in to Claude and this box will draft on your own subscription. '
-            'You will not need an API key.</p></div>']
-    if note:
-        body.append(f'<div class="card"><p>{_esc(note)}</p></div>')
-
-    if url:
-        body.append(
-            '<div class="card">'
-            '<p><b>1.</b> Open this link and sign in to Claude, then approve access.</p>'
-            f'<p style="margin:12px 0"><a class="btn" href="{_esc(url)}" target="_blank" '
-            'rel="noopener noreferrer">Sign in to Claude &rarr;</a></p>'
-            '<p class="quiet" style="word-break:break-all">' + _esc(url) + '</p>'
-            '<p><b>2.</b> Claude will show you a short code. Paste it here.</p>'
-            '<form class="compose" method="post" action="/inbox/connect-claude">'
-            '<input type="hidden" name="do" value="code">'
-            '<input name="code" autocomplete="off" spellcheck="false" aria-label="Paste the code" '
-            'placeholder="Paste the code from Claude" style="width:100%;font:inherit;'
-            'font-size:16px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;'
-            'background:var(--card);color:var(--ink)">'
-            '<button class="btn" type="submit">Finish</button></form>'
-            '<form method="post" action="/inbox/connect-claude" style="margin-top:10px">'
-            '<input type="hidden" name="do" value="cancel">'
-            '<button class="btn" type="submit">Cancel</button></form>'
-            '</div>')
-    else:
-        # THE LINK IS NOT DRAWN BEFORE IT EXISTS. Starting the login takes a few seconds and can
-        # fail; a button that says "Sign in to Claude" and leads nowhere is the dead end this
-        # whole screen was written to remove.
-        body.append(
-            '<div class="card">'
-            '<form method="post" action="/inbox/connect-claude">'
-            '<input type="hidden" name="do" value="start">'
-            '<button class="btn" type="submit">Connect</button></form>'
-            '<p class="quiet" style="margin-top:12px">This box never sees your password. You sign '
-            'in at claude.com and paste back a short code.</p>'
-            '<p class="quiet"><a href="/inbox/setup">Paste a key instead</a></p>'
-            '</div>')
-    return _shell("".join(body), here="/inbox/setup")
-
-
-# NOT `@blueprint.post`. tests/test_customer_voice.py scans this department for a CALL named
-# `post`, and a decorator is a call — the same two extra characters r_drafts spends.
-@blueprint.route("/inbox/push/subscribe", methods=["POST"])
-def r_push_subscribe():
-    """A browser hands over the endpoint its push service issued. We store it against the person.
-
-    NOT OWNER-ONLY. Every seat on this box gets their own phone rung — a member handling the inbox
-    needs the notification more than the owner does. The row is keyed to whoever is signed in, and
-    `subscriptions_for` never crosses users.
-
-    THE BODY IS A SUBSCRIPTION, NOT A MESSAGE. It carries an endpoint and two public key halves,
-    all of them issued by the browser; nothing a customer wrote passes through here.
-    """
-    gate = _gate()
-    if gate is not None:
-        return gate
-    from core import push
-    try:
-        who = dash.session_user(request) or {}
-    except Exception:                                    # noqa: BLE001
-        who = {}
-    if not who.get("id"):
-        return jsonify({"ok": False, "error": "sign in first"}), 403
-    body = request.get_json(silent=True) or {}
-    keys = body.get("keys") or {}
-    try:
-        fresh = push.save_subscription(user_id=str(who["id"]),
-                                       endpoint=str(body.get("endpoint") or ""),
-                                       p256dh=str(keys.get("p256dh") or ""),
-                                       auth=str(keys.get("auth") or ""))
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-    return jsonify({"ok": True, "new": fresh})
-
-
-@blueprint.route("/inbox/push/key", methods=["GET"])
-def r_push_key():
-    """The box's own VAPID public key, for `applicationServerKey`.
-
-    An empty key is an answer, not a failure: a box whose release predates the crypto dependency
-    cannot mint one, and the screen needs to say so rather than offer a button that cannot work.
-    """
-    gate = _gate()
-    if gate is not None:
-        return gate
-    from core import push
-    ok, why = push.available()
-    return jsonify({"key": push.public_key(), "available": ok, "why": why})
 
 
 @blueprint.route("/inbox/setup", methods=["GET", "POST"])
@@ -4104,7 +4014,10 @@ def r_setup():
     # THE PHONE STEP'S SCRIPT, loaded only by this screen. It is not in the inbox's own JS block
     # because that block is guarded against fetch and timers — the inbox must never imply it is
     # live-updating — and this belongs to set-up, where the phone step lives.
-    body += f'<script>{PUSH_JS}</script>'
+    # THE SCRIPT IS CORE'S NOW, because the two endpoints it fetches are (`/settings/push/*`).
+    # THE ASKING CANNOT MOVE WITH THEM: this machine's service worker is the only scope on the box,
+    # so `serviceWorker.ready` resolves on these screens and on no others.
+    body += f'<script>{_push_client_js()}</script>'
     body += ('<p style="margin-top:22px"><a href="/inbox/settings" '
              'style="color:var(--accent)">← Settings</a></p>')
     # THIS SCREEN LIGHTS ITS OWN ROW. Until #1374 there was no Set up row, so pointing `here` at
@@ -4616,26 +4529,6 @@ def r_search():
     return _shell(body, here="/inbox/search"), 200
 
 
-# ── AI COWORKERS: the handle on the inside of a door that has been shut since it was built ─────
-# WHAT WAS TRUE BEFORE THIS. `core/connector` is finished work: a per-seat credential, a
-# constant-time compare, per-seat revocation, an audit row per call, a capability list, and four
-# tools behind it. `core/dispatch._seat_authorized` says it plainly — "a box with no seats minted
-# refuses everything, which is the shipped state of every box until somebody deliberately mints
-# one". NOBODY COULD. `seats.mint()` was called from tests and from nowhere else in the product,
-# there is no screen and no CLI on a delivered box, and the provisioning key is removed at first
-# boot, so not even we can reach in. Every box ever sold has carried a connector that no buyer
-# could switch on, under a $499 card that says "Claude and ChatGPT, connected".
-#
-# OWNER-ONLY, and for the same reason the AI account and the app password are: this mints a
-# credential that reads every customer message on the box.
-_ROLE_CHOICES = (
-    ("read", "Read only",
-     "It can read your conversations and your morning report. It cannot write anything."),
-    ("act", "Read and draft replies",
-     "Everything above, plus it can leave a suggested reply waiting on the screen. It still "
-     "cannot send - you press send, or you do not."),
-)
-
 
 def _is_owner() -> bool:
     """ONE ANSWER TO THIS QUESTION, used by the row and by the screen it links to.
@@ -4652,186 +4545,26 @@ def _is_owner() -> bool:
 def _coworkers_row(owner: bool) -> str:
     """The row a member sees is the same sentence WITHOUT the link.
 
-    NO DOOR A PERSON IS REFUSED AT. `/inbox/agent` 403s anyone who is not the owner, because the
-    credential it mints reads every message on the box — so drawing the link for a member would
-    hand them a dead end, which is what tests/test_a_buyer_can_walk_every_screen exists to stop
-    (it caught exactly that here). The row itself stays: a member should know the box can do this
-    and who to ask, rather than wondering why their colleague has a screen they cannot find.
+    NO DOOR A PERSON IS REFUSED AT. The screen it links to answers 403 to anyone who is not the
+    owner, because the credential it mints reads every message on the box — so drawing the link
+    for a member would hand them a dead end, which is what tests/test_a_buyer_can_walk_every_screen
+    exists to stop (it caught exactly that here). The row itself stays: a member should know the
+    box can do this and who to ask, rather than wondering why their colleague has a screen they
+    cannot find.
+
+    THE SCREEN IS THE BOX'S NOW, not this machine's (owner, 2026-09-22 — an AI coworker is a
+    `core.connector` seat, and a box running any other machine needs it just as much). This row
+    survives because the inbox's own Settings is still a reasonable place to be reminded the box
+    can do it; the door it points at is core's.
     """
     if owner:
         return ('<div class="setrow"><b>AI coworkers</b>'
                 '<span>Let Claude, ChatGPT or Grok read this inbox and draft replies for you. '
-                '<a href="/inbox/agent" style="color:var(--accent)">Connect one</a>.</span></div>')
+                '<a href="/settings/agent" style="color:var(--accent)">Connect one</a>.'
+                '</span></div>')
     return ('<div class="setrow"><b>AI coworkers</b>'
             '<span>This box can be connected to Claude, ChatGPT or Grok. The owner of the box '
             'sets that up.</span></div>')
-
-
-def _agent_seat_rows(seats_list: list) -> str:
-    """The seats that exist, so revoking is possible without remembering what you made.
-
-    A REVOKED SEAT IS STILL LISTED. It is the audit trail: "this assistant had access between
-    these dates" is a question a buyer will eventually be asked by somebody else.
-    """
-    if not seats_list:
-        return ('<div class="card"><div class="row"><span class="t">Nothing is connected to '
-                'this box yet.</span></div></div>')
-    out = ['<div class="card">']
-    for s in seats_list:
-        label = _esc(str(s.get("label") or ""))
-        role = str(s.get("role") or "")
-        human = next((t for r, t, _ in _ROLE_CHOICES if r == role), role)
-        if s.get("revoked_at"):
-            out.append(f'<div class="setrow"><b>{label}</b>'
-                       f'<span>Revoked. It can no longer reach this box.</span></div>')
-        else:
-            out.append(
-                f'<div class="setrow"><b>{label}</b><span>{_esc(human)}. '
-                f'<a href="/inbox/agent?revoke={_esc(str(s.get("id") or ""))}" '
-                f'style="color:var(--accent)">Revoke</a></span></div>')
-    out.append('</div>')
-    return "".join(out)
-
-
-def _agent_form(note: str = "") -> str:
-    opts = "".join(
-        f'<label style="display:block;margin:8px 0"><input type="radio" name="role" '
-        f'value="{r}"{" checked" if r == "read" else ""}> <b>{t}</b><br>'
-        f'<span class="quiet" style="margin-left:22px">{w}</span></label>'
-        for r, t, w in _ROLE_CHOICES)
-    return (note +
-            '<form method="post" class="card">'
-            '<input type="hidden" name="do" value="mint">'
-            '<div class="setrow"><b>What should it be called?</b>'
-            '<span>A name you will recognise later, so you know what you are revoking.</span>'
-            '</div>'
-            '<input name="label" maxlength="60" placeholder="Grok on X" '
-            'style="width:100%;padding:10px;margin:8px 0" required>'
-            '<div class="setrow"><b>What may it do?</b></div>'
-            + opts +
-            '<button class="btn" type="submit" style="margin-top:10px">Create the connection'
-            '</button></form>')
-
-
-def _agent_credential(label: str, credential: str, url: str) -> str:
-    """Shown ONCE. `seats.mint` never stores the secret, so there is no second chance by design.
-
-    THE PAGE SAYS SO BEFORE THE STRING, not after it. Somebody who scrolls past a key and closes
-    the tab has lost it, and the only repair is revoking a seat they never used and making
-    another.
-    """
-    return (
-        '<h1>Copy this now.</h1>'
-        f'<p class="quiet">This is the only time <b>{_esc(label)}</b>\'s key will ever be shown. '
-        'The box keeps a one-way hash of it and nothing else, so if you lose it, revoke this '
-        'connection and make another - there is no way to look it up.</p>'
-        '<div class="card"><div class="setrow"><b>Key</b></div>'
-        f'<p style="word-break:break-all;font-family:ui-monospace,monospace;font-size:14px;'
-        f'margin:6px 0">{_esc(credential)}</p></div>'
-        '<div class="card"><div class="setrow"><b>Address</b>'
-        '<span>Give your assistant this address and that key. It speaks MCP.</span></div>'
-        f'<p style="word-break:break-all;font-family:ui-monospace,monospace;font-size:14px;'
-        f'margin:6px 0">{_esc(url)}</p></div>'
-        '<div class="foot"><a href="/inbox/agent">← AI coworkers</a></div>')
-
-
-@blueprint.route("/inbox/agent", methods=["GET", "POST"])
-def r_agent():
-    """Connect an AI coworker to this box, or take its access away.
-
-    NOT A NEW DOOR - the handle on one that has been shut since it was built. Everything this
-    screen calls already existed and was already tested: `seats.mint`, `seats.revoke`,
-    `seats.all_seats`. What did not exist was any way for the person who owns the box to reach
-    them.
-    """
-    from core.connector import seats
-    gate = _gate()
-    if gate is not None:
-        return gate
-
-    try:
-        who = dash.session_user(request) or {}
-    except Exception:                                    # noqa: BLE001 — an unreadable session is
-        who = {}                                         # not a reason to 500 a settings screen
-    if not _is_owner():
-        return _shell('<div class="card"><p>Only the owner of this box can connect an AI '
-                      'coworker, because the connection can read every message on it.</p>'
-                      '<p><a href="/inbox/settings">Back to settings</a></p></div>',
-                      here="/inbox/settings"), 403
-
-    note = ""
-    revoke = (request.args.get("revoke") or "").strip()
-    if revoke:
-        seats.revoke(revoke)
-        return redirect("/inbox/agent", code=303)
-
-    if request.method == "POST" and str(request.form.get("do") or "") == "mint":
-        label = str(request.form.get("label") or "").strip()[:60]
-        role = str(request.form.get("role") or "read").strip()
-        if role not in [r for r, _, _ in _ROLE_CHOICES]:
-            role = "read"
-        try:
-            _sid, credential = seats.mint(label, role)
-        except ValueError as e:
-            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
-        else:
-            root = str(request.host_url or "").rstrip("/")
-            # NEVER A REDIRECT AND NEVER A QUERY STRING. The credential is rendered into this
-            # one response and then it is gone: a redirect would put it in a URL, and gunicorn
-            # logs raw query strings.
-            # ONE ADDRESS, THE SHORT ONE. This screen printed `/api/v1/mcp` while the screen
-            # that links to it printed `/mcp` — both work (same handler, same gate) but a buyer
-            # shown two addresses for one thing reasonably concludes one of them is wrong. The
-            # owner hit exactly that on 2026-09-22. `/mcp` is the address we tell people to use.
-            return _shell(_agent_credential(label, credential, f"{root}/mcp"),
-                          here="/inbox/settings"), 200
-
-    from core import box_secrets as _bs
-    root = str(request.host_url or "").rstrip("/")
-    # THE ADDRESS, BEFORE THE FORM. It is the thing a buyer came here to copy, and the thing an
-    # investor is shown: per-box, on their own hostname, so nothing they say to their assistant
-    # about their customers travels through us to get here.
-    clients = "".join(
-        f'<div class="setrow"><b>{_esc(c["name"])}</b><span>{_esc(c["how"])}</span></div>'
-        for c in _bs.AGENT_CLIENTS)
-    addr = ('<div class="card"><div class="setrow"><b>This box\'s address</b>'
-            '<span>Paste this into whichever assistant you use, with a key from below.</span>'
-            '</div>'
-            f'<p style="word-break:break-all;font-family:ui-monospace,monospace;font-size:15px;'
-            f'margin:8px 0">{_esc(root)}/mcp</p></div>'
-            # EVERY ONE OF THESE IS LIVE. They connect TO the box over MCP; the box never calls
-            # them and holds nothing of theirs, which is why this list needs nothing greyed out
-            # while the drafting-model list on set-up does.
-            '<div class="card"><div class="setrow"><b>Works with</b>'
-            '<span>Each of these can connect today.</span></div>' + clients + '</div>')
-
-    steps = "".join(f'<div class="row"><span class="t">{i}. {_esc(t)}</span></div>'
-                    for i, t in enumerate(_bs.AGENT_STEPS, 1))
-    body = ('<h1>AI coworkers.</h1>'
-            '<p class="quiet">Your box can be read by an assistant you already pay for - Claude, '
-            'ChatGPT, Grok - so you can ask it about your customers in the place you already '
-            'work, instead of opening another app. You give it a key, you choose what it may do, '
-            'and you can take that key away at any moment without changing anything else.</p>'
-            '<p class="quiet">Nothing you connect here can send a message as your business. '
-            'The most a coworker can do is leave a reply waiting on the screen for you.</p>'
-            + addr
-            # THE STEPS BEFORE THE FORM, AND THE FORM DEMOTED. Until 2026-09-22 this screen led
-            # with minting a key, because that was the only way in. It is not any more: every
-            # assistant worth naming signs in, and the owner's own words after doing it were
-            # "people will probably just choose sign in" and "I don't think customers will be
-            # able to figure this out". A screen that opens with a secret to copy teaches the
-            # harder path first.
-            + f'<div class="card">{steps}</div>'
-            + '<details style="margin-top:18px"><summary style="cursor:pointer;color:var(--accent)">'
-              'Or make a key by hand</summary>'
-              '<p class="quiet" style="margin:10px 0">For a script, or an assistant that cannot '
-              'sign in. The key is shown once and you keep it safe yourself \u2014 signing in '
-              'above is easier and revoking it is the same button.</p>'
-            + _agent_form(note)
-            + '</details>'
-            + _agent_seat_rows(seats.all_seats())
-            + '<div class="foot"><a href="/inbox/settings">← Settings</a></div>')
-    return _shell(body, here="/inbox/settings"), 200
 
 
 # ── DRAFTS: the queue of people waiting on an answer ─────────────────────────────────────────

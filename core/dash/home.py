@@ -771,8 +771,20 @@ def _box_rows(*, owner: bool) -> str:
         # step's OWN declared link is a machine's door whose gate core cannot read, so it is
         # offered only to the owner, who can open any of them. The row still renders either way
         # — a member sees what is set, which is true and useful, and simply has nothing to press.
+        if not url:
+            url = str(e.get("action_href") or "")
         mine = url.startswith("/")
-        href = (url if (mine and owner) else
+        # CORE CAN NOW VOUCH FOR ITS OWN DOORS, and that is what changed on 2026-09-22. Every
+        # box-level step is finished on a core screen, so the step declares its gate as data
+        # (`owner_only`) and this row honours it — instead of the old blanket rule, which offered
+        # a machine's door to the owner alone because core could not read a machine's gate.
+        #
+        # THE DEAD END THAT RULE EXISTED FOR IS GONE RATHER THAN HIDDEN. A member used to be shown
+        # "Set up" against the AI coworkers step and met a 403 at it; now the step says who may
+        # open it, this row does not draw a link a member cannot use, and the phone — which is
+        # theirs as much as anybody's — is offered to them properly for the first time.
+        allowed = owner or not e.get("owner_only")
+        href = (url if (mine and allowed) else
                 ("" if mine else (f"{where}#{_esc(key)}" if where else "")))
         # THE VERB IS THE STATE. "Change" on something set and "Set up" on something not is the
         # whole difference a person needs, and it saves the row a second sentence explaining it.

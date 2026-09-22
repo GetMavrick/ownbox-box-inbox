@@ -635,8 +635,29 @@ def anthropic_state() -> dict:
 #
 # IT NEVER CARRIES A SECRET. Every entry says whether something is set, never what it is.
 
+# WHICH SCREEN A STEP BELONGS TO — `surface`, and it is the reason this contract can be split at
+# all. Owner, 2026-09-22: "Step three and step four should be a core setting. The LLM and the
+# phone." A step is "machine" (the default, and what every step was before today) or "box".
+#
+# THE TEST OF IT IS ONE QUESTION: would a box running a DIFFERENT machine still need this? A
+# mailbox and a set of social accounts belong to the inbox and go with it. An AI account is what
+# `core.brain` reasons through for every machine; a phone belongs to a person; an AI coworker is a
+# `core.connector` seat. Those three are the box's and are answered in the box's own drawer.
+#
+# A STEP WITHOUT THE KEY IS A MACHINE STEP. Older machines and every seam step registered before
+# today carry no `surface`, and they must keep rendering exactly where they always did — a default
+# that silently moved somebody's step into core's Settings would be the worst kind of quiet.
+SURFACE_BOX = "box"
+SURFACE_MACHINE = "machine"
+
+
+def surface_of(step) -> str:
+    """Which screen renders this step. Unknown or missing reads as the machine's — never the box's."""
+    return SURFACE_BOX if str((step or {}).get("surface") or "") == SURFACE_BOX else SURFACE_MACHINE
+
+
 SETUP_STEPS = (
-    {"key": "email", "title": "Your inbox",
+    {"key": "email", "title": "Your inbox", "surface": SURFACE_MACHINE,
      "why": "Ownbox reads the mail your customers send you, and drafts replies. It never sends "
             "anything and it never marks a message as read.",
      "fields": ({"name": "user", "label": "The email address to read", "type": "email",
@@ -657,7 +678,7 @@ SETUP_STEPS = (
     # things only you can do", and nothing said a box with only Gmail connected is a finished box.
     # It is: `inbox/poller.py` sweeps email on its own credential and says so in its own words —
     # "a buyer who connects Gmail and nothing else is a box with no Zernio key at all".
-    {"key": "zernio", "title": "Your social accounts",
+    {"key": "zernio", "title": "Your social accounts", "surface": SURFACE_MACHINE,
      "why": "Skip this if email is all you need — your box is already finished without it. "
             "Zernio is the service that carries Instagram, Facebook and TikTok messages: those "
             "networks do not hand direct messages to just anybody, so a licensed one relays them, "
@@ -772,10 +793,17 @@ def agent_state() -> dict:
 
 _AGENT_STEP = {
     "key": "agent", "title": "Your AI coworkers",
+    "surface": SURFACE_BOX,
+    # CORE CAN VOUCH FOR ITS OWN DOOR, which is the whole point of the door having moved. This
+    # step mints a credential that reads every message on the box, so it is the owner's alone —
+    # and saying so HERE, as data, is what lets a screen decline to offer it to a member instead
+    # of offering it and then refusing them at it. That dead end was real: a member pressed "Set
+    # up" on /settings and met a 403 (caught by test_a_buyer_can_walk_every_screen).
+    "owner_only": True,
     # EVERY ENTRY CARRIES `fields`, EMPTY OR NOT. `app._setup_source()` requires the five keys of
     # the contract on every step, and tests/test_setup_sources_merge.py asserts it — a step is a
     # shape, not a special case. This one has no field to type into: the key is MINTED on
-    # /inbox/agent and shown once, never pasted in.
+    # the step's own screen and shown once, never pasted in.
     "fields": (),
     # THE CONTRACT WANTS `steps` TOO, and this step has real ones — the key is minted here and
     # pasted into the assistant, which is the reverse of every other step on this screen.
@@ -792,7 +820,7 @@ _AGENT_STEP = {
     "steps": AGENT_STEPS,
     "optional": True,
     "link": {"label": "Connect an AI coworker",
-             "url": "/inbox/agent",
+             "url": "/settings/agent",
              "new_tab": False,
              "after": "The key is shown once. If you lose it, revoke it and make another."},
     "note": "This is the MCP address for this box and nobody else's — your conversations never "
@@ -807,6 +835,10 @@ _AI_STEP = {
     # thing a person reads first and the thing they film. The step's identity stays `anthropic`;
     # only the words a buyer sees change.
     "key": "anthropic", "title": "Your AI account",
+    "surface": SURFACE_BOX,
+    # Connecting this bills the whole box and every machine on it drafts through it, so it is the
+    # owner's. See `_AGENT_STEP["owner_only"]` for why the gate is data rather than a 403.
+    "owner_only": True,
     # DECLARED BY THE STEP, DRAWN BY THE RENDERER — never `if key == "anthropic"` in the screen.
     # test_setup_screen_loop refuses a `_setup_step` that names a step, and it is right to: the
     # whole point of the contract is that a machine can add a step without editing the renderer.
@@ -824,7 +856,7 @@ _AI_STEP = {
     # He was right. Asking for an sk-ant-oat token asks a person to install a CLI and run a command
     # on their laptop to produce the OUTPUT of a login — which is a wall, not onboarding. The box
     # runs that login itself now and hands them a link (`core/claude_login.py`).
-    "action_href": "/inbox/connect-claude",
+    "action_href": "/settings/ai",
     "action_label": "Sign in to Claude",
     "action_why": "Have a Claude Pro or Max subscription? Sign in and this box drafts on it — no "
                   "key to find, nothing to install. You sign in at claude.com; the box never sees "
@@ -877,10 +909,38 @@ _AI_STEP = {
 # this working", and the page refines the line for the device actually looking at it.
 _PHONE_STEP = {
     "key": "phone", "title": "Your phone",
+    "surface": SURFACE_BOX,
+    # NOT OWNER-ONLY, AND DELIBERATELY SO. A phone belongs to a person, not to whoever bought the
+    # box: a member working the inbox all day needs the notification more than the owner does, and
+    # `push.subscriptions_for` is keyed to whoever is signed in and never crosses users.
+    "owner_only": False,
+    "action_href": "/settings/phone",
+    "action_label": "How to set up your phone",
+    "action_why": "It takes about thirty seconds and there is nothing to type. The box has to be "
+                  "on your Home Screen before it can ring at all.",
     "why": "Add this box to your phone's Home Screen and it can tell you when a customer writes — "
            "a notification that opens straight into your inbox, not into somebody else's app. "
            "Email keeps working either way; this is the faster way to hear about it.",
     "fields": (),
+    # PER PLATFORM, IN THE CONTRACT, because two screens render these words: the step's own page
+    # and the sheet a colleague is handed. A second copy laid out for paper is a second copy that
+    # DRIFTS, and the one that drifts is the printed one — nobody re-reads a page they already
+    # pinned to a wall. So the instructions live here, once, and both surfaces draw them.
+    "platforms": ({"title": "On an iPhone or iPad",
+                   "steps": ("Open this box in Safari. It has to be Safari — Chrome on an iPhone "
+                             "cannot do this.",
+                             "Tap the Share button (the square with an arrow coming out of it).",
+                             "Scroll down and tap Add to Home Screen, then Add.",
+                             "Open the box again from the new icon on your Home Screen."),
+                   "note": "A Safari tab cannot receive notifications at all, whatever you answer "
+                           "to the prompt. The Home Screen app is the only thing that can."},
+                  {"title": "On an Android phone",
+                   "steps": ("Open this box in Chrome.",
+                             "Tap the ⋮ menu at the top right.",
+                             "Tap Install app — or take the install banner if one appears.",
+                             "Open the box again from the new icon."),
+                   "note": "If you do not see Install app, the page is probably not open in "
+                           "Chrome."}),
     "steps": ("On iPhone: open this box in Safari, tap the Share button, then Add to Home Screen. "
               "It has to be the Home Screen app — Safari tabs cannot receive notifications at all.",
               "On Android: open the browser menu and choose Install app, or take the install "
