@@ -37,6 +37,20 @@ blueprint = Blueprint("customer_voice_app", __name__)
 TOKEN_COOKIE = "aios_app_k"          # the same cookie machine_app banks; one box, one unlock
 
 
+def _readable(text: str) -> str:
+    """One message body as safe HTML. Falls back to plain escaping if the module is absent.
+
+    A LEAD BOX HAS NO customer_voice, and this file is only loaded where it does — but the
+    fallback costs one line and means a future import shuffle degrades to the old rendering
+    instead of a 500 on somebody's thread.
+    """
+    try:
+        from marketing.customer_voice.inbox.render import readable
+        return readable(text)
+    except Exception:                                    # noqa: BLE001 — a thread must still open
+        return _esc(text)
+
+
 def _esc(v) -> str:
     return html.escape(str(v if v is not None else ""))
 
@@ -2602,7 +2616,13 @@ def r_thread(zcid):
         last_stamp = stamp
         bubbles.append(
             f'<div class="msg {"in" if inbound else "out"}">'
-            f'<div class="b">{_esc(m.get("body") or "")}</div>'
+            # `readable`, NOT `_esc`. It escapes FIRST and then makes the message legible: runs
+            # of blank lines collapsed, `<https://…>` turned into a real link. What a buyer was
+            # reading here is the mailer's plain-text FALLBACK — see inbox/render.py — and
+            # `.msg .b` is `white-space:pre-wrap`, so every throwaway blank line in it was dead
+            # space on their screen. No sender HTML is rendered and none can be: the only tags
+            # this emits are its own, built from already-escaped characters.
+            f'<div class="b">{_readable(m.get("body") or "")}</div>'
             f'<div class="m">{_esc(by)}'
             + (f' · {_esc(stamp)}' if show else "") + '</div></div>')
     back = '<div class="foot"><a href="/inbox/inbox">← Inbox</a></div>'
