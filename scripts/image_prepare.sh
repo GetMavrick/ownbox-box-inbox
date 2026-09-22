@@ -139,6 +139,20 @@ SDKPY
     shown=$(printf '%s' "${origin:-missing}" | sed -E 's#(://)[^/@]*@#\1***@#')
     printf '%s' "$origin" | grep -Eq '^(git@github\.com:|https://github\.com/)GetMavrick/ownbox-box-[a-z0-9-]+(\.git)?$' \
       || { echo "  ✗ origin is $shown, not a box repository — a sold box never follows the monorepo"; bad=1; }
+    # ── AND IT MUST BE THE DOOR THAT ACTUALLY OPENS ───────────────────────────────────────────
+    # Measured 2026-09-22 on a live box: the image mints a per-box ssh key and sets an ssh origin,
+    # and that key was never registered on the repository. Every fetch in the field was
+    # "Permission denied (publickey)" — no box we had sold could take an update, security or
+    # otherwise. The release repository is public now, so https needs no key at all and the signed
+    # tag is still what decides. An image cut with the ssh origin would put a fresh box straight
+    # back into that hole, so it is refused here rather than discovered on a customer's machine.
+    # IMAGE_ALLOW_SSH_ORIGIN=1 is for a deployment that really does have a key registered.
+    if printf '%s' "$origin" | grep -Eq '^git@github\.com:' && [ "${IMAGE_ALLOW_SSH_ORIGIN:-0}" != "1" ]; then
+      echo "  ✗ origin is $shown — a box cut from this image would need an ssh key nobody registers."
+      echo "    Use the public https url for the same repository, or set IMAGE_ALLOW_SSH_ORIGIN=1"
+      echo "    if this deployment genuinely holds a registered key."
+      bad=1
+    fi
     tag=$(git -C "$root" describe --tags --exact-match --match 'release/*' HEAD 2>/dev/null) || tag=""
     if [ -z "$tag" ]; then
       echo "  ✗ HEAD is not on a release tag — an image is cut from a signed release, never from a branch"; bad=1
@@ -165,6 +179,26 @@ fi
 RELEASE=$(git -C "$AIOS" describe --tags --exact-match --match 'release/*' HEAD 2>/dev/null) \
   || { echo "✗ $AIOS is not a checkout at a release tag — check out the release this image is cut from" >&2; exit 1; }
 SHA=${SHA:-$(git -C "$AIOS" rev-parse --short=8 HEAD)}
+# THE ORIGIN IS NORMALISED BEFORE ANYTHING ELSE HAPPENS, so the person cutting an image never has
+# to remember this. An ssh box origin becomes the public https url for the SAME repository, and it
+# is PROVED to answer before we keep it — baking an origin nobody has fetched from is how the last
+# hole got dug. Nothing is guessed: the owner and repository come from the url that was there.
+ORIGIN=$(git -C "$AIOS" remote get-url origin 2>/dev/null) || ORIGIN=""
+case "$ORIGIN" in
+  git@github.com:GetMavrick/ownbox-box-*)
+    HTTPS="https://github.com/${ORIGIN#git@github.com:}"
+    case "$HTTPS" in *.git) ;; *) HTTPS="$HTTPS.git" ;; esac
+    echo "== 0/5 origin: $ORIGIN is a door that needs a key nobody registers =="
+    if GIT_TERMINAL_PROMPT=0 git ls-remote --tags "$HTTPS" >/dev/null 2>&1; then
+      git -C "$AIOS" remote set-url origin "$HTTPS"
+      echo "   origin is now $HTTPS — proved reachable with no credential"
+    else
+      echo "✗ $HTTPS does not answer without a credential, so this image would ship a box that" >&2
+      echo "  cannot update. Make the release repository public, or set IMAGE_ALLOW_SSH_ORIGIN=1" >&2
+      echo "  if this deployment genuinely holds a registered key." >&2
+      [ "${IMAGE_ALLOW_SSH_ORIGIN:-0}" = "1" ] || exit 1
+    fi ;;
+esac
 # AN IMAGE IS NEVER CUT FROM A BOX. If a licence or a database is here, somebody pointed this at a
 # real box; deleting its database to make an image is exactly the accident this refuses to have.
 for guard in licence.json aios.db; do
@@ -202,7 +236,8 @@ bash scripts/install_litestream.sh || true   # binary + unit; stays disabled wit
 # token, reports the CLI missing and drafts NOTHING: the one failure a buyer reads as "it does not
 # work". Baked here rather than fetched at first boot so a customer's box never waits on
 # claude.ai being up at the moment they are watching it start.
-bash scripts/install_claude_code.sh || true   # idempotent; a failure must not stop an image cut
+bash scripts/install_claude_code.sh || true
+bash scripts/install_codex.sh || true   # idempotent; a failure must not stop an image cut
 
 echo "== 4/5 the stamp =="
 cat > image.json <<JSON

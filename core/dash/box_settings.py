@@ -190,11 +190,100 @@ def box_ai():
             '<p class="quiet" style="margin-top:12px">This box never sees your password. You sign '
             'in at claude.com and paste back a short code.</p></div>')
 
+    # THE SECOND DOOR, under the first, only when the step declares one (a box mid-update may not).
+    if e.get("alt_action_href"):
+        body.append(
+            '<div class="card"><h2>Or use your ChatGPT subscription</h2>'
+            f'<p>{_esc(e.get("alt_action_why") or "")}</p>'
+            f'<p><a href="{_esc(e.get("alt_action_href"))}">'
+            f'{_esc(e.get("alt_action_label") or "Sign in to ChatGPT")} &rarr;</a></p></div>')
     body.append(_key_form(e))
     body.append(_back())
     return chrome("/settings", title="Your AI account",
                   lede="What writes your drafts, on your own account.",
                   body="".join(body)), 200
+
+
+@blueprint.route("/settings/chatgpt", methods=["GET", "POST"])
+def box_chatgpt():
+    """Sign in to ChatGPT from the box: a link and a one-time code, entered on the buyer's OWN
+    device. Owner, 2026-09-21: "We need the Claude login. And then we're gonna need the ChatGPT
+    login right behind it."
+
+    THE MIRROR IMAGE OF /settings/ai. There, the person brings a code back to the box; here, the
+    box hands them a code to take to ChatGPT, and the CLI on the box waits for ChatGPT to say it
+    was entered. So this page has no field at all: it shows the link and the code, and checks
+    itself every few seconds until the sign-in is done. Nothing secret crosses this page.
+    """
+    refuse = _admit(owner_only=True)
+    if refuse is not None:
+        return refuse
+    if not _is_owner():
+        return chrome("/settings", title="Your AI account",
+                      body='<div class="card"><p>Only the owner of this box can connect an AI '
+                           'account.</p></div>' + _back()), 403
+    from core import codex_login
+    who = _who()
+    note, live = "", {}
+    if request.method == "POST":
+        action = str(request.form.get("do") or "")
+        try:
+            if action == "start":
+                live = codex_login.start(user_id=who.get("id"))
+            elif action == "cancel":
+                codex_login.cancel()
+                return redirect("/settings/ai", code=303)
+            elif action == "disconnect":
+                codex_login.disconnect(user_id=who.get("id"))
+                return redirect("/settings", code=303)
+        except codex_login.LoginError as e:
+            note = str(e)
+    if not live and not note:                        # a failed start says why; no stale session
+        live = codex_login.pending()
+    st = str(live.get("status") or "")
+    if st == "done":
+        codex_login.cancel()                             # the session directory has done its job
+        return redirect("/settings", code=303)
+    if st == "error" and not note:
+        note = str(live.get("error") or "")
+        live = {}
+    body = ['<div class="card"><p>Sign in to ChatGPT on your phone or computer and this box will '
+            'draft on your own subscription. There is no key, and the box never sees your '
+            'password.</p></div>']
+    if note:
+        body.append(f'<div class="card"><p>{_esc(note)}</p></div>')
+    refresh = ""
+    if live.get("url") and live.get("code"):
+        body.append(
+            '<div class="card">'
+            '<p><b>1.</b> Open this link on any device and sign in to ChatGPT.</p>'
+            f'<p style="margin:12px 0"><a href="{_esc(live["url"])}" target="_blank" '
+            'rel="noopener noreferrer">Open ChatGPT &rarr;</a></p>'
+            f'<p class="quiet" style="word-break:break-all">{_esc(live["url"])}</p>'
+            '<p><b>2.</b> Enter this one-time code when it asks.</p>'
+            '<p style="font:600 28px/1.2 ui-monospace,Menlo,monospace;letter-spacing:0.08em;'
+            f'margin:10px 0 16px;user-select:all">{_esc(live["code"])}</p>'
+            '<p class="quiet">The code lasts fifteen minutes. This page checks itself every few '
+            'seconds and takes you back to settings when the sign-in is done.</p>'
+            '<form method="post" action="/settings/chatgpt" style="margin-top:12px">'
+            '<input type="hidden" name="do" value="cancel">'
+            '<button type="submit">Cancel</button></form></div>')
+        refresh = '<meta http-equiv="refresh" content="5">'
+    else:
+        body.append(
+            '<div class="card"><h2>Use your ChatGPT subscription</h2>'
+            '<form method="post" action="/settings/chatgpt">'
+            '<input type="hidden" name="do" value="start">'
+            '<button type="submit">Connect</button></form>'
+            '<p class="quiet" style="margin-top:12px">Not working? Turn on device code sign-in '
+            'in ChatGPT under Settings &rarr; Security (a work account needs an admin to allow '
+            'it), then press Connect again.</p></div>')
+    body.append(_back())
+    page = chrome("/settings", title="Your AI account",
+                  lede="Sign in with ChatGPT — a one-time code, no key.", body="".join(body))
+    if refresh and "</head>" in page:
+        page = page.replace("</head>", refresh + "</head>", 1)
+    return page, 200
 
 
 def _key_form(e: dict) -> str:

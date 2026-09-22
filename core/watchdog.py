@@ -396,6 +396,13 @@ def probe_backend() -> tuple[str, bool, str]:
     backend = (get_config().get("brain") or {}).get("backend", "api")
     if backend == "claude_code":
         return ("claude_code", *_probe_claude_code())
+    from core import brain as _brain
+    if _brain._backend() == "codex":
+        # NO SPEND: `codex login status` answers from the CLI's own file. A box signed in to
+        # ChatGPT that is probed for an Anthropic key would page a permanent false FAIL.
+        from core import codex_login
+        ok = codex_login.logged_in()
+        return ("codex", ok, "signed in to ChatGPT" if ok else "not signed in to ChatGPT")
     # THE KEY THE BRAIN ACTUALLY USES, NOT THE ONE IN SETTINGS. `core.brain` drafts with
     # `box_secrets.anthropic_key()` — the environment first, then the key a buyer pastes on the
     # set-up screen. This probe used to read `settings.anthropic_api_key` alone, so on every

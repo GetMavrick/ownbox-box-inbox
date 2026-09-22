@@ -25,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import pathlib
 import subprocess
 import threading
 import time
@@ -195,10 +196,16 @@ def _backend() -> str:
     the same honest "not set up yet" it has always given, never a silent failure.
     """
     configured = (get_config().get("brain") or {}).get("backend", "api")
-    if configured == "claude_code":
-        return "claude_code"
+    if configured in ("claude_code", "codex"):
+        return configured
     from core import box_secrets
-    return "claude_code" if box_secrets.claude_oauth_token() else "api"
+    if box_secrets.claude_oauth_token():
+        return "claude_code"
+    # SIGN IN WITH CHATGPT: connecting one IS choosing it, exactly as with Claude. A Claude token
+    # still wins when both exist, because the owner ruled Claude the default (2026-09-22).
+    if box_secrets.codex_connected():
+        return "codex"
+    return "api"
 
 
 def _cli_model(model_id: str) -> str:
@@ -245,6 +252,7 @@ _CLI_TRANSIENT_RE = re.compile(r"connection|network|timed?.?out|overloaded"
 #
 # The wait is logged when it is real, because contention that nobody can see is exactly how
 # this went unexplained for a night.
+_CLI_AUTH_RE = re.compile(r"\b401\b|unauthori[sz]ed|not logged in|missing bearer", re.I)
 _CLI_LOCK = threading.Lock()
 _CLI_WAIT_LOG_S = 5.0
 # How long a caller queues before it gives the tick back instead. Long enough to wait out a
@@ -324,6 +332,90 @@ def _run_claude(cmd: list[str], *, timeout: float) -> tuple[int, str, str]:
     finally:
         _CLI_LOCK.release()
     return proc.returncode, proc.stdout or "", proc.stderr or ""
+
+
+def _think_codex(task: str, prompt: str, *, system, cached_context, job_id,
+                 timeout: float | None) -> str:
+    """One reasoning call through the buyer's ChatGPT subscription (Codex CLI, `codex exec`).
+
+    MEASURED ON codex-cli 0.155.1 (2026-09-22): the final message goes to stdout and nothing
+    else does; progress goes to stderr; an unsigned box fails rc=1 with "401 Unauthorized:
+    Missing bearer". The prompt is read from stdin with `-`.
+
+    NO TOOLS, NO PROJECT, NO SHELL. `-s read-only` is the sandbox; `mcp_servers={}` empties the
+    tool list; `-C <empty dir>` gives it nothing to read; `--ignore-user-config --ignore-rules
+    --ephemeral` keep the box's own files and any config out of it. Prompts here carry text from
+    strangers (transcripts); a prompt injection must find nothing to grab, exactly as `--tools ""`
+    guarantees on the Claude path.
+
+    NO SYSTEM FLAG on this CLI, so the system text goes FIRST on stdin, above the prompt. The
+    drafter already frames the untrusted part of its prompt as a quoted transcript, which is what
+    keeps that ordering honest.
+
+    NO MODEL BY DEFAULT. The CLI picks the account's default; `brain.codex_model` in config sets
+    one explicitly. Inventing an OpenAI model name here would be a guess at a vendor's catalogue.
+    """
+    bin_ = shutil.which("codex")
+    if not bin_:
+        raise RuntimeError("this box drafts on ChatGPT but the `codex` CLI is not installed — "
+                           "run scripts/install_codex.sh")
+    from core import box_secrets
+    home = pathlib.Path(box_secrets.codex_home())
+    workdir = home / "empty"
+    try:
+        workdir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError:
+        pass
+    sys_text = "\n\n".join(p for p in (cached_context, system) if p)
+    full = (sys_text + "\n\n" if sys_text else "") + prompt
+    cmd = [bin_, "exec", "--skip-git-repo-check", "-C", str(workdir), "--ephemeral",
+           "--ignore-user-config", "--ignore-rules", "-s", "read-only", "--color", "never",
+           "-c", "mcp_servers={}"]
+    chosen = str((get_config().get("brain") or {}).get("codex_model") or "").strip()
+    if chosen:
+        cmd += ["-m", chosen]
+    cmd.append("-")
+    env = dict(os.environ)
+    env["CODEX_HOME"] = str(home)
+    env["NO_COLOR"] = "1"
+    env.pop("OPENAI_API_KEY", None)      # the subscription the person signed in with, and only that
+    env.pop("CODEX_API_KEY", None)
+    if not _CLI_LOCK.acquire(timeout=_CLI_WAIT_MAX_S):
+        raise RetryableError(f"codex busy for {_CLI_WAIT_MAX_S:.0f}s ({task})")
+    try:
+        proc = subprocess.run(cmd, input=full, capture_output=True, text=True,
+                              timeout=(timeout or 120.0) + 30.0, env=env)
+    except subprocess.TimeoutExpired as e:
+        tail = e.stderr or b""
+        if isinstance(tail, bytes):
+            tail = tail.decode("utf-8", "replace")
+        raise RetryableError(f"codex timed out ({task})"
+                             + (f" — said: {tail.strip()[-300:]}" if tail else "")) from e
+    finally:
+        _CLI_LOCK.release()
+    out, err = proc.stdout or "", proc.stderr or ""
+    if proc.returncode != 0 or not out.strip():
+        blob = (err or out)[-600:]
+        if _CLI_AUTH_RE.search(blob):
+            try:
+                box_secrets.note_codex_status("needs_reauth", blob[:200])
+            except Exception as e:                       # noqa: BLE001
+                log.warning("brain.codex_status_unwritable", error=type(e).__name__)
+            raise RuntimeError(f"codex not signed in (rc={proc.returncode}): {blob[:200]}")
+        if _CLI_LIMIT_RE.search(blob):
+            raise BudgetExceeded(f"chatgpt subscription limit: {blob[:200]}")
+        if _CLI_TRANSIENT_RE.search(blob):
+            raise RetryableError(f"codex transient (rc={proc.returncode}): {blob[:200]}")
+        raise RuntimeError(f"codex failed (rc={proc.returncode}): {blob[:300]}")
+    text = out.strip()
+    try:
+        state.record_spend(job_id=job_id, task=task, model=f"codex:{chosen or 'default'}",
+                           cost_usd=0.0, input_tokens=0, output_tokens=0,
+                           cache_write_tokens=0, cache_read_tokens=0)
+    except Exception as e:                               # noqa: BLE001
+        log.error("think.SPEND_UNRECORDED", task=task, model="codex", cost_usd=0.0,
+                  error=str(e)[:200])
+    return text
 
 
 def _think_claude_code(task: str, model: str, prompt: str, *, system, cached_context,
@@ -454,6 +546,14 @@ def can_think() -> tuple[bool, str]:
     """
     import shutil
     be = _backend()
+    if be == "codex":
+        if not shutil.which("codex"):
+            return False, "this box drafts on ChatGPT but the `codex` CLI is not on PATH"
+        from core import box_secrets
+        if not box_secrets.codex_connected():
+            return False, ("this box thinks on a ChatGPT subscription but nobody is signed in — "
+                           "use Sign in to ChatGPT in Set up")
+        return True, "codex"
     if be == "claude_code":
         if not shutil.which("claude"):
             return False, "brain.backend=claude_code but the `claude` CLI is not on PATH"
@@ -495,6 +595,9 @@ def think(task: str, prompt: str, *, system: str | None = None,
     """
     cached_context = _with_knowledge(cached_context, isolated)
     model = _model_for(task)
+    if _backend() == "codex":
+        return _think_codex(task, prompt, system=system, cached_context=cached_context,
+                            job_id=job_id, timeout=timeout)
     if _backend() == "claude_code":
         # Subscription path: no USD pre-check (marginal cost is zero) — the
         # subscription's own usage window is the guard, surfacing as BudgetExceeded.

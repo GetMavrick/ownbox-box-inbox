@@ -105,6 +105,45 @@ _URL_LINK = re.compile(r"\x1b\]8;[^;]*;(https://claude\.com/[^\x07\x1b]+/authori
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[=>78]|\x1b\][^\x1b]*\x1b\\")
 # THE TOKEN, WHICH IS THE ONLY THING WORTH READING OUT OF THE SUCCESS OUTPUT.
 _TOKEN = re.compile(r"sk-ant-oat[A-Za-z0-9_\-]{20,}")
+_TOKEN_START = re.compile(r"sk-ant-oat[A-Za-z0-9_\-]*")
+_TOKEN_LINE = re.compile(r"[A-Za-z0-9_\-]+")
+
+
+def find_token(text: str) -> str:
+    """The token the CLI printed, whole, and NOTHING that came after it.
+
+    MEASURED 2026-09-22 ON THE OWNER'S BOX: the stored token was 130 characters and ended in
+    "Storethistokensecurely". The CLI prints the 108-character token on an 80-column pty, so it
+    wraps once, and then prints a blank line and the sentence "Store this token securely." The
+    old capture squashed ALL whitespace first and then matched greedily, so the wrap was healed —
+    and the sentence was glued on. Every draft on that box then failed with "401 OAuth access
+    token is invalid", from a sign-in the screen had called done.
+
+    A WRAP IS A LINE BREAK WITH TOKEN CHARACTERS ON BOTH SIDES AND NOTHING ELSE ON THE NEXT LINE.
+    So: take the run that starts at the prefix; join the next line ONLY if it is entirely token
+    characters (a wrapped tail never contains a space; a sentence always does), and stop at a
+    blank line, a space, or any other character. The length is not hard-coded — that is the
+    vendor's to change — but a sane ceiling stops a runaway join.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "")
+    m = _TOKEN_START.search(text)
+    if not m:
+        return ""
+    tok, pos = m.group(0), m.end()
+    while pos < len(text) and text[pos] == "\n":
+        rest = text[pos + 1:]
+        n = _TOKEN_LINE.match(rest)
+        if not n:
+            break                                    # blank line or a non-token character
+        end = n.end()
+        if end < len(rest) and rest[end] not in ("\n",):
+            break                                    # the line goes on with a space or more: prose
+        if len(tok) + end > 256:
+            break                                    # no token is this long; stop a runaway join
+        tok += n.group(0)
+        pos += 1 + end
+    return tok if len(tok) >= 30 else ""
+
 
 def redact(text: str) -> str:
     """Everything secret-shaped, replaced — before a transcript is written or read.
@@ -691,10 +730,11 @@ def _serve(d: pathlib.Path) -> int:
         text = _clean(buf)
         # THE TOKEN IS SEARCHED FOR IN THE WHOLE TRANSCRIPT, not only the newest chunk: it is
         # printed across a wrapped line, and a chunk boundary can land in the middle of it.
-        tok = _TOKEN.search(re.sub(r"\s+", "", text))
-        if tok:
+        # WHOLE, AND NOTHING MORE — see find_token for the night this line cost.
+        found = find_token(text)
+        if found:
             user = _read(d, "user") or None
-            box_secrets.put_claude_oauth(tok.group(0), consented=True, user_id=user)
+            box_secrets.put_claude_oauth(found, consented=True, user_id=user)
             keep_transcript()
             _write(d, "status", "done")
             if proc.poll() is None:

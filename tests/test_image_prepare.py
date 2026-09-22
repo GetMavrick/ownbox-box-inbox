@@ -54,7 +54,11 @@ CI_KEY, CI_PUB = _key("ci")
 ROGUE_KEY, _ = _key("rogue")
 TRUST = f'ci@ownbox namespaces="git" {CI_PUB}\n'
 RELEASE = "release/2026.09.20.1"
-BOX_ORIGIN = "git@github.com:GetMavrick/ownbox-box-inbox.git"
+# THE PUBLIC HTTPS URL, because that is the only door that opens. An image cut with the ssh
+# origin ships a box needing a per-box key nobody registers — measured in the field 2026-09-22,
+# where it meant no box we had sold could take an update at all.
+BOX_ORIGIN = "https://github.com/GetMavrick/ownbox-box-inbox.git"
+SSH_ORIGIN = "git@github.com:GetMavrick/ownbox-box-inbox.git"
 
 
 def g(d: pathlib.Path, *args: str, key: pathlib.Path = CI_KEY) -> subprocess.CompletedProcess:
@@ -96,6 +100,25 @@ print("\n— a clean tree is an image —")
 base = clean_tree()
 r = verify(base)
 ok("a tree with a venv and a stamp passes", r.returncode == 0, r.stdout + r.stderr)
+
+print("\n— an image may not ship the door that needs a key nobody registers —")
+_ssh = clean_tree()
+subprocess.run(["git", "-C", str(_ssh), "remote", "set-url", "origin", SSH_ORIGIN],
+               env=GENV, check=True)
+r = verify(_ssh)
+ok("an ssh origin is refused", r.returncode != 0 and "nobody registers" in r.stdout, r.stdout[-300:])
+ok("...and the refusal says what to use instead", "https url" in r.stdout, r.stdout[-300:])
+r = subprocess.run(["bash", str(SCRIPT), "--verify", str(_ssh)], capture_output=True, text=True,
+                   env={**GENV, "IMAGE_ALLOW_SSH_ORIGIN": "1"})
+ok("...unless this deployment says it really holds a registered key", r.returncode == 0, r.stdout[-300:])
+
+print("\n— and prepare normalises it, so nobody has to remember —")
+_src = (ROOT / "scripts" / "image_prepare.sh").read_text()
+ok("prepare rewrites an ssh box origin to the https url for the SAME repository",
+   'HTTPS="https://github.com/${ORIGIN#git@github.com:}"' in _src)
+ok("...only after proving it answers with no credential",
+   'git ls-remote --tags "$HTTPS"' in _src and "GIT_TERMINAL_PROMPT=0" in _src)
+ok("...and refuses to cut the image when it does not", "cannot update" in _src)
 
 print("\n— the SDK baked into the image is the pinned one, checked HERE and not at a customer's first boot —")
 

@@ -191,6 +191,7 @@ bash scripts/install_litestream.sh || true
 # baked image this finds the binary and does nothing. `|| true` because a box that cannot reach
 # claude.ai must still finish booting — it simply cannot draft until the binary arrives.
 bash scripts/install_claude_code.sh || true
+bash scripts/install_codex.sh || true
 
 echo ""
 echo "== bootstrap complete — final gate =="

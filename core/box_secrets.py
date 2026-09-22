@@ -49,6 +49,11 @@ CLAUDE_OAUTH = "claude_code_oauth_token"
 CLAUDE_OAUTH_CONSENT = "claude_code_oauth_consent"
 CLAUDE_OAUTH_STATUS = "claude_code_oauth_status"
 CLAUDE_OAUTH_DETAIL = "claude_code_oauth_detail"
+# SIGN IN WITH CHATGPT. There is no token row: the credential is the Codex CLI's own auth.json
+# under CODEX_HOME, written by `codex login --device-auth` and read by `codex exec`. The box
+# keeps only a status beside it, the way it keeps one beside the mailbox and Zernio.
+CODEX_STATUS = "codex_login_status"
+CODEX_DETAIL = "codex_login_detail"
 # Anthropic's own terms, linked on the set-up screen so the choice is made with them in front of
 # the person making it rather than described second-hand by us.
 ANTHROPIC_TERMS_URL = "https://www.anthropic.com/legal/consumer-terms"
@@ -541,6 +546,45 @@ def oauth_consent_record() -> str:
     return get(CLAUDE_OAUTH_CONSENT)
 
 
+def codex_home() -> str:
+    """Where the Codex CLI keeps the buyer's ChatGPT sign-in. NEVER under /tmp: the CLI refuses to
+    place helpers under a temporary directory and warns on every run (measured, 0.155.1)."""
+    import os
+    return (os.environ.get("AIOS_CODEX_HOME") or "/var/lib/aios/codex").strip()
+
+
+def codex_status() -> str:
+    """The recorded verdict on the ChatGPT sign-in, or "" when nobody has signed in."""
+    import pathlib
+    st = get(CODEX_STATUS)
+    if not st:
+        return ""
+    if not (pathlib.Path(codex_home()) / "auth.json").is_file():
+        return ""                      # the CLI's file is gone: whatever we recorded is history
+    return st
+
+
+def codex_connected() -> bool:
+    """True when the box can draft on a ChatGPT subscription right now."""
+    return codex_status() in ("connected", "saved")
+
+
+def note_codex_status(status: str, detail: str = "", *, user_id: str | None = None) -> None:
+    """What the CLI last said about the ChatGPT sign-in. Same three verdicts as Anthropic's."""
+    if status not in ("connected", "needs_reauth", "payment_required"):
+        raise ValueError(f"unknown codex status {status!r}")
+    put(CODEX_STATUS, status, user_id=user_id)
+    if detail and detail.strip():
+        put(CODEX_DETAIL, detail[:300], user_id=user_id)
+    else:
+        clear(CODEX_DETAIL, user_id=user_id)
+
+
+def clear_codex(*, user_id: str | None = None) -> None:
+    clear(CODEX_STATUS, user_id=user_id)
+    clear(CODEX_DETAIL, user_id=user_id)
+
+
 def note_anthropic_status(status: str, detail: str = "", *, user_id: str | None = None) -> None:
     """The drafter says why Anthropic turned it away, so a screen can say something actionable.
 
@@ -600,6 +644,13 @@ def anthropic_state() -> dict:
     # THAT IS THE WORST SHAPE A BUG CAN HAVE ON THIS SCREEN: the product works and tells its owner
     # it does not. He pastes the token he was asked for, nothing on screen changes, and the only
     # sane conclusion is that it failed. He would have filmed exactly that.
+    # A CHATGPT SIGN-IN IS AN AI ACCOUNT TOO, and this is the one reader every screen asks, so it
+    # answers for all of them. The Claude token still wins in `brain._backend()` when both exist;
+    # here the question is only "can this box draft", and the answer is the same.
+    cst = codex_status()
+    if cst and not claude_oauth_token() and not anthropic_key():
+        return {"status": "connected" if cst == "saved" else cst, "user": None,
+                "detail": get(CODEX_DETAIL), "provider": "chatgpt"}
     if claude_oauth_token():
         st = get(CLAUDE_OAUTH_STATUS)
         # `saved` is this store's honest word for "not tested yet" — see `put_claude_oauth`. The
@@ -743,8 +794,8 @@ SETUP_STEPS = (
 DRAFTING_MODELS = (
     {"id": "claude", "name": "Claude", "available": True,
      "note": "Sign in with a Pro or Max subscription, or paste an Anthropic key."},
-    {"id": "openai", "name": "ChatGPT", "available": False,
-     "note": "Coming soon — the box cannot draft on OpenAI yet."},
+    {"id": "openai", "name": "ChatGPT", "available": True,
+     "note": "Sign in with your ChatGPT subscription — a one-time code, no key."},
     {"id": "gemini", "name": "Gemini", "available": False,
      "note": "Coming soon — the box cannot draft on Gemini yet."},
     {"id": "grok", "name": "Grok", "available": False,
@@ -858,6 +909,12 @@ _AI_STEP = {
     # runs that login itself now and hands them a link (`core/claude_login.py`).
     "action_href": "/settings/ai",
     "action_label": "Sign in to Claude",
+    # THE SECOND DOOR, SAME SHAPE, drawn by /settings/ai under the first. Owner, 2026-09-21: "We
+    # need the Claude login. And then we're gonna need the ChatGPT login right behind it."
+    "alt_action_href": "/settings/chatgpt",
+    "alt_action_label": "Sign in to ChatGPT",
+    "alt_action_why": "Have a ChatGPT subscription instead? Sign in with a one-time code on your "
+                      "phone or computer — no key, and the box never sees your password.",
     "action_why": "Have a Claude Pro or Max subscription? Sign in and this box drafts on it — no "
                   "key to find, nothing to install. You sign in at claude.com; the box never sees "
                   "your password.",

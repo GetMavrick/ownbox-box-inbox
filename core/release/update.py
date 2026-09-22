@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -46,10 +47,45 @@ class Decision:
     refused: list[dict] = field(default_factory=list)
     tamper: list[str] = field(default_factory=list)
     detail: str = ""
+    served: str = ""                    # the source the tags actually came from (see https_mirror_of)
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    # NEVER PROMPT. Over https git asks for a username when a repository is private or missing, and
+    # this runs from a timer with nobody to answer: the fetch would sit until the unit timeout with
+    # nothing in the log. With prompts off it fails in a second with the real reason.
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env)
+
+
+# The ssh form every box built from an image carries, and the public https form of the SAME
+# repository. Only these two shapes — a mirror is derived, never configured, so nothing can point
+# a box at somebody else's tags by editing a file on it.
+_SSH_BOX = re.compile(r"^git@github\.com:(GetMavrick/ownbox-box-[a-z0-9-]+?)(?:\.git)?$")
+
+
+def _url_of(repo: Path, source: str) -> str:
+    """`source` as a URL: a git remote NAME resolved to its url, anything else unchanged."""
+    r = _git(repo, "remote", "get-url", source)
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else source
+
+
+def https_mirror_of(source: str) -> str:
+    """The public https URL for the SAME box repository, or "" when `source` is not an ssh box repo.
+
+    WHY A BOX NEEDS THIS. Every box sold before 2026-09-22 was built from an image whose origin is
+    the ssh URL, and the per-box key that origin needs was never registered on the repository —
+    measured on a live box that day: every fetch was "Permission denied (publickey)", so the
+    twice-daily updater had never installed anything on any box in the field, and a security fix
+    could not have reached one. Those boxes cannot be edited one by one; they have to heal
+    themselves on the next tick.
+
+    WHY IT IS SAFE. The transport carries no trust here and never did: `verify_release` checks the
+    signed tag against the trust file the box already holds, whichever way the bytes arrived. What
+    changes is only which door the same tags come through.
+    """
+    m = _SSH_BOX.match(str(source or "").strip())
+    return f"https://github.com/{m.group(1)}.git" if m else ""
 
 
 RELEASE_FILE = "/var/lib/aios/release"   # written by scripts/box_update.sh after each verified install
@@ -92,11 +128,26 @@ def choose(repo: str | Path, source: str, *, log_path: str | Path | None = None,
 
     before = {t: _git(repo, "rev-parse", f"refs/tags/{t}").stdout.strip() for t in _tags(repo)}
     fetched = _git(repo, "fetch", "--no-tags", source, REFSPEC)
-    tamper = [line.strip() for line in (fetched.stdout + fetched.stderr).splitlines()
+    served, output = source, fetched.stdout + fetched.stderr
+    # THE SAME REPOSITORY THROUGH THE OTHER DOOR, and only after the configured one has failed. A
+    # box whose key works never takes this path and nothing about it changes.
+    if fetched.returncode != 0:
+        # A REMOTE NAME FIRST. `scripts/box_update.sh` passes the literal "origin" unless .env names
+        # a source, so deriving straight from `source` would find no mirror on the very boxes this
+        # exists for — green, and doing nothing. Measured on the live box before it was fixed.
+        mirror = https_mirror_of(_url_of(repo, source))
+        if mirror:
+            retry = _git(repo, "fetch", "--no-tags", mirror, REFSPEC)
+            output += retry.stdout + retry.stderr
+            if retry.returncode == 0:
+                fetched, served = retry, mirror
+    # TAMPER IS READ FROM BOTH ATTEMPTS. A source that tried to move a tag we hold has said
+    # something about itself, and a second fetch succeeding must not wash that away.
+    tamper = [line.strip() for line in output.splitlines()
               if "would clobber" in line or "[rejected]" in line]
     if fetched.returncode != 0 and not tamper:
         pinned.unlink(missing_ok=True)
-        return _log(Decision("cannot_run", current=current,
+        return _log(Decision("cannot_run", current=current, served=served,
                              detail=f"fetch failed: {fetched.stderr.strip()[:200]}"), log_path, source)
     moved = [t for t, sha in before.items() if _git(repo, "rev-parse", f"refs/tags/{t}").stdout.strip() != sha]
     tamper += [f"local tag {t} changed during fetch" for t in moved]
@@ -106,7 +157,7 @@ def choose(repo: str | Path, source: str, *, log_path: str | Path | None = None,
                         key=version_of, reverse=True)
     if not candidates:
         pinned.unlink(missing_ok=True)
-        return _log(Decision("up_to_date", current=current, tamper=tamper), log_path, source)
+        return _log(Decision("up_to_date", current=current, tamper=tamper, served=served), log_path, source)
 
     refused = []
     for tag in candidates:
@@ -114,10 +165,11 @@ def choose(repo: str | Path, source: str, *, log_path: str | Path | None = None,
         if v.ok:
             pinned.unlink(missing_ok=True)
             return _log(Decision("selected", current=current, selected=tag, principal=v.principal,
-                                 refused=refused, tamper=tamper), log_path, source)
+                                 refused=refused, tamper=tamper, served=served), log_path, source)
         refused.append({"tag": tag, "reason": v.reason, "detail": v.detail[:160]})
     pinned.unlink(missing_ok=True)
-    return _log(Decision("all_refused", current=current, refused=refused, tamper=tamper), log_path, source)
+    return _log(Decision("all_refused", current=current, refused=refused, tamper=tamper,
+                         served=served), log_path, source)
 
 
 def _tags(repo: Path) -> list[str]:

@@ -251,7 +251,10 @@ import pathlib as _pl  # noqa: E402
 
 _brain_path = _pl.Path(__file__).resolve().parents[1] / "core/brain.py"
 _brain = _brain_path.read_text().lower() if _brain_path.is_file() else ""
-_EVIDENCE = {"claude": "anthropic", "openai": "openai", "gemini": "genai", "grok": "xai"}
+# The evidence is the thing that DRAFTS, not a string that could be in the file for any reason:
+# "openai" appears in brain.py merely because OPENAI_API_KEY is scrubbed from a subprocess, so the
+# ChatGPT path is evidenced by `codex` — the CLI it actually reasons through.
+_EVIDENCE = {"claude": "anthropic", "openai": "codex", "gemini": "genai", "grok": "xai"}
 from core import box_secrets as _bsx  # noqa: E402
 for _m in _bsx.DRAFTING_MODELS:
     if _m.get("available"):
@@ -262,8 +265,13 @@ for _m in _bsx.DRAFTING_MODELS:
     else:
         ok(f"{_m['id']} is offered but greyed out, and says so",
            "coming soon" in str(_m.get("note", "")).lower(), str(_m.get("note")))
-ok("exactly one model is live today", sum(1 for m in _bsx.DRAFTING_MODELS
-                                          if m.get("available")) == 1,
+# AT LEAST ONE, NOT EXACTLY ONE. This counted to 1 while Claude was the only login built; that
+# was a snapshot of a Monday, not a rule, and it went red the day ChatGPT shipped (2026-09-22)
+# for a change that was correct. What must never be true is a box with NOTHING live — a screen
+# offering four greyed-out options and no way to draft — and the loop above is what keeps every
+# live one honest.
+ok("at least one model is live, or a buyer has no way to draft at all",
+   any(m.get("available") for m in _bsx.DRAFTING_MODELS),
    str([m["id"] for m in _bsx.DRAFTING_MODELS if m.get("available")]))
 ok("all four launch assistants can connect over MCP",
    {c["id"] for c in _bsx.AGENT_CLIENTS} == {"claude", "chatgpt", "gemini", "grok"},
