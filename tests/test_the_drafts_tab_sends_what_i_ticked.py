@@ -163,7 +163,11 @@ _real_send = _reply.send_reply
 
 def fake_send(*, space, zcid, text, user_id, nonce=None, **kw):
     SENT.append({"zcid": zcid, "text": text, "user_id": user_id, "nonce": nonce})
-    return {"status": "sent", "message_id": f"out-{len(SENT)}"}
+    # "ok" IS WHAT send_reply RETURNS. This fake said "sent", the handler checked for
+    # "sent", and the two agreed with each other while disagreeing with the product:
+    # every real send was reported to the owner as "did not go". A fake that invents a
+    # contract proves nothing but itself.
+    return {"status": "ok", "message_id": f"out-{len(SENT)}"}
 
 
 voice_reply_mod = sys.modules["marketing.customer_voice.inbox.reply"]
@@ -208,7 +212,7 @@ def flaky(*, space, zcid, text, user_id, nonce=None, **kw):
     if zcid == "c-boom":
         raise RuntimeError("vendor said no")
     SENT.append({"zcid": zcid})
-    return {"status": "sent"}
+    return {"status": "ok"}
 
 
 voice_reply_mod.send_reply = flaky

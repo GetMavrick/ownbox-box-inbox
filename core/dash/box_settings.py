@@ -127,7 +127,9 @@ def box_ai():
         action = str(request.form.get("do") or "")
         try:
             if action == "start":
-                url = claude_login.start()
+                # THE TICK TRAVELS WITH THE LOGIN IT BELONGS TO. See `claude_login.start`.
+                url = claude_login.start(consented=bool(request.form.get(
+                    str(_step("anthropic").get("consent_field") or "subscription_consent"))))
             elif action == "code":
                 claude_login.finish(str(request.form.get("code") or ""), user_id=who.get("id"))
                 return redirect("/settings", code=303)
@@ -162,11 +164,36 @@ def box_ai():
             url = ""
 
     e = _step("anthropic")
+    picked = _picked(e)
     body = ['<div class="card"><p>' + _esc(e.get("why") or
             "This is what writes your replies, on your own account and your own bill.")
-            + '</p></div>']
+            + '</p></div>', _picker(e, picked)]
     if note:
         body.append(f'<div class="card"><p>{_esc(note)}</p></div>')
+
+    # A MODEL THIS BOX CANNOT DRAFT WITH GETS THE WHOLE SCREEN TO ITSELF AND NO FIELD ON IT.
+    # Owner, 2026-09-22: *"the page is gonna have to be completely different according to which
+    # drop-down is chosen."* It is — and the half that must not vary is that nothing here will
+    # take a credential it cannot use.
+    if not picked.get("available"):
+        body.append(_preview(picked, _models(e)))
+        body.append(_back())
+        return chrome("/settings", title="Your AI account",
+                      lede=f"What {picked.get('name')} would look like on this box.",
+                      body="".join(body)), 200
+
+    # A LIVE MODEL CONNECTED SOMEWHERE ELSE GETS ITS OWN DOOR, AND NONE OF CLAUDE'S CARDS.
+    # This is the half of the owner's ruling that was missing while ChatGPT was still greyed out:
+    # picking it changed the heading and then drew the Claude sign-in underneath, which is the
+    # screen lying about what the button in front of you does. Every card below this line is
+    # Anthropic's — the link, the code field, the sk-ant… form — so a model that connects
+    # elsewhere returns before any of them is built.
+    if (picked.get("connect_href") or "/settings/ai") != "/settings/ai":
+        body.append(_door(picked))
+        body.append(_back())
+        return chrome("/settings", title="Your AI account",
+                      lede=f"Sign in with {picked.get('name')}.",
+                      body="".join(body)), 200
 
     if url:
         body.append(
@@ -183,7 +210,7 @@ def box_ai():
             '<button type="submit">Finish</button></form>'
             '<form method="post" action="/settings/ai" style="margin-top:10px">'
             '<input type="hidden" name="do" value="cancel">'
-            '<button type="submit">Cancel</button></form>'
+            '<button class="ghost" type="submit">Cancel</button></form>'
             '</div>')
     else:
         # THE LINK IS NOT DRAWN BEFORE IT EXISTS. Starting the login takes a few seconds and can
@@ -194,6 +221,10 @@ def box_ai():
             f'<p>{_esc(e.get("action_why") or "")}</p>'
             '<form method="post" action="/settings/ai">'
             '<input type="hidden" name="do" value="start">'
+            # WHERE THE OWNER PUT IT, AND WHERE IT WAS ALWAYS ABOUT. The sentence says "use my
+            # SUBSCRIPTION with this box"; it sat in the paste-a-key card, which is the one place
+            # on this screen a subscription is not what you are connecting.
+            + _consent(e) +
             '<button type="submit">Connect</button></form>'
             '<p class="quiet" style="margin-top:12px">This box never sees your password. You sign '
             'in at claude.com and paste back a short code.</p></div>')
@@ -294,6 +325,144 @@ def box_chatgpt():
     return page, 200
 
 
+def _models(e: dict) -> tuple:
+    """The four, from the contract. `()` on a box carrying an older one, and every caller copes."""
+    return tuple((e.get("choose") or {}).get("options") or ())
+
+
+def _picked(e: dict) -> dict:
+    """WHICH MODEL THIS SCREEN IS ABOUT. `?model=` if it names one of ours, else the live one.
+
+    A QUERY STRING IS AN UNTRUSTED STRING and it is matched against the contract rather than
+    interpolated: `?model=<script>` selects nothing and the page draws Claude.
+    """
+    want = str(request.args.get("model") or "")
+    opts = _models(e)
+    return (next((o for o in opts if o.get("id") == want), None)
+            or next((o for o in opts if o.get("available")), None)
+            or (opts[0] if opts else {}))
+
+
+def _picker(e: dict, picked: dict) -> str:
+    """The dropdown the owner asked to have back.
+
+    IT WAS NEVER DELETED — it was declared and then orphaned. `_AI_STEP["choose"]` has carried all
+    four models the whole time, and the inbox's wizard drew it; when the step moved to core
+    (#1418) it arrived at a screen with no renderer for a picker, so it silently stopped being on
+    anybody's screen. Owner, 2026-09-22: *"he removed this drop-down… We need to put that back."*
+
+    ALL FOUR ARE SELECTABLE HERE, WHICH IS THE DIFFERENCE FROM THE MACHINE'S COPY. The machine
+    greyed the unavailable ones out, because there the picker sat directly above a field that
+    would have taken a key. Here choosing one changes the page: a model the box can draft with
+    gets its sign-in, and one it cannot gets an explanation and nothing to fill in. So selecting
+    it costs a buyer nothing and answers the question they actually have — what is this going to
+    involve. The refusal to take a key the box cannot draft with lives in the panel, not in a
+    disabled attribute.
+    """
+    opts = _models(e)
+    if not opts:
+        return ""
+    choice = e.get("choose") or {}
+    out = []
+    for o in opts:
+        sel = " selected" if o.get("id") == picked.get("id") else ""
+        tail = "" if o.get("available") else " — not yet"
+        out.append(f'<option value="{_esc(o.get("id"))}"{sel}>'
+                   f'{_esc(o.get("name"))}{tail}</option>')
+    return ('<div class="card"><form method="get" action="/settings/ai">'
+            f'<label for="ai-model">{_esc(choice.get("label") or "")}</label>'
+            f'<select id="ai-model" name="model" onchange="this.form.submit()">'
+            + "".join(out) + '</select>'
+            # NO SCRIPT, NO DEAD END. `onchange` is the nicety; the button is what makes the
+            # control work for somebody whose browser ran none of it.
+            '<noscript><button type="submit">Show</button></noscript>'
+            f'<p class="quiet" style="margin:10px 0 0">{_esc(choice.get("note") or "")}</p>'
+            '</form></div>')
+
+
+def _consent(e: dict) -> str:
+    """The tick, wherever the card that needs it puts it. Never `required` — see `box_secrets`."""
+    if not e.get("consent_field"):
+        return ""
+    return (f'<label class="consent"><input type="checkbox" '
+            f'name="{_esc(e.get("consent_field"))}">'
+            f'<span>{_esc(e.get("consent_label"))}</span></label>')
+
+
+def _door(m: dict) -> str:
+    """A LIVE MODEL WHOSE SIGN-IN LIVES ON ANOTHER SCREEN — the same three steps, then one button.
+
+    THE BUTTON DOES THE THING, IT DOES NOT NAVIGATE TO IT. It posts straight to that screen's own
+    `do=start`, so pressing Connect here starts the sign-in and lands on the page showing the link
+    and the code. A link that merely arrives at another Connect button asks a buyer to press the
+    same word twice, which reads like the first press failed.
+    """
+    name = _esc(m.get("name"))
+    href = _esc(m.get("connect_href"))
+    steps = "".join(f'<div class="row"><span class="n">{i}</span>'
+                    f'<span>{_esc(s)}</span></div>'
+                    for i, s in enumerate(m.get("steps") or (), 1))
+    return ('<div class="card">'
+            f'<h2>Use your {name} subscription</h2>'
+            f'<p>{_esc(m.get("lede") or "")}</p>'
+            + (f'<p class="quiet">What it costs: {_esc(m.get("billing"))}</p>'
+               if m.get("billing") else "")
+            + steps
+            + f'<form method="post" action="{href}">'
+            '<input type="hidden" name="do" value="start">'
+            f'<button type="submit">Connect {name}</button></form>'
+            + (f'<p class="quiet" style="margin-top:12px">{_esc(m.get("gotcha"))}</p>'
+               if m.get("gotcha") else "")
+            + '</div>')
+
+
+def _preview(m: dict, opts: tuple = ()) -> str:
+    """WHAT CONNECTING THIS ONE WILL LOOK LIKE — and, plainly, that it does not work yet.
+
+    THIS PANEL EXISTS BECAUSE THE FOUR ERRANDS ARE GENUINELY DIFFERENT, which is the thing a
+    logo-and-a-key-field screen hides. Only Claude can be driven by the consumer subscription
+    somebody already pays for; ChatGPT, Gemini and Grok each need a developer account with its
+    own billing, and two of the three are a surprise to anyone holding a $20 subscription. That
+    is worth a buyer's twenty minutes and it costs us a paragraph.
+
+    THERE IS NO FIELD ON THIS PANEL AND THAT IS THE POINT. A box that accepted a key it cannot
+    draft with would be the fake feature the owner named on 2026-09-21.
+    """
+    name = _esc(m.get("name"))
+    steps = "".join(f'<div class="row"><span class="n">{i}</span>'
+                    f'<span>{_esc(t)}</span></div>'
+                    for i, t in enumerate(m.get("steps") or (), 1))
+    # WHICH ONES DO WORK, COUNTED RATHER THAN NAMED. This sentence said "Pick Claude above" and
+    # went stale the day ChatGPT went live — a buyer holding a ChatGPT subscription was told to
+    # go and find a Claude one. It now reads the same table the picker draws from, so the day a
+    # third model lands there is no copy anywhere that has to be remembered.
+    live = [str(o.get("name")) for o in (opts or ()) if o.get("available")]
+    others = (" or ".join((", ".join(live[:-1]), live[-1])) if len(live) > 1
+              else (live[0] if live else ""))
+    label, href = (m.get("key_from") or ("", ""))
+    sub = ('This is one you can drive with a subscription you already pay for.'
+           if m.get("subscription") else
+           'A consumer subscription does not cover this one — the key is a separate account.')
+    return ('<div class="card">'
+            f'<h2>What {name} would look like</h2>'
+            f'<p class="sub">{_esc(sub)}</p>'
+            f'<p>{_esc(m.get("lede") or "")}</p>'
+            + (f'<p class="quiet">What it costs: {_esc(m.get("billing"))}</p>'
+               if m.get("billing") else "")
+            + (f'<p class="quiet">Where the key comes from: '
+               f'<a href="{_esc(href)}" target="_blank" rel="noopener noreferrer">'
+               f'{_esc(label)}</a></p>' if href else "")
+            + steps
+            + '</div>'
+            '<div class="card"><h2>Not yet</h2>'
+            f'<p>This box cannot draft on {name} today, so it will not take a key for it — a key '
+            'that sits here and never writes a reply is worse than no key at all. '
+            + (f'Pick {_esc(others)} above to connect something that works now. ' if others
+               else '')
+            + f'{name} will appear here as a button the day the box can really use it.'
+            '</p></div>')
+
+
 def _key_form(e: dict) -> str:
     """The fallback for somebody who already holds a key, with the terms beside it.
 
@@ -312,10 +481,13 @@ def _key_form(e: dict) -> str:
     links = " · ".join(
         f'<a href="{_esc(url)}" target="_blank" rel="noopener noreferrer">{_esc(label)}</a>'
         for label, url in (e.get("terms_links") or ()))
-    consent = ""
-    if e.get("consent_field"):
-        consent = (f'<label style="display:block;margin:10px 0"><input type="checkbox" '
-                   f'name="{_esc(e.get("consent_field"))}"> {_esc(e.get("consent_label"))}</label>')
+    # THE TICK IS NOT HERE ANY MORE, ON THE OWNER'S INSTRUCTION, AND THE WARNING STAYS. It reads
+    # "use my SUBSCRIPTION with this box", and this is the one card on the screen where what you
+    # are connecting is not a subscription — a pasted `sk-ant-oat…` is the expert's back door and
+    # an `sk-ant-api…` key carries no such condition at all. The INFORMATION is what we owe
+    # somebody standing here, so both vendors' terms stay linked, one click away, at the moment
+    # they are deciding (owner, 2026-09-18). Nothing is refused either way, and so this path
+    # records no tick rather than inventing one.
     return ('<div class="card"><h2>Or paste a key</h2>'
             f'<p class="quiet">{_esc(e.get("terms_warning") or "")}</p>'
             + (f'<p class="quiet">{links}</p>' if links else "")
@@ -323,10 +495,11 @@ def _key_form(e: dict) -> str:
             '<input type="hidden" name="do" value="key">'
             f'<label for="ai-key">{_esc(f.get("label") or "Key")}</label>'
             f'<input id="ai-key" name="key" type="{_esc(f.get("type") or "password")}" '
-            f'autocomplete="off" placeholder="{_esc(f.get("placeholder") or "")}">'
-            + consent
+            f'autocomplete="off" spellcheck="false" '
+            f'placeholder="{_esc(f.get("placeholder") or "")}">'
             + '<button type="submit">Save</button></form>'
-            + (f'<p class="quiet">{_esc(e.get("terms_note"))}</p>' if e.get("terms_note") else "")
+            + (f'<p class="quiet" style="margin-bottom:0">{_esc(e.get("terms_note"))}</p>'
+               if e.get("terms_note") else "")
             + '</div>')
 
 
@@ -666,11 +839,11 @@ def _seat_credential(label: str, credential: str, url: str) -> str:
             f'<p class="quiet">This is the only time <b>{_esc(label)}</b>\'s key will ever be '
             'shown. The box keeps a one-way hash of it and nothing else, so if you lose it, revoke '
             'this connection and make another — there is no way to look it up.</p>'
-            f'<p style="word-break:break-all;font-family:ui-monospace,monospace">{_esc(credential)}'
+            f'<p class="addr">{_esc(credential)}'
             '</p></div>'
             '<div class="card"><p><b>Address</b> — give your assistant this and that key. It '
             'speaks MCP.</p>'
-            f'<p style="word-break:break-all;font-family:ui-monospace,monospace">{_esc(url)}</p>'
+            f'<p class="addr">{_esc(url)}</p>'
             '</div>')
 
 
@@ -749,7 +922,7 @@ def box_agent():
             # still exists for an assistant that cannot sign in; it is a fallback, not the route.
             '<div class="card"><p><b>This box\'s address</b> — paste this into whichever '
             'assistant you use. It will send you here to sign in; there is no key to copy.</p>'
-            f'<p style="word-break:break-all;font-family:ui-monospace,monospace">{_esc(root)}/mcp'
+            f'<p class="addr">{_esc(root)}/mcp'
             '</p></div>'
             # EVERY ONE OF THESE IS LIVE. They connect TO the box over MCP; the box never calls
             # them and holds nothing of theirs, which is why this list needs nothing greyed out.

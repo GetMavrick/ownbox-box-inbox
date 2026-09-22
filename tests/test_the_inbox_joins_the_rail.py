@@ -202,11 +202,29 @@ def test_the_back_arrow_says_where_it_goes():
         got = shell.rail(path)
         ok(f"{path}: back goes to the box's home", got.back == "/dashboard", got.back)
         ok(f"{path}: ...and says so", got.back_label == "Dashboard", got.back_label)
+    # THE ELEMENT CHANGED CLASS, THE ASSERTION DID NOT. It was `<a class="back">` — chrome above
+    # the list — until the owner looked at a machine's menu on his box (2026-09-22): *"Please make
+    # sure Dashboard is in the sidebar!!!! It's a back button on the fly out menu!!!"* It is a row
+    # now, `class="home"`, and `rail_html` inserts it at the head of the nav rather than above it.
+    # What this test is for is unchanged and still has its teeth: whatever the control is dressed
+    # as, its HREF and its LABEL must be the pair `shell` resolved, because a menu whose words and
+    # destination come apart is the defect the 2026-09-17 ruling above was raised about.
     html_ = home.rail_html("/inbox/inbox", who="Ownbox")
-    arrow = re.search(r'<a class="back" href="([^"]+)".*?<span class="lbl">([^<]*)</span>', html_)
-    ok("the rendered arrow carries both", bool(arrow) and arrow.group(1) == "/dashboard"
+    arrow = re.search(r'<a class="home" href="([^"]+)".*?<span class="lbl">([^<]*)</span>', html_)
+    ok("the rendered way home carries both", bool(arrow) and arrow.group(1) == "/dashboard"
        and arrow.group(2) == "Dashboard",
-       arrow.groups() if arrow else "no back arrow rendered")
+       arrow.groups() if arrow else "no Dashboard row rendered")
+    ok("...and it is a row in the list, not chrome above it",
+       'class="back"' not in html_, "a .back element is still being rendered")
+    # AND IT POINTS BACK, WHICH IS THE HALF THAT WAS SHIPPED WRONG. Making it a row was done by
+    # giving it the dashboard's own screen icon, and that quietly cost it the one thing the row
+    # has to say. Owner, 2026-09-22: *"The dashboard should have the back arrow... a smart web
+    # designer will put a back button to show that we want to go up one level in the menu."*
+    # A machine's menu is a sub-menu; the row out of it is drawn with an arrow that goes left.
+    ok("...and it carries the back arrow, because a machine's menu is one level down",
+       home._BACK_ARROW in html_ and home._HOME_ICON not in
+       html_[html_.index('class="home"'):html_.index('class="home"') + 400],
+       "the Dashboard row is not drawn with a back arrow")
 
 
 def test_the_label_cannot_come_apart_from_the_link():

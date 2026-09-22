@@ -236,7 +236,18 @@ CSS = """
      literal on a rail the dashboard never renders dark; pointed at --dim it reads in both. */
   --card:var(--surface); --rail:var(--surface); --hover:var(--bubble-in);
   --sel:var(--accent-soft); --nav-ink:var(--dim); --faint:var(--dimmer); --danger:var(--bad);
-  --av-ink:var(--accent); --av-a:var(--accent-soft); --av-b:var(--accent-soft);
+  /* THE CREST IS CORE'S COMPONENT AND WEARS CORE'S COLOUR, in both themes deliberately.
+     Pointed at this machine's accent it came out pink here and amber on the dashboard — the
+     same box, the same initial, two different badges one click apart, which is what the owner
+     was looking at (2026-09-22: *"I don't know why this one is different font and icon"*).
+     IDENTICAL IN LIGHT AND DARK, and that is not an oversight: the badge carries its own
+     ground, so the contrast that matters is the ink against the badge, not the badge against
+     the rail behind it. Values are core/dash/home.py's.
+     WRITTEN OUT IN EACH BLOCK rather than declared once on `.rail`, because this file's rule
+     is that a hex lives in a token block. test_inbox_contrast enforces BOTH halves of that —
+     every literal in one theme needs its pair in the other, and no hex outside these blocks —
+     and it caught the two earlier shapes of this change. */
+  --av-ink:#7a5a14; --av-a:#ffe4a3; --av-b:#f7c7a8;
   --drawer-flat:none; --drawer-lift:var(--lift);
   --scrim:rgba(26,29,31,.42);
   /* ── THE ORB'S GLASS ──────────────────────────────────────────────────────────────────────
@@ -281,7 +292,7 @@ CSS = """
      drawer reads as lifted over it, which is the job the shadow does in light. */
   --card:var(--surface); --rail:var(--raised); --hover:var(--raised);
   --sel:var(--accent-soft); --nav-ink:var(--dim); --faint:var(--dimmer); --danger:var(--bad);
-  --av-ink:var(--accent); --av-a:var(--accent-soft); --av-b:var(--accent-soft);
+  --av-ink:#7a5a14; --av-a:#ffe4a3; --av-b:#f7c7a8;
   --drawer-flat:none; --drawer-lift:var(--lift);
   --scrim:rgba(0,0,0,.62);
   /* The same layers, this theme's values — not an inversion of light's. The body barely moves
@@ -321,8 +332,21 @@ a{color:inherit;text-decoration:none}
 /* ── the title bar ─────────────────────────────────────────────────────────────────────────
    STICKY, NOT FIXED, and it clears the notch itself: installed as a PWA there is no browser
    chrome above it, so this bar IS the status area and must not sit under the system clock. */
-.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:10;background:var(--tab-bg);
+/* MOBILE-ONLY, THE SAME AS THE DASHBOARD'S. This bar used to show at every width, and
+   `core/dash/home.py` records that as deliberate — the shared rail block deliberately does NOT
+   carry `.topbar`'s rules "because it is display:none until the breakpoint — the inbox's bar is
+   visible at every width and would have vanished on a desktop the moment it imported this."
+   That reasoning was sound; the owner has changed the decision it served.
+   On a desktop the bar was the whole difference he was pointing at (2026-09-22): a strip
+   carrying nothing but a date, and a rail pushed down by its height so the box's crest sat
+   lower here than on the dashboard he had just come from. Two screens, one click apart,
+   disagreeing about where the box's name lives. Hidden at desktop width, the machine's chrome
+   and the dashboard's are the same chrome. The phone keeps its bar, which is where it earns
+   its place: the drawer is shut there and this is the only thing carrying the way out. */
+.bar{display:none;position:sticky;top:env(safe-area-inset-top,0px);z-index:10;
+  background:var(--tab-bg);
   backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid var(--hair)}
+@media (max-width:820px){ .bar{display:block} }
 .bar-in{display:flex;align-items:baseline;gap:10px;padding:13px 16px;max-width:620px;margin:0 auto}
 .brand{font-weight:650;letter-spacing:-.015em}
 /* THE WAY OUT. Sits before the mark and reads as a trail, not a button: the reference the owner
@@ -335,6 +359,14 @@ a{color:inherit;text-decoration:none}
 .up svg{display:block;flex:none}
 .up:hover{color:var(--ink);background:var(--bubble-in)}
 .day{margin-left:auto;font-size:13px;color:var(--dimmer)}
+/* THE DATE, NOW ON THE SCREEN INSTEAD OF IN THE CHROME. Owner, 2026-09-22: *"That date in the
+   top needs to get out of there and move down into the today screen."* It sits beside the
+   "Today" eyebrow because that is the word it qualifies — "Today" on its own tells a person
+   nothing they did not know, and this file already said so about the h1 it replaced. Not bold
+   and not a heading: it is the caption on the heading, and it must not compete with the
+   sentence underneath. */
+h1 .daystamp{font-weight:500;font-size:13px;color:var(--dimmer);letter-spacing:0;
+  margin-left:8px;white-space:nowrap}
 /* HEADINGS ARE THE ONLY PLACE THE DISPLAY FACE SPEAKS, and there is not much of it: every
    heading in this app is one word — Inbox, Search, Today, Settings. That is precisely why the
    greeting on Today was worth building; it is the one heading long enough to have a shape. */
@@ -1276,6 +1308,18 @@ def _menu_button() -> str:
             f'aria-controls="railnav">{_HAM}</label>')
 
 
+def _daystamp(day: str) -> str:
+    """The date, as a caption on the Today heading — "" when this render has no day to show.
+
+    IT USED TO LIVE IN THE TITLE BAR, and the bar is now mobile-only, so on a desktop the date
+    simply vanished. Moving it here is the owner's instruction and it is also the better place:
+    the bar is chrome that repeats on every screen of the machine, while the date is a fact
+    about THIS one.
+    """
+    d = str(day or "").strip()
+    return f'<span class="daystamp">{_esc(d)}</span>' if d else ""
+
+
 def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> str:
     brand = dash.brand()
     # HIS CHOICE IS STAMPED ON <html>. No stamp means he has never chosen, and that renders
@@ -1307,8 +1351,7 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
 <body{' class="ib"' if wide else ''}>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
 <div class="bar"><div class="bar-in">{_menu_button()}{_up()}
-<span class="brand">{_esc(brand)}</span>
-<span class="day">{_esc(day)}</span></div></div>
+<span class="brand">{_esc(brand)}</span></div></div>
 <label class="scrim" for="navtoggle" aria-label="Close menu"></label>
 <div class="lay">{_rail(here or request.path)}
 <main class="main"><div class="wrap">{body}</div></main></div>
@@ -1344,7 +1387,7 @@ def _rows(items: list, *, needs: bool = False) -> str:
     return f'<div class="card{" needs" if needs else ""}">{"".join(out)}</div>'
 
 
-def _first_run() -> str:
+def _first_run(day: str = "") -> str:
     """TODAY, ON A BOX NOTHING CAN REACH — the set-up, not a report.
 
     Measured by rendering it on a bare box (2026-09-16): a customer who had just bought a unified
@@ -1358,7 +1401,7 @@ def _first_run() -> str:
     wrong on its own. The button is absent when this box serves nowhere to put it.
     """
     go = _connect_href()
-    return ('<h1>Today</h1><div class="head">'
+    return (f'<h1>Today{_daystamp(day)}</h1><div class="head">'
             '<div class="v">Your box is running.</div>'
             '<div class="l">Nothing is connected to it yet, so there is nothing here to report. '
             'Connect one and this screen fills itself.</div></div>'
@@ -1465,8 +1508,8 @@ def r_today():
         # there for whoever is debugging the box.
         fault = ('<div class="quiet">Today\'s report could not be read on this box. '
                  'Nothing has been lost; the next poll writes it again.</div>')
-        body = (_first_run() + fault if _nothing_arrives_yet() else
-                '<h1>Today</h1><div class="head"><div class="v">—</div>'
+        body = (_first_run(label) + fault if _nothing_arrives_yet() else
+                f'<h1>Today{_daystamp(label)}</h1><div class="head"><div class="v">—</div>'
                 '<div class="l">Today\'s report could not be read on this box. '
                 'Nothing has been lost; the next poll writes it again.</div></div>')
         return _shell(body, day=label), 200
@@ -1487,7 +1530,7 @@ def r_today():
     # the day he arrives, and a headline of "0 rails set up" is not it.
     first_run = _nothing_arrives_yet()
     if first_run:
-        parts = [_first_run()]
+        parts = [_first_run(label)]
     else:
         head = v.get("headline") or {}
         # THE GREETING IS THE HEADING NOW, and the report's own headline keeps its block right
@@ -4669,11 +4712,28 @@ def r_waiting():
                                             user_id=str(u["id"]),
                                             nonce=f"waiting:{d['id']}")
                 except Exception as e:                   # noqa: BLE001 — one bad send, not ten
+                    # THE SENTENCE, NOT THE CLASS NAME. This recorded `type(e).__name__`, so a
+                    # buyer read "Dr. Mercola did not go — ReplyRefused." and so did we: the one
+                    # line that says WHY — "this box is not connected to a mailbox", "there is no
+                    # address on this thread" — was thrown away at the only place it was needed.
+                    # The thread's own compose box has always shown `str(e)`; this screen did not.
                     log.error("voice.waiting_send_failed",
-                              extra={"conversation": zcid, "error": type(e).__name__})
-                    failed.append((d, type(e).__name__))
+                              extra={"conversation": zcid, "error": type(e).__name__,
+                                     "why": str(e)[:200]})
+                    # OUR OWN SENTENCE, NEVER SOMEBODY ELSE'S TEXT. `ReplyRefused` carries a
+                    # line written for a buyer and it belongs on the screen. An unexpected raise
+                    # carries whatever the failure happened to say — a path, a vendor's internals —
+                    # and that has never been fit to show a person, which is what the class name
+                    # was protecting against before it started hiding the good sentences too.
+                    failed.append((d, str(e) if isinstance(e, _reply.ReplyRefused)
+                                   else "it could not be sent just now"))
                     continue
-                (sent if str(out.get("status")) in ("sent", "queued") else failed).append(
+                # `ok` IS WHAT A SEND RETURNS. `send_reply` has only ever returned "ok" — there is
+                # no "sent" and no "queued" anywhere in `inbox/reply.py` — so this counted every
+                # SUCCESSFUL send as a failure and told the buyer "did not go — ok." about a reply
+                # that had left the box. Worse than a wrong word: it invites a re-tick, and only
+                # the ledger claim underneath stopped that becoming a second message.
+                (sent if str(out.get("status")) == "ok" else failed).append(
                     (d, str(out.get("status"))))
             bits = []
             if sent:

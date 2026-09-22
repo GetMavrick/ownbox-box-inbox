@@ -405,8 +405,19 @@ def pending_url() -> str:
     return _read(d, "url") if d is not None else ""
 
 
-def start() -> str:
-    """Begin a login and return the URL the buyer must open. Raises LoginError with a sentence."""
+def start(*, consented: bool = False) -> str:
+    """Begin a login and return the URL the buyer must open. Raises LoginError with a sentence.
+
+    `consented` IS CARRIED, NOT ASSUMED. This path used to store the token with `consented=True`
+    hard-coded, which recorded a tick nobody had been shown: the only consent box on the screen
+    sat in the "Or paste a key" card and was never submitted by this flow. So the box wrote down
+    that its owner had reviewed their provider's terms on the strength of nothing.
+
+    The tick now sits beside Connect, where the subscription actually gets connected (owner,
+    2026-09-22: *"I have reviewed tick box needs to be moved up to the use your claude
+    subscription"*), and what it says travels with the login that is about to run. It is still
+    never REQUIRED — `put_claude_oauth` refuses nobody, on the owner's 2026-09-18 ruling.
+    """
     if not cli_present():
         raise LoginError("This box cannot sign in to Claude yet — the Claude Code CLI is not "
                          "installed on it. Ask support@ownbox.io and we will put it on.")
@@ -424,6 +435,9 @@ def start() -> str:
     except FileExistsError:
         pass
     _write(d, "status", "starting")
+    # BEFORE THE CHILD IS SPAWNED, because the child reads it at the moment the token appears and
+    # there is no second chance to tell it. Same file-in-the-live-dir shape as `user`.
+    _write(d, "consent", "1" if consented else "")
 
     root = pathlib.Path(__file__).resolve().parents[1]
     try:
@@ -734,7 +748,13 @@ def _serve(d: pathlib.Path) -> int:
         found = find_token(text)
         if found:
             user = _read(d, "user") or None
-            box_secrets.put_claude_oauth(found, consented=True, user_id=user)
+            # BOTH HALVES OF THIS LINE WERE FIXED TONIGHT, BY TWO PEOPLE, AN HOUR APART, and a
+            # merge that kept either one alone would have quietly undone the other. `found` is
+            # #1422's — the token captured whole and nothing that came after it. The consent is
+            # this branch's — read from the login's own directory rather than asserted, because
+            # the tick a buyer is shown now sits beside Connect and has to survive the round trip.
+            box_secrets.put_claude_oauth(found, consented=_read(d, "consent") == "1",
+                                         user_id=user)
             keep_transcript()
             _write(d, "status", "done")
             if proc.poll() is None:

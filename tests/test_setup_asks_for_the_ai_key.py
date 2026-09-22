@@ -73,8 +73,12 @@ ok("...and it comes after the channels, because it is what the box DOES with the
    keys.index("anthropic") > max(keys.index("email"), keys.index("zernio")), str(keys))
 
 step = next(e for e in bs.setup_state() if e["key"] == "anthropic")
-ok("it says plainly that the key is the buyer's own, on the buyer's own bill",
-   "your own key" in step["why"] and "own bill" in step["why"], step["why"])
+# "ACCOUNT", NOT "KEY". This asserted the literal words "your own key" until 2026-09-22, when
+# two of the four models became a sign-in with no key in them at all and that sentence started
+# telling a ChatGPT buyer to go and find something that does not exist. What the step has to
+# promise is unchanged and is what is asserted now: the credential is theirs, on their bill.
+ok("it says plainly that the account is the buyer's own, on the buyer's own bill",
+   "your own account" in step["why"] and "own bill" in step["why"], step["why"])
 ok("...and that nothing is sent automatically, which is the whole product promise",
    "Nothing is sent automatically" in step["why"])
 ok("...and what a box WITHOUT one still does, so the step reads as a choice not a wall",

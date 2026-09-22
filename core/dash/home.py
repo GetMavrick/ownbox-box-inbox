@@ -31,7 +31,14 @@ from core.dash import blueprint, brand
 
 _BASE = """
 :root{--bg:#f4f5f7;--card:#fff;--ink:#14171a;--dim:#6b7480;--faint:#98a1ac;--line:#9da2a9;
---hover:#f0f2f4;--sel:#eaedf1;--accent:#1a6ef5;--good:#0f8a4d;--warn:#9a6400;--danger:#e0392b;
+--hover:#f0f2f4;--sel:#eaedf1;--accent:#1a6ef5;--good:#0f8a4d;--warn:#9a6400;--danger:#c62828;
+--accent-dark:#1559cc;--on-accent:#ffffff;
+/* `--danger` WAS #e0392b AND IT FAILED AA — 4.38:1 on a white card, 4.02:1 on the page,
+   against the 4.5:1 body text needs. It was already carrying the rail's own danger link
+   at that ratio; the outlined Stop button just put it somewhere nobody could miss. This
+   value measures 5.62:1 on the card and 5.15:1 on the page, and white on it for the
+   hover fill is 5.62:1. Contrast is the one design property that can be computed, so it
+   is computed rather than eyeballed — same rule as `tests/test_inbox_contrast.py`. */
 --rail:#fbfbfc;--scrim:rgba(16,20,26,.42);
 --nav-ink:#333940;--av-ink:#7a5a14;--av-a:#ffe4a3;--av-b:#f7c7a8;
 --drawer-flat:0 0 0 rgba(0,0,0,0);--drawer-lift:0 12px 40px rgba(16,20,26,.18)}
@@ -81,8 +88,16 @@ pointer-events:none;transition:opacity .2s ease}
 
 .lay{display:flex;min-height:100%;align-items:stretch}
 
+/* THE RAIL SETS ITS OWN TYPEFACE, and until now it did not. This block is imported by every
+   machine that draws its own page, so the menu inherited whatever `body` font its HOST had
+   chosen — Inter Tight on the dashboard, Public Sans inside the inbox. One component, two
+   faces, on two screens a buyer moves between in a single click. The owner saw it immediately
+   (2026-09-22): *"The name of the box needs to be just like the dashboard. I don't know why
+   this one is different font"*. Core's rail is core's, so it names the stack it wants and stops
+   depending on the room it is standing in. A machine's own content keeps its own font. */
 .rail{width:272px;flex:0 0 272px;background:var(--rail);border-right:1px solid var(--line);
-padding:0 10px 14px;display:flex;flex-direction:column}
+padding:0 10px 14px;display:flex;flex-direction:column;
+font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 .who{display:flex;align-items:center;gap:11px;padding:15px 8px 13px}
 .who .av{width:38px;height:38px;border-radius:11px;flex:none;display:flex;align-items:center;
 justify-content:center;font-weight:700;font-size:16px;color:var(--av-ink);
@@ -91,19 +106,13 @@ background:linear-gradient(145deg,var(--av-a),var(--av-b))}
 .who b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .who span{color:var(--dim);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-/* THE WAY OUT IS CHROME, NOT A DESTINATION. It rendered with the same radius and hover as a
-   nav row and a HEAVIER weight than one -- 600 and full --ink against a row's --nav-ink -- so
-   the one control that leaves the menu looked more like a selected item than the items did.
-   Owner, 2026-09-21: *"the dashboard with the back button should not be listed there. It would
-   should be in the menu at the top of it and should function like a back button when you are
-   drilled down into a sub menu for the machine."* It already behaves that way -- `level == 2`
-   means it is absent on the dashboard and present only inside a machine -- so what was wrong
-   was that it was DRESSED as a row. Now it is smaller, dimmer, and a rule separates it from the
-   destinations below: chrome above the list, not the first thing in it. */
-.back{display:flex;align-items:center;gap:6px;padding:2px 8px 11px;margin:0 0 9px;
-border-bottom:1px solid var(--line);color:var(--dim);font-size:13.5px;font-weight:500}
-.back:hover{color:var(--ink);background:none}
-.back svg{width:16px;height:16px}
+/* THE WAY HOME IS A ROW, NOT CHROME — so there is no rule here for it any more.
+   It was `.back`: smaller, dimmer, a chevron, a rule under it, deliberately unlike the
+   destinations below. Owner, 2026-09-22, on his own box: *"Please make sure Dashboard is in the
+   sidebar!!!! It's a back button on the fly out menu!!!"* It is now an ordinary `.nav a` with the
+   dashboard's own icon, inserted at the head of the list by `rail_html`, so it needs no rule of
+   its own — which is the point: it should look like what it is, a place you can go. The history
+   and the earlier ruling it reverses are recorded at that insertion. */
 
 .nav{display:flex;flex-direction:column;gap:1px}
 .nav a{display:flex;align-items:center;gap:11px;min-height:42px;padding:8px 10px;
@@ -123,7 +132,7 @@ color:var(--faint);font-size:12.5px;line-height:1.4}
 .main{flex:1;min-width:0;padding:22px 26px 56px;max-width:1000px}
 @media (prefers-reduced-motion: reduce){.rail,.scrim{transition:none}}
 
-/* THE PHONE — A DRAWER OVER THE PAGE, NOT A BLOCK ABOVE IT.
+/* A SMALL SCREEN — A DRAWER OVER THE PAGE, NOT A BLOCK ABOVE IT.
    Measured first, in Chromium at 375x780: stacked, the owner's own ten-item Settings menu is
    538px tall, which put the page title at 585px and the first field card at 673px. A buyer who
    tapped Settings -> Profile scrolled a full screen of menu to reach the one thing he opened it
@@ -171,6 +180,105 @@ a.row:hover{color:var(--accent)}
 .quiet{color:var(--dim)}
 .stale{color:var(--warn)}
 
+/* ── CONTROLS ──────────────────────────────────────────────────────────────────────────────
+   EVERY FORM IN core/ RAN ON BROWSER DEFAULTS UNTIL NOW, and nobody noticed while core had no
+   forms in it. The box's own settings screens arrived with #1418 and brought the first buttons
+   and fields this stylesheet has ever had to draw: a grey 1995 submit
+   button under a styled card, and a label sitting ON the same line as its input because nothing
+   here had ever said `display:block`. Owner, 2026-09-22, looking at his own box: *"it needs to be
+   styled out with the buttons"*.
+   A CARD IS NOT A DESIGN SYSTEM. The rule that keeps this honest is that a control takes its
+   colour from the same tokens the surface behind it does — no literal anywhere below. */
+label{display:block;font-size:13.5px;font-weight:600;margin:16px 0 6px}
+input[type=text],input[type=password],input[type=email],input[type=url],input:not([type]),
+select,textarea{width:100%;font:inherit;font-size:16px;padding:11px 13px;
+border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
+input::placeholder{color:var(--faint)}
+select{appearance:auto;cursor:pointer}
+/* A DISABLED OPTION IS THE POINT OF THE PICKER, not a defect in it — see `_choice_picker`. */
+select option:disabled{color:var(--faint)}
+/* A PILL, NOT A ROUNDED RECTANGLE. Owner, 2026-09-22: *"I like the blue that's cool. But make
+   sure you are using 9999 pixel radius, rounded pills"*. 9999px rather than 50%: a percentage
+   radius on a box wider than it is tall draws an ellipse that changes shape with the label, and
+   these buttons carry labels from one word to four. A radius larger than the box
+   always clamps to exactly half the height, so every button on the box is the same pill whatever
+   it says. The horizontal padding goes up with it — a pill needs room at the ends or the first
+   and last letters sit on the curve.
+
+   MOBILE FIRST, AND THAT IS THE BASE RULE RATHER THAN A BREAKPOINT. The owner's standing ruling
+   of 2026-09-22, quoted in full in CLAUDE.md: nine buyers in ten are on a mobile device, so the
+   mobile rule is the unqualified one and the desktop gets the media query, not the other way
+   round. A full-width pill at a 48px tap target — a thumb's worth of button, comfortably past
+   the 44px both platforms ask for — and the `min-width` query below shrinks it to its label once
+   there is a pointer to aim with.
+
+   HIS WORDS ARE IN CLAUDE.md AND NOT HERE ON PURPOSE. Every byte of this stylesheet is inlined
+   into every page the box serves, so a quotation in it is a quotation a buyer receives — and his
+   phrasing that morning used the very noun the naming ruling below now reserves. The doctrine
+   file is read by developers and served to nobody, which is where a verbatim quote belongs. */
+button{display:block;width:100%;min-height:48px;font:inherit;font-size:16px;font-weight:600;
+padding:12px 24px;margin-top:16px;border:1px solid var(--accent);border-radius:9999px;
+background:var(--accent);color:var(--on-accent);cursor:pointer}
+button:hover{background:var(--accent-dark);border-color:var(--accent-dark)}
+/* THE SECOND BUTTON ON A SCREEN IS NEVER THE ONE WE WANT PRESSED — Cancel beside Finish, and the
+   pair read identically while both were the browser's default grey. */
+button.ghost{background:var(--card);color:var(--ink);border-color:var(--line);font-weight:500}
+button.ghost:hover{background:var(--hover);border-color:var(--line)}
+/* THE HALT IS NOT THE FRIENDLY BLUE ONE. Making every button accent-filled turned the control
+   that stops the box into the most inviting thing on the dashboard — worse than the anonymous
+   grey default it replaced, because grey at least did not ask to be pressed. Outlined rather
+   than filled: a thumb scrolling past a full-width red slab is a thumb that eventually hits it.
+
+   AND NO CONTROL'S LABEL IS QUOTED ANYWHERE IN THIS STYLESHEET, for the same reason no route is
+   (see the row rule below): every byte of it is inlined into every page, so a label written in a
+   comment here is a label PRESENT in the HTML of a page that must not offer it. That is not
+   theoretical — `test_the_box_shows_a_buyer_the_way_in` went red on the first draft of this very
+   block, an hour after the same mistake with a route went red one rule further down. */
+button.danger{background:var(--card);color:var(--danger);border-color:var(--danger)}
+button.danger:hover{background:var(--danger);color:var(--on-accent);border-color:var(--danger)}
+
+@media (min-width:560px){
+ /* A POINTER CAN HIT A SMALL TARGET, so a desktop button is the width of what it says. */
+ button{display:inline-block;width:auto;min-height:0;font-size:14px;padding:10px 22px}
+}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{
+outline:2px solid var(--accent);outline-offset:2px}
+/* THE TICK IS NOT A FIELD AND MUST NOT WEAR A FIELD'S LABEL. Bold, block and 16px above a
+   checkbox makes a consent line shout; it is a sentence somebody reads, beside a box. */
+label.consent{display:flex;gap:10px;align-items:flex-start;margin:16px 0 0;
+font-size:14px;font-weight:400;line-height:1.45;cursor:pointer}
+label.consent input{width:22px;height:22px;flex:none;margin:0;accent-color:var(--accent)}
+/* `a{color:inherit}` IS RIGHT FOR THE RAIL AND WRONG FOR PROSE. Every terms link, console link
+   and "Sign in to Claude" on the settings screens rendered as plain text — unfindable unless you
+   happened to drag the pointer over it. Scoped to paragraphs so rows and the rail keep theirs. */
+.card p a{color:var(--accent)}
+.card p a:hover{text-decoration:underline}
+.foot{margin-top:18px;font-size:14px}
+.foot a{color:var(--dim)}
+.foot a:hover{color:var(--accent)}
+/* AN ADDRESS SOMEBODY HAS TO COPY BY HAND. It was unstyled prose; on a narrow screen it ran off
+   the card. Monospace, a ground it can sit on, and it wraps rather than overflows.
+
+   THE VOCABULARY IN THIS FILE'S COMMENTS IS PRODUCT VOCABULARY, which is worth writing down
+   because nothing about editing a stylesheet suggests it. `CSS` here is inlined into every served
+   page, so these comments are shipped text: a word in one reaches a buyer exactly as a word in a
+   heading does. The receptionist machine now being built gets to keep the nouns that describe
+   what it does, and the thing a buyer installs on a device is the mobile app — the owner's naming
+   ruling of 2026-09-22, relayed by OSDev4 in #1426.
+   `tests/test_core_css_keeps_the_vocabulary.py` measures this rather than trusting this comment,
+   and it caught this very paragraph naming a reserved route while explaining the rule. */
+.addr{font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+background:var(--bg);border:1px solid var(--line);border-radius:9px;
+padding:10px 12px;margin:10px 0 0;word-break:break-all;user-select:all}
+/* A ROW WHOSE TRAILING TEXT IS A SENTENCE, not a number. The coworkers screen puts four of
+   these under `Works with` and each one drove its instruction hard against the right edge.
+   NO ROUTE IS NAMED IN THIS FILE'S CSS, and that is not fussiness: this stylesheet is inlined
+   into EVERY page, so a path mentioned in a comment here is a path present in the HTML served to
+   a member who is refused at it — which is exactly what
+   `test_the_box_settings_are_the_boxs_own` measures, and exactly how it caught this block. */
+.row{flex-wrap:wrap}
+.row>.quiet{flex:1 1 320px;min-width:0}
+
 """
 
 # ORDER IS THE ORDER IT ALWAYS WAS — the phone's overrides sit last, after the base rules they
@@ -200,7 +308,6 @@ def _serving() -> set:
         return set()
 
 
-_CHEV_LEFT = "M15 18l-6-6 6-6"
 # LEAVES THE BOX. Drawn, not typed: a CSS `content:"\2197"` renders as tofu wherever the face
 # lacks the glyph, which is exactly what a headless render showed — a missing-character box
 # followed by a stray "97" beside the word Billing. Every other mark in this rail is an SVG for
@@ -210,7 +317,24 @@ _OUT_ARROW = ('<svg class="out" width="13" height="13" viewBox="0 0 24 24" fill=
               'stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>')
 # CORE'S OWN SECTION IS THE ONLY ICON THIS FILE HOLDS. Every other one arrives with the machine
 # that registered the section, the same way its title does.
-_HOME_ICON = "M3 10.5 12 3l9 7.5M5.5 9.5V21h13V9.5"
+# A SCREEN WITH A STAND, because this row is where the box reports what it did — the owner asked
+# for "a control panel of some sort for a screen" (2026-09-22). The house shape it replaces said
+# "home", which is true of the route and says nothing about what is on it.
+_HOME_ICON = "M3 4.5h18v11.5H3zM9 20h6M12 16v4"
+# A BACK ARROW, FOR THE ONE ROW THAT GOES UP A LEVEL. Owner, 2026-09-22: *"The dashboard should
+# have the back arrow. Because we are on a sub menu when we're inside the inbox machine. So that's
+# why a smart web designer will put a back button to show that we want to go up one level in the
+# menu."* A shaft and a head, not a bare chevron: at 19px a lone chevron reads as "there is more
+# over there" — a disclosure — and this control is the opposite of that.
+_BACK_ARROW = "M19 12H5M12 19l-7-7 7-7"
+# A PLUS, and nothing else. This row adds a machine to the box; the glyph is the verb.
+_ADD_ICON = "M12 5.5v13M5.5 12h13"
+# A GEAR. Two subpaths in one `d` — the cog outline and the hole — because `_svg` draws exactly
+# one path and a gear without its centre reads as a flower.
+_GEAR_ICON = ("M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"
+              "M20.4 13.6a8.6 8.6 0 0 0 0-3.2l2-1.5-2-3.5-2.4 1a8.6 8.6 0 0 0-2.8-1.6L14.9 2h-4"
+              "l-.3 2.8a8.6 8.6 0 0 0-2.8 1.6l-2.4-1-2 3.5 2 1.5a8.6 8.6 0 0 0 0 3.2l-2 1.5 2 3.5"
+              "2.4-1a8.6 8.6 0 0 0 2.8 1.6l.3 2.8h4l.3-2.8a8.6 8.6 0 0 0 2.8-1.6l2.4 1 2-3.5Z")
 
 
 def _svg(d: str, size: int = 19) -> str:
@@ -263,15 +387,27 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
     have = _serving()
     rows = []
     for it in got.items:
-        if have and it.href not in have and it.tone != "away":
+        # OFF-BOX IS READ FROM THE HREF, never declared beside it. `away` still works for a row
+        # that says so, but a row whose destination is an https:// address IS away whether or not
+        # somebody remembered the tone, and the two cannot drift apart.
+        off = shell.is_off_box(it.href)
+        if have and not off and it.href not in have and it.tone != "away":
             # SILENTLY ABSENT, not greyed out. A disabled row still promises the thing exists.
+            #
+            # AND AN OFF-BOX ROW IS EXEMPT, which is not a loophole but the same rule: `_serving()`
+            # answers "does THIS box route that path", and a website on somebody else's domain is
+            # not a path this box routes. Without the exemption the Add a Machine row would be
+            # dropped from every rail as unserved — measured, not reasoned.
             continue
         cls = " ".join(c for c in (it.tone,) if c)
         cur = ' aria-current="page"' if shell.is_current(it, path) else ""
-        rows.append(f'<a href="{_esc(it.href)}"'
+        # A LINK THAT LEAVES OPENS AWAY FROM THE BOX and carries `noopener`: the destination is
+        # outside this box's control, and a menu row is not a reason to hand it this window.
+        away = (' target="_blank" rel="noopener noreferrer"' if off else "")
+        rows.append(f'<a href="{_esc(it.href)}"{away}'
                     + (f' class="{_esc(cls)}"' if cls else "")
                     + f'{cur}>{_svg(it.icon)}<span class="lbl">{_esc(it.label)}</span>'
-                    + (_OUT_ARROW if it.tone == "away" else "") + '</a>')
+                    + (_OUT_ARROW if (off or it.tone == "away") else "") + '</a>')
 
     head = _account(who or brand(), email)
     if got.level == 2:
@@ -292,8 +428,38 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
         # one. Owner, 2026-09-17: *"they can go back into the dashboard so there should be a back
         # arrow with a dashboard label."* `back_label` resolves through the same chain as `back`,
         # so the words and the link cannot come apart.
-        head += (f'<a class="back" href="{_esc(got.back)}">{_svg(_CHEV_LEFT, 18)}'
-                 f'<span class="lbl">{_esc(got.back_label or got.title)}</span></a>')
+        # AND IT IS A DESTINATION AGAIN, NOT CHROME. Owner, 2026-09-22, looking at the machine's
+        # own menu on his box: *"Please make sure Dashboard is in the sidebar!!!! It's a back
+        # button on the fly out menu!!!"*
+        #
+        # THIS REVERSES HIS 2026-09-21 RULING QUOTED BELOW, AND BOTH ARE HIS WORDS. That day he
+        # asked for the opposite — *"the dashboard with the back button should not be listed
+        # there. It would should be in the menu at the top of it and should function like a back
+        # button when you are drilled down into a sub menu for the machine."* — and this file did
+        # exactly that: a dimmer, smaller row with a chevron, separated from the list by a rule.
+        # Seen on a real machine screen it reads as chrome rather than as the way home, and on
+        # the box's OWN screens Dashboard is a full row, so the same control wore two costumes
+        # depending on which page you were standing on. The newer instruction wins; the older one
+        # is kept here rather than deleted so the next person reads a decision that changed
+        # rather than a rule that was ignored.
+        #
+        # IT IS A ROW, AND IT CARRIES THE BACK ARROW. Both halves are his, and the first pass at
+        # this shipped only the first. Owner, 2026-09-22: *"The dashboard should have the back
+        # arrow. Because we are on a sub menu when we're inside the inbox machine. So that's why
+        # a smart web designer will put a back button to show that we want to go up one level in
+        # the menu."*
+        #
+        # SO THE TWO INSTRUCTIONS ARE ABOUT DIFFERENT THINGS, which is why the first read of them
+        # looked like a contradiction and was not. "In the sidebar, not a back button" is about
+        # WHERE IT SITS — a row in the list, same size and weight as its neighbours, not dimmed
+        # chrome pushed under a rule. "It should have the back arrow" is about WHAT IT SAYS — a
+        # machine's menu is a sub-menu, and the row out of it has to show it goes up a level.
+        # Giving it the dashboard's own screen icon satisfied the first and quietly undid the
+        # second: the row looked like every other destination and named no direction at all.
+        #
+        # It keeps `back`'s HREF and LABEL, so the link and the words still cannot come apart.
+        rows.insert(0, f'<a class="home" href="{_esc(got.back)}">{_svg(_BACK_ARROW)}'
+                       f'<span class="lbl">{_esc(got.back_label or got.title)}</span></a>')
     return (f'<nav class="rail" id="railnav" aria-label="Sections">{head}'
             f'<div class="nav">{"".join(rows)}</div>{_foot()}</nav>')
 
@@ -446,7 +612,10 @@ def _stop_card() -> str:
     return (f'<div class="card"><h2>{"Your box is stopped" if paused else "Stop everything"}</h2>'
             f'<p class="sub">{_esc(sub)}</p>'
             f'<form method="post" action="/dash/{"resume" if paused else "stop"}">'
-            f'<button type="submit">{_esc(word)}</button></form></div>')
+            # `danger` ONLY FOR THE HALT. "Start it again" is the ordinary control on a stopped
+            # box and wearing the warning colour would make restarting look like the risk.
+            f'<button class="{"" if paused else "danger"}" type="submit">'
+            f'{_esc(word)}</button></form></div>')
 
 
 def _setup_progress():
@@ -706,6 +875,7 @@ def dashboard():
 # needs no registry, so it is also not blocked on one being designed.
 BOX_SETTINGS = ("anthropic", "mobile", "agent")
 
+
 # THE SAME CLOSED SET `box_secrets.setup_state()` DOCUMENTS, plus core's own `unavailable`. Said
 # in core's words rather than the inbox's: this screen is about the box, so "Not set up yet"
 # rather than "Not connected yet", which reads oddly against an app somebody installs.
@@ -807,7 +977,7 @@ def settings():
 
     THE SAME GATE AS THE DASHBOARD, and for the same reasoning rather than a copy of it: this page
     publishes no money and no meters, so `owner_only` would lock a signed-in member out of their
-    own phone setting for nothing. The one genuinely owner-only thing on it — replacing the box's
+    own mobile app setting for nothing. The one genuinely owner-only thing on it — replacing the box's
     AI key — is gated where it is actually done, not by hiding the row that says it is set.
     """
     from core.dash import review as _review
@@ -827,10 +997,22 @@ def settings():
 # rail is a machine's to declare, which is what keeps this file from becoming the list of every
 # product we sell.
 shell.register_section("dashboard", order=0, machine="core", title="Dashboard",
-                       href="/dashboard", home=True)
+                       href="/dashboard", home=True, icon=_HOME_ICON)
 
 # SETTINGS IS THE SECOND, AND THE LAST. `order=90` leaves the whole middle of the rail to the
 # machines: a box with five of them still ends with Settings, which is where a person looks for
 # it. Owner, 2026-09-22, on where these belong: the system drawer.
-shell.register_section("settings", order=90, machine="core", title="Settings",
-                       href="/settings")
+# ADD A MACHINE LEAVES THE BOX, and that is the point rather than a compromise. A machine is
+# bought, not configured: the shop is on ownbox.io and no screen this box serves can sell one.
+# Owner, 2026-09-22, gave the destination himself and said the page is not built yet — his
+# domain, his call. The row carries the out-arrow and opens in a new tab, both DERIVED from the
+# https:// href by `rail_html`, so a buyer knows before pressing that they are leaving.
+shell.register_section("add_machine", order=80, machine="core", title="Add a Machine",
+                       href="https://www.ownbox.io/machines", icon=_ADD_ICON)
+
+# SYSTEM SETTINGS, NOT SETTINGS. Owner, 2026-09-22. The box now has two settings screens by his
+# own ruling — this one for what the box shares, and each machine's own for what only it has —
+# and two rows both reading "Settings" is the menu telling somebody they are in the same place
+# twice. The qualifier is what makes the pair legible.
+shell.register_section("settings", order=90, machine="core", title="System Settings",
+                       href="/settings", icon=_GEAR_ICON)

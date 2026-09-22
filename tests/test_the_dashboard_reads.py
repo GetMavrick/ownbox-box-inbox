@@ -303,12 +303,21 @@ def test_an_item_page_carries_exactly_one_way_back():
     the phone carries the same menu the desktop carries. Back then means one thing on both: leave
     this section — which is what the owner's reference shows. Two controls reading the same and
     going to different places was the price of the old answer; this keeps it from growing back.
+
+    IT IS A ROW NOW, NOT BACK-CHROME, AND THE COUNT IS WHAT THIS TEST WAS ALWAYS ABOUT. Owner,
+    2026-09-22, looking at the open drawer on his own box: *"Please make sure Dashboard is in the
+    sidebar!!!! It's a back button on the fly out menu!!!"* So the element moved from `class=back`
+    at the foot of the drawer to `class=home` at the head of the list. What must not change is
+    that exactly ONE control in the drawer leaves the section, and that it goes to /dashboard —
+    which is what is matched below, by role rather than by the class it happens to wear.
     """
     _settings_box()
     html_ = home.chrome("/settings/profile", title="Profile", lede="Your name.", body="")
-    backs = re.findall(r'<a class="back" href="([^"]+)"', html_)
-    ok("exactly one back control", len(backs) == 1, str(backs))
-    ok("...and it leaves the section", backs == ["/dashboard"], str(backs))
+    backs = re.findall(r'<a class="(?:back|home)" href="([^"]+)"', html_)
+    ok("exactly one control that leaves the section", len(backs) == 1, str(backs))
+    ok("...and it leaves it to the dashboard", backs == ["/dashboard"], str(backs))
+    ok("...and it is a row in the rail, not back-chrome under it",
+       '<a class="home" href="/dashboard"' in html_)
 
 
 def test_the_phone_gets_a_drawer_not_a_stack():

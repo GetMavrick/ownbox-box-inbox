@@ -93,6 +93,9 @@ def needs_a_draft(space: str, *, limit: int = 5) -> list[dict]:
         rows = c.execute(
             "SELECT k.space, k.zernio_conversation_id AS zcid, k.participant, k.platform, "
             "       m.zernio_message_id AS inbound_id, m.body AS inbound_body, "
+            # WHO WROTE IT, so the sweep can refuse a machine before it spends a model call
+            # (`inbox/who_wrote.py`). It was always on the row and never carried up.
+            "       m.sent_by AS sender, "
             "       m.created_at AS inbound_at "
             "  FROM inbox_conversations k "
             "  JOIN inbox_messages m "

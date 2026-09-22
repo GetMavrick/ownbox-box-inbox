@@ -182,8 +182,14 @@ rails.declared = lambda: set()                    # type: ignore[assignment]
 try:
     _msg("zc-done", "zc-done-new", "in", _in_window(360))
     seg = voice_report.report(TODAY)
-    ok("the setup prompt is there, as it was", any("Nothing set up yet" in t
-                                                   for t in _texts(seg, "watch")),
+    # THE SETUP PROMPT IS GONE, AND THAT IS THE POINT NOW. This asserted "Nothing set up yet —
+    # say which of these this business has", which was right while a box shipped
+    # `rails_owned: [uptime, pagespeed]` and an empty set meant the buyer had cleared it. The
+    # owner retired the rail on 2026-09-22 — *"the whole speed and site thing is not something
+    # we're going to have"* — so every box lands here and that line became a nag about a feature
+    # the product no longer has. Asserted ABSENT rather than deleted, so it cannot drift back.
+    ok("the retired rail prompt is NOT offered to anybody",
+       not any("Nothing set up yet" in t for t in _texts(seg, "watch")),
        str(_texts(seg, "watch")))
     ok("AND THE INBOX LINE SURVIVED IT — `watch = [...]` would have wiped this",
        any(t.startswith("Inbox —") for t in _texts(seg, "watch")), str(_texts(seg, "watch")))
@@ -192,6 +198,32 @@ try:
     ok("...and he is still told to go and answer it",
        any("waiting on your reply" in t for t in _texts(seg, "needs_you")),
        str(_texts(seg, "needs_you")))
+
+    # AND THE OTHER HALF OF THE SAME RULING: a box with no rails AND a quiet inbox says NOTHING.
+    # The old branch fell through to `(0, "rails set up")`, which on today's default renders as
+    # "0 rails set up" on the dashboard — a figure counting a thing that no longer exists. A
+    # segment whose headline carries no label is skipped by `core/dash/home.py:_segments`, so an
+    # empty label IS the instruction to draw no card, and that is what a quiet box should do.
+    # A GENUINELY QUIET BOX, WHICH A DIFFERENT DAY DOES NOT GIVE YOU: `awaiting_reply` is a LIVE
+    # count and is not day-scoped, so the message seeded above is still waiting whichever day is
+    # asked for. Measured — the first version of this assertion read 1 waiting on a day three days
+    # back. The two inputs are stubbed instead, which is what "nothing has happened" actually is.
+    _real_counts, _real_waiting = store.day_counts, store.awaiting_reply
+    # THE REAL SHAPE, not a guessed one — store.day_counts returns these four and the
+    # reporter reads new_people. A stub missing a key raises inside the report, which is
+    # exactly what the first version of this did.
+    store.day_counts = lambda *a, **k: {"inbound": 0, "replied": 0,
+                                        "new_people": 0, "drafts": 0}
+    store.awaiting_reply = lambda *a, **k: 0
+    try:
+        _quiet = voice_report.report(TODAY)
+    finally:
+        store.day_counts, store.awaiting_reply = _real_counts, _real_waiting
+    ok("a quiet box with no rails offers no headline at all",
+       not str(_quiet["headline"].get("label") or ""), str(_quiet["headline"]))
+    ok("...and invents no zero to go with it",
+       _quiet["headline"].get("value") in (None, ""), str(_quiet["headline"]))
+    ok("...and asks for nothing", not _texts(_quiet, "watch"), str(_texts(_quiet, "watch")))
 finally:
     rails.declared = _real_declared               # type: ignore[assignment]
 

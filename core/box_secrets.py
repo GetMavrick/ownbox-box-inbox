@@ -839,23 +839,119 @@ SETUP_STEPS = (
 # ── WHICH MODEL WRITES, AND WHICH ASSISTANTS CAN CONNECT ─────────────────────────────────────
 # TWO DIFFERENT QUESTIONS, and conflating them is how a screen starts lying. The box CALLS the
 # drafting model, so that list is limited by what `core/brain.py` can actually talk to — today,
-# Anthropic and nothing else. The assistants in `AGENT_CLIENTS` call the BOX, over MCP, so that
-# list is limited only by which of them speak MCP — and all four do, today, with no work from us.
+# Anthropic and OpenAI. The assistants in `AGENT_CLIENTS` call the BOX, over MCP, so that list is
+# limited only by which of them speak MCP — and all four do, today, with no work from us.
 #
-# THE GREYED-OUT THREE ARE MARKED `available: False` AND THE SCREEN MUST HONOUR IT. Owner,
-# 2026-09-21, asked for them shown greyed out, which is honest: it says where this is going
-# without claiming to be there. What would NOT be honest is a selectable option that stores an
-# `sk-...` key and then never drafts a single reply, which is what an un-greyed list would be
-# until `brain.py` grows a second provider.
+# THE GREYED-OUT ONES ARE MARKED `available: False` AND THE SCREEN MUST HONOUR IT. Owner,
+# 2026-09-21, asked for the ones that do not work yet shown greyed out, which is honest: it says
+# where this is going without claiming to be there. What would NOT be honest is a selectable
+# option that stores a key and then never drafts a single reply, which is what an un-greyed list
+# would be until `brain.py` grows the road behind it.
+#
+# THE PAGE CHANGES WITH THE PICK, WHICH IS WHY EACH ENTRY CARRIES ITS OWN COPY. Owner,
+# 2026-09-22: *"the page is gonna have to be completely different according to which drop-down is
+# chosen… do the research and start writing a copy for each selection."* Connecting these four is
+# not one flow with four logos on it — it is four genuinely different errands, and the difference
+# is worth telling a buyer BEFORE they go looking:
+#
+#   Claude   the subscription you already pay for can drive this box. Sign in, no key.
+#   ChatGPT  the same answer by a different road — the subscription drives the box through the
+#            Codex CLI's device sign-in, so there is no key here either.   (#1423, 2026-09-22)
+#   Gemini   Google AI Pro/Ultra do NOT include API access, and there is no equivalent sign-in;
+#            a key from AI Studio has a real free tier and needs no card.
+#                                                          (ai.google.dev, checked 2026-09-22)
+#   Grok     X Premium and SuperGrok do NOT include API access either. console.x.ai is its own
+#            billing, with promotional credits to start.    (docs.x.ai, checked 2026-09-22)
+#
+# THIS TABLE WAS WRONG FOR A DAY AND THE WRONG VERSION READ EXACTLY LIKE RESEARCH. Written on
+# 2026-09-22, the ChatGPT row said a Plus subscription cannot drive a box and a developer key is
+# the only way in. That was true of OpenAI's *API*, which is what had been checked, and it was
+# false about this box within hours, because #1423 landed a sign-in the pricing page does not
+# describe. The lesson is not "check the vendor docs" — they were checked. It is that a fact
+# about a VENDOR stops being a fact about THIS BOX the moment `brain.py` grows a road the vendor
+# never advertised, so every claim below is pinned to what `core/brain.py` can do, and
+# `tests/test_the_ai_screen_answers_for_four_models.py` re-checks that pin rather than the copy.
+#
+# `available` STILL GATES THE CREDENTIAL, AND NOTHING BELOW LOOSENS IT. The picker is selectable
+# for all four so the screen can answer "what would this look like" — the box refuses to take a
+# key it cannot draft with, which is the opposite of the fake feature the owner named on
+# 2026-09-21. `tests/test_setup_asks_for_the_ai_key.py` holds that line against `core/brain.py`.
 DRAFTING_MODELS = (
     {"id": "claude", "name": "Claude", "available": True,
-     "note": "Sign in with a Pro or Max subscription, or paste an Anthropic key."},
+     "note": "Sign in with a Pro or Max subscription, or paste an Anthropic key.",
+     "vendor": "Anthropic",
+     "subscription": True,
+     # WHERE PICKING THIS ONE TAKES YOU. Claude is connected on /settings/ai itself, so the screen
+     # draws its own cards rather than sending anybody anywhere.
+     "connect_href": "/settings/ai",
+     "lede": "The one you already pay for. A Claude Pro or Max subscription signs in here and "
+             "writes your drafts on it — there is no key to find and nothing to install.",
+     "billing": "Your own Claude subscription, or an Anthropic API account if you would rather "
+                "pay per word. Your box keeps a hard spending cap on top of either.",
+     "key_label": "Anthropic API key or Claude subscription token",
+     "key_from": ("Anthropic Console", "https://console.anthropic.com/settings/keys"),
+     "key_prefix": "sk-ant-...",
+     "steps": ("Press Connect. The box opens a sign-in at claude.com in a new tab.",
+               "Sign in and approve access. Claude shows you a short code.",
+               "Paste the code back here. That is the whole of it.")},
     {"id": "openai", "name": "ChatGPT", "available": True,
-     "note": "Sign in with your ChatGPT subscription — a one-time code, no key."},
+     "note": "Sign in with your ChatGPT subscription — a one-time code, no key.",
+     "vendor": "OpenAI",
+     # A SUBSCRIPTION DRIVES THIS ONE TOO, which is the fact this row got wrong for a day. The
+     # road is the Codex CLI's device sign-in, not the API: `core/codex_login.py` runs it on the
+     # box and `core/brain.py:_think_codex` drafts through `codex exec` afterwards.
+     "subscription": True,
+     "connect_href": "/settings/chatgpt",
+     "lede": "The ChatGPT subscription you already pay for. The box shows you a link and a "
+             "one-time code; you sign in on your own phone or computer and enter the code "
+             "there. No key, and the box never sees your password.",
+     "billing": "Your own ChatGPT Plus, Pro or Business subscription — nothing extra, and no "
+                "prepaid API credits. Your box keeps a hard spending cap on top of it.",
+     # NO `key_label`, `key_from` OR `key_prefix`, AND THAT ABSENCE IS THE DESIGN. There is no key
+     # to paste for ChatGPT on this box; a field offered here would be a place to put something
+     # that can never be used. The screen draws a key form only for a model that declares one.
+     "steps": ("Press Connect. The box shows you a link and a short code.",
+               "Open the link on any device, sign in to ChatGPT, and enter the code.",
+               "Nothing comes back here — the box notices by itself and returns you to "
+               "settings."),
+     # THE ONE THING THAT GOES WRONG, SAID BEFORE IT DOES. Device-code sign-in is off by default
+     # on some accounts; `codex_login` maps the CLI's refusal to this sentence, and the screen
+     # says it up front so a buyer is not sent to support for a switch they own.
+     "gotcha": "If ChatGPT refuses the code, turn on device code sign-in under Settings → "
+               "Security. A work account needs an administrator to allow it."},
     {"id": "gemini", "name": "Gemini", "available": False,
-     "note": "Coming soon — the box cannot draft on Gemini yet."},
+     "note": "Coming soon — the box cannot draft on Gemini yet.",
+     "vendor": "Google",
+     "subscription": False,
+     "lede": "Google AI Pro and Ultra do not include API access, and there is no sign-in like "
+             "Claude's or ChatGPT's. Gemini would draft on a key from Google AI Studio instead — "
+             "and that one has a real free tier, so it asks for no card at all.",
+     "billing": "Free to start, with daily limits. Paid usage runs through Google Cloud billing "
+                "if you outgrow them.",
+     "key_label": "Google AI Studio API key",
+     "key_from": ("Google AI Studio", "https://aistudio.google.com/apikey"),
+     "key_prefix": "AIza...",
+     # THE LAST STEP DOES NOT SAY "PASTE IT HERE". There is no field on this panel and there
+     # must not be one, so an instruction to paste sends a buyer hunting for a box that was
+     # deliberately left out. Read off the rendered page, 2026-09-22.
+     "steps": ("Sign in at aistudio.google.com with a Google account.",
+               "Open Get API key and create one. No card is asked for.",
+               "Keep it somewhere safe. This box will ask you for it the day it can draft on "
+               "Gemini — and not before.")},
     {"id": "grok", "name": "Grok", "available": False,
-     "note": "Coming soon — the box cannot draft on Grok yet."},
+     "note": "Coming soon — the box cannot draft on Grok yet.",
+     "vendor": "xAI",
+     "subscription": False,
+     "lede": "X Premium and SuperGrok are the chat app; neither includes API access. Drafting on "
+             "Grok needs a key from xAI's own console, billed on its own account.",
+     "billing": "Prepaid credits at console.x.ai, usually with a promotional balance to start.",
+     "key_label": "xAI API key",
+     "key_from": ("xAI Console", "https://console.x.ai"),
+     "key_prefix": "xai-...",
+     "steps": ("Sign in at console.x.ai. It is self-serve — there is no waiting list.",
+               "Create an API key.",
+               "Keep it somewhere safe. This box will ask you for it the day it can draft on "
+               "Grok — and not before.")},
 )
 
 # EVERY ONE OF THESE IS LIVE. They are MCP clients: they connect to the box's own address with a
@@ -950,12 +1046,26 @@ _AI_STEP = {
     # test_setup_screen_loop refuses a `_setup_step` that names a step, and it is right to: the
     # whole point of the contract is that a machine can add a step without editing the renderer.
     # A picker is data like a field is data.
+    # THE NOTE HAD TO CHANGE WITH THE SCREEN. It read "Only the ones your box can actually use
+    # are selectable", which was true of the machine's greyed-out picker and became a lie the
+    # moment core's picker let you choose one to read about. A caption that argues with the
+    # control beneath it is worse than no caption — found by rendering, 2026-09-22.
     "choose": {"label": "Which model writes your drafts",
-               "note": "More are coming. Only the ones your box can actually use are selectable.",
+               # WHAT THIS SENTENCE MUST NOT DO IS COUNT. It said "Claude works today" and was
+               # stale the same day ChatGPT went live; naming the live ones here means two
+               # places to keep in step, and the one nobody updates is the one buyers read. The
+               # picker already marks each option, so this says only what the OTHERS are for.
+               "note": "Every one of these can be picked. The ones your box cannot draft with "
+                       "yet show you what connecting them will involve and take nothing from "
+                       "you.",
                "options": DRAFTING_MODELS},
-    "why": "This is what writes the replies. Your box drafts with your own key on your own bill, "
-           "so your customers' messages are never on anybody else's account. Nothing is sent "
-           "automatically — the box writes, you read it, and you decide.",
+    # "YOUR OWN ACCOUNT", NOT "YOUR OWN KEY". This sentence sits above every model's panel, and
+    # two of the four are now a sign-in with no key in them anywhere — a buyer reading "your own
+    # key" on the ChatGPT page goes looking for one that does not exist. Found by rendering the
+    # page and reading it, 2026-09-22.
+    "why": "This is what writes the replies. Your box drafts on your own account and your own "
+           "bill, so your customers' messages are never on anybody else's account. Nothing is "
+           "sent automatically — the box writes, you read it, and you decide.",
     "fields": ({"name": "key", "label": "Anthropic API key or Claude subscription token",
                 "type": "password", "placeholder": "sk-ant-..."},),
     # THE BUTTON IS THE ANSWER FOR A SUBSCRIPTION; THE FIELD IS THE FALLBACK. Owner, 2026-09-18:

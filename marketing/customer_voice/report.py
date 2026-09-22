@@ -291,18 +291,27 @@ def report(day: date, space: str | None = None) -> dict:
     headline = ps_score if ps_score is not None else (checks - down)
     label = "PageSpeed score" if ps_score is not None else "good checks today"
     if not owned:
-        # A BOX THAT OWNS NO RAIL IS NOT A BROKEN ONE. It renders as a machine waiting to be
-        # told what this business has, which is a setup step and reads like one.
+        # OWNING NO RAIL IS NOW THE SHIPPED DEFAULT, NOT AN UNFINISHED BOX. Until 2026-09-22 a box
+        # shipped with `rails_owned: [uptime, pagespeed]`, so an empty set meant the buyer had
+        # actively cleared it and this branch asked him to say what his business has. The owner
+        # retired that whole rail — *"the whole speed and site thing is not something we're going
+        # to have"* — so every box now lands here, and both halves of what this branch used to do
+        # became wrong on the same day:
         #
-        # BUT A SOLD BOX OWNS NO RAIL AND STILL HAS AN INBOX, which is the common case and not the
-        # empty one: the buyer connected Instagram and never named a website to watch. Writing
-        # `watch = [...]` here would have DELETED the inbox line this segment just added, on
-        # exactly the boxes the product is sold to — so the setup prompt is APPENDED to what is
-        # already there, and it only becomes the whole page when there is nothing else to say.
-        headline, label = (waiting, "waiting on you") if counts["inbound"] or waiting \
-            else (0, "rails set up")
-        watch = watch + [{"text": "Nothing set up yet — say which of these this business has",
-                          "state": rails.CONNECT}]
+        #   · THE PROMPT BECAME A NAG ABOUT A FEATURE WE REMOVED. "say which of these this
+        #     business has" asks a buyer to opt into watching a website, which is the one thing
+        #     this change exists to stop asking. Dropped.
+        #
+        #   · THE HEADLINE BECAME A ZERO ABOUT NOTHING. `(0, "rails set up")` was a fair summary
+        #     while rails were the product; on a quiet box it now renders "0 rails set up" on the
+        #     dashboard — a figure counting a thing that is gone. Measured by rendering the report
+        #     on a fresh box, not by reading this line.
+        #
+        # SO A QUIET BOX SAYS NOTHING AT ALL, which is this file's own rule rather than a new one:
+        # `core/dash/home.py:_segments` skips a segment whose headline carries no LABEL, and the
+        # module header above says zeroes on the first morning read as a broken machine. The inbox
+        # still speaks the moment it has anything to say.
+        headline, label = (waiting, "waiting on you") if counts["inbound"] or waiting else (None, "")
 
     return {"title": TITLE,
             "headline": {"value": headline, "label": label},

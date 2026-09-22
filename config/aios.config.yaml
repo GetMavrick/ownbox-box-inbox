@@ -65,7 +65,16 @@ customer_voice:
   # THE RAILS THIS BUSINESS ACTUALLY HAS, his answer and nobody's inference. A rail he has not
   # been asked about renders NOTHING; one he owns but has not connected says "connect", never a
   # failure. Guessing here is how a clone nags forever about a Yelp listing that does not exist.
-  rails_owned: [uptime, pagespeed]
+  # SHIPPED OFF. Owner, 2026-09-22: *"the whole speed and site thing is not something we're
+  # going to have. We're not gonna connect Google site speed and do SEO yet."* The product is
+  # narrowing to the unified inbox, then the AI receptionist, then an agentic CRM, and a rail
+  # that asks every buyer for a website address is selling something none of those are.
+  #
+  # OWNED IS A DECLARATION, NOT A CAPABILITY, so nothing is deleted to do this. The workers, the
+  # tables and the LABEL prompts all stay, `voice_rails` still overrides this file, and a
+  # business that genuinely wants its site watched declares the rail and gets it back exactly as
+  # before. What changes is only what a box SHIPS switched on.
+  rails_owned: []
 
 # THE MORNING REVIEW — one report per machine per day, sent at breakfast and kept forever
 # (core/report.py, docs/PLAN_MORNING_REVIEW.md). Owner, 2026-09-09: "a crucial feature that

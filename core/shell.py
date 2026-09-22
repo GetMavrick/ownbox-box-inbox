@@ -51,6 +51,44 @@ _KEY = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 TONES = frozenset({"", "danger", "away"})
 
 
+# WHERE A RAIL ROW MAY POINT. Two shapes and no third.
+#
+# A PATH ON THIS BOX is the normal answer and stays the default. The one exception the owner
+# asked for (2026-09-22) is a row that leaves the box entirely — "Add a Machine" goes to the
+# shop on ownbox.io, which is a website and not a screen this box serves. Before this, both
+# validators below refused anything not starting with "/", so that row could not be registered
+# at all; the rule was right and simply had no room for the case.
+#
+# HTTPS ONLY, AND THAT IS THE WHOLE ALLOW-LIST. A rail href becomes an `href` attribute on a
+# page a paying customer is signed in to, so the shapes deliberately refused are the ones that
+# would matter: `javascript:` (script execution from a menu), `http://` (a downgrade on a box
+# that exists to be private), and `//host` (protocol-relative, which reads as a path and is not
+# one). Anything else — `mailto:`, `data:`, a bare word — is refused by falling through.
+def _href_problem(href: str) -> str:
+    """"" if this href may be drawn in the rail, else why not, in words for the raising line."""
+    h = str(href or "")
+    if h.startswith("//"):
+        # PROTOCOL-RELATIVE READS AS A PATH AND IS NOT ONE. `//evil.example` starts with "/" and
+        # would have passed the old check, which is the one hole worth naming here.
+        return f"is protocol-relative, which is not a path on this box: {h!r}"
+    if h.startswith("/"):
+        return ""
+    if h.startswith("https://") and len(h) > len("https://"):
+        return ""
+    return f"must be a path on this box or an https:// address, got {h!r}"
+
+
+def is_off_box(href: str) -> bool:
+    """Whether following this row leaves the box — DERIVED, never declared.
+
+    The `away` tone and its out-arrow exist already, and a row could simply be asked to carry
+    both. It is not asked to: a link whose destination says it leaves and whose tone says it does
+    not is a row that lies, and the two would drift the first time somebody edited one of them.
+    The href is the fact; everything else is read off it.
+    """
+    return str(href or "").startswith("https://")
+
+
 @dataclass(frozen=True)
 class Item:
     """One choice inside a section — the second level."""
@@ -123,8 +161,9 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
         raise ValueError(f"rail section {key!r} needs an integer order")
     if not (title or "").strip():
         raise ValueError(f"rail section {key!r} needs a title a buyer can read")
-    if not (href or "").startswith("/"):
-        raise ValueError(f"rail section {key!r} needs an absolute path, got {href!r}")
+    _bad = _href_problem(href)
+    if _bad:
+        raise ValueError(f"rail section {key!r} href {_bad}")
 
     built = []
     seen = set()
@@ -140,8 +179,9 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
         seen.add(ikey)
         if not (it.get("label") or "").strip():
             raise ValueError(f"rail item {ikey!r} needs a label")
-        if not str(it.get("href") or "").startswith("/"):
-            raise ValueError(f"rail item {ikey!r} needs an absolute path")
+        _ibad = _href_problem(it.get("href"))
+        if _ibad:
+            raise ValueError(f"rail item {ikey!r} href {_ibad}")
         tone = str(it.get("tone") or "")
         if tone not in TONES:
             raise ValueError(f"rail item {ikey!r} has tone {tone!r}; expected one of {sorted(TONES)}")

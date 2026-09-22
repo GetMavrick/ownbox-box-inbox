@@ -214,6 +214,12 @@ def periodic() -> dict:
     return {"drafted": drafted}
 
 
+# How far past the cap the sweep looks for real people. Twenty is generous on purpose: in the
+# owner's own mailbox 81% of inbound is automated, so scanning only `cap` rows would usually
+# find nobody at all.
+_SCAN_MULTIPLE = 20
+
+
 def sweep(space: str) -> dict:
     """Draft for the conversations that have a new inbound and no draft. Sends nothing.
 
@@ -227,10 +233,35 @@ def sweep(space: str) -> dict:
     if not cap:
         return {"status": "capped", "drafted": 0}
     try:
-        waiting = store.needs_a_draft(space, limit=cap)
+        # A WIDER WINDOW THAN WE WILL DRAFT, so a robot can never hold the queue. The sweep takes
+        # `cap` PEOPLE, not `cap` rows: asking for exactly `cap` and then discarding the automated
+        # ones would leave the same undraftable rows at the head of a newest-first queue forever —
+        # which is precisely the seven-hour head-block of 2026-09-22, arriving by a new road.
+        # Bounded, because this is still a queue and not a mailbox scan.
+        waiting = store.needs_a_draft(space, limit=cap * _SCAN_MULTIPLE)
     except Exception as e:                       # noqa: BLE001 — a box without the table yet
         log.warning("drafter.unreadable", extra={"error": f"{type(e).__name__}: {e}"[:120]})
         return {"status": "unreadable", "drafted": 0}
+
+    # ── WHO WROTE IT ────────────────────────────────────────────────────────────────────────
+    # OWNER, 2026-09-22, after finding fifty drafts to LinkedIn job alerts and Google security
+    # alerts in his own Gmail: "None of these needed drafts. And it's just wasting my tokens."
+    # A model call is only ever spent on a message a person wrote and might read an answer to.
+    from . import who_wrote
+    ours = who_wrote.our_addresses()
+    people, refused = [], {}
+    for row in waiting:
+        reason = who_wrote.why(row.get("sender") or "", row.get("headers"), ours=ours)
+        if reason:
+            refused[reason] = refused.get(reason, 0) + 1
+        else:
+            people.append(row)
+    if refused:
+        # SAID OUT LOUD, WITH COUNTS. A silent skip is how the head-block hid for seven hours;
+        # this is the same class of event and it gets the same treatment.
+        log.info("drafter.not_a_person", extra={"space": space, "refused": refused,
+                                                "considered": len(waiting)})
+    waiting = people[:cap]
 
     drafted = 0
     for row in waiting:

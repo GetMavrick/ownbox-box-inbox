@@ -127,13 +127,25 @@ for plat in ("whatsapp", "sms", "", "EMAIL_TYPO"):
 # ── the drafter does not consult the window, on purpose ──────────────────────────────────────
 print("\n— blocking the send does not block the draft —")
 import inspect  # noqa: E402
+import re as _re_guard  # noqa: E402
 
 from marketing.customer_voice.drafter import draft as _draft  # noqa: E402
 from marketing.customer_voice.drafter import store as _dstore  # noqa: E402
 
 src = inspect.getsource(_draft) + inspect.getsource(_dstore)
+# THE RULE IS ABOUT AN IMPORT, NOT ABOUT A WORD. This was `"window" not in src`, which is a
+# substring scan over the whole source — so the day somebody wrote "a window of rows" in a
+# COMMENT it went red for prose while the real rule was never in danger (2026-09-22, OSDev1).
+# A guard that fails on English is a guard people learn to work around, and the rule it protects
+# is worth keeping sharp: the drafter must not consult `window.py`, because that module carries
+# `no_send_lane: True` for email and consulting it would stop email being DRAFTED — which is a
+# different thing from being sent, and the whole reason drafting is safe on a channel we cannot
+# send on yet.
+_WINDOW_USE = _re_guard.compile(r"^\s*(from\s+\S*\bwindow\b|import\s+\S*\bwindow\b|"
+                                r"from\s+\S+\s+import\s+[^\n]*\bwindow\b)", _re_guard.M)
 ok("THE DRAFTER NEVER IMPORTS THE WINDOW — so email ingests AND drafts",
-   "window" not in src, "the drafter now consults window.py; email would stop drafting")
+   _WINDOW_USE.search(src) is None and "window." not in src,
+   "the drafter now consults window.py; email would stop drafting")
 ok("...and it still cannot send, which is what makes that safe",
    "send_reply" not in src and "smtplib" not in src)
 
