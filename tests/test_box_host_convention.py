@@ -1,13 +1,21 @@
-"""Every machine app answers at <name>.nlvl.co — the owner's rule, asserted, not remembered.
+"""Every machine app answers at <name>.ownbox.app — the owner's rule, asserted, not remembered.
 
-Owner, 2026-09-05 (OSDev5's session): "When we automatically create these mini applications
-that have the two tabs, I would like for them to be on a subdomain of this domain: nlvl.co.
-such as: health-wellness.nlvl.co". Asked which name: the INDUSTRY for one of our own demo apps,
-the CLIENT for a sold box. Asked who makes the record: him, from his machine, before bootstrap —
-the Cloudflare token never sits on a client's VPS.
+SUPERSEDED, AND THE OLD RULING IS KEPT BECAUSE IT EXPLAINS THE SHAPE. Owner, 2026-09-05
+(OSDev5's session): "When we automatically create these mini applications that have the two tabs,
+I would like for them to be on a subdomain of this domain: nlvl.co. such as:
+health-wellness.nlvl.co". Owner, 2026-09-21, twice and unprompted: "I thought we were using
+ownbox.app for client machines!!" and then "Yes make the permanent cutover to ownbox.app for all
+machines". The LATEST ruling governs, so the zone is ownbox.app and nlvl.co is now the wrong
+answer everywhere — including on the hand-built machines this file is about, which were the last
+place still teaching the old one.
+
+Everything else from 2026-09-05 still stands. Which name: the INDUSTRY for one of our own demo
+apps, the CLIENT for a sold box. Who makes the record: him, from his machine, before bootstrap —
+the Cloudflare token never sits on a client's VPS. The provisioner already builds every SOLD box
+on ownbox.app (provisioner/userdata.py BOXES_DOMAIN); this is the hand-built path catching up.
 
 What this proves, by running the tools rather than reading them:
-  1. dns_add.py defaults to zone nlvl.co and, in --dry-run, produces exactly <name>.nlvl.co
+  1. dns_add.py defaults to zone ownbox.app and, in --dry-run, produces exactly <name>.ownbox.app
      for both shapes of name — with no token in the environment, so the test is hermetic.
   2. dns_add.py refuses a label that is not a DNS-safe slug (the industry / client name is
      typed by a person; "Health Wellness" must fail before it reaches Cloudflare).
@@ -53,16 +61,17 @@ def test_dns_add_speaks_the_rule():
         ok("dns_add.py not shipped here (a box) — nothing to enforce", True)
         return
     r = dns_add("health-wellness", "203.0.113.7", "--dry-run")
-    ok("a demo app: health-wellness -> health-wellness.nlvl.co (default zone, no token needed)",
-       r.returncode == 0 and "health-wellness.nlvl.co" in r.stdout, r.stdout + r.stderr)
+    ok("a demo app: health-wellness -> health-wellness.ownbox.app (default zone, no token needed)",
+       r.returncode == 0 and "health-wellness.ownbox.app" in r.stdout, r.stdout + r.stderr)
     r = dns_add("acme", "203.0.113.7", "--dry-run")
-    ok("a sold box: acme -> acme.nlvl.co", r.returncode == 0 and "acme.nlvl.co" in r.stdout)
+    ok("a sold box: acme -> acme.ownbox.app", r.returncode == 0 and "acme.ownbox.app" in r.stdout)
     r = dns_add("Health Wellness", "203.0.113.7", "--dry-run")
     ok("a label with a space or capitals is refused before any API call", r.returncode != 0 and "not a usable label" in r.stdout + r.stderr)
     r = dns_add("health-wellness", "203.0.113.999", "--dry-run")
     ok("a bad IPv4 is refused", r.returncode != 0 and "IPv4" in r.stdout + r.stderr)
     src = DNS_ADD.read_text()
-    ok("the default zone is nlvl.co in the source, not only in the environment", '"nlvl.co"' in src)
+    ok("the default zone is ownbox.app in the source, not only in the environment",
+       '"ownbox.app"' in src and '"nlvl.co"' not in src, "nlvl.co still appears as a default")
     ok("dns_add's help names both shapes of name", "industry" in src and "client" in src)
 
 
@@ -76,13 +85,14 @@ def test_no_tool_teaches_another_host():
         ok(f"{p.name}: no stale example host", not hits, str(hits))
     if BOOTSTRAP.exists():
         head = BOOTSTRAP.read_text()[:4000]
-        ok("bootstrap's header example uses <name>.nlvl.co", ".nlvl.co" in head)
+        ok("bootstrap's header example uses <name>.ownbox.app",
+           ".ownbox.app" in head and ".nlvl.co" not in head, head[:200])
         ok("bootstrap's header says the record is made from the owner's machine, never this box",
            "dns_add.py" in head and "never" in head)
     if DNS_CHECK.exists():
         head = DNS_CHECK.read_text()[:3000]
-        ok("dns_check's examples show a demo app and a sold box on nlvl.co",
-           "health-wellness.nlvl.co" in head and "acme.nlvl.co" in head)
+        ok("dns_check's examples show a demo app and a sold box on ownbox.app",
+           "health-wellness.ownbox.app" in head and "acme.ownbox.app" in head)
 
 
 if __name__ == "__main__":

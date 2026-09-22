@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Is this box's DNS ready? Ask, do not guess — and get told exactly what to add.
 
-  python scripts/dns_check.py --dash health-wellness.nlvl.co            # one of our demo apps
-  python scripts/dns_check.py --dash acme.nlvl.co --send acme-roofing.com  # a sold box
+  python scripts/dns_check.py --dash health-wellness.ownbox.app            # one of our demo apps
+  python scripts/dns_check.py --dash acme.ownbox.app --send acme-roofing.com  # a sold box
 
 TWO DIFFERENT DOMAINS, AND ONLY ONE OF THEM COSTS ANYTHING:
 
   --dash   where this box answers. Sending needs a public https address because every email
            carries an unsubscribe link built from it, and the login rides the same host.
            This does NOT have to be the client's domain and does NOT have to be bought: one
-           A record on nlvl.co — the owner's rule (2026-09-05): <industry>.nlvl.co for one of
-           our demo apps, <client>.nlvl.co for a sold box — points at this droplet and Caddy
+           A record on ownbox.app — the owner's rule (2026-09-21, superseding the 2026-09-05
+           nlvl.co ruling): <industry>.ownbox.app for one of our demo apps,
+           <client>.ownbox.app for a sold box — points at this droplet and Caddy
            issues the certificate by itself. Thirty seconds, no client involvement, no purchase,
            ten times over. scripts/dns_add.py makes the record from the owner's machine.
 
@@ -70,7 +71,7 @@ def check(label: str, got: list[str], want: str | None, fix: str) -> bool:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dash", help="where this box answers, e.g. health-wellness.nlvl.co (demo) or acme.nlvl.co (sold box)")
+    ap.add_argument("--dash", help="where this box answers, e.g. health-wellness.ownbox.app (demo) or acme.ownbox.app (sold box)")
     ap.add_argument("--send", help="the client's own domain that mail comes FROM")
     ap.add_argument("--ip", help="this droplet's public IP, to confirm the A record points here")
     a = ap.parse_args(argv)

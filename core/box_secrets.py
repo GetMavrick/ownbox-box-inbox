@@ -674,10 +674,29 @@ SETUP_STEPS = (
      # to the vendor's own screens: they hold the app registration, the consent screen and the
      # tokens. A link out in a NEW TAB is the honest shape — the buyer keeps this page open, does
      # the consent where it actually lives, and comes back to a row that now says connected.
+     # A DEEP LINK ONLY WHEN SOMEBODY HAS ACTUALLY SEEN IT. This was `https://zernio.com/accounts`,
+     # a path nobody had ever fetched, and the owner hit the 404 mid-onboarding on 2026-09-21 — on
+     # the step whose entire job is to send him somewhere, at the moment it was asking him for an
+     # API key. `marketing/customer_voice/app.py` already carried the warning ("the site root, not
+     # a guessed deep link"); this file had guessed anyway.
+     #
+     # The URL below is the one the OWNER read off his own Zernio dashboard the same day, which is
+     # why it is allowed to be a path at all. `tests/test_setup_asks_for_the_ai_key.py` holds the
+     # rule: an outbound set-up link is a site root UNLESS it is on the verified list there, and
+     # adding to that list means somebody loaded the page.
      "link": {"label": "Connect your accounts in Zernio",
-              "url": "https://zernio.com/accounts",
+              "url": "https://zernio.com/dashboard/connections",
               "new_tab": True,
-              "after": "Come back to this page when you are done — connected accounts appear here."},
+              # THIS SENTENCE WAS FALSE AND THE OWNER CAUGHT IT MID-ONBOARDING (2026-09-21):
+              # "connected accounts appear here" — they never could. This step binds to
+              # `zernio_state()`, which reads the KEY and its status and nothing else; it has no
+              # idea what accounts exist and makes no network call. The screen that lists them is
+              # Settings -> Add or remove a channel, which calls `accounts.discover()`.
+              #
+              # SAY WHERE, NOT "HERE". A buyer who comes back and sees nothing concludes the
+              # connection failed and re-does work that already worked.
+              "after": "When you are done, your connected accounts show up under Settings, on "
+                       "'Add or remove a channel' — not on this page."},
      "note": "A key with no payment method on the account still saves, and says so: connecting an "
              "account is what needs the card, not the key. Leaving this step alone costs you "
              "nothing and breaks nothing — email keeps arriving either way."},
@@ -689,6 +708,83 @@ SETUP_STEPS = (
 # machine stops meaning editing core. The AI key belongs to no machine: `core.brain` is the one
 # gateway every machine reasons through, and a box with no key cannot draft, summarise or route
 # anything, whichever machines it carries. There is nothing to register it, so core asks for it.
+# ── WHICH MODEL WRITES, AND WHICH ASSISTANTS CAN CONNECT ─────────────────────────────────────
+# TWO DIFFERENT QUESTIONS, and conflating them is how a screen starts lying. The box CALLS the
+# drafting model, so that list is limited by what `core/brain.py` can actually talk to — today,
+# Anthropic and nothing else. The assistants in `AGENT_CLIENTS` call the BOX, over MCP, so that
+# list is limited only by which of them speak MCP — and all four do, today, with no work from us.
+#
+# THE GREYED-OUT THREE ARE MARKED `available: False` AND THE SCREEN MUST HONOUR IT. Owner,
+# 2026-09-21, asked for them shown greyed out, which is honest: it says where this is going
+# without claiming to be there. What would NOT be honest is a selectable option that stores an
+# `sk-...` key and then never drafts a single reply, which is what an un-greyed list would be
+# until `brain.py` grows a second provider.
+DRAFTING_MODELS = (
+    {"id": "claude", "name": "Claude", "available": True,
+     "note": "Sign in with a Pro or Max subscription, or paste an Anthropic key."},
+    {"id": "openai", "name": "ChatGPT", "available": False,
+     "note": "Coming soon — the box cannot draft on OpenAI yet."},
+    {"id": "gemini", "name": "Gemini", "available": False,
+     "note": "Coming soon — the box cannot draft on Gemini yet."},
+    {"id": "grok", "name": "Grok", "available": False,
+     "note": "Coming soon — the box cannot draft on Grok yet."},
+)
+
+# EVERY ONE OF THESE IS LIVE. They are MCP clients: they connect to the box's own address with a
+# key this box mints, and the box neither calls them nor holds anything of theirs. Adding a fifth
+# is a row here, not a feature.
+AGENT_CLIENTS = (
+    {"id": "claude", "name": "Claude",
+     "how": "Settings -> Connectors -> Add custom connector, then paste the address and key."},
+    {"id": "chatgpt", "name": "ChatGPT",
+     "how": "Settings -> Connectors -> Add, then paste the address and key."},
+    {"id": "gemini", "name": "Gemini",
+     "how": "Add it as an MCP server with the address and key below."},
+    {"id": "grok", "name": "Grok",
+     "how": "Add it as an MCP server with the address and key below."},
+)
+
+
+def agent_state() -> dict:
+    """Whether any AI coworker has been given a key to this box yet."""
+    try:
+        from core.connector import seats
+        live = [s for s in seats.all_seats() if not s.get("revoked_at")]
+    except Exception:                                    # noqa: BLE001 — a step must never 500 set-up
+        return {"status": "not_connected", "detail": ""}
+    if not live:
+        return {"status": "not_connected", "detail": ""}
+    return {"status": "connected",
+            "detail": ", ".join(str(s.get("label") or "") for s in live[:3])}
+
+
+_AGENT_STEP = {
+    "key": "agent", "title": "Your AI coworkers",
+    # EVERY ENTRY CARRIES `fields`, EMPTY OR NOT. `app._setup_source()` requires the five keys of
+    # the contract on every step, and tests/test_setup_sources_merge.py asserts it — a step is a
+    # shape, not a special case. This one has no field to type into: the key is MINTED on
+    # /inbox/agent and shown once, never pasted in.
+    "fields": (),
+    # THE CONTRACT WANTS `steps` TOO, and this step has real ones — the key is minted here and
+    # pasted into the assistant, which is the reverse of every other step on this screen.
+    "steps": ("Press the button below — it mints a key for this box and shows it once.",
+              "Choose what that coworker may do: read only, or read and draft replies.",
+              "Copy the key and this box's address into your assistant's connector settings.",
+              "Revoke it whenever you like; the box keeps working, it just stops answering them."),
+    "why": "Give Claude, ChatGPT, Gemini or Grok a key to this box and they can read your "
+           "inbox and draft replies for you, in whichever one you already pay for. You choose "
+           "what each key may do, and you can take it back at any moment. Nothing you connect "
+           "here can send a message as your business.",
+    "optional": True,
+    "link": {"label": "Connect an AI coworker",
+             "url": "/inbox/agent",
+             "new_tab": False,
+             "after": "The key is shown once. If you lose it, revoke it and make another."},
+    "note": "This is the MCP address for this box and nobody else's — your conversations never "
+            "pass through Ownbox to get there.",
+}
+
+
 _AI_STEP = {
     # TITLED FOR THE ANSWER, NOT THE FALLBACK. It read "Your AI key" while the button beneath it
     # said "Sign in to Claude", which is the contradiction the owner named in the first place —
@@ -696,6 +792,13 @@ _AI_STEP = {
     # thing a person reads first and the thing they film. The step's identity stays `anthropic`;
     # only the words a buyer sees change.
     "key": "anthropic", "title": "Your AI account",
+    # DECLARED BY THE STEP, DRAWN BY THE RENDERER — never `if key == "anthropic"` in the screen.
+    # test_setup_screen_loop refuses a `_setup_step` that names a step, and it is right to: the
+    # whole point of the contract is that a machine can add a step without editing the renderer.
+    # A picker is data like a field is data.
+    "choose": {"label": "Which model writes your drafts",
+               "note": "More are coming. Only the ones your box can actually use are selectable.",
+               "options": DRAFTING_MODELS},
     "why": "This is what writes the replies. Your box drafts with your own key on your own bill, "
            "so your customers' messages are never on anybody else's account. Nothing is sent "
            "automatically — the box writes, you read it, and you decide.",
@@ -801,7 +904,7 @@ def phone_state() -> dict:
             "detail": f"{n} device{'s' if n != 1 else ''} set up" if n else ""}
 
 
-SETUP_STEPS = SETUP_STEPS + (_AI_STEP, _PHONE_STEP)
+SETUP_STEPS = SETUP_STEPS + (_AI_STEP, _PHONE_STEP, _AGENT_STEP)
 
 # ONE STATE READER PER STEP, BY NAME. This was `email_state() if key == "email" else zernio_state()`
 # — a binary that was correct while there were exactly two steps and silently wrong the moment

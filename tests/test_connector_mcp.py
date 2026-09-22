@@ -293,6 +293,37 @@ res = r.get_json()["result"]
 ok("a read seat is still refused an act tool it CAN see — neither check subsumes the other",
    res["isError"] is True, str(res)[:110])
 
+print("\n— the short address a buyer is given is gated exactly like the long one —")
+# THE ADDRESS ON THE SCREEN IS `https://<slug>.ownbox.app/mcp` (owner, 2026-09-21), and the whole
+# seat gate hangs on a path test. `core/dispatch` says it about itself: this is "latent exactly
+# until somebody mounts a connector route outside that prefix" — mounting /mcp IS that, and an
+# ungated MCP endpoint is every customer message on the box handed to whoever finds the hostname.
+#
+# MATCHED EXACTLY, NEVER BY PREFIX: `startswith("/mcp")` would wave through a future `/mcpfoo`.
+from core.dispatch import _needs_a_seat  # noqa: E402
+
+for _path, _want in (("/mcp", True), ("/api/v1/mcp", True), ("/api/v1/tools", True),
+                     ("/mcpanything", False), ("/mcp/anything", False),
+                     ("/inbox/", False), ("/dash/login", False)):
+    ok(f"{'needs a seat' if _want else 'not gated   '}: {_path}",
+       _needs_a_seat(_path) is _want,
+       "an ungated connector path is the whole inbox, unauthenticated")
+
+# AND BOTH PATHS REACH THE SAME HANDLER. Read off the app's own URL map, so this goes red if
+# somebody drops a decorator — `app` in this file is a TEST CLIENT, hence `application`.
+_rules = {r.rule for r in app.application.url_map.iter_rules()}
+ok("/mcp is mounted", "/mcp" in _rules, str(sorted(r for r in _rules if "mcp" in r)))
+ok("...and /api/v1/mcp still is", "/api/v1/mcp" in _rules)
+# THE SHORT PATH SERVES THE SAME ENDPOINTS AS THE LONG ONE — both of them, because /mcp has a
+# GET (405, the spec's answer for "no server-initiated stream") as well as the JSON-RPC POST.
+_by_path = {}
+for _r in app.application.url_map.iter_rules():
+    if _r.rule in ("/mcp", "/api/v1/mcp"):
+        _by_path.setdefault(_r.rule, set()).add(_r.endpoint)
+ok("...and the short path serves exactly the endpoints the long one does",
+   _by_path.get("/mcp") == _by_path.get("/api/v1/mcp") and bool(_by_path.get("/mcp")),
+   str(_by_path))
+
 print()
 if _failed:
     print(f"{_failed} FAILED")

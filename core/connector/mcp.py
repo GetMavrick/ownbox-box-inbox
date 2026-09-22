@@ -262,6 +262,7 @@ def _call_tool(params: dict, rpc_id, seat: dict) -> dict:
     return {"jsonrpc": "2.0", "id": rpc_id, "result": _tool_result(payload, status)}
 
 
+@blueprint.get("/mcp")
 @blueprint.get("/api/v1/mcp")
 def mcp_get():
     """No server-initiated stream. 405 is the spec's own answer for exactly this case."""
@@ -270,6 +271,12 @@ def mcp_get():
                                "JSON-RPC instead"}), 405
 
 
+# THE SAME HANDLER AT THE SHORT ADDRESS. Owner, 2026-09-21: the address a buyer hands their
+# assistant should read `https://<slug>.ownbox.app/mcp`. Deliberately NOT a redirect — an MCP
+# client POSTs JSON-RPC, and a 307 across a POST is honoured inconsistently and drops the
+# Authorization header in some stacks. One handler, two paths, one gate: `core/dispatch`
+# `_SEAT_PATHS` carries `/mcp`, so this is refused without a seat exactly as `/api/v1/mcp` is.
+@blueprint.post("/mcp")
 @blueprint.post("/api/v1/mcp")
 def mcp_post():
     """One JSON-RPC message in, one out. The seat was verified by the /api/ gate.

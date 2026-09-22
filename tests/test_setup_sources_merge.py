@@ -63,12 +63,12 @@ base = [e["key"] for e in app._setup_source()]
 # machines will need this"). It is core, not a machine's, so it belongs in this baseline — and it
 # is marked optional, so it counts for nothing on the dashboard's "N to connect".
 ok("the box starts with the core credentials plus the phone",
-   base == ["email", "zernio", "anthropic", "phone"], str(base))
+   base == ["email", "zernio", "anthropic", "phone", "agent"], str(base))
 
 _register("relay", 40, "Relay")
 after = [e["key"] for e in app._setup_source()]
 ok("A NEW SEAM STEP ADDS ITSELF AND DELETES NOTHING — the whole bug, in one assertion",
-   after == ["email", "zernio", "anthropic", "phone", "relay"], str(after))
+   after == ["email", "zernio", "anthropic", "phone", "agent", "relay"], str(after))
 # THE PREFIX IS WHATEVER CORE DECLARES, not a hardcoded three. Pinning the slice length made
 # this assertion fail the day a fourth core step arrived, which is not what it is testing:
 # it is testing that a machine's registration APPENDS and disturbs nothing before it.
@@ -84,7 +84,7 @@ ok("migrating a key does not duplicate it", keys.count("email") == 1, str(keys))
 ok("...and the SEAM's version is the one that renders",
    [e["title"] for e in merged if e["key"] == "email"] == ["Migrated mailbox"], str(keys))
 ok("...IN PLACE, not jumped to the end by its order — the owner set this screen's order",
-   keys == ["email", "zernio", "anthropic", "phone", "relay"], str(keys))
+   keys == ["email", "zernio", "anthropic", "phone", "agent", "relay"], str(keys))
 
 
 print("\ntest_the_page_outranks_the_seam")
@@ -93,7 +93,7 @@ _broken = onboarding.steps
 onboarding.steps = lambda: (_ for _ in ()).throw(RuntimeError("a machine registered nonsense"))
 survived = [e["key"] for e in app._setup_source()]
 ok("A SEAM THAT RAISES NEVER TAKES THE SET-UP PAGE DOWN — the old contract renders alone",
-   survived == ["email", "zernio", "anthropic", "phone"], str(survived))
+   survived == ["email", "zernio", "anthropic", "phone", "agent"], str(survived))
 onboarding.steps = _broken
 
 print("\ntest_every_entry_still_carries_what_the_screen_binds_to")

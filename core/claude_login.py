@@ -106,6 +106,23 @@ _ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[=>78]|\x1b\]
 # THE TOKEN, WHICH IS THE ONLY THING WORTH READING OUT OF THE SUCCESS OUTPUT.
 _TOKEN = re.compile(r"sk-ant-oat[A-Za-z0-9_\-]{20,}")
 
+def redact(text: str) -> str:
+    """Everything secret-shaped, replaced — before a transcript is written or read.
+
+    THE DIAGNOSTIC NEARLY BECAME THE BREACH. The transcript keeper added hours earlier existed to
+    explain FAILURES, and a SUCCESS transcript ends with the CLI printing the minted token in
+    full: "Your OAuth token (valid for 1 year): sk-ant-oat01-...". On 2026-09-21 that put a live
+    one-year credential on disk in plaintext, and then on a screen. The owner's token had to be
+    revoked. A support artefact must never be able to carry the thing it is helping debug.
+
+    REDACTED AT THE BOUNDARY, not at the print: anything written is already clean, so there is no
+    way to read the raw form back out of a file later. Both the oat and the api-key shapes go,
+    because `setup-token` is not the only thing whose output lands here.
+    """
+    out = _TOKEN.sub("sk-ant-oat[REDACTED]", text or "")
+    return re.sub(r"sk-ant-api[A-Za-z0-9_\-]{10,}", "sk-ant-api[REDACTED]", out)
+
+
 START_TIMEOUT_S = 60.0     # the CLI fetches its OAuth parameters before it can print a URL
 FINISH_TIMEOUT_S = 90.0    # minting the token is a round trip to Anthropic
 _STALE_AFTER_S = 900.0     # a login nobody finished is reaped rather than left holding a pty
@@ -227,6 +244,47 @@ def _alive(pid: int) -> bool:
     return True
 
 
+_LAST_DIRNAME = ".claude-login-last"
+
+
+def _last_dir() -> pathlib.Path:
+    return _dir().parent / _LAST_DIRNAME
+
+
+def _keep_last_failure(d: pathlib.Path, why: str) -> None:
+    """Copy what a failed sign-in knew into a directory the next one will not overwrite.
+
+    NEVER RAISES. This runs inside `_reap`, whose whole contract is that cleanup does not fail.
+    """
+    try:
+        keep = _last_dir()
+        keep.mkdir(parents=True, exist_ok=True)
+        (keep / "when").write_text(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                                   encoding="utf-8")
+        (keep / "why").write_text(str(why)[:400], encoding="utf-8")
+        for f in ("transcript", "error", "status", "log"):
+            src = d / f
+            if src.exists():
+                # BELT AND BRACES. `transcript` is redacted where it is written; `log` is the
+                # helper's own stdout and has never been through that path at all.
+                text = redact(src.read_text(encoding="utf-8", errors="replace"))
+                (keep / f).write_text(text[-20000:], encoding="utf-8")
+    except Exception as e:                               # noqa: BLE001 — see the docstring
+        log.warning("claude_login.keep_failed", error=f"{type(e).__name__}: {e}")
+
+
+def last_failure() -> dict:
+    """What the last failed sign-in left behind, for an operator — never for a buyer's screen."""
+    keep = _last_dir()
+    out: dict = {}
+    for f in ("when", "why", "error", "status", "transcript"):
+        try:
+            out[f] = redact((keep / f).read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            out[f] = ""
+    return out
+
+
 def _reap(why: str) -> None:
     """End any live login and remove its session. Never raises: cleanup is not a place to fail."""
     d = _dir()
@@ -251,7 +309,17 @@ def _reap(why: str) -> None:
                 time.sleep(0.05)
             if not _alive(pid):
                 break
-    for f in ("pid", "url", "status", "error", "code", "user", "log"):
+    # THE EVIDENCE OUTLIVES THE SESSION. Until 2026-09-21 this loop deleted the transcript along
+    # with everything else, so the ONE artefact that says why a sign-in failed was destroyed at
+    # the exact moment it became worth reading. The owner hit a silent failure on his own box and
+    # there was nothing to look at — not on his box, not on a clone, because the clone has to
+    # reproduce a failure it cannot reproduce without his account.
+    #
+    # KEPT OUT OF THE SESSION DIRECTORY, because the next `start()` recreates that. This is a
+    # support artefact, never shown to a buyer: it is the CLI's own words, and `_sayable` exists
+    # precisely because those words are not fit to put in front of somebody.
+    _keep_last_failure(d, why)
+    for f in ("pid", "url", "status", "error", "code", "user", "log", "transcript"):
         try:
             (d / f).unlink()
         except OSError:
@@ -428,6 +496,45 @@ def cancel() -> None:
 
 # ── the helper: one process, one pty, one login, for as long as the buyer needs ──────────────────
 
+SUBMIT_CHUNK = 8           # bytes per write into the CLI's raw-mode prompt
+SUBMIT_PAUSE_S = 0.02      # between chunks, so its reader keeps up
+
+
+def submit_bytes(code: str | bytes) -> bytes:
+    """The code as it must arrive: trimmed, CARRIAGE-RETURN terminated. See `submit_code`."""
+    raw = code.encode() if isinstance(code, str) else bytes(code)
+    return raw.strip() + b"\r"
+
+
+def submit_code(fd: int, code: str | bytes, *, sleep=time.sleep) -> None:
+    """Type the code into the CLI's prompt SLOWLY, then press Enter. Both halves are load-bearing.
+
+    MEASURED ON A REAL BOX, claude 2.1.278, through the real finish() path (2026-09-21):
+        26-character code, one write  ->  2.4s, CLI answers
+        92-character code, one write  -> 92.1s, CLI says NOTHING AT ALL
+    A real authorization code is about 92 characters. So the product worked for every test code
+    anybody ever tried and failed for every genuine one — which is exactly how it reached a
+    customer. The owner lost a day of recording to it.
+
+    TWO SEPARATE FAULTS, AND FIXING EITHER ALONE LEAVES IT BROKEN:
+      1. The prompt is RAW-MODE and masked (it echoes asterisks). Its Enter is `\r`; a bare `\n`
+         is just another character in the buffer, so the code sat there unsubmitted.
+      2. Its reader cannot take a long burst. Written in one go, a 92-byte code is accepted
+         character-by-character into the echo — the asterisks all appear — and then the CLI never
+         acts on it. Fed in small chunks with a pause, it behaves.
+
+    THE ASTERISKS ARE WHY THIS WAS INVISIBLE: the transcript showed all 92 of them, so the code
+    plainly "arrived", and every theory went looking at Claude, the code, or the buyer instead.
+
+    CHUNKED WRITES ARE NOT A TIMING HACK TO BE TIDIED AWAY. If somebody replaces this with a
+    single `os.write`, it will pass every short-code test and fail every real sign-in.
+    """
+    payload = submit_bytes(code)
+    for i in range(0, len(payload), SUBMIT_CHUNK):
+        os.write(fd, payload[i:i + SUBMIT_CHUNK])
+        sleep(SUBMIT_PAUSE_S)
+
+
 def _serve(d: pathlib.Path) -> int:
     """Own the CLI for the life of one login. Runs detached; both workers talk to it through `d`.
 
@@ -437,7 +544,19 @@ def _serve(d: pathlib.Path) -> int:
     """
     buf = b""
 
+    def keep_transcript() -> None:
+        """The CLI's own words, on disk, before anything can kill this process.
+
+        WRITTEN ON EVERY EXIT PATH AND WHILE WAITING, not only at the end: the helper can be
+        SIGKILLed by a reap, and a transcript that only lands on a clean exit is missing for
+        exactly the failures worth reading."""
+        try:
+            _write(d, "transcript", redact(_clean(buf))[-20000:])
+        except Exception:                                # noqa: BLE001 — never break the login
+            pass
+
     def fail(sentence: str) -> int:
+        keep_transcript()
         _write(d, "error", sentence)
         _write(d, "status", "error")
         return 1
@@ -528,7 +647,7 @@ def _serve(d: pathlib.Path) -> int:
     # then reported as if the box had failed rather than the code.
     asked_before = _squash(_clean(buf)).count("pastecodehere")
     try:
-        os.write(master, code.strip() + b"\n")
+        submit_code(master, code)
     except OSError:
         proc.kill()
         os.close(master)
@@ -553,6 +672,7 @@ def _serve(d: pathlib.Path) -> int:
         if tok:
             user = _read(d, "user") or None
             box_secrets.put_claude_oauth(tok.group(0), consented=True, user_id=user)
+            keep_transcript()
             _write(d, "status", "done")
             if proc.poll() is None:
                 proc.kill()
@@ -573,8 +693,18 @@ def _serve(d: pathlib.Path) -> int:
                 proc.kill()
                 os.close(master)
                 return fail(said + " Start again and paste the new code promptly.")
+        keep_transcript()
         if proc.poll() is not None:
-            break
+            # THE CLI FINISHED AND WE FOUND NO TOKEN — a DIFFERENT failure from a refusal, and it
+            # is named separately because it points somewhere else entirely: either the CLI
+            # stopped PRINTING the token (its output format is not a contract we control) or it
+            # stored the credential itself. Reported as a timeout, that reads as our bug when it
+            # is a shape change, and the transcript beside it is what settles which.
+            keep_transcript()
+            os.close(master)
+            return fail("Claude finished the sign-in but this box did not recognise a token in "
+                        "what it printed. Nothing is wrong with your account. Paste a token "
+                        "instead, and tell support the sign-in ended without one.")
     if proc.poll() is None:
         proc.kill()
     os.close(master)

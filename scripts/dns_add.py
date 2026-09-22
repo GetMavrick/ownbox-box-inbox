@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Point a client's subdomain at their box — one command, no registrar visit.
 
-  export CLOUDFLARE_API_TOKEN=...            # a token scoped to Zone:DNS:Edit on nlvl.co
-  python scripts/dns_add.py acme 203.0.113.7                 # a sold box: <client>.nlvl.co
-  python scripts/dns_add.py health-wellness 203.0.113.7      # one of our demo apps: <industry>.nlvl.co
+  export CLOUDFLARE_API_TOKEN=...            # a token scoped to Zone:DNS:Edit on ownbox.app
+  python scripts/dns_add.py acme 203.0.113.7                 # a sold box: <client>.ownbox.app
+  python scripts/dns_add.py health-wellness 203.0.113.7 --zone nlvl.co   # a DEMO app keeps its own zone
   python scripts/dns_add.py acme 203.0.113.7 --zone nlvl.co --dry-run
 
 Creates (or updates) an A record  acme.nlvl.co → 203.0.113.7. THE NAME IS THE RULE (owner, 2026-09-05):
@@ -66,7 +66,13 @@ def main(argv=None) -> int:
     ap.add_argument("ip", help="the droplet's public IPv4")
     ap.add_argument("--wildcard", action="store_true",
                     help="the demo box's ONE record: *.<zone> → ip (owner, once; every <industry>.<zone> then resolves)")
-    ap.add_argument("--zone", default=os.environ.get("AIOS_DNS_ZONE") or "nlvl.co")   # an EMPTY env var must not make "*." records
+    # ownbox.app IS THE BOXES DOMAIN (owner, 2026-09-21: "make the permanent cutover to
+    # ownbox.app for all machines"). This defaulted to nlvl.co, so the one script an operator
+    # runs to create a hand-built box's DNS record put it on the OLD zone — while the
+    # provisioner, which builds every automated box, has used provisioner.userdata.BOXES_DOMAIN
+    # ("ownbox.app") throughout. Two paths, two domains, and only one of them matched the
+    # certificate and reserved-name rules.
+    ap.add_argument("--zone", default=os.environ.get("AIOS_DNS_ZONE") or "ownbox.app")   # an EMPTY env var must not make "*." records
     ap.add_argument("--dry-run", action="store_true", help="say what it would do, change nothing")
     a = ap.parse_args(argv)
     if a.name == "*" and not a.wildcard:

@@ -3614,12 +3614,46 @@ def _setup_consent(e: dict) -> str:
         '</div>')
 
 
+def _choice_picker(choice: dict) -> str:
+    """A dropdown a STEP declared. The renderer knows nothing about which step it belongs to.
+
+    `test_setup_screen_loop` refuses a `_setup_step` that names a particular step, and it is
+    right to — the contract exists so a machine can add a step without editing this file. A
+    picker is data, exactly like a field is data.
+
+    DISABLED IS THE HONEST STATE for an option we cannot serve. `core/brain.py` speaks to
+    Anthropic and nothing else, so a selectable ChatGPT would take a buyer's `sk-...`, store it,
+    and never draft a reply — the fake feature the owner named on his own box on 2026-09-21. The
+    greyed entries say where this is going without claiming to have arrived, and
+    tests/test_setup_asks_for_the_ai_key.py refuses to let one be marked available unless
+    brain.py actually carries a client for it.
+    """
+    options = choice.get("options") or ()
+    if not options:
+        return ""
+    first_live = next((o["id"] for o in options if o.get("available")), "")
+    opts = "".join(
+        f'<option value="{_esc(o["id"])}"{"" if o.get("available") else " disabled"}'
+        f'{" selected" if o["id"] == first_live else ""}>'
+        f'{_esc(o["name"])}{"" if o.get("available") else " — coming soon"}</option>'
+        for o in options)
+    return ('<div class="card"><div class="setrow">'
+            f'<b>{_esc(choice.get("label") or "")}</b>'
+            f'<span>{_esc(choice.get("note") or "")}</span></div>'
+            '<select aria-label="' + _esc(choice.get("label") or "") + '" '
+            'style="width:100%;font:inherit;font-size:16px;padding:12px 14px;'
+            'border:1px solid var(--line);border-radius:12px;background:var(--card);'
+            'color:var(--ink)">' + opts + '</select></div>')
+
+
 def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
                 owner: bool) -> str:
     """ONE ENTRY, RENDERED THE SAME WAY WHATEVER IT IS. This is the whole point of the contract:
     two vendors, two kinds of secret, one shape — a number, a title, why it is wanted, what is
     set, the instructions, the fields, and whatever the buyer can press."""
     typed = typed or {}
+    # WHATEVER THE ENTRY DECLARED, and nothing about which entry it is.
+    picker = _choice_picker(e["choose"]) if e.get("choose") else ""
     label, tone, verb = _SET_STATUS.get(e.get("status"), _SET_STATUS["not_connected"])
     who = e.get("who") or ""
     said = f'{label} — {who}' if (who and e.get("status") != "not_connected") else label
@@ -3664,6 +3698,8 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
             f'<p class="quiet" style="margin:2px 0 0">{_esc(e.get("why"))}</p>'
             f'<p class="quiet" style="margin:6px 0 0"><b class="{_esc(tone)}">{_esc(said)}</b>'
             + (f' — {_esc(detail)}' if detail else "") + '</p>'
+            # ABOVE THE INSTRUCTIONS, because it decides which set of them applies.
+            + picker
             # THE ONE-PRESS ROUTE FIRST, ABOVE THE INSTRUCTIONS FOR THE LONG WAY ROUND. A step
             # that declares `action_href` has a door a buyer can simply walk through; drawing it
             # under four numbered steps would hide the easy path behind the hard one. A step that
@@ -4587,6 +4623,25 @@ def r_agent():
             return _shell(_agent_credential(label, credential, f"{root}/api/v1/mcp"),
                           here="/inbox/settings"), 200
 
+    from core import box_secrets as _bs
+    root = str(request.host_url or "").rstrip("/")
+    # THE ADDRESS, BEFORE THE FORM. It is the thing a buyer came here to copy, and the thing an
+    # investor is shown: per-box, on their own hostname, so nothing they say to their assistant
+    # about their customers travels through us to get here.
+    clients = "".join(
+        f'<div class="setrow"><b>{_esc(c["name"])}</b><span>{_esc(c["how"])}</span></div>'
+        for c in _bs.AGENT_CLIENTS)
+    addr = ('<div class="card"><div class="setrow"><b>This box\'s address</b>'
+            '<span>Paste this into whichever assistant you use, with a key from below.</span>'
+            '</div>'
+            f'<p style="word-break:break-all;font-family:ui-monospace,monospace;font-size:15px;'
+            f'margin:8px 0">{_esc(root)}/mcp</p></div>'
+            # EVERY ONE OF THESE IS LIVE. They connect TO the box over MCP; the box never calls
+            # them and holds nothing of theirs, which is why this list needs nothing greyed out
+            # while the drafting-model list on set-up does.
+            '<div class="card"><div class="setrow"><b>Works with</b>'
+            '<span>Each of these can connect today.</span></div>' + clients + '</div>')
+
     body = ('<h1>AI coworkers.</h1>'
             '<p class="quiet">Your box can be read by an assistant you already pay for - Claude, '
             'ChatGPT, Grok - so you can ask it about your customers in the place you already '
@@ -4594,6 +4649,7 @@ def r_agent():
             'and you can take that key away at any moment without changing anything else.</p>'
             '<p class="quiet">Nothing you connect here can send a message as your business. '
             'The most a coworker can do is leave a reply waiting on the screen for you.</p>'
+            + addr
             + _agent_form(note)
             + _agent_seat_rows(seats.all_seats())
             + '<div class="foot"><a href="/inbox/settings">← Settings</a></div>')

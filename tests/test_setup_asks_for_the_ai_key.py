@@ -238,6 +238,65 @@ ok("THE HEADING COUNTS THE STEPS rather than saying 'Two', which my third step m
 ok("...and with three steps it reads 'Three things', in words rather than a digit",
    'Three things' in src and '{_n} only you can do' in src)
 
+print("\n— the model list cannot promise what the box cannot do —")
+# OWNER, 2026-09-21, asked for the other three shown GREYED OUT, and greyed out is a promise
+# about honesty: `core/brain.py` speaks to Anthropic and nothing else, so a SELECTABLE ChatGPT
+# would take a buyer's sk-... , store it, and never draft a reply. That is the "fake feature" he
+# called out on his own box the same day.
+#
+# THIS TEST IS THE LINK BETWEEN THE TWO. A provider may only be `available: True` if brain.py
+# actually has a client for it — so the day somebody enables one without doing the backend work,
+# this goes red instead of a customer finding out.
+import pathlib as _pl  # noqa: E402
+
+_brain_path = _pl.Path(__file__).resolve().parents[1] / "core/brain.py"
+_brain = _brain_path.read_text().lower() if _brain_path.is_file() else ""
+_EVIDENCE = {"claude": "anthropic", "openai": "openai", "gemini": "genai", "grok": "xai"}
+from core import box_secrets as _bsx  # noqa: E402
+for _m in _bsx.DRAFTING_MODELS:
+    if _m.get("available"):
+        ok(f"{_m['id']} is offered AND brain.py can reach it",
+           (not _brain) or _EVIDENCE.get(_m["id"], _m["id"]) in _brain,
+           f"no {_EVIDENCE.get(_m['id'])} client in core/brain.py — this option would store a key "
+           f"and never draft")
+    else:
+        ok(f"{_m['id']} is offered but greyed out, and says so",
+           "coming soon" in str(_m.get("note", "")).lower(), str(_m.get("note")))
+ok("exactly one model is live today", sum(1 for m in _bsx.DRAFTING_MODELS
+                                          if m.get("available")) == 1,
+   str([m["id"] for m in _bsx.DRAFTING_MODELS if m.get("available")]))
+ok("all four launch assistants can connect over MCP",
+   {c["id"] for c in _bsx.AGENT_CLIENTS} == {"claude", "chatgpt", "gemini", "grok"},
+   str(sorted(c["id"] for c in _bsx.AGENT_CLIENTS)))
+
+print("\n— no set-up step sends a buyer to a URL nobody has opened —")
+# THE OWNER HIT A 404 MID-ONBOARDING, 2026-09-21, on https://zernio.com/accounts: a path nobody
+# had ever fetched, on the step whose entire job is to send him somewhere. app.py already carried
+# the note ("the site root, not a guessed deep link") and this file's steps ignored it.
+#
+# SO THE RULE IS MECHANICAL, BECAUSE JUDGEMENT ALREADY FAILED ONCE: an outbound link in a set-up
+# step is a site ROOT, unless its exact URL is on the list below — and a URL gets on that list by
+# a person loading it, not by looking plausible. A vendor's paths are theirs to change without
+# telling us, and one extra click costs a buyer far less than a 404 does while we are asking them
+# for an API key.
+from urllib.parse import urlsplit  # noqa: E402
+
+from core import box_secrets as _bs  # noqa: E402
+
+# url -> who opened it, and when. Nothing else may carry a path.
+VERIFIED_DEEP_LINKS = {
+    "https://zernio.com/dashboard/connections": "owner, 2026-09-21, read off his own dashboard",
+}
+
+for _step in tuple(_bs.SETUP_STEPS) + (_bs._AI_STEP, _bs._PHONE_STEP):
+    _url = str((_step.get("link") or {}).get("url") or "")
+    if not _url.startswith("http"):
+        continue
+    _path = urlsplit(_url).path
+    ok(f"{_step['key']}: {_url}",
+       _path in ("", "/") or _url in VERIFIED_DEEP_LINKS,
+       f"path {_path!r} is neither a root nor on the verified list — has anyone opened it?")
+
 print("\n— and this file cannot silently fall out of CI —")
 import pathlib  # noqa: E402
 

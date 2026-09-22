@@ -53,7 +53,12 @@ def run(*args, env_token=None):
 
 r = run("acme", "203.0.113.7", "--dry-run")
 ok("--dry-run needs no token and changes nothing", r.returncode == 0 and "would create" in r.stdout, r.stdout[:120])
-ok("… and names the full host", "acme.nlvl.co" in r.stdout)
+# THE DEFAULT ZONE MOVED (owner, 2026-09-21: "the permanent cutover to ownbox.app for all
+# machines"). `run()` passes no --zone, so this reads the DEFAULT — which is the one thing that
+# PR changes, and the fourth assertion in the repo to have the old zone baked into it. The three
+# above use an explicit zone and deliberately keep a different one: that is what proves the
+# argument is honoured rather than the default leaking through.
+ok("… and names the full host", "acme.ownbox.app" in r.stdout, r.stdout[:140])
 # Proxied ON means Caddy never sees the ACME challenge and the box has no certificate at all.
 ok("it says why the record must not be proxied", "proxied off" in r.stdout.lower() or "proxied" in r.stdout)
 r = run("Acme Corp", "203.0.113.7")

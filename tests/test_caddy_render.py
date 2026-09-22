@@ -19,7 +19,17 @@ ok("no zone argument → no wildcard block, no global block (a sold box)", "*." 
 ok("expose.sh renders through the renderer and validates before moving the live file", all(x in (ROOT / "scripts/expose.sh").read_text() for x in ("render_caddyfile.sh", "caddy validate", "Caddyfile.candidate", "untouched")))
 env = {**os.environ, "CLOUDFLARE_API_TOKEN": "", "AIOS_DNS_ZONE": ""}
 w = subprocess.run([sys.executable, str(ROOT / "scripts/dns_add.py"), "--wildcard", "203.0.113.7", "--dry-run"], capture_output=True, text=True, env=env)
-ok("dns_add --wildcard --dry-run: the owner's one record, *.nlvl.co → ip", w.returncode == 0 and "*.nlvl.co" in w.stdout and "203.0.113.7" in w.stdout, w.stdout[-200:] + w.stderr[-200:])
+# THE DEFAULT ZONE MOVED (owner, 2026-09-21: "the permanent cutover to ownbox.app for all
+# machines"), and this assertion reads the DEFAULT, which is why it is the one that changed.
+# The two render calls above pass a zone explicitly and deliberately keep a different one —
+# that is what proves the argument is honoured rather than the default leaking through.
+#
+# WORTH KNOWING, AND SURFACED RATHER THAN BURIED: *.ownbox.app is now a wildcard on the SAME
+# zone the provisioner sells boxes in. A specific record wins over a wildcard at Cloudflare, so
+# no customer host is shadowed — but a name nobody has provisioned now resolves to the owner's
+# demo box instead of failing. That is a change in behaviour, not a defect, and it is the
+# owner's call whether the wildcard should stay on a zone customers live in.
+ok("dns_add --wildcard --dry-run: the owner's one record, *.ownbox.app → ip", w.returncode == 0 and "*.ownbox.app" in w.stdout and "203.0.113.7" in w.stdout, w.stdout[-200:] + w.stderr[-200:])
 s = subprocess.run([sys.executable, str(ROOT / "scripts/dns_add.py"), "*", "203.0.113.7", "--dry-run"], capture_output=True, text=True, env=env)
 ok("a bare '*' name without --wildcard is refused", s.returncode != 0, s.stdout[-120:])
 n = subprocess.run([sys.executable, str(ROOT / "scripts/dns_add.py"), "203.0.113.7", "--dry-run"], capture_output=True, text=True, env=env)

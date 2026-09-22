@@ -207,6 +207,21 @@ def _deploy_authorized(req) -> bool:
 # and ZERO of them are under /api/, so this costs nothing today and closes the repeat.
 _API_PREFIX = "/api/"
 
+# THE SHORT ADDRESS A BUYER IS GIVEN, and it is listed HERE because this is the only place that
+# decides what needs a seat. `/api/v1/mcp` is the real endpoint; `https://<slug>.ownbox.app/mcp`
+# is the one that fits on a screen and gets pasted into an assistant's settings.
+#
+# MATCHED EXACTLY, NEVER BY PREFIX. `startswith("/mcp")` would also match `/mcpanything`, and a
+# route mounted there later would be served with no seat at all — the note above `_API_PREFIX`
+# says this gate is "latent exactly until somebody mounts a connector route outside that prefix",
+# and this IS that somebody. An unauthenticated MCP endpoint is every customer message on the box
+# handed to anyone who finds the hostname.
+_SEAT_PATHS = ("/mcp",)
+
+
+def _needs_a_seat(path: str) -> bool:
+    return path.startswith(_API_PREFIX) or path in _SEAT_PATHS
+
 
 def _seat_authorized(req) -> bool:
     """Does this request carry a valid connector seat? No seat minted, no entry — ever.
@@ -294,7 +309,7 @@ def _auth_gate():
     if request.path.startswith("/deploy"):
         if not _deploy_authorized(request):
             return jsonify({"error": "unauthorized"}), 401
-    elif request.path.startswith(_API_PREFIX):
+    elif _needs_a_seat(request.path):
         # Module-level lookup, not a captured reference: step 2 (and the test) replace this
         # function, and a closure over the original would keep refusing after it was filled in.
         if not globals()["_seat_authorized"](request):

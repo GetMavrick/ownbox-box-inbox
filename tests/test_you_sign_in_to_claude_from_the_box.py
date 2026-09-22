@@ -294,6 +294,74 @@ ok("a claude.com link that is not an authorisation is refused rather than offere
    claude_login.find_url(b"", "https://claude.com/cai/oauth/authorize?code=true") == "")
 
 
+print("\n— the code is submitted with a CARRIAGE RETURN, the byte the prompt accepts —")
+# THE OWNER LOST A DEMO DAY TO THIS, 2026-09-21. `claude setup-token` reads the code at a
+# raw-mode masked prompt (it echoes asterisks). A raw prompt's Enter is \r; a bare \n is just
+# another character in the buffer, so the code arrived COMPLETE and was never submitted — 92
+# asterisks in the transcript, then ninety seconds of silence, then an error blaming his code.
+#
+# MEASURED ON A REAL BOX, claude 2.1.278, the same wrong code both ways:
+#   LF -> 36 bytes back, no reaction
+#   CR -> 247 bytes back, "OAuth error: ... status code 400. Press Enter to retry."
+#
+# CI CANNOT RUN ANY OF THAT — GitHub runners have no `claude` binary — so this asserts the BYTE
+# instead. It is the only thing standing between us and somebody tidying \r back to \n.
+ok("a submitted code ends with CR", claude_login.submit_bytes("abc#def").endswith(b"\r"),
+   repr(claude_login.submit_bytes("abc#def")))
+ok("...and NOT with a newline", not claude_login.submit_bytes("abc#def").endswith(b"\n"),
+   "a raw-mode prompt buffers a newline instead of submitting on it")
+ok("...and the code itself is unchanged", claude_login.submit_bytes("  abc#def  ") == b"abc#def\r",
+   repr(claude_login.submit_bytes("  abc#def  ")))
+ok("...whether it arrives as str or bytes",
+   claude_login.submit_bytes(b"abc#def") == claude_login.submit_bytes("abc#def"))
+
+# AND IT IS TYPED IN, NOT DUMPED. A REAL authorization code is ~92 characters, and the CLI's
+# raw-mode reader cannot take it in one write: measured through the real finish() path on a real
+# box (claude 2.1.278, 2026-09-21), 26 characters answered in 2.4s and 92 characters produced
+# NINETY-TWO SECONDS OF SILENCE. The asterisk echo showed all 92 characters arriving, which is
+# why every theory went looking at Claude, at the code, and at the buyer instead of at us.
+#
+# THE TEST USES A 92-CHARACTER CODE ON PURPOSE. A short one passes whether the write is chunked
+# or not — that is exactly how this shipped, and how it would ship again.
+_writes = []
+_REAL_LENGTH_CODE = "n" * 47 + "#" + "W" + "x" * 43      # 92 chars, the shape Claude hands out
+_orig_write = os.write
+
+
+def _capture(fd, data):
+    _writes.append(data)
+    return len(data)
+
+
+os.write = _capture
+try:
+    claude_login.submit_code(-1, _REAL_LENGTH_CODE, sleep=lambda _s: None)
+finally:
+    os.write = _orig_write
+
+ok("a real-length code is written in several chunks, not one dump",
+   len(_writes) > 1, f"{len(_writes)} write(s) for {len(_REAL_LENGTH_CODE)} characters")
+ok("...and no single write exceeds the chunk size",
+   all(len(w) <= claude_login.SUBMIT_CHUNK for w in _writes),
+   str(sorted({len(w) for w in _writes})))
+ok("...and what arrives is exactly the code plus CR",
+   b"".join(_writes) == _REAL_LENGTH_CODE.encode() + b"\r",
+   repr(b"".join(_writes))[:90])
+
+print("\n— the support transcript cannot carry the credential it exists to debug —")
+# THE DIAGNOSTIC NEARLY BECAME THE BREACH, 2026-09-21. The transcript keeper was added to explain
+# FAILURES; a SUCCESS transcript ends with the CLI printing the minted token in full. A live
+# one-year credential went to disk in plaintext and then onto a screen, and had to be revoked.
+_SAMPLE = ("Long-lived authentication token created successfully! Your OAuth token (valid for 1 "
+           "year): sk-ant-oat01-eb2Kr7HpWPv7RhkhupirAqB0jiUfRnJ5N3SZ5tkvbVnIAHWrCADoGeqVlFl1EY "
+           "and an api one sk-ant-api03-QQQQQQQQQQQQQQQQQQQQ too")
+_red = claude_login.redact(_SAMPLE)
+ok("an oat token is redacted", "sk-ant-oat01-eb2" not in _red, _red[-80:])
+ok("...and an api key with it", "sk-ant-api03-QQ" not in _red, _red[-80:])
+ok("...while the surrounding words survive, so the log is still readable",
+   "created successfully" in _red, _red[:60])
+ok("...and redacting twice changes nothing", claude_login.redact(_red) == _red)
+
 print("\n— and this file cannot silently fall out of CI —")
 import pathlib  # noqa: E402
 

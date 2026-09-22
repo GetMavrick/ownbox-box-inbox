@@ -8,7 +8,7 @@
 #     bash /opt/aios/scripts/bootstrap.sh
 #
 #   ONBOARDING SOMEONE ELSE'S BOX — one line, no questions, and it prints the handover card:
-#     bash /opt/aios/scripts/bootstrap.sh --buyer "Acme Roofing" --order gift-01 --host acme.nlvl.co
+#     bash /opt/aios/scripts/bootstrap.sh --buyer "Acme Roofing" --order gift-01 --host acme.ownbox.app
 #
 #   Getting the archive onto a fresh VPS (a stock Ubuntu image has tar but NOT unzip — use the .tar.gz):
 #     scp lead-machine-<version>.tar.gz root@<ip>:
@@ -16,9 +16,18 @@
 #   then the bootstrap line above. Run it straight after "create droplet" — bootstrap waits for
 #   the image's first-boot apt itself.
 #
-#   --host is a subdomain of nlvl.co (owner, 2026-09-05): <client>.nlvl.co for a sold box, <industry>.nlvl.co
-#   (health-wellness.nlvl.co) for one of our own demo apps. Make the record FIRST, from your machine, never
-#   from this box:  python scripts/dns_add.py acme <this droplet's IP>   — the Cloudflare token stays with you.
+#   --host IS A SUBDOMAIN OF ownbox.app (owner, 2026-09-21: "do the cutover to ownbox.app permanently").
+#   <client>.ownbox.app for a sold box. This line used to say nlvl.co, from the 2026-09-05 arrangement, and
+#   it was the last thing pointing an operator at the old domain: the automated path has built on ownbox.app
+#   since `provisioner/userdata.py` set BOXES_DOMAIN, so a hand-built box was landing somewhere the
+#   provisioner, the reserved-name list and the certificate story all disagreed with.
+#
+#   OUR OWN INDUSTRY DEMO APPS ARE A DIFFERENT THING and keep their own zone — that is `dash.demo_zone`,
+#   which is empty by default and set per box in an overlay. A demo subdomain is not a customer's box, and
+#   collapsing the two would hand a buyer a hostname on a zone we use for marketing.
+#
+#   Make the record FIRST, from your machine, never from this box:
+#     python scripts/dns_add.py acme <this droplet's IP>   — the Cloudflare token stays with you.
 #
 # Idempotent: re-running upgrades packages, refreshes the venv, and re-installs units.
 # It STOPS before starting services when .env is missing — filling credentials is a
