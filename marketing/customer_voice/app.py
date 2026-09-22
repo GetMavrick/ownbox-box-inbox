@@ -4769,7 +4769,11 @@ def r_agent():
             # NEVER A REDIRECT AND NEVER A QUERY STRING. The credential is rendered into this
             # one response and then it is gone: a redirect would put it in a URL, and gunicorn
             # logs raw query strings.
-            return _shell(_agent_credential(label, credential, f"{root}/api/v1/mcp"),
+            # ONE ADDRESS, THE SHORT ONE. This screen printed `/api/v1/mcp` while the screen
+            # that links to it printed `/mcp` — both work (same handler, same gate) but a buyer
+            # shown two addresses for one thing reasonably concludes one of them is wrong. The
+            # owner hit exactly that on 2026-09-22. `/mcp` is the address we tell people to use.
+            return _shell(_agent_credential(label, credential, f"{root}/mcp"),
                           here="/inbox/settings"), 200
 
     from core import box_secrets as _bs

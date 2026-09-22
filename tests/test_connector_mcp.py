@@ -324,6 +324,30 @@ ok("...and the short path serves exactly the endpoints the long one does",
    _by_path.get("/mcp") == _by_path.get("/api/v1/mcp") and bool(_by_path.get("/mcp")),
    str(_by_path))
 
+print("\n— a buyer is shown ONE address, everywhere —")
+# THE OWNER HIT THIS, 2026-09-22: the screen that mints a key printed `/api/v1/mcp` while the
+# screen linking to it printed `/mcp`. Both work — same handler, same gate — but somebody given
+# two addresses for one thing reasonably concludes one is wrong, and that doubt lands at the
+# moment they are pasting a secret into a third-party assistant.
+#
+# THE LONG FORM STAYS MOUNTED (anything already configured keeps working); it is simply never
+# what we PRINT.
+import pathlib as _pl3  # noqa: E402
+import re as _re3  # noqa: E402
+
+_app = _pl3.Path(__file__).resolve().parents[1] / "marketing/customer_voice/app.py"
+if _app.is_file():
+    _src = _app.read_text()
+    # only lines that BUILD a string for a person, not comments and not route decorators
+    _printed = [ln.strip() for ln in _src.splitlines()
+                if "/api/v1/mcp" in ln and not ln.strip().startswith("#")]
+    ok("no screen prints the long form", not _printed, str(_printed)[:120])
+    ok("...and the short one is what they get",
+       _re3.search(r'f"\{root\}/mcp"', _src) is not None,
+       "nothing renders <root>/mcp")
+else:
+    print("  --   no customer_voice here — nothing to check")
+
 print()
 if _failed:
     print(f"{_failed} FAILED")
