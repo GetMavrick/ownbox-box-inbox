@@ -293,8 +293,12 @@ ok("settings renders with nothing connected", r.status_code == 200, str(r.status
 body = r.get_data(as_text=True)
 ok("...and it now OFFERS a connect surface, which it never did before",
    "/inbox/connect" in body, "no link to /inbox/connect on Settings")
+# THE ROW, NOT THE TAB. Since the Drafts TAB joined the rail, a bare find("Drafts") matches the
+# nav link at the top of every page and this assertion passes or fails for the wrong reason. The
+# row the buyer does second is the one that says who WRITES the drafts.
 ok("...above the drafts row, the order a buyer does them in",
-   body.find("Your channels") < body.find("Drafts") if "Drafts" in body else False)
+   body.find("Your channels") < body.find("Writing your drafts")
+   if "Writing your drafts" in body else False)
 
 r = _c.get("/inbox/connect")
 ok("the connect page renders for a box with no key", r.status_code == 200, str(r.status_code))

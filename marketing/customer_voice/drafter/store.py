@@ -127,3 +127,41 @@ def newest_inbound(space: str, zcid: str) -> dict | None:
             "   AND zernio_message_id IS NOT NULL "
             " ORDER BY created_at DESC LIMIT 1", (space, zcid)).fetchone()
     return dict(row) if row else None
+
+
+def waiting(space: str, *, limit: int = 50) -> list[dict]:
+    """Every draft still waiting on a person: not dismissed, and not already answered.
+
+    "STILL WAITING" IS A JOIN, NOT A COLUMN, and deliberately so. A draft is spent when the
+    conversation has an OUTBOUND message newer than the inbound it answers — which is exactly
+    what happens when somebody presses send, whether they sent this draft, an edit of it, or
+    something else entirely. A `sent_at` column would have to be written by every path that can
+    reply, and the one that forgets leaves a draft on the screen forever.
+
+    ORDERED OLDEST FIRST. This is a queue of people waiting on an answer, and the person who has
+    waited longest should be the one at the top; a newest-first list quietly buries them.
+    """
+    with state.connect() as c:
+        rows = c.execute(
+            "SELECT d.id, d.zernio_conversation_id AS zcid, d.body, d.created_at,"
+            "       d.in_reply_to, k.participant, k.platform,"
+            "       m.body AS asked, m.created_at AS asked_at "
+            "  FROM inbox_drafts d "
+            "  JOIN inbox_conversations k ON k.space = d.space "
+            "   AND k.zernio_conversation_id = d.zernio_conversation_id "
+            "  LEFT JOIN inbox_messages m ON m.space = d.space "
+            "   AND m.zernio_message_id = d.in_reply_to "
+            " WHERE d.space = ? AND d.dismissed_at IS NULL AND k.opted_out = 0 "
+            "   AND NOT EXISTS (SELECT 1 FROM inbox_messages o "
+            "                    WHERE o.space = d.space "
+            "                      AND o.zernio_conversation_id = d.zernio_conversation_id "
+            "                      AND o.direction = 'out' "
+            "                      AND o.created_at > COALESCE(m.created_at, d.created_at)) "
+            " ORDER BY COALESCE(m.created_at, d.created_at) ASC LIMIT ?",
+            (space, int(limit))).fetchall()
+    return [dict(r) for r in rows]
+
+
+def waiting_count(space: str) -> int:
+    """How many people are waiting on an answer — for the tab's badge."""
+    return len(waiting(space, limit=1000))

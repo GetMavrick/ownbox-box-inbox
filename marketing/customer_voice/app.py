@@ -1107,6 +1107,16 @@ shell.register_section(
          "icon": _TAB_ICON["/inbox/inbox"]},
         {"key": "today", "label": "Today", "href": "/inbox/",
          "icon": _TAB_ICON["/inbox/"]},
+        # DRAFTS SITS SECOND, NEXT TO MESSAGES, because it is the same queue seen from the other
+        # end: Messages is who has written to you, Drafts is who is still waiting on an answer.
+        # The owner asked for it by name on 2026-09-22 and called the drafting behind it "one of
+        # the killer features for the unified inbox — the big time-saver".
+        #
+        # ROUTE `/inbox/waiting`, LABEL "Drafts". `/inbox/drafts` is already the AI-account form
+        # (§2.6) — a misnamed route from before this screen existed. Renaming it today would
+        # break a link somebody may already hold; it should move in its own change.
+        {"key": "waiting", "label": "Drafts", "href": "/inbox/waiting",
+         "icon": _TAB_ICON["/inbox/inbox"]},
         # SEARCH IS LISTED HERE BECAUSE IT IS A SCREEN OF THIS SECTION, and leaving it out was a
         # real defect rather than an omission: `shell.is_current` falls back to the section's own
         # href for a path no item claims, so standing on /inbox/search the rail lit *Today*. A
@@ -1748,7 +1758,7 @@ def _drafts_row() -> str:
     # the set-up screen already uses, so the two cannot disagree about the same key.
     _ai = box_secrets.anthropic_state()
     if _ai["status"] == "not_connected":
-        return ('<div class="setrow"><b>Drafts</b>'
+        return ('<div class="setrow"><b>Writing your drafts</b>'
                 '<span>Ownbox can write a reply for every message, ready for you to read and '
                 'send. It needs an AI account to write with — yours, on your own bill, so '
                 'nothing you receive passes through us.</span>'
@@ -1759,7 +1769,7 @@ def _drafts_row() -> str:
     # be drafts that stopped appearing. The two reasons take different actions, so they get
     # different sentences and different buttons.
     if _ai["status"] == "payment_required":
-        return ('<div class="setrow"><b>Drafts</b>'
+        return ('<div class="setrow"><b>Writing your drafts</b>'
                 '<span>Paused. Your AI account needs credit before it will write any more '
                 'replies — add some there and your box picks up on its own. Every message is '
                 'still arriving and you can still answer by hand.</span>'
@@ -1767,7 +1777,7 @@ def _drafts_row() -> str:
                 'href="https://console.anthropic.com/settings/billing" target="_blank" '
                 'rel="noopener">Add credit</a></p></div>')
     if _ai["status"] == "needs_reauth":
-        return ('<div class="setrow"><b>Drafts</b>'
+        return ('<div class="setrow"><b>Writing your drafts</b>'
                 '<span>Paused. Your AI account stopped accepting the key this box has — that '
                 'usually means it was deleted or replaced in the console. Paste the new one and '
                 'drafting starts again. Every message is still arriving in the meantime.</span>'
@@ -1775,7 +1785,7 @@ def _drafts_row() -> str:
                 'Paste a new key</a></p></div>')
     # THE SECOND SENTENCE IS LOAD-BEARING AND DOES NOT GET CUT (§2.6). It is the promise the
     # whole product rests on, and Settings is where a nervous buyer goes to check it.
-    return ('<div class="setrow"><b>Drafts</b>'
+    return ('<div class="setrow"><b>Writing your drafts</b>'
             '<span>On. Ownbox writes a reply for every message that arrives. You read it and '
             'you send it — nothing goes out on its own.</span>'
             '<span style="margin-top:8px">Writing with your own AI account. '
@@ -4795,6 +4805,8 @@ def r_agent():
             '<div class="card"><div class="setrow"><b>Works with</b>'
             '<span>Each of these can connect today.</span></div>' + clients + '</div>')
 
+    steps = "".join(f'<div class="row"><span class="t">{i}. {_esc(t)}</span></div>'
+                    for i, t in enumerate(_bs.AGENT_STEPS, 1))
     body = ('<h1>AI coworkers.</h1>'
             '<p class="quiet">Your box can be read by an assistant you already pay for - Claude, '
             'ChatGPT, Grok - so you can ask it about your customers in the place you already '
@@ -4803,7 +4815,137 @@ def r_agent():
             '<p class="quiet">Nothing you connect here can send a message as your business. '
             'The most a coworker can do is leave a reply waiting on the screen for you.</p>'
             + addr
+            # THE STEPS BEFORE THE FORM, AND THE FORM DEMOTED. Until 2026-09-22 this screen led
+            # with minting a key, because that was the only way in. It is not any more: every
+            # assistant worth naming signs in, and the owner's own words after doing it were
+            # "people will probably just choose sign in" and "I don't think customers will be
+            # able to figure this out". A screen that opens with a secret to copy teaches the
+            # harder path first.
+            + f'<div class="card">{steps}</div>'
+            + '<details style="margin-top:18px"><summary style="cursor:pointer;color:var(--accent)">'
+              'Or make a key by hand</summary>'
+              '<p class="quiet" style="margin:10px 0">For a script, or an assistant that cannot '
+              'sign in. The key is shown once and you keep it safe yourself \u2014 signing in '
+              'above is easier and revoking it is the same button.</p>'
             + _agent_form(note)
+            + '</details>'
             + _agent_seat_rows(seats.all_seats())
             + '<div class="foot"><a href="/inbox/settings">← Settings</a></div>')
     return _shell(body, here="/inbox/settings"), 200
+
+
+# ── DRAFTS: the queue of people waiting on an answer ─────────────────────────────────────────
+# OWNER, 2026-09-22: "a tab in the dashboard called Drafts where we can select groups of messages
+# and then send them off", and, of the drafting itself: "that's one of the killer features for
+# the unified inbox. The big time-saver. Even Gmail doesn't have that."
+#
+# EVERY DRAFT'S FULL TEXT IS ON THE SCREEN, and that is the design, not a layout choice. The time
+# this saves is the WRITING, never the reading — a screen that let somebody tick twenty boxes
+# against twenty subject lines would be a machine for sending twenty replies nobody read, to
+# twenty customers, under the buyer's own name. So the list IS the drafts, in full, oldest first,
+# and ticking a box is the act of having read one.
+#
+# THE ROUTE IS `/inbox/waiting` WHILE THE TAB SAYS DRAFTS. `/inbox/drafts` is already taken by
+# the AI-account form (§2.6) — a misnamed route from before this screen existed. Renaming it
+# today would break a link somebody may already have; it should move, in its own change.
+def _draft_card(d: dict, n: int) -> str:
+    asked = str(d.get("asked") or "").strip()
+    return (
+        f'<div class="card" style="margin-top:12px">'
+        f'<label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">'
+        f'<input type="checkbox" name="pick" value="{_esc(str(d["zcid"]))}" '
+        f'style="margin-top:4px;width:18px;height:18px;flex:0 0 auto">'
+        f'<span style="flex:1 1 auto">'
+        f'<b>{_esc(str(d.get("participant") or "Someone"))}</b>'
+        f'<span class="quiet"> · {_esc(_channel(str(d.get("platform") or "")))}'
+        f' · asked {_esc(_when(d.get("asked_at") or d.get("created_at")))}</span>'
+        # WHAT THEY ASKED, ABOVE WHAT WE WOULD SAY. A reply read without the question is a reply
+        # nobody can judge, and judging it is the whole point of this screen.
+        + (f'<span class="quiet" style="display:block;margin:6px 0 0;padding-left:10px;'
+           f'border-left:2px solid var(--line)">{_readable(asked[:400])}</span>' if asked else "")
+        + f'<span style="display:block;margin:10px 0 0;white-space:pre-wrap">'
+          f'{_readable(str(d.get("body") or ""))}</span>'
+        f'<span class="quiet" style="display:block;margin-top:8px">'
+        f'<a href="/inbox/inbox/{_esc(str(d["zcid"]))}" style="color:var(--accent)">'
+        f'Open the conversation to edit it</a></span>'
+        f'</span></label></div>')
+
+
+@blueprint.route("/inbox/waiting", methods=["GET", "POST"])
+def r_waiting():
+    """The drafts waiting on a person, and one button to send the ones they have read.
+
+    NOTHING HERE SENDS. It calls `inbox.reply.send_reply` — the same plain function the thread's
+    own reply button uses, which is the only thing in this department allowed to send and which
+    carries every rule the single path has: the opted-out refusal, the idempotency claim, the
+    hourly window. A second send path would be a second set of those rules to keep in step.
+
+    ONE FAILURE DOES NOT STOP THE REST. Ten ticked drafts are ten independent sends; a vendor
+    refusing the third must not silently swallow the seven after it, and the screen says exactly
+    which went and which did not.
+    """
+    from marketing.customer_voice.drafter import store as drafts
+    from marketing.customer_voice.inbox import reply as _reply
+    gate = _gate()
+    if gate is not None:
+        return gate
+    space = _space()
+    note = ""
+
+    if request.method == "POST":
+        try:
+            u = dash.session_user(request) or {}
+        except Exception:                                # noqa: BLE001 — cannot say who: no send
+            u = {}
+        if not u.get("id"):
+            note = ('<div class="card"><p>Your session could not be read, so nothing was sent.'
+                    '</p></div>')
+        else:
+            picked = [p for p in request.form.getlist("pick") if p]
+            by_zcid = {d["zcid"]: d for d in drafts.waiting(space, limit=200)}
+            sent, failed = [], []
+            for zcid in picked:
+                d = by_zcid.get(zcid)
+                if d is None:                            # answered or dismissed since the page drew
+                    continue
+                try:
+                    out = _reply.send_reply(space=space, zcid=zcid, text=str(d["body"]),
+                                            user_id=str(u["id"]),
+                                            nonce=f"waiting:{d['id']}")
+                except Exception as e:                   # noqa: BLE001 — one bad send, not ten
+                    log.error("voice.waiting_send_failed",
+                              extra={"conversation": zcid, "error": type(e).__name__})
+                    failed.append((d, type(e).__name__))
+                    continue
+                (sent if str(out.get("status")) in ("sent", "queued") else failed).append(
+                    (d, str(out.get("status"))))
+            bits = []
+            if sent:
+                bits.append(f'<b>Sent {len(sent)}.</b>')
+            for d, why in failed:
+                bits.append(f'{_esc(str(d.get("participant") or "One reply"))} did not go — '
+                            f'{_esc(why)}.')
+            if bits:
+                note = f'<div class="card"><p>{" ".join(bits)}</p></div>'
+
+    rows = drafts.waiting(space, limit=200)
+    if not rows:
+        body = ('<h1>Drafts.</h1>'
+                '<div class="card"><div class="row"><span class="t">Nothing is waiting. When a '
+                'customer writes and your box drafts an answer, it appears here for you to read '
+                'and send.</span></div></div>'
+                '<div class="foot"><a href="/inbox/inbox">← All conversations</a></div>')
+        return _shell(note + body, here="/inbox/waiting"), 200
+
+    n = len(rows)
+    body = (f'<h1>{n} {"reply" if n == 1 else "replies"} waiting.</h1>'
+            '<p class="quiet">Your box wrote these. Read them, tick the ones you are happy with, '
+            'and send. Nothing goes out until you press the button — and anything you want to '
+            'change, open the conversation and edit it there.</p>'
+            + note
+            + '<form method="post">'
+            + "".join(_draft_card(d, i) for i, d in enumerate(rows, 1))
+            + '<p style="margin:18px 0 0"><button class="btn" type="submit">'
+              'Send the ones I ticked</button></p></form>'
+            + '<div class="foot"><a href="/inbox/inbox">← All conversations</a></div>')
+    return _shell(body, here="/inbox/waiting"), 200

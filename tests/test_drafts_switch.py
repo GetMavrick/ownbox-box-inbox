@@ -238,7 +238,8 @@ def test_settings_offers_the_switch_when_there_is_no_key():
     print("test_settings_offers_the_switch_when_there_is_no_key")
     clear()
     html = client().get("/inbox/settings").get_data(as_text=True)
-    ok("the row is there", "Drafts" in html)
+    # NAMED, so the rail's "Drafts" tab cannot satisfy this on the row's behalf.
+    ok("the row is there", "Writing your drafts" in html)
     # §2.6: phrased as a capability, not a missing key. "No API key configured" is a fault report
     # about our plumbing; the buyer did nothing wrong and does not know what an API key is.
     ok("...phrased as what the box can do", "write a reply for every message" in html)

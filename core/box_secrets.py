@@ -735,13 +735,25 @@ DRAFTING_MODELS = (
 # is a row here, not a feature.
 AGENT_CLIENTS = (
     {"id": "claude", "name": "Claude",
-     "how": "Settings -> Connectors -> Add custom connector, then paste the address and key."},
+     "how": "Settings -> Connectors -> Add custom connector. Paste the address, choose "
+            "\u201cSign in now\u201d, then Connect."},
     {"id": "chatgpt", "name": "ChatGPT",
-     "how": "Settings -> Connectors -> Add, then paste the address and key."},
+     "how": "Settings -> Connectors -> Add. Paste the address and let it sign in."},
     {"id": "gemini", "name": "Gemini",
-     "how": "Add it as an MCP server with the address and key below."},
+     "how": "Add it as an MCP server with the address below and let it sign in."},
     {"id": "grok", "name": "Grok",
-     "how": "Add it as an MCP server with the address and key below."},
+     "how": "grok.com/connectors -> New Connector -> Custom. Paste the address and let it "
+            "sign in."},
+)
+
+# THE THREE STEPS EVERY ONE OF THEM SHARES, in the order a person does them. Written after
+# watching the owner do it on 2026-09-22 — he got through it, and then asked for the
+# instructions to be changed, which is the most useful kind of pass.
+AGENT_STEPS = (
+    "Copy the address below.",
+    "In your assistant, add a connector or MCP server and paste it. Pick the option that says "
+    "it will SIGN IN \u2014 not \u201cno sign-in\u201d, and not an API key.",
+    "It sends you here to approve. Press Allow, then allow the tools your assistant asks about.",
 )
 
 
@@ -771,10 +783,13 @@ _AGENT_STEP = {
               "Choose what that coworker may do: read only, or read and draft replies.",
               "Copy the key and this box's address into your assistant's connector settings.",
               "Revoke it whenever you like; the box keeps working, it just stops answering them."),
-    "why": "Give Claude, ChatGPT, Gemini or Grok a key to this box and they can read your "
-           "inbox and draft replies for you, in whichever one you already pay for. You choose "
-           "what each key may do, and you can take it back at any moment. Nothing you connect "
-           "here can send a message as your business.",
+    "why": "Claude, ChatGPT, Gemini or Grok can read this inbox and draft replies for you, in "
+           "whichever one you already pay for. You paste this box's address into your assistant, "
+           "approve it here, and that is the whole of it \u2014 there is no key to copy and "
+           "nothing to keep safe. They can read your conversations and leave draft replies "
+           "waiting for you; none of them can send anything as your business, whatever you "
+           "allow. Take any of them back whenever you like.",
+    "steps": AGENT_STEPS,
     "optional": True,
     "link": {"label": "Connect an AI coworker",
              "url": "/inbox/agent",

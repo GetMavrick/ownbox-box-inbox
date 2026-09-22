@@ -313,7 +313,15 @@ def _auth_gate():
         # Module-level lookup, not a captured reference: step 2 (and the test) replace this
         # function, and a closure over the original would keep refusing after it was filled in.
         if not globals()["_seat_authorized"](request):
-            return jsonify({"error": "unauthorized"}), 401
+            # THE 401 CARRIES THE WAY IN. Without `WWW-Authenticate` an MCP client cannot begin:
+            # it reads `resource_metadata` from this header to find the discovery document, and a
+            # bare 401 is a closed door with no handle. Measured 2026-09-22 — Claude's connector
+            # failed with "couldn't register with Ownbox's sign-in service" for exactly this, and
+            # never offered the owner anywhere to paste the key he already had.
+            from core.connector import oauth
+            from core.connector.http import _root
+            return (jsonify({"error": "unauthorized"}), 401,
+                    {"WWW-Authenticate": oauth.challenge_header(_root())})
     elif request.path.startswith("/dispatch") and not _authorized(request):
         return jsonify({"error": "unauthorized"}), 401
 

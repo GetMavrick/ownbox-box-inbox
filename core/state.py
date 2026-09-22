@@ -354,6 +354,38 @@ CREATE TABLE IF NOT EXISTS box_settings (
 -- rather than an inconvenience. The narrow-token pattern already exists one door over --
 -- /deploy has its own key for exactly this reason. Seats are that, generalised from one extra
 -- token to a table.
+-- ── THE OAUTH FRONT DOOR ────────────────────────────────────────────────────────────────────
+-- WHY THESE EXIST. MCP's June-2025 revision makes an MCP server a plain OAuth RESOURCE SERVER: a
+-- client hits /mcp unauthenticated, reads `WWW-Authenticate: Bearer resource_metadata=…`, fetches
+-- RFC 9728 metadata, REGISTERS ITSELF (RFC 7591), and runs an OAuth flow. Claude's "add custom
+-- connector" does exactly that and nothing else — it never offers a box to paste a key into.
+-- Measured 2026-09-22: it failed with "couldn't register with Ownbox's sign-in service", because
+-- the box served a bare 401 and 404 on every .well-known path.
+--
+-- A GRANT MINTS A SEAT. These tables hold only what OAuth itself needs; the credential a client
+-- ends up holding IS a seat, so `_seat_authorized`, `visible_to`, revocation and the audit trail
+-- all keep working unchanged. OAuth becomes a WAY TO CREATE a seat, not a second access system.
+CREATE TABLE IF NOT EXISTS oauth_clients (
+  client_id     TEXT PRIMARY KEY,   -- issued by us at registration; public
+  name          TEXT NOT NULL,      -- what the client called itself, shown on the consent screen
+  redirect_uris TEXT NOT NULL,      -- JSON array. An exact match is required at /authorize
+  created_at    TEXT NOT NULL
+);
+
+-- SHORT-LIVED, SINGLE-USE, AND PKCE-BOUND. A code is worthless without the verifier whose hash
+-- was presented at /authorize, so intercepting one buys nothing.
+CREATE TABLE IF NOT EXISTS oauth_codes (
+  code            TEXT PRIMARY KEY,
+  client_id       TEXT NOT NULL,
+  redirect_uri    TEXT NOT NULL,
+  code_challenge  TEXT NOT NULL,    -- S256 only; `plain` is refused
+  role            TEXT NOT NULL,    -- what the owner approved: read | act
+  label           TEXT NOT NULL,    -- the seat's label, so the audit row reads like a name
+  user_id         TEXT,             -- who approved it
+  expires_at      TEXT NOT NULL,
+  used_at         TEXT              -- set on redemption; a second attempt is refused
+);
+
 CREATE TABLE IF NOT EXISTS seats (
   id           TEXT PRIMARY KEY,   -- 'seat_<random>'; the PUBLIC handle, safe to log and to audit
   label        TEXT NOT NULL,      -- 'Mavrick (prod)', 'Dana - ops'; what a human recognises
