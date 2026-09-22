@@ -141,15 +141,24 @@ def test_the_note_is_styled_on_state_never_on_the_english():
     ok("...and never branches on `reason`", '"reason"' not in fn, fn[:200])
 
 
-def test_a_channel_the_box_cannot_send_from_says_so_without_a_dead_button():
-    """Email: the box drafts, the person sends from their own mail app. That is a fact about the
-    product, not a permission they are waiting on."""
-    _wipe()
-    _thread("mail", platform="email", hours=2)
-    html_ = _page("mail")
-    words = _text(html_)
-    ok("no reply box is drawn", 'class="compose"' not in html_)
-    ok("...and it says where the reply actually goes", "mail app" in words, words[:260])
+def test_email_gets_its_reply_box_and_is_never_told_a_window_shut():
+    """Email used to draw no compose box: the box had no SMTP path, so it said "send it from your
+    own mail app" instead of offering a dead button. Owner, 2026-09-22 — it sends email now.
+
+    THE PAIR THAT MATTERS IS THE TWO AGES. Email has no clock, so a two-hour-old thread and a
+    year-old one must read identically. Getting that wrong is how a screen tells a business owner
+    he may not answer his own customer, which is the thing this whole file exists to prevent.
+    """
+    for hours in (2, 24 * 400):
+        _wipe()
+        _thread("mail", platform="email", hours=hours)
+        html_ = _page("mail")
+        words = _text(html_)
+        ok(f"email draws a reply box at {hours}h — the box sends it", 'class="compose"' in html_)
+        ok(f"...and no longer sends them to their own mail app ({hours}h)",
+           "mail app" not in words, words[:200])
+        ok(f"...and is never told a window shut, because email has none ({hours}h)",
+           "window" not in words.lower(), words[:200])
 
 
 def test_explain_falling_over_costs_the_note_and_never_the_box():

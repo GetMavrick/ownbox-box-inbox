@@ -60,14 +60,19 @@ SEED = [
     ("zc-new",    "Dana Whitfield",  "messenger", 1,    None,           "acct-1", 1, False,
      []),
     # WHATSAPP, NOT EMAIL, IS THE RULELESS CHANNEL NOW. Email was this suite's stand-in for "no
-    # policy written" and it stopped being one the moment the email rule landed: it is written,
-    # cited, and refuses because this box has no SMTP path. Swapping in a channel that genuinely
-    # has no rule keeps the state covered instead of quietly deleting it — and the email row below
-    # covers the state that replaced it.
+    # policy written" and it stopped being one the moment the email rule landed: written, cited,
+    # and since 2026-09-22 sendable — the box mails it from the buyer's own address. Swapping in
+    # a channel that genuinely has no rule keeps the state covered instead of quietly deleting
+    # it, and the email row below now covers the opposite state: a channel with nothing to warn
+    # about at all.
     ("zc-norule", "Terrence Hall",   "whatsapp",  2,    None,           "acct-1", 2, False,
      ["No reply rule"]),
+    # EMAIL NOW CARRIES NO PILL AT ALL, and that is the assertion. It used to say "Send in your
+    # mail app"; the owner ruled on 2026-09-22 and the box sends email itself, so the row has
+    # nothing to warn about — no missing lane, and no window, because email has never had one.
+    # An empty list here is the whole point: a pill is a claim, and there is no true one to make.
     ("zc-mail",   "Aurelia Bench",   "email",     2,    None,           "acct-1", 2, False,
-     ["Send in your mail app"]),
+     []),
     ("zc-ad",     "Sofia Marchetti", "instagram", 3,    "Roof repair",  "acct-1", 2, False,
      ["From Roof repair"]),
     ("zc-out",    "Joanna Reyes",    "messenger", 5,    None,           "acct-1", 3, True,
@@ -194,12 +199,15 @@ def test_a_channel_with_no_written_policy_gets_no_reply_box():
     t = c.get("/inbox/inbox/zc-norule").get_data(as_text=True)
     ok("no reply box on a channel with no send rule", 'id="reply"' not in t)
     ok("...and it says so in the buyer's words, not ours", "no reply rule for WhatsApp" in t)
-    # THE OTHER WRITTEN-DOWN REFUSAL, which must not be reported as the same thing. Email's rule
-    # exists; what is missing is an SMTP path, and the sentence says where the reply goes instead.
+    # AND EMAIL IS THE OTHER SIDE OF THE SAME GUARD. It used to be hidden here too, because the
+    # box had no SMTP path; the owner ruled on 2026-09-22 and it has one, so the box gets its
+    # reply box like any channel with a written rule. This pair is what keeps the guard honest:
+    # one channel that must NOT get a box and one that must, checked on the same screen.
     m = c.get("/inbox/inbox/zc-mail").get_data(as_text=True)
-    ok("no reply box on email either", 'id="reply"' not in m)
-    ok("...but it is NOT called a missing rule", "no reply rule for Email" not in m)
-    ok("...it says where the send actually happens", "your own mail app" in m)
+    ok("email HAS a reply box now — the box sends it", 'id="reply"' in m)
+    ok("...and is still not called a missing rule", "no reply rule for Email" not in m)
+    ok("...and no longer sends the buyer off to their own mail app",
+       "your own mail app" not in m)
     ok("...while still showing him everything that arrived", "message 0" in t)
     # THE OTHER HALF: a channel that DOES have a rule still gets its box, or this guard has
     # quietly deleted the product.
@@ -219,9 +227,9 @@ def test_the_rule_probe_answers_from_window_and_not_from_a_second_table():
     for key in sorted(window._RULES):
         # EVERY WRITTEN RULE IS FOUND, INCLUDING ONE THAT REFUSES. This loop used to hold that a
         # rule is written iff a fresh message is FREEFORM, which was true only while every rule
-        # carried a window. Email's does not — it is written, cited, and blocks because the box
-        # has no SMTP path — so the probe asks whether a rule EXISTS, and `_no_send_lane` carries
-        # the second, different fact.
+        # carried a window. Email's does not — it is written and cited, and `decide` blocks it
+        # because the box does not send UNATTENDED, not because a person may not. So the probe
+        # asks whether a rule EXISTS, and the flags carry the second, different facts.
         ok(f"a written rule is found for {key}", voice._has_send_rule(key))
     ok("a channel with no rule is refused", not voice._has_send_rule("whatsapp"))
     ok("...and so is one nobody has ever heard of", not voice._has_send_rule("carrier-pigeon"))

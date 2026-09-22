@@ -37,6 +37,18 @@ os.environ["AIOS_DB_PATH"] = os.path.join(_T, "wd_byo.db")
 os.environ["DISPATCH_BEARER_TOKEN"] = "bearer"
 os.environ["DASH_TOKEN"] = "pw"
 os.environ.pop("ANTHROPIC_API_KEY", None)          # a delivered box: no key in its environment
+# AND NO OPERATOR TO PAGE, because that is the branch this suite asserts. `_alert` logs
+# `watchdog.probe_failed_operator_unset` only under `if not dm:` (core/watchdog.py:194), and `dm`
+# is `settings.operator_slack_user_id` — read from OPERATOR_SLACK_USER_ID at class-definition time
+# in core/config.py:72, so it must be popped BEFORE core is imported, which is why it sits here
+# beside the key rather than next to the assertion that needs it.
+#
+# WITHOUT THIS THE SUITE READS THE MACHINE IT RUNS ON. A runner with no .env passes; the
+# EXPORTED-BOX run has a real one, so `dm` was truthy, the DM path was taken instead of the log,
+# and the assertion failed there and only there — which made a green PR look like it had broken
+# main. Measured both ways on one tree: var set = 1 FAILED, `env -u` = ALL OK. It also fails at
+# the commit that introduced it, so no change caused it and bisecting was wasted effort.
+os.environ.pop("OPERATOR_SLACK_USER_ID", None)     # no operator to page: the branch under test
 
 from core import state  # noqa: E402
 

@@ -23,7 +23,7 @@ from core import cost_guard
 from core.logging import get_logger
 from core.vendors import zernio
 
-from . import store, window
+from . import email_channel, store, window
 
 log = get_logger(__name__)
 
@@ -144,10 +144,11 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
     # customer, on our arithmetic, with no override.
     #
     # A MISSING LANE IS A DIFFERENT KIND OF FACT, not a stricter version of the same one. It is
-    # not about time at all: this box has no SMTP path, so there is nothing for a person to be
-    # blocked FROM, and the only alternative is the fall-through a buyer actually hit — an email
-    # draft reaching the Zernio branch and getting an exception class name where a sentence
-    # belongs (OSDev1, 2026-09-22).
+    # not about time at all: it is that the box cannot reach the channel, so there is nothing for
+    # a person to be blocked FROM. Email WAS such a channel and is not any more — the owner ruled
+    # on 2026-09-22 and this file now sends it — but the question stays, because the alternative
+    # is the fall-through a buyer actually hit: a draft on a channel with no transport reaching
+    # the Zernio branch and getting an exception class name where a sentence belongs.
     #
     # The first cut of this called `decide`, and CI was right to refuse it. `no_send_lane_why`
     # takes no timestamp, so it cannot answer "the window shut" — and the suite now asserts that
@@ -205,18 +206,70 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
     # retry over something that never reached the vendor — so the two pre-send refusals resolve
     # to `failed` first, exactly as `release_opener` releases an opener claim whose send
     # DETERMINATELY failed.
+    # WHICH TRANSPORT. Email leaves this box through the buyer's own mailbox and everything else
+    # through Zernio, and the difference starts here rather than at the call: email has no vendor
+    # to meter (no spend, so nothing to check or record) and no Space to resolve (no Zernio
+    # account is involved at all). Metering a vendor that is not in the path would put a charge in
+    # the ledger for a message Google sent for free.
+    is_email = str(conv.get("platform") or "").strip().lower() == "email"
+    sp, cred, tail = None, {}, {}
     try:
-        cost_guard.check_vendor("zernio", 1)
-        sp = _space(space)
-        if not sp:
-            # FAIL CLOSED ON AN UNRESOLVED SPACE. Never fall through to a default — see _space.
-            raise ReplyRefused("this box cannot resolve the Space that owns this conversation")
+        if is_email:
+            from core import box_secrets
+            cred = box_secrets.email_credential()
+            if not cred:
+                raise ReplyRefused("this box is not connected to a mailbox")
+            tail = email_channel.thread_tail(space, zcid)
+            if "@" not in str(tail.get("to") or ""):
+                raise ReplyRefused("there is no address on this thread to reply to")
+        else:
+            cost_guard.check_vendor("zernio", 1)
+            sp = _space(space)
+            if not sp:
+                # FAIL CLOSED ON AN UNRESOLVED SPACE. Never fall through to a default — see _space.
+                raise ReplyRefused("this box cannot resolve the Space that owns this conversation")
     except Exception as e:                # noqa: BLE001 — nothing was sent on either path
         store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
         raise
 
     try:
-        sent = zernio.client(sp).inbox.send(zcid, account_id, text)
+        if is_email:
+            # THE SUBJECT IS FETCHED HERE, INSIDE THE CLAIM, and a failure to read it costs a
+            # subject line rather than the reply — `subject_for` never raises.
+            mid = email_channel.send(
+                cred, to=tail["to"],
+                subject=email_channel.subject_for(cred, tail.get("in_reply_to") or ""),
+                body=text, in_reply_to=tail.get("in_reply_to") or "",
+                references=tail.get("references") or "")
+            sent = {"message_id": mid}
+        else:
+            sent = zernio.client(sp).inbox.send(zcid, account_id, text)
+    except email_channel.EmailSendIndeterminate as e:
+        # INVARIANT 4, ON THE MAIL PATH. A timeout or a disconnect after DATA tells us nothing
+        # about whether the message was queued, so it is recorded as "may have landed" and
+        # nothing here ever resends it.
+        store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
+        log.error("inbox.reply_indeterminate", extra={"space": space, "conversation": zcid,
+                                                      "error": str(e)[:160]})
+        raise ReplyIndeterminate(str(e)) from e
+    except email_channel.EmailSendRefused as e:
+        # THE SERVER ANSWERED NO. Determinate, so the row says failed and the person may retry —
+        # which is exactly what the generic `except Exception` below must NOT do for it, because
+        # that arm means "we have no idea" and would leave an honest retry blocked forever.
+        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
+        raise ReplyRefused(str(e)) from e
+    except email_channel.EmailAuthError as e:
+        # DETERMINATE: Google refused the credential, so nothing was sent. Recorded on the
+        # mailbox row as well, in the same words the set-up screen already renders, because the
+        # buyer cannot fix this from the thread — the poller would otherwise be the only thing
+        # that ever noticed, on its own schedule.
+        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
+        try:
+            from core import box_secrets
+            box_secrets.note_email_status(e.status, e.detail)
+        except Exception:                 # noqa: BLE001 — recording a reason never changes the
+            pass                          # outcome of a send that provably did not happen
+        raise ReplyRefused(e.detail) from e
     except zernio.ZernioError as e:
         if e.indeterminate:              # always set by ZernioError.__init__, as handler.py:169 reads it
             # MAY HAVE LANDED. Record it, tell the caller, and never resend on our own.

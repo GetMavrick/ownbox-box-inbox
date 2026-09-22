@@ -490,7 +490,16 @@ INBOX.send_impl = lambda cid, aid, text, tag: {"message_id": f"out-{len(INBOX.se
 #
 # THE OTHER CHANNELS MUST STILL GO. A gate that refuses everything is not a fix, and the Drafts
 # tab sends a mixed list — the whole point of the screen is ticking several at once.
-print("\ntest_a_channel_with_no_send_lane_is_refused_in_words")
+print("\ntest_email_reaches_the_mail_path_and_fails_honestly_without_a_mailbox")
+
+# WHAT THIS TEST USED TO ASSERT, AND WHY IT CHANGED. Email was a no-send lane: `send_reply`
+# refused it in the channel's own words before claiming anything, because the box had no SMTP
+# path and the owner had not ruled. Owner, 2026-09-22: *"There's gotta be a way to send email as
+# well."* So the lane is open, and email now goes down the mail path like any other channel.
+#
+# THE HARNESS HAS NO MAILBOX CONNECTED, which is the most useful state to pin: it proves email
+# gets PAST the lane (it is refused for a mailbox reason, not a policy one) and that the failure
+# is handled with the same ledger discipline as every other pre-send refusal.
 
 _now = datetime.now(timezone.utc).isoformat()
 store.upsert_conversation(space=SPACE, zcid="zc-lane-email", platform="email",
@@ -498,35 +507,49 @@ store.upsert_conversation(space=SPACE, zcid="zc-lane-email", platform="email",
 store.upsert_conversation(space=SPACE, zcid="zc-lane-dm", platform="messenger",
                           last_inbound_at=_now, account_id="acct-lane")
 
+_nonce = reply.new_nonce()
 try:
     reply.send_reply(space=SPACE, zcid="zc-lane-email", text="Tuesday works.",
-                     user_id=U, nonce=reply.new_nonce())
-    ok("an email draft is refused rather than reaching the vendor", False, "it was not refused")
+                     user_id=U, nonce=_nonce)
+    ok("an email with no mailbox connected is refused, not sent", False, "it was not refused")
 except reply.ReplyRefused as e:
-    ok("an email draft is refused rather than reaching the vendor", True)
-    # THE CHANNEL'S OWN SENTENCE, from `no_send_lane_why` on the rule, surfaced by `decide` under
-    # `reason`. Reading `no_send_lane_why` off the RESULT looks right and is always empty.
-    ok("...in the channel's own words, not a class name",
-       "mail app" in str(e) and "SMTP" in str(e), str(e)[:120])
+    ok("an email with no mailbox connected is refused, not sent", True)
+    ok("...for the MAILBOX reason, which proves it got past the lane and is on the mail path",
+       "mailbox" in str(e).lower(), str(e)[:120])
+    ok("...and not for the retired policy reason", "mail app" not in str(e), str(e)[:120])
 except Exception as e:                                   # noqa: BLE001
-    ok("an email draft is refused rather than reaching the vendor", False,
+    ok("an email with no mailbox connected is refused, not sent", False,
        f"{type(e).__name__}: {str(e)[:80]}")
 
-# NOTHING IS CLAIMED FOR A SEND THAT COULD NEVER HAPPEN. The refusal is before the ledger claim,
-# so a lane-blocked channel leaves no row for the watchdog to puzzle over later.
-_led = store.get_send(SPACE, reply.idem_for(SPACE, "zc-lane-email", U, "x")) or {}
-ok("...and no ledger row was claimed for it", not _led, str(_led))
+# THE LEDGER ROW IS CLAIMED AND RESOLVED TO `failed`, AND THAT IS THE POINT.
+#
+# The old refusal fired BEFORE the claim, so it left no row. This one fires after — it is
+# discovered while setting up the transport — and `send_reply`'s contract is that every exit
+# below the claim resolves the row it owns. A claim left hanging reads as "may have landed"
+# forever (store.claim_send) and would block the buyer's honest retry over a message that
+# provably never left the box.
+_led = store.get_send(SPACE, reply.idem_for(SPACE, "zc-lane-email", U, _nonce)) or {}
+ok("...and the ledger row it claimed is resolved to failed, never left hanging",
+   _led.get("status") == "failed", str(_led))
+ok("...with the reason on the row, so a retry is not a guess",
+   "mailbox" in str(_led.get("error") or "").lower(), str(_led.get("error"))[:90])
 
-# THE OTHER CHANNELS ARE UNTOUCHED: messenger has a written rule and gets past the lane. It fails
-# later here only because this harness resolves no Space, which is the fixture, not the gate.
+# NOTHING WAS METERED. Email leaves through the buyer's own mailbox, so there is no vendor in the
+# path — charging the Zernio meter for a message Google sends for free would put a cost in the
+# ledger for a send that never touched a vendor.
+ok("...and no vendor was metered for a channel that has none",
+   not any("zernio" in str(r).lower() for r in [_led.get("error") or ""]), str(_led.get("error")))
+
+# THE OTHER CHANNELS ARE UNTOUCHED: messenger still resolves a Space and a vendor. It fails later
+# here only because this harness resolves no Space, which is the fixture, not the gate.
 try:
     reply.send_reply(space=SPACE, zcid="zc-lane-dm", text="On our way.",
                      user_id=U, nonce=reply.new_nonce())
-    ok("a messenger draft still goes past the lane", True)
+    ok("a messenger draft still takes the vendor path", True)
 except Exception as e:                                   # noqa: BLE001
-    ok("a messenger draft still goes past the lane",
-       "cannot send on that channel" not in str(e) and "mail app" not in str(e),
-       f"the lane refused it too: {str(e)[:90]}")
+    ok("a messenger draft still takes the vendor path",
+       "mailbox" not in str(e).lower() and "mail app" not in str(e),
+       f"it took the mail path instead: {str(e)[:90]}")
 
 print(("FAILED " + str(_failed)) if _failed else "all ok")
 sys.exit(1 if _failed else 0)

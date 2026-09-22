@@ -424,6 +424,53 @@ m = last_message()
 ok("a server that answers with the WRONG message yields no subject, not a stranger's",
    res8.get("appended") == 1 and m["Subject"] == "Re: your message", str(m["Subject"]))
 
+# ── FIVE ROWS THAT CAN NEVER WORK MUST NOT HIDE THE ONE THAT CAN ────────────────────────────
+#
+# OSDev1 found this shape in the DRAFTER on 2026-09-22, an hour before this rail was written:
+# `needs_a_draft` returned the same five rows every sweep, none of them draftable, so 72
+# conversations with real text were never reached — for seven hours, with /health ok, systemd
+# active and every counter reading zero-because-quiet rather than zero-because-stuck.
+#
+# THIS RAIL HAS THE IDENTICAL SHAPE. `waiting()` is LIMIT 5 and a "not this time" releases the
+# claim, so anything permanently unappendable comes straight back to the front of the queue. The
+# defence is that a fact about the ROW answers `None` and keeps its claim — and the only honest
+# way to test that is to put five of them in front of a real one.
+print("\n— A PERMANENTLY UNAPPENDABLE ROW LEAVES THE QUEUE —")
+install(subjects={})
+for i in range(5):
+    zc = f"<blocker{i}@buyer.com>"
+    # NO INBOUND MESSAGE ROW, so `_recipient` can never resolve an address for it — the exact
+    # permanent condition, arrived at the way a box would arrive at it rather than by stubbing.
+    store.upsert_conversation(space=SPACE, zcid=zc, platform="email",
+                              participant="ghost", account_id=OWNER)
+    store.record_message(space=SPACE, zcid=zc, zmid=f"<other{i}@x.com>", direction="in",
+                         sent_by="ghost@buyer.com", body="hi")
+    drafts.put(space=SPACE, zcid=zc, in_reply_to=f"<missing{i}@buyer.com>", body="Hello there.")
+
+ok("five unappendable rows are enough to fill the sweep's limit",
+   len(md.waiting(SPACE)) == 5, str(len(md.waiting(SPACE))))
+install(subjects={})
+first = quiet(md.sweep, SPACE)
+ok("...the sweep appends none of them", first.get("appended") == 0, str(first))
+ok("...and they are OUT of the queue afterwards, not back at the front",
+   md.waiting(SPACE) == [], str(len(md.waiting(SPACE))))
+
+# NOW THE ROW THAT WOULD HAVE BEEN STARVED. On the old code this never ran: the five came back
+# every sweep, filled the limit, and this draft sat behind them until somebody looked.
+install(subjects={"<real@buyer.com>": "Can you quote me?"})
+seed("<real@buyer.com>", mid="<real@buyer.com>")
+drafts.put(space=SPACE, zcid="<real@buyer.com>", in_reply_to="<real@buyer.com>",
+           body="Happy to — what size is the job?")
+res_real = quiet(md.sweep, SPACE)
+ok("the real draft behind them is reached on the very next sweep",
+   res_real.get("appended") == 1, str(res_real))
+ok("...and it is the RIGHT one", "<real@buyer.com>" == last_message()["In-Reply-To"],
+   str(last_message()["In-Reply-To"]))
+
+# AND THE DISTINCTION HOLDS THE OTHER WAY: a server having a bad minute is still a retry, which
+# the "REFUSED APPEND IS RELEASED" block above already proves. Both halves, or this is just a
+# rule that drops work.
+
 # ── AND THE RAIL IS WIRED, NOT MERELY WRITTEN ───────────────────────────────────────────────
 print("\n— THE RAIL RUNS ON THE BOX —")
 src = (ROOT / "marketing" / "customer_voice" / "__init__.py").read_text()

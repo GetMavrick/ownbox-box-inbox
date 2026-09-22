@@ -1822,9 +1822,9 @@ def _has_send_rule(platform: str) -> bool:
 
     ASKED AS "IS ONE WRITTEN", NOT "IS ONE OPEN", and the difference arrived with email. Every
     rule used to carry a window, so "a message that arrived this instant is FREEFORM" was the same
-    question — it is not any more. Email's rule is written, cited, and refuses: there is no
-    platform window at all, and this box has no SMTP path. Reading FREEFORM as "a rule exists"
-    would report that written decision as a gap in our work.
+    question — it is not any more. Email's rule is written and cited, and `decide` still refuses
+    it because there is no platform window at all and the box does not send UNATTENDED. Reading
+    FREEFORM as "a rule exists" would report that written decision as a gap in our work.
 
     CACHED, because a rule is code and not data — it cannot change between two rows of one page.
     """
@@ -1840,11 +1840,13 @@ def _no_send_lane(platform: str) -> bool:
 
     THE DIFFERENCE MATTERS TO A PERSON, which is the only reason it is worth a second function.
     "No reply rule" means nobody has read this channel's policy and the box refuses out of
-    caution — a gap, and it reads like one. Email is not that: it has no platform window at all,
-    the rule is written with its citation, and the reason nothing goes out from here is that this
-    box has no SMTP path and the owner has not ruled on an email send policy. Told the first
-    sentence about the second situation, a buyer waits for us to finish something that is already
-    finished.
+    caution — a gap, and it reads like one. The other state is a channel whose policy IS read and
+    says the send happens elsewhere; told the first sentence about the second, a buyer waits for
+    us to finish something that is already finished.
+
+    NOTHING IS IN THAT SECOND STATE TODAY. Email was the only one — "this box has no SMTP path
+    and the owner has not ruled on an email send policy" — and he ruled on 2026-09-22, so the box
+    sends it and this returns False for every channel. Kept for the next channel that needs it.
 
     ASKED THROUGH `window.decide` LIKE ITS SIBLING, never by reading `_RULES` — the flag rides the
     RESULT for exactly this caller. Cached for the same reason: a rule is code, not data.
@@ -1869,9 +1871,13 @@ def _tag_list(k: dict) -> list:
         out.append(("Opted out", "stop"))
     elif _no_send_lane(plat):
         # NOT A FAULT, SO NOT RED, and checked before the branch below because it is the more
-        # specific fact. The rule for this channel IS written and says the send happens in the
-        # person's own mail app — email has no platform window, and this box has no SMTP path.
-        # "No reply rule" here would report a gap where there is a finished decision.
+        # specific fact: the rule for this channel IS written and says the send happens somewhere
+        # else. "No reply rule" here would report a gap where there is a finished decision.
+        #
+        # NO CHANNEL IS IN THIS STATE TODAY. Email was the only one, and the owner retired it on
+        # 2026-09-22 — the box sends email itself now. Kept because it is the shape the next such
+        # channel needs and `decide` still carries the flag for it, but the comment that used to
+        # sit here explained the branch by describing email, which is no longer true of email.
         out.append(("Send in your mail app", "warn"))
     elif not _has_send_rule(plat):
         # NOT A WINDOW PROBLEM, AND IT MUST NOT READ AS ONE. Nothing sends on a channel whose
@@ -1892,9 +1898,17 @@ def _tag_list(k: dict) -> list:
         out.append(("No inbound yet", "warn"))
     else:
         from marketing.customer_voice.inbox import window as _w
-        d = _w.decide(plat, k.get("last_inbound_at"))["decision"]
-        if d in _WINDOW_TAG:
-            out.append(_WINDOW_TAG[d])
+        _d = _w.decide(plat, k.get("last_inbound_at"))
+        # NOT EVERY `BLOCKED` IS A SHUT WINDOW, and the pill must only ever claim the one thing
+        # it says. `decide` answers for the UNATTENDED box, so email — which has no window at all
+        # — comes back BLOCKED because the box does not mail anyone on its own yet. Read as a
+        # decision alone that painted "Window closed" onto every email row: false on a channel
+        # with no clock, and it tells a buyer they cannot answer their own customer when they can.
+        #
+        # THE FLAG IS WHY THIS IS ONE LINE. `no_window` rides the result for exactly this reader,
+        # the same way `no_send_lane` and `no_rule` do, so the screen never reads `_RULES`.
+        if _d["decision"] in _WINDOW_TAG and not _d.get("no_window"):
+            out.append(_WINDOW_TAG[_d["decision"]])
     # THE "NEW" PILL USED TO BE HERE, on `message_count == 1`. Owner, 2026-09-17: "the new label
     # just gets in the way too. New messages should be in Bold text. Read messages in regular."
     #
@@ -2841,10 +2855,16 @@ def _compose(zcid: str, conv: dict, msgs: list[dict]) -> str:
         # A WRITTEN RULE THAT SAYS THE SEND HAPPENS ELSEWHERE. Checked before the no-rule branch
         # below because it is the more specific fact: both hide the compose box, and only this one
         # can tell the person where their reply actually goes.
+        #
+        # UNREACHABLE TODAY, AND THE SENTENCE BELOW IS WHY THAT MATTERS. Email was the only
+        # channel with this flag, and this is the copy the owner read back at us on 2026-09-22 —
+        # "is this true??", then "if we can't auto draft emails and then actually go ahead and
+        # send them, this is a completely worthless app". It is no longer true of email: the box
+        # sends it. The branch survives for the next channel that genuinely has no lane, and the
+        # WORDING is OSDev5's to write when there is one, rather than this retired paragraph.
         return ('<div class="card"><div class="row"><span class="t quiet">Ownbox reads your '
                 + _esc(_channel(str(conv.get("platform") or ""))) + ' and writes the reply, but '
-                'it does not send mail — you send it from your own mail app, from your own '
-                'address. Copy the draft across.</span></div></div>')
+                'the send happens outside the box for this channel.</span></div></div>')
     if not _has_send_rule(str(conv.get("platform") or "")):
         # FOUND BY RENDERING, 2026-09-16. A seeded box on a channel with NO send rule written —
         # `email`, today — drew a full reply box with a Send button under it, and the send would
@@ -4065,11 +4085,14 @@ def r_mailbox():
     whoami = _u.get("id")
 
     if request.args.get("off"):
-        # STOPPING IS AS REAL A CONTROL AS STARTING. The status row goes with the credential: a
+        # STOPPING IS AS REAL A CONTROL AS STARTING. The status rows go with the credential: a
         # left-behind "connected" would have this screen reporting on a mailbox it no longer reads.
-        box_secrets.clear(box_secrets.EMAIL, user_id=whoami)
-        box_secrets.clear(box_secrets.EMAIL_STATUS, user_id=whoami)
-        box_secrets.clear(box_secrets.EMAIL_DETAIL, user_id=whoami)
+        #
+        # `clear_email` RATHER THAN THE ROWS BY NAME. This listed them one by one, so every row
+        # added to a mailbox connection since has been a row somebody had to remember to add here
+        # too — and the store is where that list belongs, beside `clear_zernio`, which has always
+        # worked this way.
+        box_secrets.clear_email(user_id=whoami)
         return redirect("/inbox/mailbox")
 
     note, typed = "", ""

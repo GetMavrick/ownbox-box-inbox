@@ -86,6 +86,13 @@ EMAIL = "email_imap"
 # Written by the poller when Google refuses, read by the screen. Never holds a credential.
 EMAIL_STATUS = "email_imap_status"
 EMAIL_DETAIL = "email_imap_detail"
+# CAN THAT SAME PASSWORD *SEND*? A separate question with a separate answer, because a Workspace
+# administrator can leave IMAP on and turn SMTP off — so the credential that reads this mailbox
+# perfectly may be unable to send one message. Recorded at set-up, never enforced there: reading
+# is most of what this box does, and refusing a working mailbox over a send check would break the
+# feature that works to protect one that has not shipped yet.
+EMAIL_SEND = "email_smtp_status"        # can_send | refused | unknown; "" = never asked
+EMAIL_SEND_DETAIL = "email_smtp_detail"
 
 
 def get(name: str) -> str:
@@ -222,6 +229,12 @@ def _mailbox_verify(host: str, user: str, password: str):
     return verify_credential(host, user, password)
 
 
+def _mailbox_verify_send(host: str, user: str, password: str):
+    """Ask whether the same credential may SEND. Lazily imported for the reason above."""
+    from core.vendors.mailbox import verify_send
+    return verify_send(host, user, password)
+
+
 def zernio_profile() -> str:
     """The Profile id this box uses inside the buyer's own Zernio account, or "".
 
@@ -297,6 +310,36 @@ def put_email(*, host: str, user: str, password: str, user_id: str | None = None
     # says "there is no error" without inventing a value to mean it.
     clear(EMAIL_DETAIL, user_id=user_id)
 
+    # AND THE SECOND QUESTION, ASKED ONLY ONCE THE FIRST HAS BEEN ANSWERED YES.
+    #
+    # ORDER IS THE POINT. Reading is verified first and stored first, so a mailbox that reads is
+    # connected the instant it is proven to read — whatever the send check goes on to say. It also
+    # makes the refusal sentence honest: the password demonstrably works, seconds ago, on this same
+    # account, so "wrong password" is the one explanation already ruled out.
+    #
+    # ITS FAILURE IS RECORDED, NEVER RAISED. `put_email` raises to mean "not stored, fix this and
+    # try again", and a box that cannot send can still read every message a customer writes.
+    # Raising here would take that away over a feature the buyer has not been offered yet.
+    can_send, send_status, send_detail = _mailbox_verify_send(host, user, password)
+    put(EMAIL_SEND, send_status, user_id=user_id)
+    if can_send or not send_detail:
+        clear(EMAIL_SEND_DETAIL, user_id=user_id)
+    else:
+        put(EMAIL_SEND_DETAIL, send_detail, user_id=user_id)
+
+
+def clear_email(*, user_id: str | None = None) -> None:
+    """Disconnect the mailbox — the credential AND every verdict recorded about it.
+
+    ONE PLACE THAT KNOWS WHAT A MAILBOX CONNECTION IS MADE OF, for the reason `clear_zernio` above
+    exists: the screen used to name these rows one by one, so every row added since has been a row
+    somebody had to remember to add there too. The send verdict was going to be the first one
+    forgotten, and a left-behind "can send" on a mailbox this box no longer reads is a screen
+    telling a buyer they can do something the box cannot even attempt.
+    """
+    for name in (EMAIL, EMAIL_STATUS, EMAIL_DETAIL, EMAIL_SEND, EMAIL_SEND_DETAIL):
+        clear(name, user_id=user_id)
+
 
 def email_state() -> dict:
     """WHAT A SCREEN BINDS TO, and nothing a screen should not have: never the password.
@@ -307,9 +350,22 @@ def email_state() -> dict:
     and a buyer told "authentication failed" learns nothing they can act on."""
     cred = email_credential()
     if not cred:
-        return {"status": "not_connected", "user": None, "detail": ""}
+        # THE SAME KEYS ON EVERY PATH. A screen binds to this dict once; an early return that
+        # leaves two of them out turns "no mailbox yet" — the state every box starts in — into a
+        # KeyError on the set-up page, which is the one page that has to work before anything else
+        # does. Caught by the suite, which asked a disconnected box what it could send.
+        return {"status": "not_connected", "user": None, "detail": "",
+                "send": "unknown", "send_detail": ""}
+    # `send` IS A THIRD THING, NOT A SHADE OF `status`. A mailbox can be perfectly connected and
+    # unable to send, and folding the two into one word would force a screen to either call a
+    # working mailbox broken or hide the one fact a buyer needs before they rely on sending.
+    #
+    # "unknown" IS THE HONEST DEFAULT and it covers two different pasts: a box connected before
+    # this check existed, and one where the check could not reach the server. Neither is "no".
     return {"status": get(EMAIL_STATUS) or "connected", "user": cred.get("user"),
-            "detail": get(EMAIL_DETAIL)}
+            "detail": get(EMAIL_DETAIL),
+            "send": get(EMAIL_SEND) or "unknown",
+            "send_detail": get(EMAIL_SEND_DETAIL)}
 
 
 def note_email_status(status: str, detail: str = "", *, user_id: str | None = None) -> None:
@@ -365,8 +421,8 @@ def validate(name: str, value: str) -> str:
     # `.strip()` turned that into "" and the empty check raised — after the status row had already
     # been written, so the box was left with a half-written status AND an exception in the poller.
     # Reproduced, then moved. A guard placed after the thing it guards is not a guard.
-    if name in (EMAIL, EMAIL_DETAIL, ZERNIO_DETAIL, ZERNIO_PROFILE, ANTHROPIC_DETAIL,
-                CLAUDE_OAUTH_DETAIL, CLAUDE_OAUTH_CONSENT):
+    if name in (EMAIL, EMAIL_DETAIL, EMAIL_SEND_DETAIL, ZERNIO_DETAIL, ZERNIO_PROFILE,
+                ANTHROPIC_DETAIL, CLAUDE_OAUTH_DETAIL, CLAUDE_OAUTH_CONSENT):
         return str(value or "")
     value = str(value or "").strip()
     if not value:

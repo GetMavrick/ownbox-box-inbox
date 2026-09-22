@@ -108,10 +108,16 @@ lim = window.explain("tiktok", ago(60), NOW)
 ok("TikTok degrades rather than closing, and the sentence says how much is left",
    lim["state"] == "limited" and "3 more" in lim["headline"], str(lim))
 
+# EMAIL USED TO SAY "the box drafts this one — you send it", because the box had no SMTP path.
+# It has one now (owner, 2026-09-22), so the sentence a person reads had to change with the fact.
+# What it must NEVER say is that a window shut: email has no clock, at any age of thread.
 e = window.explain("email", ago(1), NOW)
-ok("email says the box drafts and the PERSON sends — a product fact, not a permission",
-   e["state"] == "no_lane" and e["can_try"] is False and "you send it" in e["headline"].lower(),
-   str(e))
+ok("email says a person can reply now — it has no window, and never had one",
+   e["state"] == "open" and e["can_try"] is True, str(e))
+e_old = window.explain("email", ago(24 * 400), NOW)
+ok("...and a year-old email thread says exactly the same thing",
+   (e_old["state"], e_old["can_try"]) == (e["state"], True)
+   and "while since" not in e_old["headline"], str(e_old))
 
 u = window.explain("whatsapp", ago(1), NOW)
 ok("AN UNWRITTEN RULE IS OURS, AND IS SAID AS OURS — never 'wait out a window'",
@@ -161,9 +167,11 @@ ok("and no window check was added BEFORE the vendor call, in the source itself",
 
 # THE ONE QUESTION THE SEND PATH MAY ASK THIS MODULE, and the reason it is safe to allow.
 #
-# `send_reply` refuses a channel this box has NO WAY to reach — email has no SMTP path, so an
-# email draft ticked in the Drafts tab used to fall through to the Zernio branch and hand a buyer
-# an exception class name (OSDev1, 2026-09-22). That is not the block this file forbids: there is
+# `send_reply` refuses a channel this box has NO WAY to reach. Email WAS one — with no SMTP path,
+# a draft ticked in the Drafts tab fell through to the Zernio branch and handed a buyer an
+# exception class name (OSDev1, 2026-09-22) — and is not one any more; nothing is, today. The
+# question stays because the next such channel will need it. That is not the block this file
+# forbids: there is
 # nothing for a person to be blocked FROM, and it is not an inference about time.
 #
 # THE ARGUMENT LIST IS WHAT KEEPS THAT TRUE. `no_send_lane_why` takes a platform and nothing else,
@@ -175,18 +183,28 @@ import inspect as _inspect  # noqa: E402
 _params = list(_inspect.signature(window.no_send_lane_why).parameters)
 ok("the send path's one question to this module takes NO timestamp, so it cannot become a clock",
    _params == ["platform"], str(_params))
-ok("...and it answers only for a lane that does not exist — never for an unknown platform, "
-   "which is a gap in OUR work and not a person's to be refused over",
-   window.no_send_lane_why("email") and not window.no_send_lane_why("whatsapp")
-   and not window.no_send_lane_why("instagram") and not window.no_send_lane_why(""),
-   f"email={bool(window.no_send_lane_why('email'))} "
-   f"whatsapp={bool(window.no_send_lane_why('whatsapp'))}")
+# NOTHING IS A NO-SEND LANE TODAY — email was the only one and the owner retired it. So this
+# asserts the shape that keeps the answer safe rather than a channel that happens to be in it:
+# every real channel answers "", and an UNKNOWN platform answers "" too. That last one is the
+# one worth pinning. A gap in our work is not a person's to be refused over, and only `decide`
+# — on the unattended path, where nobody is watching — may refuse an unwritten channel.
+ok("...and no channel is refused a lane today, an unknown platform least of all",
+   not any(window.no_send_lane_why(p)
+           for p in ("email", "instagram", "messenger", "tiktok", "whatsapp", "", "TYPO")),
+   str({p: window.no_send_lane_why(p) for p in ("email", "whatsapp", "TYPO")}))
+ok("...while `decide` DOES still refuse an unwritten channel, which is the half that protects us",
+   window.decide("whatsapp", ago(1), NOW).get("no_rule") is True,
+   str(window.decide("whatsapp", ago(1), NOW)))
 # AND THE SEND PATH KEEPS NO COPY OF THE SENTENCE. It is data on the rule, beside the policy it
 # explains, so the words a buyer reads and the reason they are true cannot drift apart. My first
 # version of this check grepped reply.py FOR the sentence and failed — correctly, and it is the
 # better property that the sentence is not there.
-ok("...and the send path keeps no copy of the words — they live beside the policy",
-   window.no_send_lane_why("email")[:40] not in src)
+# THE SENTENCE LIVED ON THE RULE, NOT IN THE SEND PATH, WHICH IS WHY RETIRING IT COST NOTHING
+# HERE. `reply.py` never held a copy to go stale: the flag came off the rule in window.py and the
+# refusal simply stopped firing. Asserted as the general property rather than against email's old
+# words, which no longer exist to compare with.
+ok("...and the send path holds no channel sentence of its own — they live beside the policy",
+   "no platform send window" not in src and "mail app" not in src)
 
 
 # ── 3. the refusal, in words — and only when our clock agrees ────────────────────────────

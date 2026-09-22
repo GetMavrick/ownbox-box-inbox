@@ -112,24 +112,33 @@ _RULES = {
     #   16 CFR Part 316 (the Primary Purpose rule) — https://www.ecfr.gov/current/title-16/part-316
     #   15 U.S.C. 7702(17) defines "transactional or relationship message".
     #
-    # SO WHY IS IT BLOCKED. Not the clock — THE BOX. There is no SMTP path anywhere in this
-    # repository: `inbox/reply.py` sends through the social vendor and nothing else, and
-    # `email_channel.py` opens the mailbox read-only with BODY.PEEK. A rule saying FREEFORM would
-    # describe a lane that does not exist, and `handler.py` would open its opener door onto a send
-    # that cannot happen. Written down here, with its reason, so that switching email on INGESTS
-    # AND DRAFTS without ever implying the box can put something in anyone's outbox.
+    # SO WHY IS IT STILL BLOCKED HERE. Not the clock and no longer the missing transport —
+    # `email_channel.send` exists, and a PERSON may send whenever they like. `decide` answers the
+    # narrower question the automatic opener asks: may the box mail a customer with nobody
+    # reading it. Delay-send is the owner's opt-in Phase 2 and has not shipped, so: no.
     #
-    # AND SEND POLICY IS THE OWNER'S WORD (CLAUDE.md), never a value a dev picks while wiring up a
-    # channel. When SMTP lands and he has ruled, this entry loses `no_send_lane` and keeps
-    # `free_hours: None`, and nothing else in this file changes.
+    # THIS PARAGRAPH USED TO SAY "there is no SMTP path anywhere in this repository", and it
+    # predicted its own retirement — "when SMTP lands and he has ruled, this entry loses
+    # `no_send_lane` and keeps `free_hours: None`". That is exactly what happened on 2026-09-22,
+    # and the flag below is what replaced it. SEND POLICY IS STILL THE OWNER'S WORD (CLAUDE.md),
+    # never a value a dev picks while wiring up a channel; this one is his.
+    # THE LANE IS OPEN. Owner, 2026-09-22: *"There's gotta be a way to send email as well.
+    # Something is not built correctly."* This entry carried `no_send_lane: True` with its reason
+    # as data — "this box has no SMTP path at all, and the owner has not ruled on an email send
+    # policy" — and both halves of that sentence are now spent: he ruled, and
+    # `email_channel.send` is the path. So the flag goes, exactly as the comment above promised
+    # it would, and `free_hours: None` stays.
+    #
+    # `free_hours: None` IS NOT AN OVERSIGHT AND IT IS NOT "UNLIMITED". It means no documented
+    # window, which for email is the truth: nobody revokes your right to answer an email, and a
+    # reply to an enquiry is transactional under CAN-SPAM (16 CFR 316, cited below). `decide`
+    # reads it and refuses, which is correct for the one caller that reads `decide` — the
+    # AUTOMATED opener, where nobody is watching. A person sending by hand never passes through
+    # it (see `no_send_lane_why`), so this opens the human path and leaves the automatic one shut
+    # until delay-send ships, which the owner ruled is opt-in.
     "email": {
-        "free_hours": None, "tag_hours": None, "no_send_lane": True,
+        "free_hours": None, "tag_hours": None, "no_window": True,
         "cite": "https://www.ecfr.gov/current/title-16/part-316",
-        # Carried as data so it survives a refactor that drops comments, exactly as Instagram's
-        # `tag_unconfirmed` is.
-        "no_send_lane_why": "email has no platform send window; this box has no SMTP path at all, "
-                            "and the owner has not ruled on an email send policy. The box reads "
-                            "and drafts; a person sends from their own mail app.",
     },
 }
 
@@ -168,7 +177,7 @@ def no_send_lane_why(platform: str) -> str:
 
     A NO-SEND LANE IS NOT THAT, and the difference is not a matter of degree. It is not an
     inference about time at all: it is the fact that this box has no way to reach the channel —
-    email has no SMTP path in the repository, so there is nothing for a person to be blocked FROM.
+    the box cannot reach the channel at all, so there is nothing for a person to be blocked FROM.
     Refusing in a sentence is the only alternative to falling through to a vendor branch for a
     completely different platform, which is what a buyer actually got (OSDev1, 2026-09-22).
 
@@ -218,6 +227,24 @@ def decide(platform: str, last_inbound_at: str | None, now: datetime | None = No
         # module and a good one: a second reader of the private table is a second thing to drift.
         return {"decision": BLOCKED, "reason": rule["no_send_lane_why"],
                 "remaining": None, "no_send_lane": True, "cite": rule.get("cite")}
+
+    if rule.get("no_window"):
+        # NO WINDOW EXISTS ON THIS CHANNEL — which is a fact about email, not a gap in our work.
+        # Nobody revokes a business's right to answer an enquiry by mail, and a reply to one is
+        # transactional under CAN-SPAM (the citation on the rule).
+        #
+        # AND IT IS STILL BLOCKED HERE, because `decide` answers ONE question: may the box send
+        # UNATTENDED, with nobody reading it. The owner ruled delay-send opt-in and it has not
+        # shipped, so the honest answer is no — and the reason says which "no" this is, rather
+        # than borrowing the sentence below, which means "nobody has documented this channel" and
+        # would read as our homework being late.
+        #
+        # THE HUMAN PATH DOES NOT COME THROUGH HERE. `send_reply` asks `no_send_lane_why`, which
+        # is "" for email now, and `explain` reads the flag below to tell a person the truth.
+        return {"decision": BLOCKED,
+                "reason": "email has no send window at all; the box does not send on it "
+                          "unattended, and a person can reply whenever they like",
+                "remaining": None, "no_window": True, "cite": rule.get("cite")}
 
     if rule.get("free_hours") is None:
         # DOCUMENTED AT THE TOP OF THIS FILE AND NEVER IMPLEMENTED — "None = no window is
@@ -344,6 +371,15 @@ def explain(platform: str, last_inbound_at: str | None, now: datetime | None = N
                 "headline": "The box drafts this one — you send it.",
                 "detail": "Your box reads this mailbox and writes the reply. Copy it into your "
                           "own mail app to send it."}
+
+    if d.get("no_window"):
+        # THE PERSON MAY ALWAYS SEND. `decide` said no because it answers for the UNATTENDED box;
+        # this function answers for somebody sitting in front of a reply they have written, and
+        # for them there is no clock to wait out and never was.
+        return {**d, "state": "open", "can_try": True,
+                "headline": "You can reply now.",
+                "detail": f"{who} has no reply window — answer whenever you like. It goes out "
+                          f"from your own address."}
 
     if d.get("no_rule"):
         # OURS, AND SAID AS OURS. Telling a buyer to wait out a window we simply have not

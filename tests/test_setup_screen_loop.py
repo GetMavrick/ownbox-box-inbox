@@ -51,10 +51,15 @@ from core import box_secrets as bs                        # noqa: E402
 #
 # `setattr`, NOT an assignment to a name that must already exist: this file has to pass BEFORE
 # #1257 lands as well as after, and on today's main there is no such attribute.
+#
+# AND THE SAME FOR SENDING. `put_email` now also asks whether that password may SEND (SMTP), which
+# is a second socket for every call here — 20 seconds of it in a runner with no egress, per test.
+# `_mailbox_verify_send` is the parallel seam, and it is stubbed on the same line of reasoning.
 def _never_calls_google() -> None:
     try:
         from core import box_secrets as _bs
         setattr(_bs, "_mailbox_verify", lambda host, user, password: (True, "connected", ""))
+        setattr(_bs, "_mailbox_verify_send", lambda host, user, password: (True, "can_send", ""))
     except Exception:                            # noqa: BLE001 — a stub that cannot be set is not
         pass                                     # a reason to fail every test in the file
 

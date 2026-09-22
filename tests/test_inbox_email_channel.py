@@ -216,13 +216,21 @@ print("\n— switched on, WITH the rule it was waiting for —")
 # "polled" alone, without the rule clause, is what would quietly undo the guarantee.
 ok("email is polled, and a send rule is written beside it",
    any(c.key == "email" for c in channels.POLLED) and "email" in window._RULES)
-# AND THE RULE SAYS NOTHING AUTO-SENDS. Ingesting a mailbox is not permission to answer from it:
-# there is no SMTP path in this repository and send policy is the owner's word, so the rule blocks
-# and says why. A future dev who makes email sendable has to change this line on purpose.
-ok("...and that rule REFUSES to send, however fresh the message",
+# AND THE RULE STILL SAYS NOTHING AUTO-SENDS. Ingesting a mailbox is not permission to answer
+# from it unattended, and that is the guarantee this pairing exists for. It was written when the
+# reason was "there is no SMTP path in this repository"; the owner ruled on 2026-09-22 and there
+# is one now, so a PERSON can send — but `decide`, the one question the automatic opener asks,
+# still refuses, and delay-send is his opt-in Phase 2. The line below was written so that a dev
+# who makes email sendable has to change it ON PURPOSE. This is that change, and the guarantee it
+# was protecting is unchanged: nothing mails a customer with nobody reading it.
+ok("...and that rule REFUSES to send UNATTENDED, however fresh the message",
    window.decide("email", datetime.now(timezone.utc).isoformat())["decision"] == window.BLOCKED)
-ok("...for the box's reason, not a closed clock",
-   window.decide("email", datetime.now(timezone.utc).isoformat()).get("no_send_lane") is True)
+ok("...because there is no window at all, not because a clock shut",
+   window.decide("email", datetime.now(timezone.utc).isoformat()).get("no_window") is True)
+# THE OTHER HALF, ASSERTED HERE TOO so this pairing can never drift into blocking a person: the
+# send path asks a different question, and for email the answer is now yes.
+ok("...while a PERSON is refused nothing — the send path's own question says so",
+   window.no_send_lane_why("email") == "", repr(window.no_send_lane_why("email")))
 ok("...and the vendor constant is named once, for the poller and the suites to share",
    channels.IMAP == "imap")
 ok("...while the reader itself is proven above, so activation is one line",

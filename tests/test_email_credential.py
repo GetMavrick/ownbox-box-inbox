@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import smtplib
 import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
@@ -110,11 +111,42 @@ def _unreachable():
     imaplib.IMAP4_SSL = factory                                   # type: ignore[assignment]
 
 
+# ── AND A SUBMISSION SERVER, BECAUSE SAVING NOW ASKS ABOUT SENDING TOO ───────────────────────
+# `put_email` asks the mailbox whether that password may SEND as well as read (SMTP), so every
+# call below opens a second socket. Unfaked, that is a real connection to smtp.gmail.com from the
+# runner — the exact thing the IMAP fake above exists to prevent, one protocol over, and it costs
+# the timeout on every test in this file.
+#
+# THE SEND VERDICT ITSELF IS NOT THIS SUITE'S SUBJECT — tests/test_the_password_can_send_too.py
+# drives it through every refusal — so this stands up the simplest server that says yes.
+class _FakeSMTP:
+    def __init__(self, host, port, timeout=None):
+        self.host, self.port = host, port
+
+    def ehlo(self, *a):
+        return (250, b"ok")
+
+    def starttls(self, *a, **k):
+        return (220, b"ready")
+
+    def login(self, user, password):
+        return (235, b"accepted")
+
+    def sendmail(self, *a, **k):
+        raise AssertionError("a credential check sent a message — nothing may leave the box here")
+
+    def quit(self):
+        return (221, b"bye")
+
+
+smtplib.SMTP = _FakeSMTP                                          # type: ignore[assignment]
+
 _server()
 
 print("\n— the four states a screen has to render —")
 ok("a box nobody has connected is not_connected, with no user and no error",
-   bs.email_state() == {"status": "not_connected", "user": None, "detail": ""}, str(bs.email_state()))
+   bs.email_state() == {"status": "not_connected", "user": None, "detail": "",
+                        "send": "unknown", "send_detail": ""}, str(bs.email_state()))
 quiet(bs.put_email, host="imap.gmail.com", user="owner@acme.com", password=APP_PW)
 ok("...connected once a credential is stored, and it names the mailbox",
    bs.email_state()["status"] == "connected" and bs.email_state()["user"] == "owner@acme.com")

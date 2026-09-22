@@ -28,6 +28,7 @@ import email.utils
 import html as html_mod
 import re
 import imaplib
+import smtplib
 from datetime import datetime, timezone
 
 from core import box_mail, box_secrets
@@ -335,15 +336,32 @@ def append_draft(*, space: str, zcid: str, in_reply_to: str, body: str,
     NEVER RAISES, because the caller is the drafting rail. A mail server having a bad minute must
     not lose a reply the box already paid a model to write.
     """
+    # NO MAILBOX IS THE ONE TRANSIENT REFUSAL HERE: a buyer who has not connected one yet, or is
+    # part-way through reconnecting, will have one shortly, and the draft should be waiting.
     cred = box_secrets.email_credential()
-    if not cred or not str(body or "").strip():
+    if not cred:
         return False
+
+    # EVERYTHING BELOW IS A FACT ABOUT THE ROW, SO IT IS `None` — never, not not-yet.
+    #
+    # OSDev1 found the shape of this bug in the DRAFTER an hour before I found it here
+    # (DEVSTATE, 2026-09-22): `needs_a_draft` kept handing back the same five rows that could
+    # never be drafted, so nothing behind them was ever reached, and every signal read green.
+    # This rail has the identical shape — `waiting()` is LIMIT 5 and a `False` releases the claim
+    # — so five conversations with an unreadable sender would quietly starve every real draft on
+    # the box, forever, while `appended: 0` looked like a quiet day.
+    #
+    # None of these three can change by trying again. The body is fixed on the row, the platform
+    # is fixed on the conversation, and `_recipient` reads a stored message that nothing rewrites.
+    if not str(body or "").strip():
+        return None
     conv = store.get_conversation(space, zcid) or {}
     if str(conv.get("platform") or "") != "email":
-        return False                                     # this is the mailbox's trick, nobody else's
+        return None                                      # this is the mailbox's trick, nobody else's
     to = _recipient(space, zcid, in_reply_to)
     if "@" not in to:
-        return False
+        log.info("email.draft_no_recipient", extra={"space": space, "conversation": zcid})
+        return None
     # A MESSAGE-ID THAT CANNOT BE A HEADER IS REFUSED HERE, and refused FOREVER.
     #
     # Python's email policy rejects CR and LF in a header value — correctly, since they would let
@@ -473,3 +491,174 @@ def sweep(space: str) -> tuple[int, int]:
             conn.logout()
         except Exception:                                # noqa: BLE001
             pass
+
+
+# ── SENDING IT, FROM THE BUYER'S OWN ADDRESS ────────────────────────────────────────────────────
+#
+# Owner, 2026-09-22: *"There's gotta be a way to send email as well. Something is not built
+# correctly."* He was right, and the gap was never technical — `window.py` has carried the reason
+# as data since the channel shipped: *"the owner has not ruled on an email send policy."* He has
+# now, so this is the transport that reason was waiting for.
+#
+# THEIR GOOGLE ACCOUNT, THEIR ADDRESS, THEIR SENDING REPUTATION. `smtplib` is stdlib and the
+# credential is the app password already stored for reading, so this adds no vendor, no key, no
+# spend and nothing to meter. A reply arrives from the business, in the customer's own thread,
+# and Gmail files a copy in the buyer's Sent folder as if they had typed it.
+#
+# THE MESSAGE ID IS OURS, GENERATED BEFORE THE SEND, and that is load-bearing in two places.
+# SMTP returns nothing to identify a message by, so without this there is no id for the ledger or
+# the mirror. And because the mirror stores the same id the header carries, a copy that later
+# comes back round through INBOX (a self-cc, a mailing list, a Workspace journal rule) is filed by
+# `record_message`'s INSERT-OR-IGNORE as the message it already has, rather than as a second one.
+
+_SEND_TIMEOUT_S = 25         # somebody IS standing in front of this one; longer than the draft's
+_SUBJECT_TIMEOUT_S = 8       # a nicety on a person's click — it may not hold up their reply
+
+
+class EmailSendIndeterminate(RuntimeError):
+    """The message MAY have gone. Invariant 4: a timeout is never "it didn't land"."""
+
+
+class EmailSendRefused(RuntimeError):
+    """The server answered, and the answer was no. Nothing was queued.
+
+    ITS OWN TYPE BECAUSE THE CALLER RESOLVES A LEDGER ROW ON IT, and "determinate" has to be
+    carried by something the caller can catch. The first cut raised a plain RuntimeError here,
+    which fell through `reply.py`'s last-resort `except Exception` — the arm that exists to treat
+    an UNEXPECTED raise as unknown — and a 550 "no such user" was recorded as "may have landed".
+    That is the wrong half of invariant 4: it is safe to be unsure, and expensive to be unsure
+    when the server has already told you. The suite drives a refused recipient to hold this.
+    """
+
+
+def _smtp_host(cred: dict) -> str:
+    from core.vendors.mailbox import smtp_host_for
+    return smtp_host_for(cred.get("host") or "")
+
+
+def subject_for(cred: dict, in_reply_to: str) -> str:
+    """`Re: ` + the subject of the message being answered, or a plain fallback. NEVER RAISES.
+
+    ITS OWN SHORT-LIVED CONNECTION, AND ITS OWN SHORT TIMEOUT. A person has clicked send, so this
+    is the one place in the file where latency is a feature of the product rather than a detail of
+    a worker. Eight seconds, and a mail server having a slow minute costs a subject line rather
+    than the reply.
+
+    A THREAD IS THREADED BY `References`, NOT BY ITS SUBJECT, which is what makes that trade safe.
+    """
+    if not in_reply_to:
+        return "Re: your message"
+    conn = None
+    try:
+        conn = imaplib.IMAP4_SSL(cred.get("host") or "imap.gmail.com", timeout=_SUBJECT_TIMEOUT_S)
+        conn.login(cred["user"], cred["password"])
+        conn.select(_FOLDER, readonly=True)              # read-only, like every other reader here
+        got = _subject_of(conn, in_reply_to)
+    except Exception:                                    # noqa: BLE001 — a nicety, never the reply
+        got = ""
+    finally:
+        if conn is not None:
+            try:
+                conn.logout()
+            except Exception:                            # noqa: BLE001
+                pass
+    if not got:
+        return "Re: your message"
+    return got if got.lower().startswith("re:") else f"Re: {got}"
+
+
+def send(cred: dict, *, to: str, subject: str, body: str,
+         in_reply_to: str = "", references: str = "") -> str:
+    """Send one reply from the buyer's own mailbox. -> the Message-ID it went out with.
+
+    RAISES, AND THE TYPE IS THE WHOLE CONTRACT, because the caller has a ledger row claimed and
+    has to resolve it to exactly the right thing (invariant 4):
+
+      EmailSendIndeterminate  it MAY have gone. A timeout, a disconnect, a 4xx — anything where
+                              the server's answer never arrived. NEVER report these as failed:
+                              "a timeout is INDETERMINATE, never assume it didn't land."
+      EmailAuthError          Google refused the credential. Determinate: nothing was sent, and
+                              the status it carries is the one the set-up row already renders.
+      EmailSendRefused        the server said no, in a 5xx, about this message. Determinate.
+
+    THE RECIPIENT IS REFUSED AT THE DOOR, not by the server. `sendmail` would happily take a
+    header-injected address; an address with a newline in it is refused here, before a connection
+    is opened, because the only thing downstream of that is somebody else's inbox.
+    """
+    to = str(to or "").strip()
+    if "@" not in to or any(c in to for c in "\r\n"):
+        raise EmailSendRefused("that conversation has no address to reply to")
+    if any(c in str(in_reply_to) for c in "\r\n") or any(c in str(references) for c in "\r\n"):
+        raise EmailSendRefused("that conversation's message id cannot be put in a header")
+
+    sender = str(cred.get("user") or "")
+    # THE DOMAIN COMES FROM THE SENDER so the id is plausibly theirs, which is what a receiving
+    # server's heuristics expect. `make_msgid` supplies the uniqueness.
+    mid = email.utils.make_msgid(domain=sender.rsplit("@", 1)[-1] or None)
+
+    msg = email.message.EmailMessage()
+    msg["From"] = sender
+    msg["To"] = to
+    msg["Subject"] = subject or "Re: your message"
+    msg["Message-ID"] = mid
+    msg["Date"] = email.utils.formatdate(localtime=True)
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = references or in_reply_to
+    # NO `X-Ownbox` MARK, deliberately, and for the same reason the appended draft carries none:
+    # that mark tells ingest to skip the BOX's own mail, and this is the buyer's. Marking it would
+    # make the sweep discard the one outbound in the thread that matters most.
+    msg.set_content(str(body))
+
+    conn = None
+    try:
+        conn = smtplib.SMTP(_smtp_host(cred), 587, timeout=_SEND_TIMEOUT_S)
+        conn.ehlo()
+        conn.starttls()
+        conn.ehlo()                                      # capabilities, re-read on the encrypted
+        conn.login(cred["user"], cred["password"])       # channel — never the list read in clear
+        conn.send_message(msg)
+    except smtplib.SMTPAuthenticationError as e:
+        raise _classify_auth_failure(str(e)) from e
+    except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused,
+            smtplib.SMTPDataError, smtplib.SMTPNotSupportedError) as e:
+        # THE SERVER ANSWERED, AND THE ANSWER WAS NO. Determinate: nothing was queued.
+        raise EmailSendRefused(f"your mail server refused the message: {str(e)[:160]}") from e
+    except Exception as e:                               # noqa: BLE001 — see the docstring
+        # EVERYTHING ELSE IS UNKNOWN. A timeout, a reset, a disconnect after DATA — the message
+        # may be queued, may be delivered, may be nowhere. The caller records "may have landed"
+        # and never resends on its own.
+        raise EmailSendIndeterminate(f"{type(e).__name__}: {str(e)[:160]}") from e
+    finally:
+        if conn is not None:
+            try:
+                conn.quit()
+            except Exception:                            # noqa: BLE001 — a failed QUIT after a
+                pass                                     # successful send is not a failed send
+    log.info("email.sent", extra={"to": to[:80], "message_id": mid})
+    return mid
+
+
+def thread_tail(space: str, zcid: str) -> dict:
+    """What a reply to this conversation has to be addressed and threaded with.
+
+    -> {"to": ..., "in_reply_to": ..., "references": ...}, any of them "" when unknown.
+
+    THE NEWEST INBOUND IS THE ONE BEING ANSWERED, not the newest message: replying to our own
+    last outbound would address the business to itself, and on a thread with several people it
+    would answer whoever spoke last rather than whoever asked.
+
+    `references` PUTS THE THREAD ROOT FIRST and the parent last, which is the ordering RFC 5322
+    §3.6.4 describes and every client threads on. `zcid` IS the root here — `thread_key` resolves
+    a message to the first id in its own References chain — so the two are the whole chain we
+    need to carry.
+    """
+    newest = None
+    for m in store.messages_for(space, zcid):
+        if str(m.get("direction")) == "in" and str(m.get("zernio_message_id") or ""):
+            newest = m
+    if not newest:
+        return {"to": "", "in_reply_to": "", "references": ""}
+    parent = str(newest.get("zernio_message_id") or "")
+    return {"to": str(newest.get("sent_by") or ""), "in_reply_to": parent,
+            "references": f"{zcid} {parent}" if zcid and zcid != parent else parent}

@@ -67,10 +67,15 @@ POLLED: tuple[Channel, ...] = (
     # citations), so the pairing `test_inbox_instagram` enforces is satisfied and this line is the
     # switch the comment here promised it would be.
     #
-    # THE RULE SAYS NOTHING AUTO-SENDS, and that is why turning it on is safe rather than merely
-    # permitted. Email has no platform window at all — the reason it is blocked is that this box
-    # has no SMTP path anywhere, and send policy is the owner's word. So the channel ingests, the
-    # drafter writes (it never consults the window), and a person sends from their own mail app.
+    # THE RULE STILL SAYS NOTHING AUTO-SENDS, and that is why turning it on was safe rather than
+    # merely permitted. Email has no platform window at all; what `decide` refuses is the box
+    # mailing a customer UNATTENDED, and delay-send is the owner's opt-in Phase 2.
+    #
+    # THE OTHER HALF CHANGED ON 2026-09-22. This used to read "the reason it is blocked is that
+    # this box has no SMTP path anywhere" and end "a person sends from their own mail app". The
+    # owner ruled, `email_channel.send` is the path, and a person now sends from the box itself —
+    # from their own address, through their own mailbox. The channel still ingests, the drafter
+    # still writes without ever consulting the window, and nothing sends with nobody reading it.
     Channel(IMAP, "email"),
 )
 
