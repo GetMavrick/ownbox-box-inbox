@@ -137,7 +137,7 @@ SDKPY
     origin=$(git -C "$root" remote get-url origin 2>/dev/null) || origin=""
     # Shown with any credential masked: a refusal is read in a terminal, a log and a chat.
     shown=$(printf '%s' "${origin:-missing}" | sed -E 's#(://)[^/@]*@#\1***@#')
-    printf '%s' "$origin" | grep -Eq '^git@github\.com:GetMavrick/ownbox-box-[a-z0-9-]+\.git$' \
+    printf '%s' "$origin" | grep -Eq '^(git@github\.com:|https://github\.com/)GetMavrick/ownbox-box-[a-z0-9-]+(\.git)?$' \
       || { echo "  ✗ origin is $shown, not a box repository — a sold box never follows the monorepo"; bad=1; }
     tag=$(git -C "$root" describe --tags --exact-match --match 'release/*' HEAD 2>/dev/null) || tag=""
     if [ -z "$tag" ]; then

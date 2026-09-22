@@ -42,6 +42,10 @@ if ! git -C /opt/aios config --get core.sshCommand >/dev/null 2>&1; then
   export GIT_SSH_COMMAND="ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes"
 fi
 # <<< ssh-key-selection
+# NO TERMINAL, EVER. Over https git asks for a username when a repository is private or missing,
+# and a timer-run updater has nobody to answer: the fetch would sit until the unit timeout and the
+# log would say nothing. With prompts off it fails in one second with the real reason.
+export GIT_TERMINAL_PROMPT=0
 # Where releases come from: this box's own git remote unless .env names another source — a URL, or a
 # path to a bundle file for a box with no network. Read with sed, never `source`: .env values carry
 # unquoted spaces.

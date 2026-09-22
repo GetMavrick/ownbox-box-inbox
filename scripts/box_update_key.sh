@@ -23,7 +23,7 @@ KEY="$STATE/update_key"
 HOSTS="$AIOS/trust/github_known_hosts"
 
 origin=$(git -C "$AIOS" remote get-url origin 2>/dev/null) || origin=""
-if ! printf '%s' "$origin" | grep -Eq '^git@github\.com:GetMavrick/ownbox-box-[a-z0-9-]+\.git$'; then
+if ! printf '%s' "$origin" | grep -Eq '^(git@github\.com:|https://github\.com/)GetMavrick/ownbox-box-[a-z0-9-]+(\.git)?$'; then
   echo "   update key: origin is not a box repository (${origin:-none}), nothing to do"
   exit 0
 fi

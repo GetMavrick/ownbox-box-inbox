@@ -34,6 +34,8 @@ SYSTEM = (
     "one."
 )
 
+_MAX_EXAMPLES = 4            # lessons shown per draft — enough to hear a voice, not a corpus
+_MAX_EXAMPLE_CHARS = 300     # per side of a lesson; a long reply is clipped, never dropped
 _MAX_INBOUND = 2000     # a transcript line longer than this is not a question, it is a payload
 
 
@@ -90,7 +92,21 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
     lines.append(f"Customer: {inbound}")
     # LABELLED AS A TRANSCRIPT, and that framing is the point: everything below the line is a
     # QUOTE of what somebody said, not a continuation of the instructions above it.
-    prompt = ("Here is the conversation so far.\n\n--- transcript ---\n"
+    # HOW THIS BUSINESS ACTUALLY REPLIES, from what its people have sent before (`store.lessons`).
+    # Quoted, like the transcript, and bounded: a handful of pairs, each clipped, so a busy box
+    # cannot grow its own prompt without limit. The DRAFT half of a lesson is not shown — the
+    # model does not need its own earlier miss, only the target.
+    examples = []
+    for ex in store.lessons(space, limit=_MAX_EXAMPLES):
+        asked = " ".join(str(ex.get("asked") or "").split())[:_MAX_EXAMPLE_CHARS]
+        sent = " ".join(str(ex.get("sent_body") or "").split())[:_MAX_EXAMPLE_CHARS]
+        if asked and sent:
+            examples.append(f"Customer: {asked}\nBusiness replied: {sent}")
+    voice = ("" if not examples else
+             "Here are replies this business has actually sent before. Match how they write — "
+             "their length, their tone, their wording.\n\n--- examples ---\n"
+             + "\n\n".join(examples) + "\n--- end of examples ---\n\n")
+    prompt = (voice + "Here is the conversation so far.\n\n--- transcript ---\n"
               + "\n".join(lines)
               + "\n--- end of transcript ---\n\nWrite the business's next reply.")
 

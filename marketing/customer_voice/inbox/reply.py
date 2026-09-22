@@ -202,6 +202,16 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
     # "the machine" and "you" must never be swapped. §3.3 records WHICH human on the ledger.
     store.record_message(space=space, zcid=zcid, zmid=mid, direction="out",
                          sent_by="human", body=text)
+    # WHAT THEY SENT, NEXT TO WHAT THE BOX DRAFTED — the one moment both exist. Guarded HERE as
+    # well as inside `learn`: the reply has already left, and its success is not hostage to
+    # bookkeeping — not to a raising learn, not to a failed import, not to a future edit that
+    # drops the inner guard. The suite replaces `learn` with a raise to prove this line.
+    try:
+        from marketing.customer_voice.drafter import store as _drafts
+        _drafts.learn(space, zcid, text)
+    except Exception as e:                # noqa: BLE001 — bookkeeping never undoes a sent reply
+        log.warning("inbox.learn_failed", extra={"space": space, "conversation": zcid,
+                                                 "error": type(e).__name__})
     log.info("inbox.reply_sent", extra={"space": space, "conversation": zcid,
                                         "message_id": mid, "user": user_id or "owner"})
     return {"status": "ok", "message_id": mid, "idem_key": idem, "duplicate": False}

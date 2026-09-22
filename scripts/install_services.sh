@@ -101,9 +101,11 @@ systemctl restart aios-dispatch aios-worker aios-slack
 # was POST /deploy, and Ownbox holds no box's bearer, so a sold box would never install a release and a
 # security fix would never reach a customer. The daily timer runs the same verified updater. It is enabled
 # only on a checkout of a box repository (the same test scripts/box_update_key.sh uses), so a monorepo
-# checkout like the operator's box keeps its gated, backup-first deploys.
+# checkout like the operator's box keeps its gated, backup-first deploys. A box repository is reached
+# over ssh (a per-box deploy key) OR https (a public release mirror, no key at all): the release tag
+# is signed and verified either way, so the transport carries no trust and needs no secret.
 origin=$(git -C "$AIOS" remote get-url origin 2>/dev/null) || origin=""
-if printf '%s' "$origin" | grep -Eq '^git@github\.com:GetMavrick/ownbox-box-[a-z0-9-]+\.git$'; then
+if printf '%s' "$origin" | grep -Eq '^(git@github\.com:|https://github\.com/)GetMavrick/ownbox-box-[a-z0-9-]+(\.git)?$'; then
   systemctl enable --now aios-update.timer && echo "aios-update.timer: enabled (this box installs verified releases daily)"
 else
   echo "aios-update.timer: not enabled (origin is not a box repository: ${origin:-none})"

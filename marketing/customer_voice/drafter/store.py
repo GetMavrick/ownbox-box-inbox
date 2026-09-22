@@ -4,6 +4,10 @@ from __future__ import annotations
 import uuid
 
 from core import state
+from core.logging import get_logger
+
+
+log = get_logger(__name__)
 
 
 def put(*, space: str, zcid: str, in_reply_to: str, body: str) -> bool:
@@ -165,3 +169,67 @@ def waiting(space: str, *, limit: int = 50) -> list[dict]:
 def waiting_count(space: str) -> int:
     """How many people are waiting on an answer — for the tab's badge."""
     return len(waiting(space, limit=1000))
+
+
+def _same(a: str, b: str) -> bool:
+    """Equal for the purpose of "did they edit it": whitespace and case at the edges do not count."""
+    return " ".join(str(a or "").split()).strip().casefold() == " ".join(str(b or "").split()).strip().casefold()
+
+
+def learn(space: str, zcid: str, sent_body: str) -> bool:
+    """A person just sent `sent_body` on this conversation. If the box had drafted a reply to the
+    message they were answering, keep the pair. Returns True if a lesson was written.
+
+    THE DRAFT THAT COUNTS IS THE ONE ANSWERING THE NEWEST INBOUND, dismissed or not. A dismissed
+    draft followed by a hand-written reply is the most informative pair there is — the box was
+    wrong enough to throw away, and here is what right looked like. A draft against an OLDER
+    message is not paired: the person was not answering that, and a lesson built from the wrong
+    question would teach the wrong thing.
+
+    NEVER RAISES INTO THE SEND. Called after the reply has left; a failure here is logged and the
+    caller's success stands, because a customer's reply going out is never hostage to bookkeeping.
+    """
+    try:
+        sent_body = str(sent_body or "").strip()
+        if not sent_body:
+            return False
+        inbound = newest_inbound(space, zcid)
+        if inbound is None:
+            return False
+        with state.connect() as c:
+            d = c.execute(
+                "SELECT id, body FROM inbox_drafts WHERE space = ? AND in_reply_to = ?",
+                (space, str(inbound["id"]))).fetchone()
+            if d is None:
+                return False
+            cur = c.execute(
+                "INSERT OR IGNORE INTO inbox_draft_lessons (id, space, draft_id, "
+                "zernio_conversation_id, asked, draft_body, sent_body, edited, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), space, d["id"], zcid,
+                 str(inbound.get("body") or "")[:2000], d["body"], sent_body[:2000],
+                 0 if _same(d["body"], sent_body) else 1, state._now()))
+            wrote = cur.rowcount > 0
+        if wrote:
+            log.info("drafter.learned", extra={"space": space, "conversation": zcid,
+                                               "edited": 0 if _same(d["body"], sent_body) else 1})
+        return wrote
+    except Exception as e:                        # noqa: BLE001 — bookkeeping never fails a send
+        log.warning("drafter.learn_failed", extra={"space": space, "error": type(e).__name__})
+        return False
+
+
+def lessons(space: str, *, limit: int = 4) -> list[dict]:
+    """The newest lessons for this space, edited ones first — what the drafter shows the model.
+
+    EDITED FIRST because an edit carries the difference between what the box would say and what
+    this business says; an unedited send only confirms. Then newest, so the examples follow the
+    business as it changes. SCOPED ON SPACE: one client's replies are never another client's
+    examples.
+    """
+    with state.connect() as c:
+        rows = c.execute(
+            "SELECT asked, draft_body, sent_body, edited, created_at FROM inbox_draft_lessons "
+            " WHERE space = ? ORDER BY edited DESC, created_at DESC LIMIT ?",
+            (space, int(limit))).fetchall()
+    return [dict(r) for r in rows]

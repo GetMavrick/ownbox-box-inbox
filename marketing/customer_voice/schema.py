@@ -161,6 +161,30 @@ CREATE TABLE IF NOT EXISTS inbox_drafts (
 CREATE INDEX IF NOT EXISTS ix_inbox_drafts_conv
   ON inbox_drafts (space, zernio_conversation_id, created_at);
 
+-- WHAT THE BUSINESS ACTUALLY SENT, next to what the box drafted for it. Written once, at the
+-- moment a person presses send on a conversation the box had drafted for: the draft as it was,
+-- the reply as it went out, and whether they differ. Every edit is the style guide nobody had to
+-- write; every unedited send says "that was right". The drafter reads the newest of these back
+-- as examples, so the box writes more like this business the more it is used — no fine-tuning,
+-- no setup screen, and nothing leaves the box.
+--
+-- ONE LESSON PER DRAFT (UNIQUE on draft_id): a second send on the same conversation, or a retry,
+-- teaches nothing new and must not weigh the examples twice. Kept, never deleted -- like drafts.
+CREATE TABLE IF NOT EXISTS inbox_draft_lessons (
+  id          TEXT PRIMARY KEY,
+  space       TEXT NOT NULL,
+  draft_id    TEXT NOT NULL,
+  zernio_conversation_id TEXT NOT NULL,
+  asked       TEXT,                   -- the customer's message the draft answered
+  draft_body  TEXT NOT NULL,
+  sent_body   TEXT NOT NULL,
+  edited      INTEGER NOT NULL,       -- 1 when sent_body differs from draft_body
+  created_at  TEXT NOT NULL,
+  UNIQUE (space, draft_id)
+);
+CREATE INDEX IF NOT EXISTS ix_inbox_draft_lessons_space
+  ON inbox_draft_lessons (space, edited, created_at);
+
 -- Poll watermark: the newest vendor message id seen per conversation (+ the raw
 -- activity marker so an unchanged conversation costs zero message fetches).
 CREATE TABLE IF NOT EXISTS inbox_state (

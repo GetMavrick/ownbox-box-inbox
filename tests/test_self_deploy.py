@@ -149,8 +149,12 @@ ok("...by less than the gap between windows, so the windows cannot overlap",
 ok("...and catches a day the box was off", "Persistent=true" in tmr)
 ok("install_services.sh installs both units",
    "deploy/aios-update.service" in inst and "deploy/aios-update.timer" in inst)
-rx = re.search(r"grep -Eq '(\^git@github[^']+)'", inst)
-key_rx = re.search(r"grep -Eq '(\^git@github[^']+)'", key)
+# LIFTED, NOT RETYPED. This extraction once began `\^git@github`, so the day the gate learned the
+# https form of a box repository it matched nothing and this went red for a gate that was right.
+# The claim is that the two scripts use ONE pattern; what that pattern admits is
+# tests/test_a_box_can_follow_an_https_origin.py's business.
+rx = re.search(r"grep -Eq '(\^[^']+)'", inst)
+key_rx = re.search(r"grep -Eq '(\^[^']+)'", key)
 ok("...and enables the timer only when origin is a box repository, by the same test the update key uses",
    rx is not None and key_rx is not None and rx.group(1) == key_rx.group(1)
    and "systemctl enable --now aios-update.timer" in inst.split(rx.group(0), 1)[1].split("else", 1)[0])
