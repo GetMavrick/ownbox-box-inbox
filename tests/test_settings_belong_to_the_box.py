@@ -96,7 +96,7 @@ def test_it_carries_the_box_level_steps_and_leaves_the_machines_theirs():
     # THE OWNER'S TWO, BY NAME. He ruled these, so they are asserted by his words and not by
     # whatever `BOX_SETTINGS` happens to say — a test that reads the constant it is checking
     # passes no matter what somebody puts in it.
-    for key in ("anthropic", "phone"):
+    for key in ("anthropic", "mobile"):
         title = str(keys.get(key, {}).get("title") or "")
         ok(f"the box's Settings carries {key!r}", bool(title) and title in html, title)
     # AND NOT THE MACHINE'S. Mailbox and channels are the inbox's business; a box running some
@@ -162,25 +162,25 @@ def test_a_member_is_never_offered_a_door_they_are_refused_at():
     # /settings drew "Set up" against the agent step, whose route /inbox/agent is owner-only, so a
     # member pressed it and met a 403. The owner's standing rule is no dead screens.
     #
-    # THE SCREEN STILL ADMITS MEMBERS, deliberately — a phone belongs to a person, not to the
+    # THE SCREEN STILL ADMITS MEMBERS, deliberately — the app on somebody's own mobile is theirs, not to the
     # box's owner, and hiding the whole page to dodge one row would be the worse trade.
     _box(setup_href="/widgets/first-run")     # a machine that is NOT the inbox, as everywhere here
     import re as _re
     member = _rows(owner=False)
-    ok("a member still sees what is set", "Your AI account" in member and "Your phone" in member)
+    ok("a member still sees what is set", "Your AI account" in member and "Your mobile app" in member)
     ok("...and is never pointed at a machine's own door",
        "/inbox/" not in member, str(_re.findall(r'href="([^"]+)"', member)))
     # THE SPLIT IS BY WHO KNOWS THE GATE, and core knows its own. A phone belongs to a person
     # rather than to whoever bought the box, so a member is offered it — properly, for the first
     # time. The two that bill or read the whole box declare `owner_only` and are not drawn.
-    ok("...but the phone, which is theirs and whose gate core knows, IS offered",
-       "/settings/phone" in member, str(_re.findall(r'href="([^"]+)"', member)))
+    ok("...but the mobile app, which is theirs and whose gate core knows, IS offered",
+       "/settings/mobile" in member, str(_re.findall(r'href="([^"]+)"', member)))
     ok("...and the two the box would refuse them at are not drawn",
        "/settings/ai" not in member and "/settings/agent" not in member,
        str(_re.findall(r'href="([^"]+)"', member)))
     owner_view = _rows(owner=True)
     ok("the owner is still offered all of it",
-       all(h in owner_view for h in ("/settings/ai", "/settings/phone", "/settings/agent")),
+       all(h in owner_view for h in ("/settings/ai", "/settings/mobile", "/settings/agent")),
        str(_re.findall(r'href="([^"]+)"', owner_view)))
     src = (pathlib.Path(__file__).resolve().parents[1] / "core/dash/home.py").read_text()
     ok("and the source does not carry that URL either", "/inbox/setup" not in src)

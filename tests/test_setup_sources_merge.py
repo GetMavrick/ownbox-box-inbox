@@ -72,7 +72,7 @@ ok("the machine's screen shows the machine's credentials",
    base == ["email", "zernio"], str(base))
 ok("...and the three that left are still IN the contract, on the box's side",
    [s_["key"] for s_ in bs.SETUP_STEPS if bs.surface_of(s_) == bs.SURFACE_BOX]
-   == ["anthropic", "phone", "agent"],
+   == ["anthropic", "mobile", "agent"],
    str([s_["key"] for s_ in bs.SETUP_STEPS]))
 
 _register("relay", 40, "Relay")

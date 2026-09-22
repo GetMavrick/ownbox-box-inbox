@@ -3,20 +3,21 @@
 WHY THESE MOVED, IN THE OWNER'S WORDS. 2026-09-22, after connecting his AI account from System
 Settings and being thrown into the inbox's wizard to finish: *"we need to find tune our wizards.
 Step four and five should not be in this wizard any longer"*, and earlier the same session,
-*"Step three and step four should be a core setting. The LLM and the phone."*
+*"Step three and step four should be a core setting. The LLM and the phone."* (his words; the
+step is named "mobile app" everywhere a buyer reads it — see the naming rule below)
 
 THE SCREEN HALF OF THAT WAS A TWO-LINE CHANGE AND IT WAS REVERTED, correctly, by OSDev5: the
 machine's set-up screen is the box's set-up CONTRACT made visible, so it cannot show a subset of
 it (`docs/SCOPE_BOX_STEPS_NEED_CORE_DOORS.md`). The contract had to be split, and a box step
 cannot leave the machine's wizard while the wizard is the only place it can be finished. All
 three were: the AI account at a sign-in route the inbox served, the AI coworkers at the inbox's
-own screen, and the phone at NO DOOR AT ALL — its instructions were prose on the wizard and its
+own screen, and the mobile app at NO DOOR AT ALL — its instructions were prose on the wizard and its
 two endpoints were the inbox's.
 
 So this file is the other half. It is option C of that scope doc, chosen by OSDev1: the doors
 move into core rather than core learning to point at a machine's. Nothing here is the inbox's
 business and none of it ever was — `core.brain` is what an AI account feeds, `core.connector` is
-what a coworker seat opens, and a phone belongs to a person rather than to a product. A Lead box
+what a coworker seat opens, and the app on somebody's mobile is theirs rather than a product's. A Lead box
 with no inbox on it needs all three and, before today, could reach none of them.
 
 WHAT DID NOT MOVE, AND WHY IT COULD NOT. The permission prompt stays where the service worker is.
@@ -26,6 +27,13 @@ ARE ON, and this box's worker is registered at a machine's path with a scope to 
 two ENDPOINTS are core's now (`core.push.CLIENT_JS` fetches them from wherever it is loaded); the
 asking waits for a root-scoped worker, which is a separate change with its own blast radius.
 """
+
+# NO WORD HERE MAY COLLIDE WITH A VOICE PRODUCT. Owner, 2026-09-22: *"It's a mobile app with
+# notifications"*, and *"don't use any terms that will collide with a voice/phone product"* — the
+# AI receptionist machine is coming to `/voice`, and a buyer who reads "your phone" on a settings
+# screen will reasonably think it is about calls. So: **mobile app**, **install**, **notify** /
+# **notification**. Never phone (except naming the device in install steps — "On iPhone"), never
+# ring, call, dial, line, voice or answer. `tests/test_no_voice_words_on_the_app.py` enforces it.
 
 import html as _html
 
@@ -322,17 +330,17 @@ def _key_form(e: dict) -> str:
             + '</div>')
 
 
-# ── the phone ────────────────────────────────────────────────────────────────────────────────────
+# ── the mobile app ────────────────────────────────────────────────────────────────────────────────────
 
-# THE INSTRUCTIONS COME FROM THE CONTRACT, NOT FROM THIS FILE. `_PHONE_STEP["platforms"]` carries
+# THE INSTRUCTIONS COME FROM THE CONTRACT, NOT FROM THIS FILE. `_MOBILE_STEP["platforms"]` carries
 # them, because TWO screens render these words — this page and the sheet a colleague is handed —
 # and a second copy laid out for paper is a second copy that drifts. The one that drifts is the
 # printed one: nobody re-reads a page they already pinned to a wall.
 def _platform_cards() -> str:
     """iPhone on the left, Android on the right — because whoever prints this does not know which
-    phone the next person has. Drawn from the step; this file names no platform of its own."""
+    device the next person has. Drawn from the step; this file names no platform of its own."""
     out = []
-    for pl in (_step("phone").get("platforms") or ()):
+    for pl in (_step("mobile").get("platforms") or ()):
         items = "".join(f'<li style="margin:6px 0">{_esc(t)}</li>'
                         for t in (pl.get("steps") or ()))
         out.append(f'<div style="flex:1 1 260px;min-width:260px">'
@@ -349,9 +357,27 @@ def _platform_cards() -> str:
     return '<div style="display:flex;flex-wrap:wrap;gap:28px">' + "".join(out) + '</div>'
 
 
+# THE OLD ADDRESS STILL OPENS, and it is not politeness — it is the defect this whole area spent
+# the night removing. `/settings/phone` shipped in #1418, the owner was handed it, typed it, and
+# it is the address a printed handout may already carry. A rename that 404s the one address he was
+# just given is the same dead end in a new hat.
+#
+# 308, NOT 302: the method and body are preserved, and browsers cache it — so a bookmark heals
+# itself rather than asking again forever. Remove this pair once no handout in the world can carry
+# the old address; it costs four lines until then.
 @blueprint.route("/settings/phone")
-def box_phone():
-    """How to put this box on a phone so it can ring. It has never had a screen of its own.
+def box_phone_moved():
+    return redirect("/settings/mobile", code=308)
+
+
+@blueprint.route("/settings/phone/print")
+def box_phone_print_moved():
+    return redirect("/settings/mobile/print", code=308)
+
+
+@blueprint.route("/settings/mobile")
+def box_mobile():
+    """How to install this box as an app so it can notify you. It has never had a screen of its own.
 
     ITS OWN PAGE, AND NOT A CARD. Owner, 2026-09-20: "It should be given its own page and a
     required step in the onboarding. A nice printable page that people can hand to their
@@ -360,12 +386,12 @@ def box_phone():
     frequently not the owner and is not standing next to them when they set it up. A card in
     somebody else's settings cannot be handed to a receptionist. A page at a stable address can.
 
-    NOT OWNER-ONLY: a phone belongs to a person. A member working the inbox all day needs the
+    NOT OWNER-ONLY: the app on somebody's own mobile is theirs. A member working the inbox all day needs the
     notification more than the owner does, and subscriptions are keyed to whoever is signed in.
 
     INSTALLING IS HERE; ASKING IS NOT, and that is the owner's other ruling the same day — ask
     "after the buyer has seen their first real message, never on first load." Adding the box to a
-    Home Screen is free and reversible, and on iPhone nothing can ring without it, so it belongs in
+    Home Screen is free and reversible, and on iPhone nothing can notify without it, so it belongs in
     set-up. An iOS denial is close to permanent, so the prompt waits for a moment that has earned
     it. This page fires nothing.
     """
@@ -374,28 +400,28 @@ def box_phone():
         return refuse
     from core import push
 
-    e = _step("phone")
+    e = _step("mobile")
     ok, why = push.available()
     body = ['<div class="card"><p>' + _esc(e.get("why") or "") + '</p></div>',
             '<div class="card">' + _platform_cards() + '</div>']
 
     # THE STATE, SAID AS NARROWLY AS THE SERVER CAN HONESTLY SAY IT. A subscription row proves SOME
     # device on this box is set up; it can never prove the one in your hand is, because the same
-    # person reading this on a laptop has a phone the box cannot see. So it reports the box, and
+    # person reading this on a laptop has a mobile the box cannot see. So it reports the box, and
     # says out loud that the box is what it is reporting.
     detail = str(e.get("detail") or "").strip()
     body.append('<div class="card"><p><b>Where this box stands</b></p>'
                 + (f'<p>{_esc(detail)}.</p>' if detail else
                    '<p>No device on this box has notifications switched on yet.</p>')
                 + '<p class="quiet">This is what the box can see across everybody who uses it. It '
-                  'cannot tell whether the phone you are holding is one of them — open the box '
+                  'cannot tell whether the device you are holding is one of them — open the box '
                   'from its Home Screen icon and it will know.</p></div>')
 
     # WHEN THE ASKING HAPPENS, said plainly, because a set-up step that ends with nothing switched
     # on reads as a step that failed. It did not: the box is waiting on purpose.
     body.append('<div class="card"><p><b>Turning them on</b></p>'
                 '<p>The box asks you once, on the screen where you read your messages, the first '
-                'time something real arrives. It waits on purpose: a phone only lets you answer '
+                'time something real arrives. It waits on purpose: a mobile only lets you answer '
                 'that question once, and saying no is hard to undo.</p>'
                 '<p class="quiet">Email keeps arriving either way. This is the faster way to hear '
                 'about it, never the only way.</p></div>')
@@ -405,25 +431,25 @@ def box_phone():
         # the crypto dependency cannot mint a push identity at all.
         body.append('<div class="card"><p>One thing first: this box cannot send notifications yet '
                     f'— {_esc(why)}. The steps above still work and are worth doing; the box will '
-                    'be able to ring once it updates itself.</p></div>')
+                    'be able to notify you once it updates itself.</p></div>')
 
     body.append('<div class="card"><p><b>For somebody else on this box</b></p>'
                 '<p>Whoever watches the inbox is often not whoever bought the box. This page '
                 'prints onto one sheet you can hand over or leave by the till — it carries no '
                 'password and nothing private, just these instructions and the address.</p>'
-                '<p><a href="/settings/phone/print">Print this for a colleague &rarr;</a></p>'
+                '<p><a href="/settings/mobile/print">Print this for a colleague &rarr;</a></p>'
                 '</div>')
     body.append(_back())
-    return chrome("/settings", title="Your phone",
-                  lede="Put the box on your Home Screen and it can tell you when a customer writes.",
+    return chrome("/settings", title="Your mobile app",
+                  lede="Install the box as an app and it can notify you when a customer writes.",
                   body="".join(body)), 200
 
 
 # AN ADDRESS THAT CANNOT WORK FROM ANOTHER DEVICE MUST NEVER REACH PAPER.
 #
 # THIS IS A MEASURED FAILURE, NOT A PRECAUTION (2026-09-22). The owner opened a sheet rendered
-# from a box reached over `localhost`, followed its last instruction on his phone, and Safari said
-# it could not connect to the server. `localhost` on a phone IS that phone. He had already
+# from a box reached over `localhost`, followed its last instruction on his mobile, and Safari said
+# it could not connect to the server. `localhost` on a mobile IS that device. He had already
 # installed the real box on his Home Screen; the sheet sent him somewhere that does not exist.
 #
 # WHAT MAKES IT WORSE THAN A BROKEN LINK IS THE PAPER. A dead link on a screen is a back button.
@@ -445,11 +471,11 @@ def _handout_address(root: str) -> str:
     for bad in _UNPRINTABLE_HOSTS:
         if bare == bad.rstrip(".") or bare.startswith(bad) or bare.endswith(".localhost"):
             return ""
-    return f"{root}/settings/phone"
+    return f"{root}/settings/mobile"
 
 
-@blueprint.route("/settings/phone/print")
-def box_phone_print():
+@blueprint.route("/settings/mobile/print")
+def box_mobile_print():
     """The same instructions, laid out for paper, for the seat that is not reading this screen.
 
     A SEPARATE ROUTE RATHER THAN A `@media print` BLOCK ON THE PAGE ABOVE, which is what I planned
@@ -490,7 +516,7 @@ def box_phone_print():
         'web address you normally use, come back to this page, and print it again.</p>')
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            f"<title>{_esc(name)} — notifications on your phone</title>"
+            f"<title>{_esc(name)} — notifications on your mobile</title>"
             "<style>"
             # NO DARK MODE, NO THEME TOKENS. Paper is white and the screen preview should look
             # like the sheet that comes out of the printer, so this page defines its own colours
@@ -510,19 +536,19 @@ def box_phone_print():
             "    @page{margin:14mm} h1{font-size:20pt} h2{font-size:13pt} }"
             "</style></head><body>"
             f"<h1>{_esc(name)}</h1>"
-            "<p>This box can tell your phone the moment a customer writes to the business — a "
+            "<p>This box can tell your mobile the moment a customer writes to the business — a "
             "notification that opens straight into the messages, not into somebody else's app.</p>"
-            "<h2>Put it on your phone</h2>"
+            "<h2>Install it on your mobile</h2>"
             + _platform_cards() +
-            "<h2>Then open this address on that phone</h2>"
+            "<h2>Then open this address on that device</h2>"
             + address_block +
             "<p class=\"quiet\">Sign in with your own account. The box asks whether to send you "
             "notifications the first time a real message arrives — it waits until then on purpose, "
-            "because a phone only lets you answer that question once.</p>"
+            "because a mobile only lets you answer that question once.</p>"
             "<p class=\"quiet\">There is no password on this sheet and nothing private. If you "
             "do not have an account on this box yet, ask whoever set it up to invite you.</p>"
             "<div class=\"noprint\"><button onclick=\"window.print()\">Print this page</button>"
-            " &nbsp; <a href=\"/settings/phone\">&larr; Back</a></div>"
+            " &nbsp; <a href=\"/settings/mobile\">&larr; Back</a></div>"
             "</body></html>"), 200
 
 
@@ -547,7 +573,7 @@ def box_push_key():
 def box_push_subscribe():
     """A browser hands over the endpoint its push service issued. We store it against the person.
 
-    NOT OWNER-ONLY, for the reason above: every seat on this box gets their own phone rung, and
+    NOT OWNER-ONLY, for the reason above: every seat on this box gets their own device notified, and
     `subscriptions_for` never crosses users.
 
     THE BODY IS A SUBSCRIPTION, NOT A MESSAGE. An endpoint and two public key halves, all issued
@@ -690,7 +716,7 @@ def box_agent():
             root = str(request.host_url or "").rstrip("/")
             # NEVER A REDIRECT AND NEVER A QUERY STRING. The credential is rendered into this one
             # response and then it is gone: a redirect would put it in a URL, and gunicorn logs
-            # raw query strings.
+            # raw query stnotifies.
             return chrome("/settings", title="AI coworkers",
                           lede="Copy the key now — it is shown once.",
                           # ONE ADDRESS, THE SHORT ONE — carried across from #1417 (OSDev1),
@@ -715,8 +741,14 @@ def box_agent():
             'at any moment.</p>'
             '<p class="quiet">Nothing you connect here can send a message as your business. The '
             'most a coworker can do is leave a reply waiting on the screen for you.</p></div>'
+            # THERE IS NO KEY TO COPY, and this sentence said there was. Owner, 2026-09-22, after
+            # connecting Claude himself: "we're gonna have totally different instructions where we
+            # just enter the MCP server and it authorizes." Since the OAuth front door (#1419) that
+            # is what happens — the assistant is sent here to sign in — and a line telling a buyer
+            # to fetch a key first sends them to the hard path we stopped needing. The form below
+            # still exists for an assistant that cannot sign in; it is a fallback, not the route.
             '<div class="card"><p><b>This box\'s address</b> — paste this into whichever '
-            'assistant you use, with a key from below.</p>'
+            'assistant you use. It will send you here to sign in; there is no key to copy.</p>'
             f'<p style="word-break:break-all;font-family:ui-monospace,monospace">{_esc(root)}/mcp'
             '</p></div>'
             # EVERY ONE OF THESE IS LIVE. They connect TO the box over MCP; the box never calls
@@ -747,12 +779,12 @@ def box_agent():
 
 # THE THREE DOORS ABOVE ARE WHAT `core/dash/home.py` OFFERS, and it learns them from the step data
 # rather than from this file: `_AI_STEP["action_href"]`, `_PHONE_STEP["action_href"]` and
-# `_AGENT_STEP["link"]["url"]` all name paths served here. Keeping the strings in the contract is
+# `_AGENT_STEP["link"]["url"]` all name paths served here. Keeping the stnotifies in the contract is
 # what lets one screen render a step it has never heard of.
-_DOORS = ("/settings/ai", "/settings/phone", "/settings/agent")
-# The handout hangs off the phone door rather than being one of its own: it is not a
+_DOORS = ("/settings/ai", "/settings/mobile", "/settings/agent")
+# The handout hangs off the mobile-app door rather than being one of its own: it is not a
 # step a buyer finishes, it is a sheet they hand to somebody else.
-_HANDOUT = "/settings/phone/print"
+_HANDOUT = "/settings/mobile/print"
 
 
 def registered_doors() -> tuple:

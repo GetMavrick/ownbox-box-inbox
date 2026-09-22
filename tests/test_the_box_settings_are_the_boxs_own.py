@@ -92,8 +92,8 @@ box = [e["key"] for e in box_secrets.SETUP_STEPS
        if box_secrets.surface_of(e) == box_secrets.SURFACE_BOX]
 machine = [e["key"] for e in box_secrets.SETUP_STEPS
            if box_secrets.surface_of(e) == box_secrets.SURFACE_MACHINE]
-ok("the box's three are the AI account, the phone and the AI coworkers",
-   box == ["anthropic", "phone", "agent"], str(box))
+ok("the box's three are the AI account, the mobile app and the AI coworkers",
+   box == ["anthropic", "mobile", "agent"], str(box))
 ok("...and the mailbox and the channels stay the machine's", machine == ["email", "zernio"],
    str(machine))
 
@@ -107,7 +107,7 @@ ok("...and so does a step declaring nonsense",
 ok("...and so does nothing at all", box_secrets.surface_of(None) == box_secrets.SURFACE_MACHINE)
 
 doors = {"anthropic": step("anthropic").get("action_href"),
-         "phone": step("phone").get("action_href"),
+         "mobile": step("mobile").get("action_href"),
          "agent": (step("agent").get("link") or {}).get("url")}
 for key, href in doors.items():
     ok(f"{key}: its door is a path core serves", href in box_settings.registered_doors(), str(href))
@@ -120,7 +120,7 @@ print("\ntest_the_machine_no_longer_serves_the_box_s_doors")
 
 for gone in ("/inbox/connect-claude", "/inbox/agent", "/inbox/push/key", "/inbox/push/subscribe"):
     ok(f"{gone} is no longer served", gone not in ROUTES)
-for here in ("/settings/ai", "/settings/phone", "/settings/agent",
+for here in ("/settings/ai", "/settings/mobile", "/settings/agent",
              "/settings/push/key", "/settings/push/subscribe"):
     ok(f"{here} is", here in ROUTES)
 
@@ -134,9 +134,15 @@ ok("...and names no machine at all", "/inbox/" not in push.CLIENT_JS)
 # would spend the whole channel on page one.
 ok("...and calls neither of the two functions it defines",
    push.CLIENT_JS.count("ownboxEnableNotifications") == 1
-   and push.CLIENT_JS.count("ownboxCanBeRung") == 2,   # defined once, read once by the other
+   and push.CLIENT_JS.count("ownboxCanNotify") == 2,   # defined once, read once by the other
    str((push.CLIENT_JS.count("ownboxEnableNotifications"),
-        push.CLIENT_JS.count("ownboxCanBeRung"))))
+        push.CLIENT_JS.count("ownboxCanNotify"))))
+# THE OLD FUNCTION NAME IS GONE. Owner, 2026-09-22: "It's a mobile app with notifications" — the
+# receptionist machine takes /voice, and one word on two products in one menu is a confusion no
+# later rename can reach once it is in a bookmark. This checks the ONE exact name that moved,
+# nothing broader: a substring rule here would fire on some innocent future word and teach the
+# next person to delete the assertion rather than read it.
+ok("...and the old name is gone", "ownboxCanBeRung" not in push.CLIENT_JS)
 
 
 # ── 3. the owner's Settings offers all three and each one answers ────────────────────────
@@ -161,7 +167,7 @@ ok("a member still sees all three rows, so they know what the box has",
    all(step(k)["title"] in mhtml for k in box), str(box))
 # A PHONE BELONGS TO A PERSON, NOT TO WHOEVER BOUGHT THE BOX. A member working the inbox all day
 # needs the notification more than the owner does.
-ok("...is offered the phone, which is theirs", "/settings/phone" in mhtml)
+ok("...is offered the phone, which is theirs", "/settings/mobile" in mhtml)
 ok("...and is NOT offered the AI account, which bills the whole box",
    "/settings/ai" not in mhtml)
 ok("...nor the coworker seat, which reads every message on it",
@@ -174,7 +180,7 @@ for href in ("/settings/ai", "/settings/agent"):
        str(mc.get(href).status_code))
     ok(f"{href} ...on the POST too, not merely the page",
        mc.post(href, data={"do": "start"}).status_code == 403)
-ok("/settings/phone admits a member", mc.get("/settings/phone").status_code == 200)
+ok("/settings/mobile admits a member", mc.get("/settings/mobile").status_code == 200)
 
 
 # ── 5. a stranger gets a refusal in the shape the caller can read ────────────────────────
@@ -294,14 +300,14 @@ ok("...and still listed afterwards, as the audit trail",
 # ── 8. the phone finally has a screen of its own ─────────────────────────────────────────
 print("\ntest_the_phone_step_has_a_door_at_all_which_it_never_had")
 
-ph = oc.get("/settings/phone").get_data(as_text=True)
+ph = oc.get("/settings/mobile").get_data(as_text=True)
 # FROM THE CONTRACT, NOT FROM THE PAGE'S OWN COPY. Two surfaces render these words — this page and
-# the printed handout — so `_PHONE_STEP["platforms"]` is where they live and this asserts the page
+# the printed handout — so `_MOBILE_STEP["platforms"]` is where they live and this asserts the page
 # is actually drawing them. A page with its own copy passes a test written against its own copy.
-plats = step("phone").get("platforms") or ()
+plats = step("mobile").get("platforms") or ()
 ok("the contract carries per-platform instructions", len(plats) >= 2, str(len(plats)))
 for pl in plats:
-    ok(f"the phone page carries the {pl['title']} heading", pl["title"] in ph)
+    ok(f"the mobile-app page carries the {pl['title']} heading", pl["title"] in ph)
     for line in pl["steps"]:
         ok(f"  …and: {line[:34]}…", line[:34] in ph)
 # INSTALLING IS HERE; ASKING IS NOT.
@@ -314,14 +320,14 @@ print("\ntest_the_printable_handout_is_safe_to_leave_on_a_counter")
 # THE PERSON WHO NEEDS THIS PAGE IS OFTEN NOT THE PERSON WHO BOUGHT THE BOX. Owner, 2026-09-20:
 # "A nice printable page that people can hand to their colleagues." A box seats three, and whoever
 # watches the inbox at 8 AM is frequently not the owner.
-sheet_r = mc.get("/settings/phone/print")            # a MEMBER — this is the seat it is for
+sheet_r = mc.get("/settings/mobile/print")            # a MEMBER — this is the seat it is for
 ok("the handout answers a member", sheet_r.status_code == 200, str(sheet_r.status_code))
 sheet = sheet_r.get_data(as_text=True)
 
 from core import dash as _dash                                           # noqa: E402
 
 ok("it carries the business's own name, not ours", _dash.brand() in sheet, _dash.brand())
-ok("...and the address to open on the phone", "/settings/phone" in sheet)
+ok("...and the address to open on the phone", "/settings/mobile" in sheet)
 ok("...and both platforms, because whoever prints it does not know which phone is next",
    "iPhone" in sheet and "Android" in sheet)
 ok("...and a print stylesheet, so it is one sheet and not the whole app",
@@ -336,7 +342,7 @@ ok("...and it fires no permission prompt", "requestPermission" not in sheet)
 _tok = "sk-ant-oat" + ("H" * 48)
 box_secrets.put_claude_oauth(_tok, consented=True, user_id=state.owner_user()["id"])
 _sid, _cred = seats.mint("Handout leak check", "read")
-fresh = mc.get("/settings/phone/print").get_data(as_text=True)
+fresh = mc.get("/settings/mobile/print").get_data(as_text=True)
 for label, secret in (("the AI subscription token", _tok),
                       ("a coworker seat credential", _cred),
                       ("the dispatch bearer token", os.environ["DISPATCH_BEARER_TOKEN"]),
@@ -363,14 +369,14 @@ for root in ("http://localhost", "http://localhost:8000", "http://127.0.0.1:5000
              "http://[::1]:5000", "http://0.0.0.0:8000", "http://box.localhost",
              "http://169.254.11.4"):
     ok(f"{root} never reaches paper", _handout_address(root) == "", _handout_address(root))
-for root, want in (("https://acme.ownbox.app", "https://acme.ownbox.app/settings/phone"),
+for root, want in (("https://acme.ownbox.app", "https://acme.ownbox.app/settings/mobile"),
                    ("https://inbox.acmeplumbing.com",
-                    "https://inbox.acmeplumbing.com/settings/phone"),
+                    "https://inbox.acmeplumbing.com/settings/mobile"),
                    # A LAN ADDRESS IS ALLOWED ON PURPOSE: it is how a receptionist on the shop's
                    # own wifi reaches a box that is not on the public internet. Refusing it would
                    # be us deciding how somebody may run their own box.
-                   ("http://192.168.1.40:8000", "http://192.168.1.40:8000/settings/phone"),
-                   ("http://10.0.0.5", "http://10.0.0.5/settings/phone")):
+                   ("http://192.168.1.40:8000", "http://192.168.1.40:8000/settings/mobile"),
+                   ("http://10.0.0.5", "http://10.0.0.5/settings/mobile")):
     ok(f"{root} prints as itself", _handout_address(root) == want, _handout_address(root))
 
 # AND THE SHEET SAYS SO RATHER THAN GOING QUIET. A sheet that silently drops its own address is
@@ -378,13 +384,13 @@ for root, want in (("https://acme.ownbox.app", "https://acme.ownbox.app/settings
 ok("a sheet with no printable address explains itself instead",
    "open this page at the box" in fresh and "print it again" in fresh,
    fresh[fresh.find("Then open this address"):][:220])
-ok("...and does not print the dead address anyway", "localhost/settings/phone" not in fresh,
+ok("...and does not print the dead address anyway", "localhost/settings/mobile" not in fresh,
    "a dead address reached paper")
 
 
 # THE PAGE OFFERS IT, or nobody ever prints it.
-page = mc.get("/settings/phone").get_data(as_text=True)
-ok("the phone page links to the handout", "/settings/phone/print" in page)
+page = mc.get("/settings/mobile").get_data(as_text=True)
+ok("the mobile-app page links to the handout", "/settings/mobile/print" in page)
 # INSTALLING IS HERE; ASKING IS NOT — the page must not fire the prompt it is teaching people to
 # expect later. An iOS denial is close to permanent.
 ok("...and the page itself asks for nothing", "requestPermission" not in page)

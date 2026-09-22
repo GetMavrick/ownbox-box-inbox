@@ -21,7 +21,7 @@ WHEN; the assertion that matters is that a rendered screen contains a CALL and n
 definition, because that is the failure that shipped and it is invisible to every test that
 only checks the function exists.
 
-Run: python tests/test_the_box_asks_before_it_rings.py
+Run: python tests/test_the_box_asks_before_it_notifies.py
 """
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ print("\ntest_an_empty_inbox_never_asks")
 # does, so a prompt fired at an empty box spends the whole channel, permanently, on somebody
 # with nothing to be notified about yet.
 empty = inbox_html()
-ok("a box with no conversations offers nothing", "ownbox-ring" not in empty)
+ok("a box with no conversations offers nothing", "ownbox-notify" not in empty)
 ok("...and does not even load the client that could ask",
    "ownboxEnableNotifications" not in empty)
 
@@ -95,7 +95,7 @@ store.upsert_conversation(space=_space, zcid="zc-ring-1", platform="email",
                           last_inbound_at=datetime.now(timezone.utc).isoformat())
 live = inbox_html()
 ok("the conversation is on the screen", "zc-ring-1" in live)
-ok("...and the offer is there with it", 'id="ownbox-ring"' in live)
+ok("...and the offer is there with it", 'id="ownbox-notify"' in live)
 
 # THE ASSERTION THIS FILE EXISTS FOR. `ownboxEnableNotifications` was defined on every box and
 # called from nowhere, which no test caught because the definition was always present. A
@@ -115,9 +115,9 @@ ok("...and there is exactly one copy of the client on the page",
 # ── 3. the page asks nothing by itself; a person presses something ───────────────────────
 print("\ntest_the_page_never_fires_the_prompt_on_its_own")
 
-ok("the offer starts hidden", 'id="ownbox-ring" hidden' in live)
-ok("there is a button to accept", 'id="ownbox-ring-yes"' in live)
-ok("...and a way to decline that is not a dead end", 'id="ownbox-ring-no"' in live)
+ok("the offer starts hidden", 'id="ownbox-notify" hidden' in live)
+ok("there is a button to accept", 'id="ownbox-notify-yes"' in live)
+ok("...and a way to decline that is not a dead end", 'id="ownbox-notify-no"' in live)
 # `requestPermission` APPEARS EXACTLY ONCE, inside the client's own function. A second occurrence
 # means somebody wired a page to call it directly, which is the first-load prompt the owner ruled
 # against arriving by another door.
@@ -128,7 +128,7 @@ ok("requestPermission is reachable only through the client",
 # ── 4. the three states, and only one of them asks ───────────────────────────────────────
 print("\ntest_it_respects_an_answer_already_given")
 
-js = _inbox._RING_JS
+js = _inbox._NOTIFY_JS
 ok("a refusal is never asked again — the browser will not allow it anyway",
    "'denied'" in js and "return" in js.split("'denied'")[1][:40], js[:0] or "no denied branch")
 # ALREADY GRANTED IS NOT A PROMPT. Re-subscribing repairs the case core.push.CLIENT_JS warns
@@ -136,7 +136,7 @@ ok("a refusal is never asked again — the browser will not allow it anyway",
 ok("an existing yes re-subscribes quietly rather than asking again",
    "'granted'" in js and "ownboxEnableNotifications()" in js.split("'granted'")[1][:400])
 ok("...and a Safari tab is never offered it, because it could not deliver",
-   "ownboxCanBeRung()" in js)
+   "ownboxCanNotify()" in js)
 ok("'not now' is remembered per viewer, and the page still renders without storage",
    "localStorage" in js and "catch" in js)
 ok("a failure tells the person the reason rather than 'something went wrong'",
@@ -166,7 +166,7 @@ import pathlib                                                           # noqa:
 
 _wf = (pathlib.Path(__file__).resolve().parents[1] / ".github/workflows/tests.yml")
 if _wf.exists():
-    ok("registered in the suite list", "test_the_box_asks_before_it_rings" in _wf.read_text())
+    ok("registered in the suite list", "test_the_box_asks_before_it_notifies" in _wf.read_text())
     import yaml                                                          # noqa: E402
     yaml.safe_load(_wf.read_text())
     ok("...and the workflow file is still valid YAML", True)

@@ -9,7 +9,7 @@ That is the whole argument. Every other channel is read somewhere else — a Sla
 text in Messages. Only a notification from the installed web app OPENS THE INBOX when it is
 tapped. The client half of that has been shipped for weeks: the manifest, the registered worker,
 a `push` handler that always calls `showNotification`, and a `notificationclick` that refuses any
-target outside `/inbox/`. This file is the other half — who we are, and who we may ring.
+target outside `/inbox/`. This file is the other half — who we are, and whose devices we may notify.
 
 THE KEYPAIR IS THE BOX'S, NEVER OURS (invariant 11-7: a clone depends on nothing of ours). One
 shared VAPID identity would make every notification on every customer's box traceable to us and
@@ -264,7 +264,7 @@ def _vapid_header(endpoint: str, *, subject: str) -> dict[str, str]:
 def send(subscription: dict, *, waiting: int | None = None, navigate: str = "/inbox/inbox",
          subject: str = "mailto:support@ownbox.io", timeout: int = 10,
          resolve=None) -> tuple[bool, str]:
-    """Ring one device. Returns (delivered, detail); a gone subscription is forgotten here.
+    """Notify one device. Returns (delivered, detail); a gone subscription is forgotten here.
 
     THROUGH `core.net`, NOT `requests`, AND THAT IS A SECURITY BOUNDARY. The endpoint is DATA: the
     browser supplies it and it is stored verbatim, so a signed-in person could register one
@@ -304,7 +304,7 @@ def send(subscription: dict, *, waiting: int | None = None, navigate: str = "/in
         note_result(endpoint, ok=False, detail=f"{type(e).__name__}: {e}")
         return False, f"{type(e).__name__}"
     # 404/410 MEANS GONE FOR GOOD, and the row goes with it. Retrying a dead endpoint is how a box
-    # ends up reporting "notified" to itself forever about a phone that will never ring again.
+    # ends up reporting "notified" to itself forever about a phone that will never be reached again.
     if status in (404, 410):
         forget(endpoint)
         return False, f"gone ({status})"
@@ -332,8 +332,8 @@ def send(subscription: dict, *, waiting: int | None = None, navigate: str = "/in
 # other path that promise never settles — no error, no rejection, a button that spins forever. So
 # the endpoints are core's and the asking stays where the worker is. Whoever gives core a
 # root-scoped worker can move it.
-CLIENT_JS = """  window.ownboxCanBeRung = function () {
-    // ON IPHONE THE HOME SCREEN APP IS THE ONLY THING THAT CAN RECEIVE A PUSH. A Safari tab cannot,
+CLIENT_JS = """  window.ownboxCanNotify = function () {
+    // ON IPHONE THE INSTALLED APP IS THE ONLY THING THAT CAN RECEIVE A PUSH. A Safari tab cannot,
     // whatever the permission says, so offering the prompt there is a dead end that burns the ask.
     var standalone = (window.navigator.standalone === true) ||
       (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
@@ -342,8 +342,8 @@ CLIENT_JS = """  window.ownboxCanBeRung = function () {
   };
 
   window.ownboxEnableNotifications = function () {
-    if (!window.ownboxCanBeRung()) {
-      return Promise.resolve({ ok: false, why: 'add the box to your Home Screen first' });
+    if (!window.ownboxCanNotify()) {
+      return Promise.resolve({ ok: false, why: 'install the app first — open the box and add it to your Home Screen' });
     }
     return fetch('/settings/push/key', { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })

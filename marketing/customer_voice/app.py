@@ -2364,17 +2364,17 @@ def _stopped_note() -> str:
 #              dead endpoint forever.
 #   denied   — say nothing at all. The browser will not ask again and a button that cannot work
 #              is the dead control this app keeps deleting.
-_RING_OFFER = ('<div class="card" id="ownbox-ring" hidden>'
-               '<div class="setrow"><b>Get these on your phone</b>'
+_NOTIFY_OFFER = ('<div class="card" id="ownbox-notify" hidden>'
+               '<div class="setrow"><b>Get these on your mobile</b>'
                '<span>This box can tell you the moment a customer writes, instead of you '
                'checking. You can turn it off again whenever you like.</span></div>'
                '<p style="margin:10px 0 0">'
-               '<button class="btn" type="button" id="ownbox-ring-yes">Turn on notifications'
+               '<button class="btn" type="button" id="ownbox-notify-yes">Turn on notifications'
                '</button> '
-               '<button type="button" id="ownbox-ring-no" '
+               '<button type="button" id="ownbox-notify-no" '
                'style="background:none;border:0;color:var(--dim);font:inherit;cursor:pointer">'
                'Not now</button></p>'
-               '<p class="quiet" id="ownbox-ring-said" style="margin:8px 0 0"></p></div>')
+               '<p class="quiet" id="ownbox-notify-said" style="margin:8px 0 0"></p></div>')
 
 def _push_client_js() -> str:
     """ONE COPY OF THE CLIENT, loaded by both screens that need it.
@@ -2382,7 +2382,7 @@ def _push_client_js() -> str:
     It lives in `core.push` because the two endpoints it fetches are core's. Loaded through a
     function rather than imported at module scope so a box whose release predates it still serves
     every other screen: an inbox that 500s because push is missing is a worse box than one that
-    cannot ring.
+    cannot receive a push.
     """
     try:
         from core import push
@@ -2391,41 +2391,41 @@ def _push_client_js() -> str:
         return ""
 
 
-_RING_JS = """(function () {
-  var box = document.getElementById('ownbox-ring');
-  if (!box || !window.ownboxCanBeRung || !window.ownboxEnableNotifications) { return; }
-  // ON IPHONE ONLY THE HOME SCREEN APP CAN RECEIVE A PUSH. Offering this in a Safari tab spends
+_NOTIFY_JS = """(function () {
+  var box = document.getElementById('ownbox-notify');
+  if (!box || !window.ownboxCanNotify || !window.ownboxEnableNotifications) { return; }
+  // ON IPHONE ONLY THE INSTALLED APP CAN RECEIVE A PUSH. Offering this in a Safari tab spends
   // the one answer a person ever gets on a surface that could not have delivered anyway.
-  if (!window.ownboxCanBeRung()) { return; }
+  if (!window.ownboxCanNotify()) { return; }
   var perm = (window.Notification && Notification.permission) || 'default';
   if (perm === 'denied') { return; }
   if (perm === 'granted') {
     // ALREADY SAID YES. Re-subscribe quietly rather than ask again: this fires no prompt, and it
-    // repairs a subscription iOS dropped while the box went on believing it could ring.
+    // repairs a subscription iOS dropped while the box went on believing it could reach them.
     window.ownboxEnableNotifications();
     return;
   }
   // AND NOT AGAIN TODAY IF THEY SAID "not now". Per viewer, per browser; it is a convenience and
   // the page renders correctly when it cannot be read.
-  try { if (localStorage.getItem('ownbox.ring.hidden')) { return; } } catch (e) {}
+  try { if (localStorage.getItem('ownbox.notify.hidden')) { return; } } catch (e) {}
   box.hidden = false;
-  var said = document.getElementById('ownbox-ring-said');
-  document.getElementById('ownbox-ring-no').addEventListener('click', function () {
+  var said = document.getElementById('ownbox-notify-said');
+  document.getElementById('ownbox-notify-no').addEventListener('click', function () {
     box.hidden = true;
-    try { localStorage.setItem('ownbox.ring.hidden', '1'); } catch (e) {}
+    try { localStorage.setItem('ownbox.notify.hidden', '1'); } catch (e) {}
   });
-  document.getElementById('ownbox-ring-yes').addEventListener('click', function (ev) {
+  document.getElementById('ownbox-notify-yes').addEventListener('click', function (ev) {
     ev.target.disabled = true;
-    said.textContent = 'Asking your phone…';
+    said.textContent = 'Asking your device…';
     window.ownboxEnableNotifications().then(function (r) {
       if (r && r.ok) {
-        said.textContent = 'Done. This phone will be told when something arrives.';
-        document.getElementById('ownbox-ring-yes').style.display = 'none';
-        document.getElementById('ownbox-ring-no').textContent = 'Close';
+        said.textContent = 'Done. This device will be notified when something arrives.';
+        document.getElementById('ownbox-notify-yes').style.display = 'none';
+        document.getElementById('ownbox-notify-no').textContent = 'Close';
       } else {
         // THE REASON, NOT "something went wrong". Every branch of the client returns one a person
         // can act on, and the commonest is "you said no", which nothing here can undo.
-        said.textContent = 'Not turned on — ' + ((r && r.why) || 'your phone declined') + '.';
+        said.textContent = 'Not turned on — ' + ((r && r.why) || 'your device declined') + '.';
         ev.target.disabled = false;
       }
     });
@@ -2570,7 +2570,7 @@ def r_inbox():
             # an empty inbox is the control that cannot succeed this app keeps deleting.
             body = ('<h1>Inbox</h1><div class="quiet">No conversations yet. '
                     'The first person who messages you appears here, and you will get a '
-                    'notification once this is installed on your phone.</div>')
+                    'notification once this is installed as an app on your mobile.</div>')
         # WIDE ON THE EMPTIES TOO. Every branch above still draws the chip row, so a reader who
         # filtered to Instagram and found nothing must keep the rail that got them there —
         # otherwise the layout moves under them at the exact moment they need to change filter.
@@ -2643,8 +2643,8 @@ def r_inbox():
                   f'{_pager(q=q, channel=channel, page=page, more=more, waiting=waiting, from_ad=from_ad)}'
                   # THIS BRANCH IS THE ONE WITH CONVERSATIONS IN IT, which is the whole condition
                   # the owner set. The four empty states above render none of this.
-                  + _RING_OFFER
-                  + f'<script>{_push_client_js()}</script><script>{_RING_JS}</script>',
+                  + _NOTIFY_OFFER
+                  + f'<script>{_push_client_js()}</script><script>{_NOTIFY_JS}</script>',
                   wide=True), 200
 
 
@@ -3386,7 +3386,7 @@ def r_sw():
 # /voice is the AI receptionist machine's path — so every other /voice route is simply gone: a 404,
 # never a redirect. THIS ONE ADDRESS STAYS, briefly, for a reason no redirect could serve. A phone
 # that installed the app before the cut holds a worker registered at scope /voice/, and a worker can
-# never claim /inbox/ (the scope rule in r_sw above). On its next update check that phone fetches
+# never claim /inbox/ (the scope rule in r_sw above). On its next update check that device fetches
 # THIS file, installs it, and it unregisters itself. Nothing else: no fetch handler, no cache, no
 # navigation — it must not answer a single request on a path that is no longer ours.
 # REMOVE IT, and its PUBLIC_PATHS entry, once the owner's installed phone has taken it (runbook

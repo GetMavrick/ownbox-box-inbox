@@ -688,11 +688,11 @@ def anthropic_state() -> dict:
 
 # WHICH SCREEN A STEP BELONGS TO — `surface`, and it is the reason this contract can be split at
 # all. Owner, 2026-09-22: "Step three and step four should be a core setting. The LLM and the
-# phone." A step is "machine" (the default, and what every step was before today) or "box".
+# mobile." A step is "machine" (the default, and what every step was before today) or "box".
 #
 # THE TEST OF IT IS ONE QUESTION: would a box running a DIFFERENT machine still need this? A
 # mailbox and a set of social accounts belong to the inbox and go with it. An AI account is what
-# `core.brain` reasons through for every machine; a phone belongs to a person; an AI coworker is a
+# `core.brain` reasons through for every machine; a mobile belongs to a person; an AI coworker is a
 # `core.connector` seat. Those three are the box's and are answered in the box's own drawer.
 #
 # A STEP WITHOUT THE KEY IS A MACHINE STEP. Older machines and every seam step registered before
@@ -948,9 +948,9 @@ _AI_STEP = {
 
 
 
-# NOTIFICATIONS ON A PHONE — A CORE STEP, FOR EVERY MACHINE. Owner, 2026-09-20, ruling on where it
+# NOTIFICATIONS ON THE MOBILE APP — A CORE STEP, FOR EVERY MACHINE. Owner, 2026-09-20, ruling on where it
 # belongs: "Yes in onboarding, all machines will need this." The inbox is what rings first, but a
-# Lead box with a hot prospect wants a phone rung too, so this sits in core beside the AI account
+# Lead box with a hot prospect wants a mobile rung too, so this sits in core beside the AI account
 # rather than inside customer_voice.
 #
 # INSTALLING IS HERE; ASKING IS NOT. The owner's other ruling the same day: ask for permission
@@ -962,20 +962,20 @@ _AI_STEP = {
 #
 # WHAT THE SERVER CAN HONESTLY SAY IS LIMITED, and the status here reflects that. A subscription
 # row proves SOME device is set up, never that the one in your hand is: the same person reading
-# this on a laptop has a phone the box cannot see. So the status answers "has anybody here got
+# this on a laptop has a mobile the box cannot see. So the status answers "has anybody here got
 # this working", and the page refines the line for the device actually looking at it.
-_PHONE_STEP = {
-    "key": "phone", "title": "Your phone",
+_MOBILE_STEP = {
+    "key": "mobile", "title": "Your mobile app",
     "surface": SURFACE_BOX,
-    # NOT OWNER-ONLY, AND DELIBERATELY SO. A phone belongs to a person, not to whoever bought the
+    # NOT OWNER-ONLY, AND DELIBERATELY SO. A mobile belongs to a person, not to whoever bought the
     # box: a member working the inbox all day needs the notification more than the owner does, and
     # `push.subscriptions_for` is keyed to whoever is signed in and never crosses users.
     "owner_only": False,
-    "action_href": "/settings/phone",
-    "action_label": "How to set up your phone",
-    "action_why": "It takes about thirty seconds and there is nothing to type. The box has to be "
-                  "on your Home Screen before it can ring at all.",
-    "why": "Add this box to your phone's Home Screen and it can tell you when a customer writes — "
+    "action_href": "/settings/mobile",
+    "action_label": "How to install the mobile app",
+    "action_why": "It takes about thirty seconds and there is nothing to type. The app has to be "
+                  "installed before it can notify you at all.",
+    "why": "Install this box as an app on your mobile and it can notify you when a customer writes — "
            "a notification that opens straight into your inbox, not into somebody else's app. "
            "Email keeps working either way; this is the faster way to hear about it.",
     "fields": (),
@@ -990,8 +990,8 @@ _PHONE_STEP = {
                              "Scroll down and tap Add to Home Screen, then Add.",
                              "Open the box again from the new icon on your Home Screen."),
                    "note": "A Safari tab cannot receive notifications at all, whatever you answer "
-                           "to the prompt. The Home Screen app is the only thing that can."},
-                  {"title": "On an Android phone",
+                           "to the prompt. Only the installed app can."},
+                  {"title": "On an Android mobile",
                    "steps": ("Open this box in Chrome.",
                              "Tap the ⋮ menu at the top right.",
                              "Tap Install app — or take the install banner if one appears.",
@@ -999,20 +999,20 @@ _PHONE_STEP = {
                    "note": "If you do not see Install app, the page is probably not open in "
                            "Chrome."}),
     "steps": ("On iPhone: open this box in Safari, tap the Share button, then Add to Home Screen. "
-              "It has to be the Home Screen app — Safari tabs cannot receive notifications at all.",
+              "It has to be the installed app — a Safari tab cannot receive notifications at all.",
               "On Android: open the browser menu and choose Install app, or take the install "
               "banner when it appears.",
               "Open the box from the new icon. It fills the screen, with no browser bar.",
               "Turning notifications ON comes later, on the inbox itself, once you have had a "
               "message worth being told about."),
-    # NOT STARTING WITH THE STEP'S OWN TITLE. It read "Your phone asks you once" directly under a
-    # heading that already says "Your phone" — redundant to read, and it tripped the guard that
+    # NOT STARTING WITH THE STEP'S OWN TITLE. It read "Your mobile asks you once" directly under a
+    # heading that already said so — redundant to read, and it tripped the guard that
     # refuses anything rendered twice on the set-up page.
     "note": "iOS asks you once, and a refusal is hard to undo — so the box waits until it has "
             "something real to show you before it asks.",
     # IT COUNTS FOR NOTHING, AND THAT IS THE POINT. The other three steps are credentials only the
-    # buyer can supply and without which the box cannot work; this one is a phone the box may never
-    # see, because email is the floor and plenty of people will never install anything. Counted
+    # buyer can supply and without which the box cannot work; this one is an app the box may never
+    # see installed, because email is the floor and plenty of people will never install anything. Counted
     # like the others it would hold every box at "3 of 4" forever — a permanent nag for declining
     # something optional, on a box that is finished. It renders in onboarding (owner, 2026-09-20:
     # "Yes in onboarding, all machines will need this") and is excluded from the count.
@@ -1020,8 +1020,8 @@ _PHONE_STEP = {
 }
 
 
-def phone_state() -> dict:
-    """Whether ANY device on this box is set up for notifications — never whether yours is.
+def mobile_state() -> dict:
+    """Whether ANY device on this box has the app installed and notifications on — never yours.
 
     Guarded, because push is inert until `cryptography` is in the lock: a box that cannot mint an
     identity still renders this step, it simply cannot be finished yet.
@@ -1036,7 +1036,7 @@ def phone_state() -> dict:
             "detail": f"{n} device{'s' if n != 1 else ''} set up" if n else ""}
 
 
-SETUP_STEPS = SETUP_STEPS + (_AI_STEP, _PHONE_STEP, _AGENT_STEP)
+SETUP_STEPS = SETUP_STEPS + (_AI_STEP, _MOBILE_STEP, _AGENT_STEP)
 
 # ONE STATE READER PER STEP, BY NAME. This was `email_state() if key == "email" else zernio_state()`
 # — a binary that was correct while there were exactly two steps and silently wrong the moment
@@ -1045,7 +1045,7 @@ SETUP_STEPS = SETUP_STEPS + (_AI_STEP, _PHONE_STEP, _AGENT_STEP)
 # an unknown key gets nothing rather than the last branch's answer.
 _STATE_READERS = {
     "email": email_state, "zernio": zernio_state, "anthropic": anthropic_state,
-    "phone": phone_state}
+    "mobile": mobile_state}
 
 
 def setup_state() -> list[dict]:

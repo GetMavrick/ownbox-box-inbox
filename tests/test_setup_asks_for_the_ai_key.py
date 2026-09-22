@@ -97,8 +97,8 @@ ok("AND THE AI KEY DOES NOT — the old binary would have handed it Zernio's ans
    got["anthropic"] == "not_connected", str(got))
 ok("...nor does the mailbox, which is the other half of the same mistake",
    got["email"] == "not_connected", str(got))
-ok("...nor the phone, which no credential on this screen can turn on",
-   got["phone"] == "not_connected", str(got))
+ok("...nor the mobile app, which no credential on this screen can turn on",
+   got["mobile"] == "not_connected", str(got))
 
 ok("an unknown step key resolves to nothing, never to the last branch's answer",
    bs._STATE_READERS.get("a-step-nobody-wrote") is None)
@@ -296,7 +296,7 @@ VERIFIED_DEEP_LINKS = {
     "https://zernio.com/dashboard/connections": "owner, 2026-09-21, read off his own dashboard",
 }
 
-for _step in tuple(_bs.SETUP_STEPS) + (_bs._AI_STEP, _bs._PHONE_STEP):
+for _step in tuple(_bs.SETUP_STEPS) + (_bs._AI_STEP, _bs._MOBILE_STEP):
     _url = str((_step.get("link") or {}).get("url") or "")
     if not _url.startswith("http"):
         continue

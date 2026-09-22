@@ -324,6 +324,25 @@ ok("...and the short path serves exactly the endpoints the long one does",
    _by_path.get("/mcp") == _by_path.get("/api/v1/mcp") and bool(_by_path.get("/mcp")),
    str(_by_path))
 
+print("\n— and is not sent to fetch a key that is no longer needed —")
+# ASKED OF THE RENDERED SCREEN, not the source: this is a sentence a buyer reads, and the only
+# honest way to check what it says is to draw it. Owner, 2026-09-22: "we just enter the MCP
+# server and it authorizes."
+import re as _re4  # noqa: E402
+from core import dash as _dash4  # noqa: E402
+from core import state as _state4  # noqa: E402
+from core.dispatch import app as _app4  # noqa: E402
+
+_state4.init_db()
+_c4 = _app4.test_client()
+_c4.set_cookie(_dash4.COOKIE, _dash4.new_session(_state4.owner_user()["id"]), domain="localhost")
+_agent = _c4.get("/settings/agent").get_data(as_text=True)
+ok("the connector screen renders", "This box" in _agent, _agent[:120])
+ok("...and does NOT tell the buyer to bring a key", "a key from below" not in _agent)
+ok("...it says the assistant is sent here to sign in", "there is no key to copy" in _agent)
+ok("...and the sign-in step is still the one it teaches first", "will SIGN IN" in _agent)
+ok("...and the Allow step a buyer actually meets is on the screen", "Press Allow" in _agent)
+
 print("\n— a buyer is shown ONE address, everywhere —")
 # THE OWNER HIT THIS, 2026-09-22: the screen that mints a key printed `/api/v1/mcp` while the
 # screen linking to it printed `/mcp`. Both work — same handler, same gate — but somebody given

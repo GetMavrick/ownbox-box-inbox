@@ -704,11 +704,11 @@ def dashboard():
 # WHY NOT THE MERGED REGISTRY (option A): core would have to understand each machine's settings
 # shape to draw them, which is precisely what `tests/test_core_boundary.py` exists to refuse. B
 # needs no registry, so it is also not blocked on one being designed.
-BOX_SETTINGS = ("anthropic", "phone", "agent")
+BOX_SETTINGS = ("anthropic", "mobile", "agent")
 
 # THE SAME CLOSED SET `box_secrets.setup_state()` DOCUMENTS, plus core's own `unavailable`. Said
 # in core's words rather than the inbox's: this screen is about the box, so "Not set up yet"
-# rather than "Not connected yet", which reads oddly against a phone.
+# rather than "Not connected yet", which reads oddly against an app somebody installs.
 _BOX_SAID = {
     "connected":        ("Connected", ""),
     "needs_reauth":     ("Needs a new password", "stale"),

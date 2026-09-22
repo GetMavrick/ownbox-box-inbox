@@ -10,7 +10,7 @@ hash-pinned lock and routes every notification's existence through Google's, Moz
 service, while email through the box's own Resend account added no dependency and no new
 sub-processor. That reasoning was sound and it lost to a better argument.
 
-Owner, 2026-09-20: notifications on a phone are "a critical business function with the unified
+Owner, 2026-09-20: notifications on a mobile are "a critical business function with the unified
 inbox" — and, on Slack as the alternative, "if they get the notification on Slack, then they're
 totally outside of our environment on their phone." That is the point email cannot answer either.
 A mail is read in Mail. Only a notification from the installed web app OPENS THE INBOX when it is
@@ -194,8 +194,8 @@ def _key(key: str) -> str:
     return f"notify:{key}"
 
 
-def _ring(person_id: str, waiting: int | None) -> int:
-    """Ring every phone this person has registered. Returns how many were reached.
+def _notify_devices(person_id: str, waiting: int | None) -> int:
+    """Notify every device this person has installed the app on. Returns how many were reached.
 
     NEVER RAISES, like everything else here — it is called from the poller's pass. A push service
     having a bad minute must leave the email floor intact rather than take intake down.
@@ -244,13 +244,13 @@ def send_notice(key: str, subject: str, text_body: str, html_body: str | None = 
         if not people:
             return {"sent": 0, "skipped": "nobody", "detail": "this box has no signed-in people"}
 
-        sent, failed, rung = 0, [], 0
+        sent, failed, notified = 0, [], 0
         for p in people:
-            # THE PHONE AND THEN THE MAIL, BOTH, EVERY TIME (owner, 2026-09-20, superseding his
-            # own earlier ruling the same day). A ring that fails costs nothing here because the
+            # THE APP AND THEN THE MAIL, BOTH, EVERY TIME (owner, 2026-09-20, superseding his
+            # own earlier ruling the same day). A notification that fails costs nothing here because the
             # mail goes regardless; that is the whole point of sending both while push is new.
-            if _ring(p["id"], waiting):
-                rung += 1
+            if _notify_devices(p["id"], waiting):
+                notified += 1
             try:
                 box_mail.send(p["email"], subject, text_body, html_body or _plain_html(text_body),
                               idem_key=f"notify:{marker}:{p['id']}",
@@ -261,18 +261,18 @@ def send_notice(key: str, subject: str, text_body: str, html_body: str | None = 
                 # must still reach the first and the third.
                 failed.append(str(e)[:120])
                 log.warning("notify.send_failed", key=key, error=str(e)[:120])
-        # A RING COUNTS AS DELIVERY FOR THE MARKER, and that matters now that both channels fire.
+        # A NOTIFICATION COUNTS AS DELIVERY FOR THE MARKER, and that matters now that both channels fire.
         # The marker is what stops the 15-minute tick re-sending inside one slot. Keyed on the mail
-        # alone, a box whose push landed and whose mail bounced would mark nothing and ring the
+        # alone, a box whose push landed and whose mail bounced would mark nothing and notify the
         # phone again every quarter of an hour until the slot closed — the spam cannon this module
         # exists to prevent, arriving through the newer channel.
-        delivered = sent + rung
+        delivered = sent + notified
         if delivered:
             # BUMPED ONLY WHEN SOMETHING ACTUALLY WENT. A failed round that marked the gap would
             # buy silence with nothing delivered, and the next real notice would be suppressed.
             state.set_alert(_key(marker), now.isoformat(), bump_alert_ts=True)
-            log.info("notify.sent", key=key, people=sent, rung=rung)
-        return {"sent": sent, "rung": rung,
+            log.info("notify.sent", key=key, people=sent, notified=notified)
+        return {"sent": sent, "notified": notified,
                 "skipped": "" if delivered else "all_failed",
                 "detail": "; ".join(failed)}
     except Exception as e:                     # noqa: BLE001 — see the module docstring
