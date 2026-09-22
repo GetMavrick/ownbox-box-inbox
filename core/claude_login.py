@@ -496,8 +496,10 @@ def cancel() -> None:
 
 # ── the helper: one process, one pty, one login, for as long as the buyer needs ──────────────────
 
-SUBMIT_CHUNK = 8           # bytes per write into the CLI's raw-mode prompt
-SUBMIT_PAUSE_S = 0.02      # between chunks, so its reader keeps up
+SUBMIT_CHUNK = 8           # bytes per write, for the chunked fallback
+SUBMIT_PAUSE_S = 0.02      # between chunks, so the CLI's reader keeps up
+PASTE_START = b"\x1b[200~"  # bracketed paste, xterm's atomic-paste protocol
+PASTE_END = b"\x1b[201~"
 
 
 def submit_bytes(code: str | bytes) -> bytes:
@@ -506,29 +508,50 @@ def submit_bytes(code: str | bytes) -> bytes:
     return raw.strip() + b"\r"
 
 
-def submit_code(fd: int, code: str | bytes, *, sleep=time.sleep) -> None:
-    """Type the code into the CLI's prompt SLOWLY, then press Enter. Both halves are load-bearing.
+def paste_bytes(code: str | bytes) -> bytes:
+    """The same code wrapped in BRACKETED PASTE, which is how a terminal delivers a long string.
 
-    MEASURED ON A REAL BOX, claude 2.1.278, through the real finish() path (2026-09-21):
-        26-character code, one write  ->  2.4s, CLI answers
-        92-character code, one write  -> 92.1s, CLI says NOTHING AT ALL
-    A real authorization code is about 92 characters. So the product worked for every test code
-    anybody ever tried and failed for every genuine one — which is exactly how it reached a
-    customer. The owner lost a day of recording to it.
-
-    TWO SEPARATE FAULTS, AND FIXING EITHER ALONE LEAVES IT BROKEN:
-      1. The prompt is RAW-MODE and masked (it echoes asterisks). Its Enter is `\r`; a bare `\n`
-         is just another character in the buffer, so the code sat there unsubmitted.
-      2. Its reader cannot take a long burst. Written in one go, a 92-byte code is accepted
-         character-by-character into the echo — the asterisks all appear — and then the CLI never
-         acts on it. Fed in small chunks with a pause, it behaves.
-
-    THE ASTERISKS ARE WHY THIS WAS INVISIBLE: the transcript showed all 92 of them, so the code
-    plainly "arrived", and every theory went looking at Claude, the code, or the buyer instead.
-
-    CHUNKED WRITES ARE NOT A TIMING HACK TO BE TIDIED AWAY. If somebody replaces this with a
-    single `os.write`, it will pass every short-code test and fail every real sign-in.
+    `ESC[200~ … ESC[201~` tells the reader "everything between these is pasted text, take it as a
+    unit". It is the mechanism this problem has, rather than a timing trick that happens to win.
     """
+    raw = code.encode() if isinstance(code, str) else bytes(code)
+    return PASTE_START + raw.strip() + PASTE_END
+
+
+def submit_code(fd: int, code: str | bytes, *, sleep=time.sleep) -> None:
+    """Deliver the code to the CLI's prompt, atomically, then press Enter.
+
+    THE BUG THIS EXISTS FOR (2026-09-21/22, measured on claude 2.1.278 through the real finish()
+    path): `claude setup-token` reads the code at a RAW-MODE masked prompt. Its Enter is `\r`,
+    not `\n`, and its reader cannot take a long burst. A real ~92-character code written in ONE
+    call is echoed in full as asterisks — so it plainly "arrived" — and then never acted on:
+
+        one write, 92 chars   0/3 reacted, 20s+ each   (before: 92.1s then a misleading error)
+        chunked 8B/20ms       3/3 reacted, 0.5s worst
+        bracketed paste       3/3 reacted, 0.2s worst
+
+    Every test code anybody had used was SHORT, so this passed every test and failed every real
+    sign-in. The owner lost a day of demo recording to it.
+
+    WHY BRACKETED PASTE AND NOT THE CHUNKS. Both work today. Chunking assumes 20ms is enough for
+    the CLI's renderer on whatever box this is — and the renderer was observed being OUTRUN even
+    when it worked (the echo came back as mixed asterisks and plaintext), so that margin is thin
+    on a loaded $6 droplet. Bracketed paste is ONE write with no race in it at all. Its cost is a
+    protocol assumption, and that assumption is now fixed: the CLI is pinned
+    (scripts/install_claude_code.sh) and every image cut runs the sign-in mechanism check.
+
+    THE CHUNKED PATH IS KEPT AS A FALLBACK, not as dead code: if a pinned-version bump ever meets
+    a CLI that ignores bracketed paste, the escape bytes would land in the buffer as garbage, and
+    `chunked_fallback` is what that upgrade should try before anybody concludes the feature is
+    broken. Do not delete it because nothing calls it today.
+    """
+    os.write(fd, paste_bytes(code))
+    sleep(SUBMIT_PAUSE_S)
+    os.write(fd, b"\r")
+
+
+def chunked_fallback(fd: int, code: str | bytes, *, sleep=time.sleep) -> None:
+    """Type it in slowly — for a CLI that does not honour bracketed paste. See `submit_code`."""
     payload = submit_bytes(code)
     for i in range(0, len(payload), SUBMIT_CHUNK):
         os.write(fd, payload[i:i + SUBMIT_CHUNK])

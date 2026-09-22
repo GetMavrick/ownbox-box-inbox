@@ -1,11 +1,21 @@
 [Unit]
-Description=Check once a day for a newer verified AIOS release
+Description=Check twice a day for a newer verified AIOS release
 
 # ONCE A DAY, SPREAD ACROSS THE FLEET. 08:00 UTC is 1 AM Pacific and 4 AM Eastern; the three-hour
 # random delay keeps every box from asking GitHub in the same minute. Persistent catches a day the
 # box was off.
 [Timer]
-OnCalendar=*-*-* 08:00:00 UTC
+# TWICE A DAY WHILE WE ARE BUILDING (owner, 2026-09-22: "we are in heavy development phase").
+# One check a day meant a fix merged at 09:00 UTC did not reach a sold box for 23 hours, and the
+# owner felt exactly that with a demo hours away and his box five hours from its only window.
+#
+# 08:00 AND 20:00 UTC, which is roughly 1am and 1pm Pacific — one window overnight and one in the
+# working day, so a morning fix lands the same afternoon instead of the next morning.
+#
+# THE SPREAD SHRINKS WITH THE INTERVAL. RandomizedDelaySec exists so a fleet does not arrive at
+# GitHub in one thundering herd; at 3h against a 12h interval that stays comfortably inside the
+# window, and it keeps the worst-case wait at ~15h rather than ~27h.
+OnCalendar=*-*-* 08,20:00:00 UTC
 RandomizedDelaySec=3h
 Persistent=true
 

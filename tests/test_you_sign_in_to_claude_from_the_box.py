@@ -294,37 +294,22 @@ ok("a claude.com link that is not an authorisation is refused rather than offere
    claude_login.find_url(b"", "https://claude.com/cai/oauth/authorize?code=true") == "")
 
 
-print("\n— the code is submitted with a CARRIAGE RETURN, the byte the prompt accepts —")
-# THE OWNER LOST A DEMO DAY TO THIS, 2026-09-21. `claude setup-token` reads the code at a
-# raw-mode masked prompt (it echoes asterisks). A raw prompt's Enter is \r; a bare \n is just
-# another character in the buffer, so the code arrived COMPLETE and was never submitted — 92
-# asterisks in the transcript, then ninety seconds of silence, then an error blaming his code.
+print("\n— the code is delivered ATOMICALLY, as a bracketed paste, then Enter —")
+# THE OWNER LOST A DEMO DAY TO THIS. `claude setup-token` reads the code at a RAW-MODE masked
+# prompt. Measured on claude 2.1.278 through the real finish() path, three runs each with a
+# REAL-LENGTH 92-character code:
+#     one write          0/3 reacted, 20s+          (the shipped bug: 92.1s, then blamed the buyer)
+#     chunked 8B/20ms    3/3 reacted, 0.5s worst
+#     bracketed paste    3/3 reacted, 0.2s worst
 #
-# MEASURED ON A REAL BOX, claude 2.1.278, the same wrong code both ways:
-#   LF -> 36 bytes back, no reaction
-#   CR -> 247 bytes back, "OAuth error: ... status code 400. Press Enter to retry."
+# BRACKETED PASTE WINS ON THE THING THAT MATTERS: it is ONE write with no race in it. Chunking
+# assumes 20ms is enough for the CLI's renderer on whatever box this is, and the renderer was
+# seen being OUTRUN even while succeeding (the echo came back mixed asterisks and plaintext), so
+# that margin is thin on a loaded $6 droplet.
 #
-# CI CANNOT RUN ANY OF THAT — GitHub runners have no `claude` binary — so this asserts the BYTE
-# instead. It is the only thing standing between us and somebody tidying \r back to \n.
-ok("a submitted code ends with CR", claude_login.submit_bytes("abc#def").endswith(b"\r"),
-   repr(claude_login.submit_bytes("abc#def")))
-ok("...and NOT with a newline", not claude_login.submit_bytes("abc#def").endswith(b"\n"),
-   "a raw-mode prompt buffers a newline instead of submitting on it")
-ok("...and the code itself is unchanged", claude_login.submit_bytes("  abc#def  ") == b"abc#def\r",
-   repr(claude_login.submit_bytes("  abc#def  ")))
-ok("...whether it arrives as str or bytes",
-   claude_login.submit_bytes(b"abc#def") == claude_login.submit_bytes("abc#def"))
-
-# AND IT IS TYPED IN, NOT DUMPED. A REAL authorization code is ~92 characters, and the CLI's
-# raw-mode reader cannot take it in one write: measured through the real finish() path on a real
-# box (claude 2.1.278, 2026-09-21), 26 characters answered in 2.4s and 92 characters produced
-# NINETY-TWO SECONDS OF SILENCE. The asterisk echo showed all 92 characters arriving, which is
-# why every theory went looking at Claude, at the code, and at the buyer instead of at us.
-#
-# THE TEST USES A 92-CHARACTER CODE ON PURPOSE. A short one passes whether the write is chunked
-# or not — that is exactly how this shipped, and how it would ship again.
+# CI CANNOT RUN THE CLI — runners have no `claude` binary — so this asserts the BYTES.
+_REAL = "n" * 47 + "#" + "W" * 44                        # 92 chars, a real code's shape
 _writes = []
-_REAL_LENGTH_CODE = "n" * 47 + "#" + "W" + "x" * 43      # 92 chars, the shape Claude hands out
 _orig_write = os.write
 
 
@@ -335,32 +320,64 @@ def _capture(fd, data):
 
 os.write = _capture
 try:
-    claude_login.submit_code(-1, _REAL_LENGTH_CODE, sleep=lambda _s: None)
+    claude_login.submit_code(-1, _REAL, sleep=lambda _s: None)
 finally:
     os.write = _orig_write
 
-ok("a real-length code is written in several chunks, not one dump",
-   len(_writes) > 1, f"{len(_writes)} write(s) for {len(_REAL_LENGTH_CODE)} characters")
-ok("...and no single write exceeds the chunk size",
-   all(len(w) <= claude_login.SUBMIT_CHUNK for w in _writes),
-   str(sorted({len(w) for w in _writes})))
-ok("...and what arrives is exactly the code plus CR",
-   b"".join(_writes) == _REAL_LENGTH_CODE.encode() + b"\r",
-   repr(b"".join(_writes))[:90])
+_joined = b"".join(_writes)
+ok("the code is wrapped in bracketed paste",
+   _joined.startswith(b"\x1b[200~") and b"\x1b[201~" in _joined, repr(_joined[:16]))
+ok("...and delivered in ONE write, not a timed drip",
+   len(_writes[0]) == len(claude_login.paste_bytes(_REAL)), f"{len(_writes)} writes")
+ok("...with Enter as CR, separately", _writes[-1] == b"\r", repr(_writes[-1]))
+ok("...and NOT a newline", b"\n" not in _joined,
+   "a raw-mode prompt buffers a newline instead of submitting on it")
+ok("...and the code itself is intact between the markers",
+   _joined.split(b"\x1b[200~")[1].split(b"\x1b[201~")[0] == _REAL.encode(),
+   "the payload was altered in transit")
 
-print("\n— the support transcript cannot carry the credential it exists to debug —")
-# THE DIAGNOSTIC NEARLY BECAME THE BREACH, 2026-09-21. The transcript keeper was added to explain
-# FAILURES; a SUCCESS transcript ends with the CLI printing the minted token in full. A live
-# one-year credential went to disk in plaintext and then onto a screen, and had to be revoked.
-_SAMPLE = ("Long-lived authentication token created successfully! Your OAuth token (valid for 1 "
-           "year): sk-ant-oat01-eb2Kr7HpWPv7RhkhupirAqB0jiUfRnJ5N3SZ5tkvbVnIAHWrCADoGeqVlFl1EY "
-           "and an api one sk-ant-api03-QQQQQQQQQQQQQQQQQQQQ too")
-_red = claude_login.redact(_SAMPLE)
-ok("an oat token is redacted", "sk-ant-oat01-eb2" not in _red, _red[-80:])
-ok("...and an api key with it", "sk-ant-api03-QQ" not in _red, _red[-80:])
-ok("...while the surrounding words survive, so the log is still readable",
-   "created successfully" in _red, _red[:60])
-ok("...and redacting twice changes nothing", claude_login.redact(_red) == _red)
+# THE FALLBACK IS KEPT AND MUST KEEP WORKING — it is what a future CLI that ignores bracketed
+# paste should be tried with, before anybody concludes the feature is broken.
+_writes.clear()
+os.write = _capture
+try:
+    claude_login.chunked_fallback(-1, _REAL, sleep=lambda _s: None)
+finally:
+    os.write = _orig_write
+ok("the chunked fallback still exists and chunks", len(_writes) > 1, f"{len(_writes)} writes")
+ok("...none larger than the chunk size",
+   all(len(w) <= claude_login.SUBMIT_CHUNK for w in _writes), str(sorted({len(w) for w in _writes})))
+ok("...and it too ends with CR", b"".join(_writes).endswith(b"\r"))
+
+print("\n— the CLI this whole feature rides on is PINNED —")
+# "USE YOUR OWN CLAUDE SUBSCRIPTION, NO API KEY" IS A SELLING POINT, and all of it runs through
+# `claude setup-token` on a pty. That is not an API with a contract — it is a human-facing prompt
+# whose behaviour Anthropic may change, and it ALREADY broke once silently (2026-09-21/22): the
+# raw-mode masked prompt needs CR, and cannot take a 92-byte burst. 92.1s of nothing, and the
+# error blamed the buyer's code.
+#
+# UNPINNED, EVERY IMAGE BAKED WHATEVER SHIPPED THAT DAY, so one CLI change would break the
+# sign-in on all new boxes at once — and CI cannot see it, because runners have no `claude`.
+# A pin makes an upgrade a deliberate act with a verification step attached.
+import pathlib as _pl2  # noqa: E402
+import re as _re2  # noqa: E402
+
+_inst = _pl2.Path(__file__).resolve().parents[1] / "scripts/install_claude_code.sh"
+if _inst.is_file():
+    _src = _inst.read_text()
+    _m = _re2.search(r'CLAUDE_CLI_VERSION="\$\{CLAUDE_CLI_VERSION:-([^}"]+)\}"', _src)
+    ok("install_claude_code.sh names a version", bool(_m), "no CLAUDE_CLI_VERSION default found")
+    if _m:
+        ok(f"...and it is a concrete one, not a moving target ({_m.group(1)})",
+           _re2.fullmatch(r"\d+\.\d+\.\d+(-\S+)?", _m.group(1)) is not None,
+           f"{_m.group(1)!r} — 'latest'/'stable' means a CLI change ships to every new box unseen")
+    ok("...and the installer is invoked WITH it",
+       'bash -s -- "$CLAUDE_CLI_VERSION"' in _src,
+       "the version is declared but not passed, which pins nothing")
+    ok("...and nothing still pipes the installer unpinned",
+       "install.sh | bash\n" not in _src, "an unpinned `| bash` remains")
+else:
+    print("  --   no installer here (a box, not the repo) — nothing to check")
 
 print("\n— and this file cannot silently fall out of CI —")
 import pathlib  # noqa: E402

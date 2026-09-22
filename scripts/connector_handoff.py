@@ -35,6 +35,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 PROVISION_JSON = os.environ.get("AIOS_PROVISION_JSON", "/opt/aios/provision.json")
+_DEPLOY_OK = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 ENV_PATH = os.environ.get("AIOS_ENV_PATH", "/opt/aios/.env")
 
 # The same shapes the provisioner validated before it wrote them; checked again here because a file is not
@@ -128,6 +129,48 @@ def apply(conn: dict, *, env_path: str = ENV_PATH, force: bool = False) -> dict:
     return outcome
 
 
+DEPLOY_VAR = "DEPLOY_TOKEN"
+
+
+def deploy_token_from(path: str = PROVISION_JSON) -> str:
+    """The narrow /deploy key this box was built with, or "" — never raises on a box without one."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            facts = json.load(fh)
+    except (OSError, ValueError):
+        return ""
+    tok = str((facts or {}).get("deploy_token") or "")
+    return tok if _DEPLOY_OK.match(tok) else ""
+
+
+def apply_deploy_token(token: str, *, env_path: str = ENV_PATH) -> str:
+    """Put DEPLOY_TOKEN in `.env`, and NEVER over one the box already has.
+
+    WHY THIS EXISTS. `/deploy` lets a box install the newest verified release on demand — the same
+    thing its timer does at 08:00 UTC, but now. It has existed since #900 and has been UNUSABLE on
+    every box ever sold: with no DEPLOY_TOKEN, `core/dispatch._deploy_authorized` falls back to
+    DISPATCH_BEARER_TOKEN, which is also the dashboard password and the key that signs every
+    unsubscribe link. Nobody responsible hands that to a deploy caller, so the door had no key.
+    The owner hit it on 2026-09-22 with a demo hours away and a box five hours from its timer.
+
+    NEVER OVERWRITES. Same rule as the connector key above: a box that already has one keeps it,
+    so re-running bootstrap cannot silently invalidate a token somebody is holding.
+    """
+    if not token:
+        return "no deploy token in provision.json (this box updates on its timer only)"
+    lines = _read_env(env_path)
+    if _value_of(lines, DEPLOY_VAR):
+        return "kept the box's own deploy token"
+    lines.append(f"{DEPLOY_VAR}={token}")
+    fd = os.open(env_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines).rstrip("\n") + "\n")
+    mode = stat.S_IMODE(os.stat(env_path).st_mode)
+    if mode & 0o077:
+        os.chmod(env_path, mode & 0o700)
+    return "written"
+
+
 # ── seats ───────────────────────────────────────────────────────────────────────────────────────
 # WHERE A SOLD BOX MAY KEEP A PER-BOX SETTING. `config/aios.config.yaml` is tracked, so a box that
 # edited its own copy would conflict with its own next `git pull`. `core.config.get_config` already
@@ -194,6 +237,11 @@ def main(argv: list[str] | None = None) -> int:
     # SEATS FIRST, AND INDEPENDENT OF THE CONNECTOR. A box with no connector block still has a
     # tier, and returning early below on `conn is None` would have silently skipped it.
     print(f"   seats: {apply_seats(tier_from(a.provision), settings_path=a.settings)}")
+    # DEPLOY TOKEN NEXT, AND ALSO INDEPENDENT OF THE CONNECTOR — for the same reason seats are.
+    # A box with no connector block still needs to be reachable for a same-day fix, and the early
+    # return below on `conn is None` would have skipped it for exactly the boxes most likely to
+    # be plain: the ones sold to somebody who has not connected Instagram.
+    print(f"   deploy token: {apply_deploy_token(deploy_token_from(a.provision), env_path=a.env)}")
     try:
         conn = connector_from(a.provision)
     except HandoffError as e:

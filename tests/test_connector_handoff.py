@@ -214,4 +214,33 @@ ok("...and imports nothing from core, so it can never reach core.config",
 print()
 if FAILS:
     print(f"{len(FAILS)} FAILED:"); [print("   -", f) for f in FAILS]; sys.exit(1)
+
+print("— the deploy token lands in .env once, and is never replaced —")
+import json as _json  # noqa: E402
+import os as _os  # noqa: E402
+import tempfile as _tf  # noqa: E402
+
+_d = _tf.mkdtemp()
+_pj, _env = _os.path.join(_d, "provision.json"), _os.path.join(_d, ".env")
+open(_env, "w").write("EXISTING=1\n")
+_json.dump({"deploy_token": "q" * 40}, open(_pj, "w"))
+ok("it is read out of provision.json", ch.deploy_token_from(_pj) == "q" * 40)
+ok("...and written to .env",
+   ch.apply_deploy_token(ch.deploy_token_from(_pj), env_path=_env) == "written")
+ok("...and is actually there", "DEPLOY_TOKEN=" + "q" * 40 in open(_env).read())
+# NEVER OVERWRITES, same rule as the connector key: re-running bootstrap must not invalidate a
+# token somebody is holding.
+ok("a second run keeps the box's own",
+   ch.apply_deploy_token("z" * 40, env_path=_env) == "kept the box's own deploy token")
+ok("...and the original survives", "q" * 40 in open(_env).read())
+ok("the file holding it is 0600", _os.stat(_env).st_mode & 0o077 == 0)
+# A BOX WITH NO TOKEN IS NOT A FAILURE — that is every box sold before this shipped.
+_json.dump({}, open(_pj, "w"))
+ok("no token in provision.json is quiet, not an error", ch.deploy_token_from(_pj) == "")
+ok("...and applying nothing says so",
+   "timer" in ch.apply_deploy_token("", env_path=_env))
+# AND A MALFORMED ONE IS IGNORED rather than written through to .env.
+_json.dump({"deploy_token": "tiny"}, open(_pj, "w"))
+ok("a malformed token is ignored", ch.deploy_token_from(_pj) == "")
+
 print("ALL OK")

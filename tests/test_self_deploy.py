@@ -128,9 +128,25 @@ ok("the update service runs the one updater, from /opt/aios, as a oneshot",
    and "Type=oneshot" in svc)
 ok("...unhardened like /deploy's systemd-run, since it rewrites unit files (ProtectSystem would forbid it)",
    not re.search(r"^ProtectSystem=", svc, re.M))
-ok("the timer fires once a day, spread across the fleet, and catches a day the box was off",
-   re.search(r"^OnCalendar=\*-\*-\* \d\d:\d\d:\d\d UTC$", tmr, re.M) is not None
-   and re.search(r"^RandomizedDelaySec=\d+h$", tmr, re.M) is not None and "Persistent=true" in tmr)
+# TWICE A DAY SINCE 2026-09-22 (owner: "we are in heavy development phase"). One window meant a
+# fix merged at 09:00 UTC did not reach a sold box for 23 hours, and he hit exactly that with a
+# demo hours away. The pattern accepts one OR MORE hours so the cadence can move again without a
+# test edit — what it still pins is the three properties that matter.
+_cal = re.search(r"^OnCalendar=\*-\*-\* ([\d,]+):\d\d:\d\d UTC$", tmr, re.M)
+ok("the timer fires on a fixed UTC schedule", _cal is not None,
+   "OnCalendar must be an explicit hour list, so a box's window is predictable")
+ok("...twice a day while we are building",
+   _cal is not None and len(_cal.group(1).split(",")) == 2,
+   f"hours={_cal.group(1) if _cal else None!r}")
+# SPREAD, so a fleet does not arrive at GitHub as one herd — and the spread must stay INSIDE the
+# interval, or two windows overlap and a box can check twice in a row while another waits.
+_delay = re.search(r"^RandomizedDelaySec=(\d+)h$", tmr, re.M)
+ok("...spread across the fleet", _delay is not None)
+ok("...by less than the gap between windows, so the windows cannot overlap",
+   _delay is not None and _cal is not None and int(_delay.group(1)) < 24 // len(_cal.group(1).split(",")),
+   f"delay={_delay.group(1) if _delay else None}h across {len(_cal.group(1).split(',')) if _cal else 0} windows")
+# AND IT CATCHES A BOX THAT WAS OFF — without Persistent a powered-down box silently skips.
+ok("...and catches a day the box was off", "Persistent=true" in tmr)
 ok("install_services.sh installs both units",
    "deploy/aios-update.service" in inst and "deploy/aios-update.timer" in inst)
 rx = re.search(r"grep -Eq '(\^git@github[^']+)'", inst)
