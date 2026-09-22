@@ -148,6 +148,17 @@ def require_session():
 
 # ── layout (Tailwind values from the saved pages, translated to plain CSS) ────
 
+# THE INPUT SELECTORS ARE OPT-IN, AND `email` WAS NOT ON THE LIST. Every other field on every
+# operator screen picked up the rule below and an email field picked up nothing, so it rendered
+# as the browser's own control — white, square, black text, and narrow, because the width rule
+# had the same gap. The owner caught it on /dash/login: one styled field sitting above one
+# unstyled one. `tel`, `url` and `number` are named now for the same reason, rather than the
+# next time somebody screenshots one.
+#
+# AND THIS NOTE LIVES OUT HERE ON PURPOSE. Its first draft was a `/* ... */` comment inside the
+# stylesheet, which is shipped to the browser verbatim on every page — `test_client_home` caught
+# the word "every" in it and `test_lead_dash` read the date in it as a phone number. A comment in
+# a CSS string is page weight and page content, not a note to the next developer.
 CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
 body{min-height:100vh;background:#15181C;color:#E8E9EA;display:flex;flex-direction:column;
@@ -228,7 +239,8 @@ font-weight:500}
 .okhead{color:#86efac;font-weight:600;font-size:14px}
 .failhead{color:#fca5a5;font-weight:600;font-size:14px}
 .stack8{display:flex;flex-direction:column;gap:32px}
-select,input[type=text],input[type=password],textarea{background:rgba(255,255,255,.05);
+select,input[type=text],input[type=email],input[type=tel],input[type=url],
+input[type=number],input[type=password],textarea{background:rgba(255,255,255,.05);
 color:#E8E9EA;border:1px solid rgba(255,255,255,.1);border-radius:8px;
 padding:10px 12px;font:inherit;width:100%}
 textarea{min-height:160px;line-height:1.625}
@@ -238,7 +250,7 @@ font-weight:500;border-radius:8px;border:0;cursor:pointer;font-family:inherit}
 .btn-primary:hover{opacity:.9}
 footer{border-top:1px solid rgba(255,255,255,.05);padding:16px 24px;text-align:center}
 footer p{font-size:12px;color:rgba(255,255,255,.2)}
-select,input[type=text]{width:100%}
+select,input[type=text],input[type=email],input[type=tel],input[type=url],input[type=number]{width:100%}
 /* Phones (the review link opens from Slack on a phone by design): stack the
    two-column grids — side-by-side at 380px crushes selects to one letter. */
 @media (max-width:720px){.grid2{grid-template-columns:1fr}}
@@ -829,6 +841,43 @@ def safe_next(value: str) -> str:
     return ""
 
 
+def _login_card(*, nxt: str = "", note: str = "") -> str:
+    """The sign-in card, in the buyer's shell — ONE builder for the form and for every refusal.
+
+    WHY THIS IS NOT THREE COPIES OF THE MARKUP. It was: the GET drew a form, and each refusal
+    REPLACED the whole page with a sentence and a "Try again" link. So a mistyped password threw
+    away the address already typed and, worse, threw away `next` — the very thing this route was
+    given so that signing in from the app returns you to the app (owner, 2026-09-11: *"when I
+    enter my password, I can use the app completely."*). Getting the password wrong once sent you
+    to the operator dashboard instead. The refusal now renders ABOVE the form, which is the rule
+    `_CLAIM_PROBLEMS` already states for the claim screens: the buyer keeps his place.
+
+    NEITHER FIELD COMES BACK ON A REFUSAL, and the address is the interesting one. Re-filling the
+    password is obviously wrong — it puts a secret in the HTML of a page that has just proven it
+    reached the wrong person. Re-filling the ADDRESS is a real convenience and it is still not
+    done, because `test_team_logins` holds a stronger line than convenience: a wrong password and
+    an unknown address must come back with the SAME status and the SAME WORDS, byte for byte, so
+    the page cannot become the list of who works at the business that the constant-time hash
+    above it exists to prevent. Echoing whatever was typed makes the two bodies differ. That is
+    not itself a leak — the person typed it — but "the two refusals are identical" is a far
+    easier invariant to keep true than "identical except here", and this is the wrong file to
+    trade a security invariant for a saved retype. `next` is still carried: it is validated by
+    `safe_next` and is the same on both paths.
+    """
+    hidden = (f'<input type="hidden" name="next" value="{html.escape(nxt)}">' if nxt else "")
+    bad = f'<p class="bad">{note}</p>' if note else ""
+    return (f'<h1>Sign in.</h1>{bad}'
+            f'<form method="post" action="/dash/login">{hidden}'
+            # LABELS, NOT PLACEHOLDER-AS-LABEL. A placeholder disappears the moment somebody
+            # types, so the one hint about what a field wanted is gone exactly when a mistake is
+            # made, and it is not a label to a screen reader at all.
+            f'<label for="email">Email</label>'
+            f'<input id="email" type="email" name="email" autocomplete="username" autofocus>'
+            f'<label for="pw">Password</label>'
+            f'<input id="pw" type="password" name="token" autocomplete="current-password">'
+            f'<button type="submit">Sign in</button></form>')
+
+
 @blueprint.get("/dash/login")
 def login_form():
     # WHERE HE WAS, CARRIED THROUGH THE LOGIN. Owner, 2026-09-11: "when I enter my password, I
@@ -836,20 +885,15 @@ def login_form():
     # dashboard — so from the app he typed his password, arrived somewhere else entirely, and
     # had to find his own way back, on a phone. A door that opens into a different room is the
     # same half-working control the app has spent days removing.
-    nxt = safe_next(request.args.get("next", ""))
-    hidden = (f'<input type="hidden" name="next" value="{html.escape(nxt)}">' if nxt else "")
-    body = f"""
-<section style="max-width:380px">
-  <label class="lbl mb">Sign in</label>
-  <form method="post" action="/dash/login">
-    {hidden}<input type="email" name="email" placeholder="email" autocomplete="username" autofocus
-           style="margin-bottom:10px">
-    <input type="password" name="token" placeholder="password" autocomplete="current-password"
-           style="margin-bottom:10px">
-    <button class="btn-primary" type="submit">Sign in</button>
-  </form>
-</section>"""
-    return page("Login", "narrow", body, title=f"{brand()} · Login")
+    #
+    # AND IT WEARS THE BUYER'S SHELL NOW, not the operator's. Owner, 2026-09-22, looking at this
+    # page: *"Why is this Page so weird looking"*. It was `page()` — the operator chrome — so the
+    # first screen a customer meets on the box they bought opened with a BREADCRUMB NAMING THE BOX
+    # to somebody not yet signed in, a 10px monospace "SIGN IN" that reads like a console, and the
+    # form pushed off-centre by a shell built for a two-column admin tool. `/claim` was moved off
+    # this same shell for this same reason and the comment below records it; sign-in was missed.
+    return _claim_page(_login_card(nxt=safe_next(request.args.get("next", ""))),
+                       title=f"{brand()} · Sign in")
 
 
 # ── first login: the box hands itself over, once (core/claim.py) ─────────────────
@@ -914,14 +958,20 @@ a{color:#e05d38}
 """
 
 
-def _claim_page(body: str, code: int = 200):
-    """The claim screens, in their own shell. `_CLAIM_CSS` above says why it is not `page()`."""
+def _claim_page(body: str, code: int = 200, title: str = "Set up your box"):
+    """The BUYER-FACING shell. `_CLAIM_CSS` above says why it is not `page()`.
+
+    NAMED FOR CLAIM AND NO LONGER ONLY CLAIM. `/dash/login` renders through here too, and the
+    reason is the one already written above `_CLAIM_CSS`: the operator shell is the wrong dress
+    for a screen a paying customer meets. Claim and sign-in are the same moment in a buyer's
+    week — one sets the password, the other uses it — and they wore two different designs.
+    """
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1,'
             f'viewport-fit=cover">'
             f'<meta name="theme-color" content="#eff2f4">'
             f'<meta name="robots" content="noindex,nofollow">'
-            f'<title>Set up your box</title><style>{_CLAIM_CSS}</style></head>'
+            f'<title>{html.escape(title)}</title><style>{_CLAIM_CSS}</style></head>'
             f'<body><div class="wrap"><div class="card">{body}</div></div></body></html>'), code
 
 
@@ -1149,9 +1199,10 @@ def login():
         # Refused BEFORE the comparison — a throttle that still checks the guess is a counter,
         # not a throttle.
         log.warning("dash.login_throttled", ip=ip, wait_s=wait)
-        resp = make_response(page("Login", "narrow",
-                                  f'<p class="val">Too many attempts. Try again in {wait}s.</p>',
-                                  title=f"{brand()} · Login"), 429)
+        resp = make_response(_claim_page(
+            _login_card(nxt=safe_next(request.form.get("next", "")),
+                        note=f"Too many attempts. Try again in {wait} seconds."),
+            429, title=f"{brand()} · Sign in"))
         resp.headers["Retry-After"] = str(wait)
         return resp
     token = settings.dash_token
@@ -1184,10 +1235,13 @@ def login():
     if who is None:
         _note_failure(ip)
         log.warning("dash.login_failed", ip=ip)
-        return page("Login", "narrow",
-                     '<p class="val">That email and password do not match. <a class="dlink" '
-                     'href="/dash/login">Try again</a></p>',
-                     title=f"{brand()} · Login"), 401
+        # THE SAME ANSWER FOR A WRONG PASSWORD AND AN UNKNOWN ADDRESS, which the comment above
+        # already argues for the timing — the words have to match it too, or the page says out
+        # loud what the constant-time hash was there to hide.
+        return _claim_page(
+            _login_card(nxt=safe_next(request.form.get("next", "")),
+                        note="That email and password do not match."),
+            401, title=f"{brand()} · Sign in")
     _clear_failures(ip)
     # Land on the client home when this box has one, else the operator page. Until the
     # home existed, a LEAD-ONLY box logged in straight into a 404: /dash belongs to the

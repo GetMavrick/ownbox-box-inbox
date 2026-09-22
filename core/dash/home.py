@@ -30,7 +30,7 @@ from core import pause, report, shell
 from core.dash import blueprint, brand
 
 _BASE = """
-:root{--bg:#f4f5f7;--card:#fff;--ink:#14171a;--dim:#6b7480;--faint:#98a1ac;--line:#e6e9ec;
+:root{--bg:#f4f5f7;--card:#fff;--ink:#14171a;--dim:#6b7480;--faint:#98a1ac;--line:#9da2a9;
 --hover:#f0f2f4;--sel:#eaedf1;--accent:#1a6ef5;--good:#0f8a4d;--warn:#9a6400;--danger:#e0392b;
 --rail:#fbfbfc;--scrim:rgba(16,20,26,.42);
 --nav-ink:#333940;--av-ink:#7a5a14;--av-a:#ffe4a3;--av-b:#f7c7a8;
@@ -91,9 +91,19 @@ background:linear-gradient(145deg,var(--av-a),var(--av-b))}
 .who b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .who span{color:var(--dim);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-.back{display:flex;align-items:center;gap:10px;padding:10px 8px;margin:2px 0 8px;
-border-radius:9px;font-weight:600;color:var(--ink)}
-.back:hover{background:var(--hover)}
+/* THE WAY OUT IS CHROME, NOT A DESTINATION. It rendered with the same radius and hover as a
+   nav row and a HEAVIER weight than one -- 600 and full --ink against a row's --nav-ink -- so
+   the one control that leaves the menu looked more like a selected item than the items did.
+   Owner, 2026-09-21: *"the dashboard with the back button should not be listed there. It would
+   should be in the menu at the top of it and should function like a back button when you are
+   drilled down into a sub menu for the machine."* It already behaves that way -- `level == 2`
+   means it is absent on the dashboard and present only inside a machine -- so what was wrong
+   was that it was DRESSED as a row. Now it is smaller, dimmer, and a rule separates it from the
+   destinations below: chrome above the list, not the first thing in it. */
+.back{display:flex;align-items:center;gap:6px;padding:2px 8px 11px;margin:0 0 9px;
+border-bottom:1px solid var(--line);color:var(--dim);font-size:13.5px;font-weight:500}
+.back:hover{color:var(--ink);background:none}
+.back svg{width:16px;height:16px}
 
 .nav{display:flex;flex-direction:column;gap:1px}
 .nav a{display:flex;align-items:center;gap:11px;min-height:42px;padding:8px 10px;
@@ -673,8 +683,142 @@ def dashboard():
     return _home(), 200
 
 
+# ── THE BOX'S OWN SETTINGS ───────────────────────────────────────────────────────────────────
+# OWNER RULED 2026-09-22, choosing option B of two put to him: TWO settings destinations, not one
+# merged registry. What belongs to the BOX lives here, in core's drawer; what belongs to a MACHINE
+# stays in that machine's own Settings.
+#
+# HE HAD ALREADY SAID SO ONCE. Settings were meant to be in the system drawer and ended up inside
+# a machine's menu instead, and the machine that holds them records why in that row's own comment:
+# "Dropping the row before the replacement exists would orphan a shipped page from the menu."
+# There was nowhere else to put them. This is the somewhere. (Core does not name that machine
+# here, and `test_the_inbox_joins_the_rail` caught the first draft of this comment doing it — the
+# menu names nobody, in code OR in prose, or the next machine needs core edited to get a row.)
+#
+# THE SPLIT IS NOT A JUDGEMENT CALL, IT IS A QUESTION WITH ONE ANSWER: would a box running some
+# other machine still need this? The AI account and the phone are the owner's own words — *"The
+# LLM and the phone."* (2026-09-22) — and both pass that test: `core.brain` is the one gateway
+# EVERY machine reasons through, and a phone belongs to a person rather than to a product. The AI
+# coworkers step is on the same side by the same test, and THAT one is my reading, not his word.
+#
+# WHY NOT THE MERGED REGISTRY (option A): core would have to understand each machine's settings
+# shape to draw them, which is precisely what `tests/test_core_boundary.py` exists to refuse. B
+# needs no registry, so it is also not blocked on one being designed.
+BOX_SETTINGS = ("anthropic", "phone", "agent")
+
+# THE SAME CLOSED SET `box_secrets.setup_state()` DOCUMENTS, plus core's own `unavailable`. Said
+# in core's words rather than the inbox's: this screen is about the box, so "Not set up yet"
+# rather than "Not connected yet", which reads oddly against a phone.
+_BOX_SAID = {
+    "connected":        ("Connected", ""),
+    "needs_reauth":     ("Needs a new password", "stale"),
+    "admin_disabled":   ("Switched off by your administrator", "stale"),
+    "payment_required": ("Needs a payment method", "stale"),
+    "not_connected":    ("Not set up yet", "quiet"),
+    "unavailable":      ("Cannot be read right now", "stale"),
+}
+
+
+def _is_owner() -> bool:
+    """Whether the person reading this page owns the box. False for a member and for nobody."""
+    from flask import request as _rq
+    from core.dash import session_user as _who
+    person = _who(_rq)
+    return bool(person and person.get("role") == "owner")
+
+
+def _box_rows(*, owner: bool) -> str:
+    """One row per box-level credential, live, each pointing at the screen that sets it.
+
+    CORE NEVER LEARNS A MACHINE'S URL, and this screen does not become the exception. Every
+    destination comes from data core already holds: a step carrying its own same-box `link` says
+    where it goes, and anything else goes to whichever machine registered the `setup` item in the
+    rail (`shell.setup_href()`). An OFF-BOX link is deliberately not followed here — the AI step's
+    own link is a vendor sign-in page, and a Settings row that throws someone at a vendor instead
+    of at the setting is the 404-shaped mistake #1410 was opened for.
+
+    A BOX MISSING ONE OF THESE DRAWS NOTHING FOR IT rather than an empty row. `BOX_SETTINGS` names
+    what core asks for; `setup_state()` decides what this box actually carries, and an older box
+    mid-self-update legitimately carries fewer.
+    """
+    from core import box_secrets
+    try:
+        state = {str(e.get("key")): e for e in box_secrets.setup_state()}
+    except Exception:                        # noqa: BLE001 — settings must never 500 on a reader
+        return ('<p class="quiet">This box could not read its own settings just now. '
+                'Nothing you have already set up is affected.</p>')
+    where = shell.setup_href()
+    rows = []
+    for key in BOX_SETTINGS:
+        e = state.get(key)
+        if e is None:
+            continue
+        said, tone = _BOX_SAID.get(str(e.get("status")), _BOX_SAID["not_connected"])
+        detail = str(e.get("detail") or "").strip()
+        url = str((e.get("link") or {}).get("url") or "")
+        # A DOOR WE CANNOT VOUCH FOR IS NOT OFFERED TO SOMEBODY WHO MAY BE REFUSED AT IT.
+        #
+        # THE WALK SUITE CAUGHT THIS AND IT WAS A REAL DEAD END: `_AGENT_STEP` declares an
+        # OWNER-ONLY machine door, and this screen admits members on purpose — a phone belongs
+        # to a person, not to the box's owner. So a member saw "Set up", pressed it, and met a
+        # 403. The owner's standing rule is no dead screens, and a door that refuses you is
+        # worse than no door at all: it reads as the box being broken. (The literal path is not
+        # named here on purpose: core/dash/home.py must contain no machine URL, and the guard in
+        # test_the_box_shows_a_buyer_the_way_in.py greps this file's source to enforce it.)
+        #
+        # THE SPLIT IS BY WHO KNOWS THE GATE, not by which step it is. Core SYNTHESISES the
+        # set-up link, so it knows that screen admits everyone and offers it to everyone. A
+        # step's OWN declared link is a machine's door whose gate core cannot read, so it is
+        # offered only to the owner, who can open any of them. The row still renders either way
+        # — a member sees what is set, which is true and useful, and simply has nothing to press.
+        mine = url.startswith("/")
+        href = (url if (mine and owner) else
+                ("" if mine else (f"{where}#{_esc(key)}" if where else "")))
+        # THE VERB IS THE STATE. "Change" on something set and "Set up" on something not is the
+        # whole difference a person needs, and it saves the row a second sentence explaining it.
+        press = ("Change" if e.get("status") == "connected" else "Set up")
+        rows.append(
+            '<div class="row">'
+            f'<b style="flex:1;min-width:0">{_esc(e.get("title"))}</b>'
+            f'<span class="{tone}">{_esc(said)}'
+            + (f' — {_esc(detail)}' if detail else '') + '</span>'
+            + (f'<a href="{_esc(href)}">{press}</a>' if href else '')
+            + '</div>')
+    if not rows:
+        return '<p class="quiet">This box carries no box-level settings yet.</p>'
+    return "".join(rows)
+
+
+@blueprint.route("/settings")
+def settings():
+    """THE SYSTEM DRAWER'S SETTINGS — the box's, never a machine's.
+
+    THE SAME GATE AS THE DASHBOARD, and for the same reasoning rather than a copy of it: this page
+    publishes no money and no meters, so `owner_only` would lock a signed-in member out of their
+    own phone setting for nothing. The one genuinely owner-only thing on it — replacing the box's
+    AI key — is gated where it is actually done, not by hiding the row that says it is set.
+    """
+    from core.dash import review as _review
+    refuse = _review._admit(owner_only=False)
+    if refuse is not None:
+        return refuse
+    body = ('<div class="card"><h2>Your box</h2>'
+            '<p class="sub">What every machine on this box shares. Each machine keeps its own '
+            'settings in its own menu.</p>'
+            + _box_rows(owner=_is_owner()) + '</div>')
+    return chrome("/settings", title="Settings",
+                  lede="The parts of this box that belong to the box, not to one machine.",
+                  body=body), 200
+
+
 # THE BOX'S HOME IS A CORE SECTION, and it is the only one core registers. Everything else in the
 # rail is a machine's to declare, which is what keeps this file from becoming the list of every
 # product we sell.
 shell.register_section("dashboard", order=0, machine="core", title="Dashboard",
                        href="/dashboard", home=True)
+
+# SETTINGS IS THE SECOND, AND THE LAST. `order=90` leaves the whole middle of the rail to the
+# machines: a box with five of them still ends with Settings, which is where a person looks for
+# it. Owner, 2026-09-22, on where these belong: the system drawer.
+shell.register_section("settings", order=90, machine="core", title="Settings",
+                       href="/settings")

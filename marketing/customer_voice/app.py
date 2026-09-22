@@ -22,6 +22,7 @@ from __future__ import annotations
 import functools
 import html
 import pathlib
+import re
 from datetime import date
 
 from flask import Blueprint, jsonify, redirect, request
@@ -43,6 +44,12 @@ def _readable(text: str) -> str:
     A LEAD BOX HAS NO customer_voice, and this file is only loaded where it does — but the
     fallback costs one line and means a future import shuffle degrades to the old rendering
     instead of a 500 on somebody's thread.
+
+    THE IMPLEMENTATION IS OSDev1'S, from #1412, and it replaced mine. Two of us built this the
+    same hour because I went from the owner's message straight to code without posting intent
+    first — the duplicate is on me. His is the better one: it lives in its own module rather
+    than in this file, it elides a long tracking URL's visible text while keeping the whole
+    href, and it carries the dependency reasoning I did not have.
     """
     try:
         from marketing.customer_voice.inbox.render import readable
@@ -200,7 +207,7 @@ CSS = """
      LABELS ON THE TAB BAR. Not a subtle failure — a bit over half the required contrast, on the
      furniture a person navigates by. tests/test_inbox_contrast.py computes these now. */
   --ink:#1a1d1f; --dim:#4e5155; --dimmer:#6a6d71;
-  --line:#e5eaed; --hair:rgba(26,29,31,.07);
+  --line:#9da2a9; --hair:rgba(26,29,31,.07);
   /* THE ACCENT IS DEEPER THAN THE BRAND ORANGE, and this is the one change here a person will
      SEE rather than merely read more easily. #e05d38 carried white at 3.63:1 — which is the
      label on every primary button and, worse, every reply this box has sent, because an outgoing
@@ -646,12 +653,63 @@ a.row:active{background:var(--hair);border-radius:10px}
      is a blank strip. A phone's bottom bar pinned to the foot of a desktop window is the single
      thing that made this screen read as unfinished. */
   .wrap{padding-bottom:28px}
-  /* ONE BACK ARROW WHEN BOTH WOULD SHOW. Core's rail draws its own way out, and the bar directly
-     above it carries the one the owner asked for by name (2026-09-17: *"a back arrow with a
-     dashboard label"*). Both visible at once is a stutter, so the rail's stands down here. On a
-     phone the drawer covers the bar, so there the rail's IS the only one and it stays. */
-  .lay .rail .back{display:none}
+  /* ONE BACK ARROW, AND ON A DESKTOP IT IS THE RAIL'S. Both visible at once is a stutter, so one
+     stands down — until 2026-09-21 that was the rail's, which put the way out in the bar while
+     the phone put it at the top of the drawer, above Messages. Owner, 2026-09-21: *"The dashboard
+     link should be on in the sidebar right above messages ... it's in the wrong place on desktop.
+     Somehow, it appears in the right place on Mobile."* So the BAR's stands down instead and the
+     two widths agree: the way back is the first row of the menu, wherever the menu is.
+     His 2026-09-17 ask ("a back arrow with a dashboard label") is still honoured — same arrow,
+     same label, both from core.shell; what moved is which of the two draws it. */
+  .bar-in .up{display:none}
+  /* AND THE BAR STOPS REPEATING THE BOX'S NAME. With core's `.who` block restored to the top of
+     the rail, the name sits eleven pixels from the bar that also carries it — the same name,
+     twice, one above the other. The rail is the box's identity on a desktop; the bar keeps the
+     day and the room to grow, and says nothing the rail already said. */
+  .bar-in .brand{display:none}
 }
+
+/* ── the set-up wizard ─────────────────────────────────────────────────────────────────────
+   Owner, 2026-09-21: a progress bar across the top, and readability. Four steps, each of which
+   is a real errand on somebody else's website, so the screen's job is to say how far in you are
+   and to get the finished ones out of the way of the one you still owe. */
+.wiz{margin:16px 0 4px}
+.wiz-n{margin:0 0 8px;font-size:15px;color:var(--dim)}
+.wiz-n b{color:var(--ink);font-weight:650}
+/* A SEGMENT PER STEP. Gap, not a divider, so the unfilled ones read as empty rather than as
+   something drawn — a track with hairlines in it looks like it is already partly full. */
+.wiz-bar{display:flex;gap:4px}
+.wiz-bar .seg{flex:1;height:6px;border-radius:3px;background:var(--hair)}
+.wiz-bar .seg.on{background:var(--accent)}
+
+/* NAMED `wstep`, NOT `step`. `.step` was already taken at the top of this stylesheet -- a
+   two-column grid for the numbered instruction rows -- so styling the wizard's sections as
+   `.step` laid every open one out as `auto 1fr` and wrapped its copy into a column seven
+   words wide with a dead gutter beside it. Valid CSS, correct grid, wrong element. Found by
+   rendering the three states and reading them; the folded rows looked right the whole time.
+
+   A FINISHED STEP IS ONE ROW UNTIL IT IS ASKED FOR. `<details>` keeps the content in the page
+   for a screen reader and for find-in-page; what it hides is four instructions for an errand
+   already run. `list-style:none` plus the ::-webkit- rule removes the platform triangle, which
+   sits at the wrong end of a row this tall and is not the affordance — the word "Change" is. */
+.wstep.done{background:var(--surface);border:1px solid var(--line);border-radius:13px;
+  padding:0 16px}
+.wstep.done[open]{padding-bottom:16px}
+.stepsum{display:flex;align-items:center;gap:12px;padding:14px 0;cursor:pointer;
+  list-style:none}
+.stepsum::-webkit-details-marker{display:none}
+.stepsum:hover .stepsum-v{color:var(--accent)}
+.stepsum .tick{flex:none;width:22px;height:22px;border-radius:50%;background:var(--accent);
+  color:var(--accent-ink);display:flex;align-items:center;justify-content:center;
+  font-size:13px;line-height:1}
+.stepsum-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.stepsum-t b{font-size:15.5px;font-weight:620}
+.stepsum-s{font-size:13.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.stepsum-v{flex:none;font-size:13.5px;color:var(--dim)}
+/* THE STEP STILL OWED IS THE ONE THAT LOOKS LIKE WORK. Everything above it has folded away, so
+   it does not need a highlight to be found — it needs the heading weight the folded rows gave up. */
+.wstep:not(.done) > h1{margin-bottom:0}
 
 /* ── the thread ────────────────────────────────────────────────────────────────────────────
    Theirs left, ours right — the iMessage shape, which is the one everybody already reads. */
@@ -662,6 +720,9 @@ a.row:active{background:var(--hair);border-radius:10px}
 .msg .b{background:var(--bubble-in);border-radius:19px;padding:9px 14px;white-space:pre-wrap;
   overflow-wrap:anywhere;font-size:16px;line-height:1.35;text-align:left}
 .msg.out .b{background:var(--bubble-out);color:var(--bubble-out-ink)}
+/* A LINK IN A BUBBLE TAKES THE BUBBLE'S COLOUR and is underlined, because an accent
+   colour that reads on the white bubble is unreadable on the tinted one. */
+.msg .b a{color:inherit;text-decoration:underline;text-underline-offset:2px;word-break:break-word}
 .msg .m{margin-top:3px;margin-bottom:9px;color:var(--dimmer);font-size:12px}
 
 /* ── the reply box ─────────────────────────────────────────────────────────────────────────
@@ -801,7 +862,12 @@ a.row:active{background:var(--hair);border-radius:10px}
    enter this calculation. */
 body{display:flex;flex-direction:column;min-height:100dvh}
 .lay{flex:1}
-@media (min-width:821px){ .lay .rail .who{display:none} }
+/* THE BOX NAMES ITSELF AT THE TOP OF THE RAIL, ON A MACHINE'S SCREENS TOO. This hid core's
+   `.who` block — crest, box name, account — whenever the rail was drawn inside this app, so the
+   dashboard's rail opened with the box's name and a machine's rail opened with a bare row. One
+   idiom per level was the intent; what it produced was furniture that appears and disappears as
+   you move between screens of the same box. Owner, 2026-09-21: *"that logo at the top should be
+   fixed therefore the machines."* Core draws it, every machine wears it. */
 """
 
 # THE BOX'S RAIL, DRAWN BY CORE AND THEMED BY THE TOKENS ABOVE. Appended rather than pasted: one
@@ -1030,7 +1096,11 @@ _TABS = (
 _TAB_ICON = {href: d for href, _label, d in _TABS}
 
 shell.register_section(
-    "inbox", order=10, machine="customer_voice", title="Inbox",
+    # UNIFIED INBOX, NOT INBOX. Owner, 2026-09-21: *"the name of the machine should be Unified
+    # Inbox not Inbox."* It is the product's name and the dashboard card already used it, so the
+    # rail was the one surface still calling it something shorter than it is called everywhere
+    # else. `Messages` below is the SCREEN inside it and keeps its own name.
+    "inbox", order=10, machine="customer_voice", title="Unified Inbox",
     href="/inbox/", icon=_TAB_ICON["/inbox/inbox"],
     items=[
         {"key": "messages", "label": "Messages", "href": "/inbox/inbox",
@@ -3634,6 +3704,37 @@ def _setup_consent(e: dict) -> str:
         '</div>')
 
 
+def _setup_progress(steps: list[dict]) -> str:
+    """WHERE YOU ARE IN A JOB THAT HAS AN END. Owner, 2026-09-21: a progress bar across the top.
+
+    A SEGMENT PER STEP, NOT A PERCENTAGE. A handful of steps is few enough to draw each
+    one, and a
+    segment answers the question a percentage dodges: how many are left, and is the one I am
+    looking at among them. It carries no labels — the steps below are the labels, and a second
+    set of names in a 6px bar is noise a person has to read twice.
+
+    THE NUMBER IS THE HEADLINE AND THE BAR IS THE PICTURE. Screen readers get the sentence and
+    skip the bar entirely (aria-hidden), because "2 of 5 connected" is the whole content; a row
+    of filled-or-not spans read aloud is worse than silence.
+
+    THE TOTAL IS COUNTED, NEVER WRITTEN. `steps` is `_setup_source()`, which is
+    `box_secrets.setup_state()` merged with the seam — the only source (OSDev1, 2026-09-22). It
+    read 4 before the AI-coworkers step landed and reads 5 after it; nothing here changed.
+    """
+    total = len(steps)
+    done = sum(1 for e in steps if e.get("status") == "connected")
+    segs = "".join(
+        f'<span class="seg{" on" if e.get("status") == "connected" else ""}"></span>'
+        for e in steps)
+    left = total - done
+    # WHAT IS LEFT, IN WORDS, because "2 of 4" tells you where you are and not how much further.
+    tail = ("Everything is connected." if not left else
+            f'{left} to go.' if done else "Nothing connected yet.")
+    return (f'<div class="wiz">'
+            f'<p class="wiz-n"><b>{done} of {total} connected.</b> {_esc(tail)}</p>'
+            f'<div class="wiz-bar" aria-hidden="true">{segs}</div>'
+            f'</div>')
+
 def _choice_picker(choice: dict) -> str:
     """A dropdown a STEP declared. The renderer knows nothing about which step it belongs to.
 
@@ -3713,12 +3814,39 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
     else:
         out = ""
 
-    return (f'<section id="{_esc(e.get("key"))}" style="margin-top:26px">'
-            f'<h1 style="font-size:19px">{n}. {_esc(e.get("title"))}</h1>'
-            f'<p class="quiet" style="margin:2px 0 0">{_esc(e.get("why"))}</p>'
-            f'<p class="quiet" style="margin:6px 0 0"><b class="{_esc(tone)}">{_esc(said)}</b>'
-            + (f' — {_esc(detail)}' if detail else "") + '</p>'
+    # A FINISHED STEP FOLDS SHUT. Until today every step printed its four Google instructions
+    # whether or not the buyer had already followed them, so a box with three of four connected
+    # was a wall of things not to do — and the one step still owed was somewhere inside it.
+    # Owner, 2026-09-21, asking for a wizard and for readability; OSDev1 named this one directly.
+    #
+    # `<details>` AND NOT A SCRIPT. This app's screens run without client JavaScript on purpose
+    # (the theme is a cookie for the same reason), and open/closed is exactly what the element
+    # is for: it keeps the content in the page for search and for a screen reader, and it needs
+    # no state of ours. The summary carries the verb, so the way back in is named rather than
+    # discovered — "Change" on a step that is done, which is the only thing left to do to it.
+    done_ = e.get("status") == "connected"
+    head_ = (f'<h1 style="font-size:19px">{n}. {_esc(e.get("title"))}</h1>'
+             f'<p class="quiet" style="margin:2px 0 0">{_esc(e.get("why"))}</p>'
+             f'<p class="quiet" style="margin:6px 0 0"><b class="{_esc(tone)}">{_esc(said)}</b>'
+             + (f' — {_esc(detail)}' if detail else "") + '</p>')
+    if done_:
+        # THE TICK IS DECORATION AND THE WORD IS THE CONTENT. "Connected" is already in `said`;
+        # a tick that a screen reader also announces would say it twice.
+        head_ = (f'<summary class="stepsum">'
+                 f'<span class="tick" aria-hidden="true">\u2713</span>'
+                 f'<span class="stepsum-t"><b>{n}. {_esc(e.get("title"))}</b>'
+                 f'<span class="stepsum-s">{_esc(said)}'
+                 + (f' — {_esc(detail)}' if detail else "") + '</span></span>'
+                 f'<span class="stepsum-v" aria-hidden="true">Change</span>'
+                 f'</summary>')
+    tag = "details" if done_ else "section"
+    return (f'<{tag} id="{_esc(e.get("key"))}" class="wstep{" done" if done_ else ""}" '
+            f'style="margin-top:26px">'
+            + head_
             # ABOVE THE INSTRUCTIONS, because it decides which set of them applies.
+            # DECLARED BY THE STEP (#1410, OSDev1) and drawn by the renderer, which is
+            # why a folded step carries its picker shut with it and this file still
+            # names no step key — test_setup_screen_loop refuses one that does.
             + picker
             # THE ONE-PRESS ROUTE FIRST, ABOVE THE INSTRUCTIONS FOR THE LONG WAY ROUND. A step
             # that declares `action_href` has a door a buyer can simply walk through; drawing it
@@ -3743,7 +3871,7 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
                f'<input type="hidden" name="step" value="{_esc(e.get("key"))}">'
                f'{fields}<p style="margin:12px 0 0">'
                f'<button class="btn" type="submit">{verb}</button></p></form>' if fields else "")
-            + out + '</section>')
+            + out + f'</{tag}>')
 
 
 @blueprint.route("/inbox/connect-claude", methods=["GET", "POST"])
@@ -3959,9 +4087,10 @@ def r_setup():
             if done < len(steps) else
             '<h1>You are set up.</h1><p class="quiet">Everything below is connected. Change any '
             'of it whenever you like.</p>')
-    body = head + "".join(_setup_step(i, e, note=notes.get(e.get("key"), ""), typed=typed,
-                                      owner=(_u.get("role") or "") == "owner")
-                          for i, e in enumerate(steps, 1))
+    body = head + _setup_progress(steps) + "".join(
+        _setup_step(i, e, note=notes.get(e.get("key"), ""), typed=typed,
+                    owner=(_u.get("role") or "") == "owner")
+        for i, e in enumerate(steps, 1))
     # THE PHONE STEP'S SCRIPT, loaded only by this screen. It is not in the inbox's own JS block
     # because that block is guarded against fetch and timers — the inbox must never imply it is
     # live-updating — and this belongs to set-up, where the phone step lives.

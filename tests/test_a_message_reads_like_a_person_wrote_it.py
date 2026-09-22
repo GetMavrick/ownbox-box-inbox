@@ -124,11 +124,54 @@ def test_a_body_with_nothing_in_it_is_not_a_crash():
             ok(f"{empty!r} renders", False, f"{type(e).__name__}: {e}")
 
 
+
+def test_only_http_ever_becomes_clickable():
+    """The scheme allow-list, which is the whole defence in a module that builds anchors.
+
+    CARRIED OVER FROM tests/test_a_message_is_readable.py — the suite I wrote for the version of
+    this that I built in parallel, before composing onto OSDev1's. His implementation is
+    http-only too, by the same regex; what his suite did not have was a case saying so, and an
+    invariant nobody asserts is one a later refactor can drop without noticing.
+    """
+    for hostile in ("javascript:alert(1)", "data:text/html;base64,PHN2Zz4=",
+                    "vbscript:msgbox", "file:///etc/passwd"):
+        out = readable(f"click {hostile} now")
+        ok(f"{hostile.split(':')[0]}: is never made clickable", "<a href=" not in out, out[:80])
+    ok("http and https still are",
+       readable("http://a.example and https://b.example").count("<a href=") == 2)
+
+
+def test_the_debris_a_fallback_generator_leaves():
+    """Two artefacts from the owner's own screenshot (2026-09-22), both found by rendering it.
+
+    THE EMPTY `<>` is where a link with no text used to be: the generator put the href in the
+    HTML part and had nothing for the plain one, so the buyer reads "fundercrm.com <>" and sees
+    a rendering fault. `_ANGLED` cannot catch it — there is no URL between the brackets.
+
+    THE BRACKET RULE cuts both ways, and stripping every trailing `)` was wrong in one direction:
+    a URL that opened its own bracket keeps it, or `..._(Y)` becomes an href ending `_(Y` and
+    404s, which is worse than no link at all.
+    """
+    ok("an empty <> is not shown to anybody",
+       "&lt;&gt;" not in readable("fundercrm.com <> will expire"),
+       readable("fundercrm.com <> will expire"))
+    wiki = readable("see https://en.wikipedia.org/wiki/X_(Y) ok")
+    ok("a URL that opened its own bracket keeps it",
+       'href="https://en.wikipedia.org/wiki/X_(Y)"' in wiki, wiki)
+    sentence = readable("(see https://x.com/a) ok")
+    ok("...and one that did not, does not",
+       'href="https://x.com/a"' in sentence and "&gt;)" not in sentence, sentence)
+    stop = readable("go https://x.com/a. done")
+    ok("a full stop stays outside the link", 'href="https://x.com/a"' in stop, stop)
+
+
 if __name__ == "__main__":
     test_nothing_a_sender_writes_becomes_markup()
     test_the_gaps_go_and_the_shape_stays()
     test_links_become_links()
     test_a_body_with_nothing_in_it_is_not_a_crash()
+    test_only_http_ever_becomes_clickable()
+    test_the_debris_a_fallback_generator_leaves()
 
     print("\n— and this file cannot silently fall out of CI —")
     import pathlib

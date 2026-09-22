@@ -35,6 +35,22 @@ import re
 # not produce a link with the full stop inside it.
 _URL = re.compile(r"""(?P<url>https?://[^\s<>"']+?)(?P<tail>[.,;:!?)\]]*)(?=\s|$)""")
 
+
+def _unclosed(url: str, tail: str) -> tuple[str, str]:
+    """Give back a bracket the URL actually opened.
+
+    THE TAIL RULE IS RIGHT FOR A SENTENCE AND WRONG FOR WIKIPEDIA. Stripping every trailing
+    `)` turns `https://en.wikipedia.org/wiki/X_(Y)` into an href ending `X_(Y` — a link that
+    404s, which is worse than no link, while `(see https://x.com/a)` genuinely wants the
+    bracket left outside. The difference is whether the URL opened the bracket itself, so
+    that is what is counted rather than guessed. Measured on both before and after.
+    """
+    while tail.startswith(")") and url.count("(") > url.count(")"):
+        url, tail = url + ")", tail[1:]
+    while tail.startswith("]") and url.count("[") > url.count("]"):
+        url, tail = url + "]", tail[1:]
+    return url, tail
+
 # `<https://…>` is RFC 3986's "angle-bracket delimited" form and mailers emit it constantly. After
 # escaping it reads `&lt;https://…&gt;`, and showing a buyer those literal brackets is noise.
 _ANGLED = re.compile(r"&lt;(?P<url>https?://[^\s<>\"']+?)&gt;")
@@ -91,7 +107,16 @@ def readable(text: str) -> str:
     operating on inert characters. A regex that assembled HTML from UNESCAPED input would be the
     hole this module exists to avoid.
     """
-    escaped = html.escape(collapse_blank_lines(text or ""), quote=True)
+    # AN EMPTY `<>` IS WHERE A LINK WITH NO TEXT USED TO BE — the generator wrote the href into
+    # the HTML part and had nothing to put in the plain one. It reaches the buyer as
+    # "fundercrm.com <>", which reads as a rendering fault rather than as the debris it is, and
+    # it appeared twice in the screenshot the owner sent. `_ANGLED` cannot catch it: there is no
+    # URL between the brackets for it to match. Dropped before escaping, while it is still `<>`.
+    escaped = html.escape(collapse_blank_lines((text or "").replace("<>", "")), quote=True)
     escaped = _ANGLED.sub(lambda m: _link(m.group("url")), escaped)
-    escaped = _URL.sub(lambda m: _link(m.group("url")) + m.group("tail"), escaped)
+    def _one(m: "re.Match[str]") -> str:
+        url, tail = _unclosed(m.group("url"), m.group("tail"))
+        return _link(url) + tail
+
+    escaped = _URL.sub(_one, escaped)
     return escaped.replace("\n", "<br>")
