@@ -23,13 +23,14 @@ from __future__ import annotations
 
 import email as email_mod
 import email.header
+import email.message
 import email.utils
 import html as html_mod
 import re
 import imaplib
 from datetime import datetime, timezone
 
-from core import box_secrets
+from core import box_mail, box_secrets
 from core.vendors import mailbox as _core_mailbox
 from core.logging import get_logger
 
@@ -183,6 +184,228 @@ def _resume_from(space: str, uidvalidity: str) -> int:
     return int(seen_uid or 0)
 
 
+# ── THE DRAFT, IN THE BUYER'S OWN DRAFTS FOLDER ──────────────────────────────────────────────────
+#
+# WHY THIS EXISTS AND WHY IT IS FIRST. Owner, 2026-09-22: *"If we can't auto draft emails and then
+# actually go ahead and send them, this is a completely worthless app."* Sending is coming; this is
+# the half that needs NO SMTP AT ALL and reaches him where he already is. The box holds an
+# authenticated IMAP session, and RFC 3501 APPEND writes a message into a folder. So the reply the
+# box wrote appears in his Gmail, inside the customer's thread, already written. He reads the
+# customer's email where he always reads it, sees the answer waiting under it, and taps Send —
+# from any client he already has, with nothing installed and no permission asked for.
+#
+# GMAIL SENDS IT, NOT US. That is the point on day one: no new credential, no send policy to
+# settle, no deliverability of ours involved. §1.2 adds SMTP so the box can send from its own
+# screen; this works before any of that, and keeps working after it for the buyer who lives in
+# the Gmail app and never opens ours.
+#
+# THE FOLDER IS FOUND, NEVER NAMED. `[Gmail]/Drafts` is LOCALISED — a French account has
+# `[Gmail]/Brouillons` — so a hard-coded name works on exactly the accounts the author tested and
+# silently fails on the rest. RFC 6154 gives every well-behaved server a `\Drafts` attribute on
+# LIST, which is what this asks for. No attribute, no append: the box's own Drafts tab still has
+# it, and a missing folder must never cost a draft.
+#
+# NO `X-Ownbox` MARK ON A DRAFT, unlike every message the box itself sends (`core.box_mail`).
+# The mark exists so ingest can skip the box's own mail; a draft is not the box's mail — the
+# moment the buyer taps Send it becomes THEIRS, and marking it would tell the sweep to ignore
+# the one outbound that matters most.
+
+_DRAFT_TIMEOUT_S = 20        # nobody is standing in front of this; shorter than the sweep's 30
+
+
+def _drafts_folder(conn) -> str:
+    """The mailbox flagged `\Drafts` (RFC 6154), or "" when the server offers none."""
+    try:
+        typ, boxes = conn.list()
+    except Exception:                                    # noqa: BLE001 — a draft never dies here
+        return ""
+    if typ != "OK":
+        return ""
+    for raw in boxes or []:
+        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+        if "\\Drafts" not in line:
+            continue
+        # LIST answers `(\HasNoChildren \Drafts) "/" "[Gmail]/Drafts"` — the name is the last
+        # quoted run, and it is quoted precisely because it may contain the delimiter.
+        parts = line.split('"')
+        if len(parts) >= 2:
+            return parts[-2]
+        return line.rsplit(" ", 1)[-1].strip()
+    return ""
+
+
+# AN IMAP SEARCH KEY IS A COMMAND, AND A MESSAGE-ID IS A STRANGER'S HEADER.
+#
+# `in_reply_to` is the customer's own `Message-ID:`, copied off the wire by the sweep. Interpolated
+# into a search key it is INJECTION, found by OSDev1 on #1434 before it landed: a sender whose
+# Message-ID contains a double quote closes ours and appends search keys of their choosing. One
+# that matches the whole mailbox, plus a reader that took the newest hit, would put an UNRELATED
+# customer's subject line on a draft addressed to this one — and the buyer taps Send.
+#
+# Two answers, and this holds with either one alone:
+#
+#   1. QUOTE IT PROPERLY. RFC 3501's quoted string escapes `"` and `\` with a backslash, and
+#      admits no CR, LF, NUL or 8-bit byte at all — those need a literal, so a value holding one
+#      is refused rather than smuggled. `_imap_quoted` is the only way this file builds a key.
+#   2. CHECK WHAT CAME BACK. The fetch asks for MESSAGE-ID beside SUBJECT and the subject is used
+#      only if the message is the one we asked for. A search that ever goes wrong again returns
+#      nothing usable instead of somebody else's mail.
+
+_UNQUOTABLE = re.compile(r"[^\x01-\x7f]")   # NUL and every 8-bit byte; CR and LF are checked by name
+
+
+def _imap_quoted(value: str) -> str:
+    """`value` as an RFC 3501 quoted string, or "" when it cannot legally be one.
+
+    RETURNS A VALUE THE CALLER MUST CHECK, rather than raising or quietly sanitising. A
+    Message-ID we cannot ask about is not an error — it costs a Subject line and nothing else —
+    but a half-escaped one sent anyway is the bug this function exists to make impossible.
+    """
+    value = str(value or "")
+    if not value or "\r" in value or "\n" in value or _UNQUOTABLE.search(value):
+        return ""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _subject_of(conn, message_id: str) -> str:
+    """The Subject of the message we are answering, so the draft reads as a reply.
+
+    FETCHED RATHER THAN STORED. The sweep keeps no subject, and adding a column would not help the
+    threads already on the box. One header fetch on an open connection is cheaper than a migration
+    that backfills nothing.
+
+    A THREAD IS THREADED BY `References`, NOT BY ITS SUBJECT — so every path out of here that
+    returns "" costs a nicety, not the feature, and the caller carries on with a plain one. That
+    is what makes the two guards above cheap enough to be absolute.
+    """
+    needle = _imap_quoted(message_id)
+    if not needle:
+        return ""
+    try:
+        typ, data = conn.uid("SEARCH", None, f"HEADER Message-ID {needle}")
+        if typ != "OK" or not (data and data[0]):
+            return ""
+        uid = (data[0] or b"").split()[-1]
+        typ, fetched = conn.uid("FETCH", uid,
+                                "(BODY.PEEK[HEADER.FIELDS (SUBJECT MESSAGE-ID)])")
+        if typ != "OK" or not fetched or not isinstance(fetched[0], tuple):
+            return ""
+        got = email_mod.message_from_bytes(fetched[0][1])
+        # THE SECOND GUARD, AND IT IS THE ONE THAT HOLDS WHEN THE FIRST IS WRONG. The subject is
+        # only ever taken from the message we actually asked about.
+        if _header(got, "Message-ID").strip() != str(message_id).strip():
+            log.info("email.subject_mismatch", extra={"asked": str(message_id)[:120]})
+            return ""
+        return _header(got, "Subject")
+    except Exception:                                    # noqa: BLE001 — a nicety, never the feature
+        return ""
+
+
+def _recipient(space: str, zcid: str, in_reply_to: str) -> str:
+    """Who this reply goes to: whoever wrote the message being answered.
+
+    READ OFF THE MESSAGE, NOT OFF THE CONVERSATION. A thread with several participants must
+    answer the one who actually asked, and `participant` on the conversation row is only ever
+    the most recent writer the sweep happened to see.
+    """
+    for m in store.messages_for(space, zcid):
+        if str(m.get("direction")) == "in" and str(m.get("zernio_message_id") or "") == in_reply_to:
+            return str(m.get("sent_by") or "")
+    return ""
+
+
+def append_draft(*, space: str, zcid: str, in_reply_to: str, body: str,
+                 conn=None) -> bool | None:
+    """Put one drafted reply into the buyer's own Drafts folder, inside the thread. Never raises.
+
+    THREE ANSWERS, AND THE THIRD IS THE ONE THAT MATTERS:
+
+      True   it landed.
+      False  not this time — no credential, no `\Drafts` folder, a server having a bad minute.
+             The rail un-claims the row and tries again, and nothing is lost: the box's own
+             Drafts tab still holds the draft, which is the surface this is a convenience on.
+      None   never, for this row. Something about it cannot be put in a mailbox on any attempt.
+             The rail keeps the claim so the row leaves the queue for good — otherwise a handful
+             of them fill every sweep's limit and starve the drafts that would have worked.
+
+    `conn` IS AN ALREADY-AUTHENTICATED SESSION, passed by the mirror so a sweep of three drafts
+    is one login rather than three. Gmail throttles logins, not APPENDs. Left None, this opens
+    and closes its own — which is what a single call from a screen wants.
+
+    NEVER RAISES, because the caller is the drafting rail. A mail server having a bad minute must
+    not lose a reply the box already paid a model to write.
+    """
+    cred = box_secrets.email_credential()
+    if not cred or not str(body or "").strip():
+        return False
+    conv = store.get_conversation(space, zcid) or {}
+    if str(conv.get("platform") or "") != "email":
+        return False                                     # this is the mailbox's trick, nobody else's
+    to = _recipient(space, zcid, in_reply_to)
+    if "@" not in to:
+        return False
+    # A MESSAGE-ID THAT CANNOT BE A HEADER IS REFUSED HERE, and refused FOREVER.
+    #
+    # Python's email policy rejects CR and LF in a header value — correctly, since they would let
+    # a stranger's Message-ID write a `Bcc:` into a message the buyer is about to send. But it
+    # rejects them by raising, three calls down, which this function would turn into "try again".
+    # A header that is malformed now is malformed for good, and five such rows would fill the
+    # rail's LIMIT every sweep and starve every real draft behind them. So: None, not False.
+    if any(c in in_reply_to for c in "\r\n") or any(c in to for c in "\r\n"):
+        log.warning("email.draft_unheaderable", extra={"space": space, "conversation": zcid})
+        return None
+
+    own, opened = conn, None
+    try:
+        if own is None:
+            own = opened = imaplib.IMAP4_SSL(cred.get("host") or "imap.gmail.com",
+                                             timeout=_DRAFT_TIMEOUT_S)
+            own.login(cred["user"], cred["password"])
+            # READ-ONLY, for the same reason the sweep is: `_subject_of` searches INBOX, and a
+            # session that cannot set a flag cannot mark the buyer's mail as read by accident.
+            own.select(_FOLDER, readonly=True)
+        folder = _drafts_folder(own)
+        if not folder:
+            log.info("email.no_drafts_folder", extra={"space": space})
+            return False
+        subject = _subject_of(own, in_reply_to)
+        if subject and not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+
+        msg = email.message.EmailMessage()
+        msg["From"] = cred["user"]
+        msg["To"] = to
+        msg["Subject"] = subject or "Re: your message"
+        # BOTH HEADERS. `In-Reply-To` names the parent and `References` carries the thread's root
+        # (`zcid` IS that root — `thread_key` resolves it), which is what every client threads on.
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = f"{zcid} {in_reply_to}" if zcid != in_reply_to else in_reply_to
+        msg["Date"] = email.utils.formatdate(localtime=True)
+        msg.set_content(str(body))
+
+        # `\Draft` IS WHAT MAKES IT A DRAFT rather than a message sitting in a folder: without
+        # the flag Gmail shows it but will not open it in the composer, which is the whole point.
+        typ, _ = own.append(folder, "\\Draft", None, msg.as_bytes())
+        if typ != "OK":
+            log.warning("email.draft_refused", extra={"space": space, "conversation": zcid,
+                                                      "folder": folder, "reply": str(typ)})
+            return False
+        log.info("email.draft_appended", extra={"space": space, "conversation": zcid,
+                                                "folder": folder})
+        return True
+    except Exception as e:                               # noqa: BLE001 — see the docstring
+        log.warning("email.draft_append_failed",
+                    extra={"space": space, "conversation": zcid,
+                           "error": f"{type(e).__name__}: {e}"[:160]})
+        return False
+    finally:
+        if opened is not None:
+            try:
+                opened.logout()
+            except Exception:                            # noqa: BLE001
+                pass
+
+
 def sweep(space: str) -> tuple[int, int]:
     """Read new mail for one Space into the inbox store. Returns (scanned, stored).
 
@@ -214,6 +437,16 @@ def sweep(space: str) -> tuple[int, int]:
             mid = _header(msg, "Message-ID")
             if not zcid or not mid:
                 continue                                 # unthreadable and unidentifiable; skip
+            # THE BOX NEVER READS ITS OWN NOTICE AS A CUSTOMER. Skipped whole — no conversation,
+            # no message row, no watermark opinion — because a notice is not a thing that happened
+            # in this business's inbox, it is this box talking to its own owner.
+            #
+            # BEFORE `upsert_conversation`, which is the point. The existing `inbound` check files
+            # an exact self-match as outbound and so never drafts a reply to it — real protection,
+            # and it still CREATES a conversation whose participant is the buyer's own address.
+            # A row per notice, twice a day, in the list of people who wrote to the business.
+            if _header(msg, box_mail.ORIGIN_HEADER):
+                continue
             frm = _header(msg, "From")
             name, addr = email.utils.parseaddr(frm)
             own = (cred.get("user") or "").lower()

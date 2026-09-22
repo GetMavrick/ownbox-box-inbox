@@ -159,6 +159,35 @@ pre_send = src.split("zernio.client(sp).inbox.send")[0]
 ok("and no window check was added BEFORE the vendor call, in the source itself",
    "window.decide" not in pre_send and "window.explain" not in pre_send)
 
+# THE ONE QUESTION THE SEND PATH MAY ASK THIS MODULE, and the reason it is safe to allow.
+#
+# `send_reply` refuses a channel this box has NO WAY to reach — email has no SMTP path, so an
+# email draft ticked in the Drafts tab used to fall through to the Zernio branch and hand a buyer
+# an exception class name (OSDev1, 2026-09-22). That is not the block this file forbids: there is
+# nothing for a person to be blocked FROM, and it is not an inference about time.
+#
+# THE ARGUMENT LIST IS WHAT KEEPS THAT TRUE. `no_send_lane_why` takes a platform and nothing else,
+# so it CANNOT answer "the window shut" however it is later edited — and the moment somebody adds
+# a timestamp to it, the send path could block on our arithmetic again and this check fails.
+# Guarding the shape rather than the intent is the only version of this that survives a refactor.
+import inspect as _inspect  # noqa: E402
+
+_params = list(_inspect.signature(window.no_send_lane_why).parameters)
+ok("the send path's one question to this module takes NO timestamp, so it cannot become a clock",
+   _params == ["platform"], str(_params))
+ok("...and it answers only for a lane that does not exist — never for an unknown platform, "
+   "which is a gap in OUR work and not a person's to be refused over",
+   window.no_send_lane_why("email") and not window.no_send_lane_why("whatsapp")
+   and not window.no_send_lane_why("instagram") and not window.no_send_lane_why(""),
+   f"email={bool(window.no_send_lane_why('email'))} "
+   f"whatsapp={bool(window.no_send_lane_why('whatsapp'))}")
+# AND THE SEND PATH KEEPS NO COPY OF THE SENTENCE. It is data on the rule, beside the policy it
+# explains, so the words a buyer reads and the reason they are true cannot drift apart. My first
+# version of this check grepped reply.py FOR the sentence and failed — correctly, and it is the
+# better property that the sentence is not there.
+ok("...and the send path keeps no copy of the words — they live beside the policy",
+   window.no_send_lane_why("email")[:40] not in src)
+
 
 # ── 3. the refusal, in words — and only when our clock agrees ────────────────────────────
 print("\ntest_a_window_refusal_is_translated_only_when_our_own_clock_agrees")

@@ -154,6 +154,38 @@ def _parse(ts: str | None) -> datetime | None:
         return None
 
 
+def no_send_lane_why(platform: str) -> str:
+    """Why this box cannot send on `platform` AT ALL, or "" when it can. TAKES NO TIMESTAMP.
+
+    THE MISSING ARGUMENT IS THE WHOLE POINT, and it is why this exists rather than the send path
+    calling `decide`. tests/test_send_window_says_it_first.py guards a NEGATIVE that came from
+    #1170 Option C — a question the owner has not answered, so no developer may answer it either:
+    *nothing in this module may ever stop a person sending*. Our window state is an INFERENCE from
+    `last_inbound_at`, a column a poller fills late, skips channels in and carries stale
+    watermarks through. A false block tells a business owner he may not answer his own customer,
+    on our arithmetic, with no override — and it does not even make the message send. It converts
+    "you tried and Meta said no" into "we said no".
+
+    A NO-SEND LANE IS NOT THAT, and the difference is not a matter of degree. It is not an
+    inference about time at all: it is the fact that this box has no way to reach the channel —
+    email has no SMTP path in the repository, so there is nothing for a person to be blocked FROM.
+    Refusing in a sentence is the only alternative to falling through to a vendor branch for a
+    completely different platform, which is what a buyer actually got (OSDev1, 2026-09-22).
+
+    So the send path asks THIS, never `decide`, and because there is no timestamp to pass, a
+    future edit cannot quietly turn it into a clock. The guard stays exactly as strict as it was
+    about `decide` and `explain`, which is the strictness that was protecting the ruling.
+    """
+    rule = _RULES.get(str(platform or "").strip().lower()) or {}
+    if not rule.get("no_send_lane"):
+        # "" COVERS BOTH OF THE OTHER ANSWERS ON PURPOSE: a channel that can send, and a channel
+        # nobody has written a rule for. Neither is a lane this box is missing, and only `decide`
+        # — on the bot path, where nobody is watching — may refuse an unknown platform. Saying no
+        # to a person here over a gap in OUR work is the exact move the guard forbids.
+        return ""
+    return str(rule.get("no_send_lane_why") or "")
+
+
 def decide(platform: str, last_inbound_at: str | None, now: datetime | None = None) -> dict:
     """What may be sent on `platform` right now. Always a dict, never an exception.
 

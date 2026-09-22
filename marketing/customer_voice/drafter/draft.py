@@ -241,4 +241,19 @@ def sweep(space: str) -> dict:
         if draft_one(space=space, zcid=row["zcid"], in_reply_to=row["inbound_id"],
                      inbound=row.get("inbound_body") or "", history=history):
             drafted += 1
+    # A SWEEP THAT LOOKED AT WORK AND DID NONE OF IT SAYS SO, OUT LOUD. This is the alarm that was
+    # missing when the drafter sat head-blocked for seven hours on the owner's own box: every
+    # early-out inside `draft_one` is individually reasonable and individually quiet, so the sweep
+    # reported `drafted: 0` forever while 87 conversations waited and /health stayed green.
+    #
+    # THE ALARM IS ON THE OUTCOME, NOT ON A CAUSE, and that is deliberate. Logging "empty body"
+    # would have caught this one and nothing else; the next silent cause — a cap, a model that
+    # will not answer, a draft already present under a different key — would be invisible all over
+    # again. The question worth asking every two minutes is only ever: I had work, did I do any?
+    if waiting and not drafted:
+        log.warning("drafter.sweep_wrote_nothing",
+                    extra={"space": space, "considered": len(waiting),
+                           "oldest": str(waiting[-1].get("inbound_at") or "")[:19],
+                           "platforms": ",".join(sorted({str(r.get("platform") or "?")
+                                                         for r in waiting}))})
     return {"status": "ok", "drafted": drafted, "considered": len(waiting)}

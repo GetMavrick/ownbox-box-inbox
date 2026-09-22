@@ -103,6 +103,12 @@ def is_configured() -> bool:
     return bool((getattr(settings, "resend_api_key", "") or "").strip() and from_address())
 
 
+# THE ONE NAME FOR "THIS BOX SENT IT". Read by `inbox/email_channel.sweep` on the way back in, so
+# it lives here — beside the only function that puts it on the wire — and is imported there rather
+# than spelled twice. Two copies of a header name is one copy being wrong after the next edit.
+ORIGIN_HEADER = "X-Ownbox"
+
+
 def send(to: str, subject: str, text_body: str, html_body: str, *, idem_key: str,
          sender_name: str, note: str) -> str:
     """One email through Resend. -> the Resend message id. Raises; the caller decides what a
@@ -123,8 +129,26 @@ def send(to: str, subject: str, text_body: str, html_body: str, *, idem_key: str
     if "@" not in to:
         raise VendorError("resend", "config", f"not an address: {to!r}")
     cost_guard.check_vendor("resend", 1)
+    # EVERY MESSAGE THIS BOX ORIGINATES CARRIES A MARK, and the inbox's sweep skips anything
+    # wearing it (`inbox/email_channel.py`). Required by OSDev1 before the box may notify a buyer
+    # at their own address (M1, 2026-09-22), because the poller reads that same mailbox.
+    #
+    # WHY THE FROM-ADDRESS CHECK ALREADY THERE IS NOT ENOUGH. The sweep computes
+    # `inbound = addr.lower() != own`, so an EXACT self-match is already filed as outbound and
+    # never drafted. That check is real protection and it is fragile in four ordinary shapes:
+    #   · a Gmail alias or +suffix — `info+notice@` is not equal to `info@`
+    #   · a notice to a MEMBER, whose address is not the mailbox's
+    #   · a shared or forwarded mailbox, where the box reads mail the buyer did not send
+    #   · a From rewritten by a relay
+    # In each of those the equality fails, the notice reads as a customer, and the box answers
+    # itself. A header is not a second guess at the same question — it is the box saying so.
+    #
+    # `X-` AND ITS OWN NAME. A custom header is carried verbatim by Resend and by SMTP; no mail
+    # system rewrites one it does not know. It says only that we sent it — it carries no count,
+    # no address and no customer's words, so a copy landing anywhere is harmless.
     payload = {"from": f"{sender_name} <{sender}>", "to": [to], "subject": subject,
-               "text": text_body, "html": html_body}
+               "text": text_body, "html": html_body,
+               "headers": {ORIGIN_HEADER: "notice"}}
     headers = {"Authorization": f"Bearer {key}", "Idempotency-Key": idem_key, "User-Agent": _UA}
     try:
         status, body = net.post_public(_URL, json=payload, headers=headers, timeout=30)

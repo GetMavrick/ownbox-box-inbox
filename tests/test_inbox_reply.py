@@ -481,5 +481,52 @@ ok("...and the ledger carries one settled row for the attempt",
 INBOX.send_impl = lambda cid, aid, text, tag: {"message_id": f"out-{len(INBOX.sent)}"}
 
 
+# ── THE LANE IS A GATE, NOT ONLY A WARNING (M2, OSDev1, 2026-09-22) ──────────────────────────
+# WHAT WAS LIVE BEFORE THIS. `no_send_lane` had exactly one reader — `app._no_send_lane`, which
+# hides the compose box on a thread. The Drafts tab (#1419) does not go through that screen: it
+# calls `send_reply` directly, for every ticked draft, whatever the platform. So an email draft
+# fell through to the Zernio branch and the buyer read an exception class name where a sentence
+# belongs. The screen was a warning and nothing was a gate.
+#
+# THE OTHER CHANNELS MUST STILL GO. A gate that refuses everything is not a fix, and the Drafts
+# tab sends a mixed list — the whole point of the screen is ticking several at once.
+print("\ntest_a_channel_with_no_send_lane_is_refused_in_words")
+
+_now = datetime.now(timezone.utc).isoformat()
+store.upsert_conversation(space=SPACE, zcid="zc-lane-email", platform="email",
+                          last_inbound_at=_now, account_id="owner@acme.co")
+store.upsert_conversation(space=SPACE, zcid="zc-lane-dm", platform="messenger",
+                          last_inbound_at=_now, account_id="acct-lane")
+
+try:
+    reply.send_reply(space=SPACE, zcid="zc-lane-email", text="Tuesday works.",
+                     user_id=U, nonce=reply.new_nonce())
+    ok("an email draft is refused rather than reaching the vendor", False, "it was not refused")
+except reply.ReplyRefused as e:
+    ok("an email draft is refused rather than reaching the vendor", True)
+    # THE CHANNEL'S OWN SENTENCE, from `no_send_lane_why` on the rule, surfaced by `decide` under
+    # `reason`. Reading `no_send_lane_why` off the RESULT looks right and is always empty.
+    ok("...in the channel's own words, not a class name",
+       "mail app" in str(e) and "SMTP" in str(e), str(e)[:120])
+except Exception as e:                                   # noqa: BLE001
+    ok("an email draft is refused rather than reaching the vendor", False,
+       f"{type(e).__name__}: {str(e)[:80]}")
+
+# NOTHING IS CLAIMED FOR A SEND THAT COULD NEVER HAPPEN. The refusal is before the ledger claim,
+# so a lane-blocked channel leaves no row for the watchdog to puzzle over later.
+_led = store.get_send(SPACE, reply.idem_for(SPACE, "zc-lane-email", U, "x")) or {}
+ok("...and no ledger row was claimed for it", not _led, str(_led))
+
+# THE OTHER CHANNELS ARE UNTOUCHED: messenger has a written rule and gets past the lane. It fails
+# later here only because this harness resolves no Space, which is the fixture, not the gate.
+try:
+    reply.send_reply(space=SPACE, zcid="zc-lane-dm", text="On our way.",
+                     user_id=U, nonce=reply.new_nonce())
+    ok("a messenger draft still goes past the lane", True)
+except Exception as e:                                   # noqa: BLE001
+    ok("a messenger draft still goes past the lane",
+       "cannot send on that channel" not in str(e) and "mail app" not in str(e),
+       f"the lane refused it too: {str(e)[:90]}")
+
 print(("FAILED " + str(_failed)) if _failed else "all ok")
 sys.exit(1 if _failed else 0)

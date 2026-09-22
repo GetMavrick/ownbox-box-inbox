@@ -23,7 +23,7 @@ from core import cost_guard
 from core.logging import get_logger
 from core.vendors import zernio
 
-from . import store
+from . import store, window
 
 log = get_logger(__name__)
 
@@ -116,6 +116,45 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
         raise ReplyRefused("no such conversation on this box")
     if conv.get("opted_out"):
         raise ReplyRefused("this person has opted out — nothing is sent to them")
+
+    # A CHANNEL THE BOX CANNOT SEND ON AT ALL, REFUSED IN WORDS — and refused HERE, in the send
+    # path, not only on the screen.
+    #
+    # OSDev1 FOUND THIS AND IT WAS LIVE (2026-09-22): `no_send_lane` was read by exactly one
+    # caller, `app._no_send_lane`, which hides the compose box on a thread. The Drafts tab (#1419)
+    # does not go through that screen — it calls this function directly, for every platform at
+    # once — so ticking an email draft fell straight through to the Zernio branch below and the
+    # buyer got an exception class name where a sentence belongs. The screen was a warning and
+    # nothing was a gate.
+    #
+    # BEFORE THE CLAIM, unlike the two refusals further down. Those resolve a claimed row to
+    # `failed` because they are discovered after claiming; this one is knowable from the
+    # conversation alone, so claiming a ledger key for a send that can never happen would write a
+    # row about an attempt that was never possible.
+    #
+    # THE REASON IS THE CHANNEL'S OWN WORDS, carried as data on the rule (`no_send_lane_why`) so
+    # the sentence a buyer reads is written once, beside the policy, rather than here.
+    #
+    # ASKED WITH `no_send_lane_why`, NEVER `decide`, AND THAT IS NOT A STYLE CHOICE.
+    # tests/test_send_window_says_it_first.py refuses `decide` and `explain` anywhere before the
+    # vendor call in this file, guarding a NEGATIVE that belongs to the owner rather than to any
+    # developer (#1170 Option C): nothing here may ever stop a person sending. Our window state is
+    # an INFERENCE from `last_inbound_at` — filled late, skipped per channel, stale after a
+    # watermark reset — and a false block tells a business owner he may not answer his own
+    # customer, on our arithmetic, with no override.
+    #
+    # A MISSING LANE IS A DIFFERENT KIND OF FACT, not a stricter version of the same one. It is
+    # not about time at all: this box has no SMTP path, so there is nothing for a person to be
+    # blocked FROM, and the only alternative is the fall-through a buyer actually hit — an email
+    # draft reaching the Zernio branch and getting an exception class name where a sentence
+    # belongs (OSDev1, 2026-09-22).
+    #
+    # The first cut of this called `decide`, and CI was right to refuse it. `no_send_lane_why`
+    # takes no timestamp, so it cannot answer "the window shut" — and the suite now asserts that
+    # argument list, so a later edit cannot quietly give it one.
+    why = window.no_send_lane_why(str(conv.get("platform") or ""))
+    if why:
+        raise ReplyRefused(why)
 
     account_id = account_id or (conv.get("account_id") or "")
     if not account_id:

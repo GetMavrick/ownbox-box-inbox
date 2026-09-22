@@ -107,6 +107,18 @@ def needs_a_draft(space: str, *, limit: int = 5) -> list[dict]:
             "                          AND m2.direction = 'in') "
             "   AND NOT EXISTS (SELECT 1 FROM inbox_drafts d "
             "                    WHERE d.space = k.space AND d.in_reply_to = m.zernio_message_id) "
+            # A MESSAGE WITH NO WORDS CAN NEVER BE ANSWERED, so it must never take a slot in this
+            # queue. MEASURED ON THE OWNER'S BOX 2026-09-22: fifteen media-only Instagram messages
+            # arrived at 06:48 with empty bodies. This query is newest-first and the sweep takes
+            # the first three, so for SEVEN HOURS every sweep picked the same empty rows,
+            # `draft_one` returned None on each (silently — an empty inbound was its first
+            # early-out), and `periodic` reported `drafted: 0`. 87 conversations were waiting, 72
+            # of them with real text, and not one could ever be reached. /health was green
+            # throughout, the worker was alive, and nothing said a word.
+            # SQLite's one-argument TRIM strips SPACES ONLY — a body of "\n\t" survives it and the
+            # jam comes straight back through a channel that sends a bare newline. The second
+            # argument is the set of characters to strip, so this is tab, newline and return too.
+            "   AND TRIM(COALESCE(m.body, ''), ' ' || char(9) || char(10) || char(13)) <> '' "
             " ORDER BY m.created_at DESC LIMIT ?", (space, int(limit))).fetchall()
     return [dict(r) for r in rows]
 

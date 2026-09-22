@@ -59,6 +59,22 @@ register_periodic(health.periodic_pagespeed, interval_s=_interval("pagespeed", 8
 from .drafter import draft as _drafter                                   # noqa: E402
 register_periodic(_drafter.periodic, interval_s=_interval("drafts", 120), name="voice_drafts")
 
+# AND THE DRAFT GOES WHERE THE BUYER ALREADY IS. A buyer who reads their mail in the Gmail app
+# never opens our Drafts tab, so the drafted reply is appended to their own Drafts folder, inside
+# the customer's thread (§1.4 of docs/SCOPE_EMAIL_SEND_AND_MOBILE_NOTIFICATIONS.md).
+#
+# A SECOND TIMER, NOT A LINE AT THE END OF THE DRAFTER. `drafter/` may not import anything under
+# `inbox/` — the guard in tests/test_customer_voice.py refuses it, because the directory that may
+# ask a model anything must not be able to reach a mailbox. It also means a slow IMAP server can
+# never delay the next draft being written.
+#
+# SLOWER THAN THE DRAFTER (180s to its 120s) so a draft is normally written and settled before
+# this looks: a draft that arrives in the mailbox and is then superseded is worse than one that
+# arrives a minute later. NO `beat=`, like the drafter — a missing draft is not an outage.
+from .inbox import mailbox_drafts as _mailbox_drafts                     # noqa: E402
+register_periodic(_mailbox_drafts.periodic, interval_s=_interval("mailbox_drafts", 180),
+                  name="voice_drafts_to_mailbox")
+
 # MONTHLY, AND THAT IS THE POINT. This is the only rail on the machine that spends money —
 # one metered Places call per competitor — and a rating moves over months. Polling it hourly
 # would buy the same number seven hundred times.
