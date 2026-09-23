@@ -116,11 +116,20 @@ ok("core/dash/home.py names no machine URL of its own", "/inbox/" not in _src,
 print("\ntest_a_buyer_with_nothing_connected_is_told_what_to_do")
 clear_all()
 h = home()
-ok("the dashboard links to the set-up screen", f'href="{href}"' in h,
-   "a buyer would still have to find it by accident")
+# THE HEADLINE LINK GOES TO THE BOX'S OWN SETTINGS, not to a machine. Owner, 2026-09-23: *"The
+# link in the middle to set up your box should go into the System Settings not the unified inbox
+# machine. It should immediately get them their LLM connection and their progressive Web App."*
+_card = h[h.find("Finish setting up"):]
+_card = _card[:_card.find("</div></div>") if "</div></div>" in _card else 4000]
+ok("the card's headline link goes to System Settings",
+   '<a href="/settings">Set up your box' in h, _card[:400])
 ok("...and says how many things are waiting", "3 things to connect" in h, h[h.find("Finish"):][:160])
-ok("...and says nothing arrives until one is connected — true, on this box",
-   "Nothing arrives until at least one" in h)
+# THE AI ACCOUNT FIRST, THE MOBILE APP SECOND, THEN THE CHANNELS — the order he named them in.
+_order = [_card.find(x) for x in ('href="/settings/ai"', 'href="/settings/mobile"', f'href="{href}#')]
+ok("...then straight to the AI account, the mobile app, and the machine's channels, in that order",
+   -1 not in _order and _order == sorted(_order), str(_order))
+ok("...and the channel rows still reach the machine through the registry",
+   f'href="{href}#email"' in _card and f'href="{href}#zernio"' in _card, _card[:600])
 # THE CONTROL THAT CANNOT DO WHAT IT SAYS. A button to stop a box that has not started was the
 # most prominent thing on this page.
 ok("Stop everything is NOT offered on a box that has not started",
@@ -139,6 +148,7 @@ ok("...and names which ones are left, so nobody hunts",
 ok("...and no longer claims nothing arrives, because something does",
    "Nothing arrives until at least one" not in h,
    "the card tells a buyer his working channel is not working")
+ok("...and the connected channel drops out of the rows", f'href="{href}#email"' not in h)
 
 
 # ── 4. finished: the card goes, the stop button returns ──────────────────────────────
@@ -147,7 +157,8 @@ box_secrets.put(box_secrets.ZERNIO, "z" * 67)
 box_secrets.put(box_secrets.ANTHROPIC, "sk-ant-" + "A" * 60)
 h = home()
 ok("a finished box is not nagged", "Finish setting up your box" not in h)
-ok("...and no longer carries a set-up link it does not need", f'href="{href}"' not in h)
+ok("...and no longer carries a set-up link it does not need",
+   f'href="{href}' not in h and '<a href="/settings">Set up your box' not in h)
 # A SET-UP CARD THAT OUTLIVES SET-UP is the banner every product trains its users to ignore, and
 # this is the one screen that must survive that training.
 ok("Stop everything comes back once there is something running to stop",
@@ -199,10 +210,10 @@ else:
     ok(f"...and /dashboard does not serve a member at all ({mh.status_code})", True)
 
 
-# ── 5. a box with no set-up screen draws no card ─────────────────────────────────────
-print("\ntest_a_box_with_nowhere_to_send_them_draws_nothing")
-# A CARD OFFERING A WAY IN, ON A BOX WITH NO WAY IN, is worse than no card — it is a button to a
-# 404. A Lead box registers no `setup` item, and this is that box.
+# ── 5. a box with no machine set-up screen still gets the box's own rows ──────────────
+print("\ntest_a_box_with_no_channel_screen_still_gets_the_box_rows")
+# A CARD MUST NEVER BE A BUTTON TO A 404. A Lead box registers no `setup` item, and this is that
+# box: its channel rows have nowhere to go, so they are not drawn.
 _saved = dict(shell._SECTIONS)
 try:
     for k, sec in list(shell._SECTIONS.items()):
@@ -210,7 +221,14 @@ try:
             **{**sec.__dict__, "items": tuple(i for i in sec.items if i.key != shell.SETUP_KEY)})
     ok("the registry now answers with nowhere", shell.setup_href() == "", shell.setup_href())
     h = home()
-    ok("...so the card does not draw", "Finish setting up your box" not in h)
+    # THE CARD NOW GOES TO THE BOX'S OWN SETTINGS, which every box serves, so there IS a way in
+    # here and no 404 to protect anyone from. What this box lacks is a machine's channel screen,
+    # so the card draws with the box's own rows and without the channel rows.
+    ok("...so the card still draws, because System Settings is on every box",
+       '<a href="/settings">Set up your box' in h)
+    ok("...with the AI account row", 'href="/settings/ai"' in h)
+    ok("...and no channel rows, because no machine offered a screen for them",
+       'Your inbox' not in h[h.find("Finish setting up"):h.find("Set up your box")])
     ok("...and the page still renders rather than failing", len(h) > 500, f"{len(h)} bytes")
 finally:
     shell._SECTIONS.clear()

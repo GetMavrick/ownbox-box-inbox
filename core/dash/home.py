@@ -106,13 +106,17 @@ background:linear-gradient(145deg,var(--av-a),var(--av-b))}
 .who b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .who span{color:var(--dim);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-/* THE WAY HOME IS A ROW, NOT CHROME — so there is no rule here for it any more.
-   It was `.back`: smaller, dimmer, a chevron, a rule under it, deliberately unlike the
-   destinations below. Owner, 2026-09-22, on his own box: *"Please make sure Dashboard is in the
-   sidebar!!!! It's a back button on the fly out menu!!!"* It is now an ordinary `.nav a` with the
-   dashboard's own icon, inserted at the head of the list by `rail_html`, so it needs no rule of
-   its own — which is the point: it should look like what it is, a place you can go. The history
-   and the earlier ruling it reverses are recorded at that insertion. */
+/* A SUB-MENU'S TITLE BAR: the way out on the left, where you are in the middle, in bold. The
+   empty third column balances the first so the title is centred on the drawer, not on what is
+   left after the chevron. 48px square, because it is the control a thumb reaches for first. */
+.subhead{display:grid;grid-template-columns:48px 1fr 48px;align-items:center;min-height:48px;
+margin:0 0 6px}
+.subhead a{display:flex;align-items:center;justify-content:center;width:48px;height:48px;
+border-radius:9px;color:var(--ink)}
+.subhead a:hover{background:var(--hover)}
+.subhead a .ic{color:inherit}
+.subhead b{text-align:center;font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;
+text-overflow:ellipsis}
 
 .nav{display:flex;flex-direction:column;gap:1px}
 .nav a{display:flex;align-items:center;gap:11px;min-height:42px;padding:8px 10px;
@@ -122,6 +126,7 @@ border-radius:9px;color:var(--nav-ink);font-size:15px}
 .nav a.danger{color:var(--danger)}
 .nav a .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nav a .out{color:var(--faint);margin-left:2px}
+.nav a .fwd{color:var(--faint);flex:none}
 .nav a .ic{color:var(--faint)}
 .nav a[aria-current] .ic{color:var(--ink)}
 
@@ -174,6 +179,10 @@ margin-bottom:14px}
 .card .sub{color:var(--dim);font-size:13px;margin:0 0 12px}
 .row{display:flex;align-items:baseline;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
 .row:first-of-type{border-top:0}
+.card a.step{align-items:center;flex-wrap:nowrap;min-height:48px;color:var(--ink)}
+.card a.step b{flex:1;min-width:0;font-weight:600}
+.card a.step .go{color:var(--dim);flex:none;font-size:14px}
+.card a.step .fwd{color:var(--faint);flex:none}
 a.row:hover{color:var(--accent)}
 .n{font-variant-numeric:tabular-nums;font-weight:650;min-width:2.2em}
 .big{font-size:32px;font-weight:680;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
@@ -321,12 +330,19 @@ _OUT_ARROW = ('<svg class="out" width="13" height="13" viewBox="0 0 24 24" fill=
 # for "a control panel of some sort for a screen" (2026-09-22). The house shape it replaces said
 # "home", which is true of the route and says nothing about what is on it.
 _HOME_ICON = "M3 4.5h18v11.5H3zM9 20h6M12 16v4"
-# A BACK ARROW, FOR THE ONE ROW THAT GOES UP A LEVEL. Owner, 2026-09-22: *"The dashboard should
-# have the back arrow. Because we are on a sub menu when we're inside the inbox machine. So that's
-# why a smart web designer will put a back button to show that we want to go up one level in the
-# menu."* A shaft and a head, not a bare chevron: at 19px a lone chevron reads as "there is more
-# over there" — a disclosure — and this control is the opposite of that.
-_BACK_ARROW = "M19 12H5M12 19l-7-7 7-7"
+# TWO CHEVRONS, AND THEY ARE A PAIR. Owner, 2026-09-23, on the reference he has sent more than
+# once: *"Notice the forward chevron to show when a menu item has sub menu items."* and, of the
+# same reference opened on Settings, *"the first thing at the top you have a back arrow/chevron
+# that functions as the back button. And then settings is in bold showing that we are on the
+# settings."* The forward one sits at the right edge of a row that opens a sub-menu; the back one
+# sits at the left of the sub-menu's own title. Same stroke, mirrored, so the way in and the way
+# out read as one gesture. (The shaft-and-head arrow this replaces was a row of its own labelled
+# Dashboard; the owner retired it the same day: *"we need to do away with the back arrow and the
+# dashboard that we have."*)
+_BACK_ARROW = "M15 5l-7 7 7 7"
+_FWD_CHEVRON = ('<svg class="fwd" width="16" height="16" viewBox="0 0 24 24" fill="none" '
+                'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+                'stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>')
 # A PLUS, and nothing else. This row adds a machine to the box; the glyph is the verb.
 _ADD_ICON = "M12 5.5v13M5.5 12h13"
 # A GEAR. Two subpaths in one `d` — the cog outline and the hole — because `_svg` draws exactly
@@ -385,8 +401,18 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
     screens and the inbox cannot drift into three menus that look almost the same."""
     got = shell.rail(path)
     have = _serving()
+    # WHO IS LOOKING, asked once. An owner-only row is dropped for everyone else rather than drawn
+    # and refused at — see `shell.Item.owner_only`. Unreadable means "not the owner", because the
+    # safe answer to "may I show this person root on the server" is always no.
+    try:
+        from core.dash import session_user as _who_rail
+        _owner = (_who_rail(request) or {}).get("role") == "owner"
+    except Exception:                            # noqa: BLE001 — no request, no owner
+        _owner = False
     rows = []
     for it in got.items:
+        if it.owner_only and not _owner:
+            continue
         # OFF-BOX IS READ FROM THE HREF, never declared beside it. `away` still works for a row
         # that says so, but a row whose destination is an https:// address IS away whether or not
         # somebody remembered the tone, and the two cannot drift apart.
@@ -406,60 +432,31 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
         away = (' target="_blank" rel="noopener noreferrer"' if off else "")
         rows.append(f'<a href="{_esc(it.href)}"{away}'
                     + (f' class="{_esc(cls)}"' if cls else "")
-                    + f'{cur}>{_svg(it.icon)}<span class="lbl">{_esc(it.label)}</span>'
-                    + (_OUT_ARROW if (off or it.tone == "away") else "") + '</a>')
+                    # A SUB-MENU'S ROWS ARE WORDS ONLY. In the reference the icons belong to the
+                    # first level, where they tell sections apart at a glance; one level down every
+                    # row is already inside one section, and the title above them says which.
+                    + f'{cur}>{_svg(it.icon) if got.level == 1 else ""}'
+                    + f'<span class="lbl">{_esc(it.label)}</span>'
+                    + (_OUT_ARROW if (off or it.tone == "away") else "")
+                    + (_FWD_CHEVRON if it.submenu else "") + '</a>')
 
     head = _account(who or brand(), email)
     if got.level == 2:
-        # ONE WAY BACK, AND THE DRAWER IS WHY THERE IS ONLY ONE.
+        # A SUB-MENU OPENS WITH ITS OWN NAME AND THE WAY OUT OF IT, on one line. Owner, 2026-09-23,
+        # of the reference opened on Settings: *"the first thing at the top you have a back
+        # arrow/chevron that functions as the back button. And then settings is in bold showing
+        # that we are on the settings. I think we need to do away with the back arrow and the
+        # dashboard that we have."*
         #
-        # An earlier pass here rendered TWO — a wide one home and a narrow one to the section's
-        # own index — because the phone stacked the menu above the page and a ten-item Settings
-        # list buried the form under 538px of navigation (measured, Chromium 375x780: title at
-        # 585px, first field card at 673px). Two labels, two destinations, one breakpoint choosing.
-        #
-        # The drawer deletes that problem rather than managing it. A menu that is not in the
-        # page's flow until it is asked for costs the page no height at all, so the phone can hold
-        # the SAME menu the desktop holds, and back can mean the one thing it means on both: leave
-        # this section. The owner's reference shows exactly one arrow, and now so does this.
-        # THE LABEL NAMES WHERE IT GOES, not where it is. This read `got.title` — the section the
-        # person is standing in — so the arrow out of the inbox said "Inbox" and the arrow out of
-        # Settings said "Settings", each naming the room being left while pointing at a different
-        # one. Owner, 2026-09-17: *"they can go back into the dashboard so there should be a back
-        # arrow with a dashboard label."* `back_label` resolves through the same chain as `back`,
-        # so the words and the link cannot come apart.
-        # AND IT IS A DESTINATION AGAIN, NOT CHROME. Owner, 2026-09-22, looking at the machine's
-        # own menu on his box: *"Please make sure Dashboard is in the sidebar!!!! It's a back
-        # button on the fly out menu!!!"*
-        #
-        # THIS REVERSES HIS 2026-09-21 RULING QUOTED BELOW, AND BOTH ARE HIS WORDS. That day he
-        # asked for the opposite — *"the dashboard with the back button should not be listed
-        # there. It would should be in the menu at the top of it and should function like a back
-        # button when you are drilled down into a sub menu for the machine."* — and this file did
-        # exactly that: a dimmer, smaller row with a chevron, separated from the list by a rule.
-        # Seen on a real machine screen it reads as chrome rather than as the way home, and on
-        # the box's OWN screens Dashboard is a full row, so the same control wore two costumes
-        # depending on which page you were standing on. The newer instruction wins; the older one
-        # is kept here rather than deleted so the next person reads a decision that changed
-        # rather than a rule that was ignored.
-        #
-        # IT IS A ROW, AND IT CARRIES THE BACK ARROW. Both halves are his, and the first pass at
-        # this shipped only the first. Owner, 2026-09-22: *"The dashboard should have the back
-        # arrow. Because we are on a sub menu when we're inside the inbox machine. So that's why
-        # a smart web designer will put a back button to show that we want to go up one level in
-        # the menu."*
-        #
-        # SO THE TWO INSTRUCTIONS ARE ABOUT DIFFERENT THINGS, which is why the first read of them
-        # looked like a contradiction and was not. "In the sidebar, not a back button" is about
-        # WHERE IT SITS — a row in the list, same size and weight as its neighbours, not dimmed
-        # chrome pushed under a rule. "It should have the back arrow" is about WHAT IT SAYS — a
-        # machine's menu is a sub-menu, and the row out of it has to show it goes up a level.
-        # Giving it the dashboard's own screen icon satisfied the first and quietly undid the
-        # second: the row looked like every other destination and named no direction at all.
-        #
-        # It keeps `back`'s HREF and LABEL, so the link and the words still cannot come apart.
-        rows.insert(0, f'<a class="home" href="{_esc(got.back)}">{_svg(_BACK_ARROW)}'
-                       f'<span class="lbl">{_esc(got.back_label or got.title)}</span></a>')
+        # SO THE DASHBOARD ROW IS GONE, and with it the argument the comments here used to record
+        # — a row or chrome, an arrow or the dashboard's own icon (his rulings of 09-21 and 09-22,
+        # in git history). The reference settles it by doing neither: the title says where you
+        # ARE, in bold, and the chevron beside it is the only control that leaves. Exactly one way
+        # back still, and it still goes where `shell` resolved — the words that name it are its
+        # accessible label, from `back_label`, so the link and its name cannot come apart.
+        head += (f'<div class="subhead"><a class="home" href="{_esc(got.back)}" '
+                 f'aria-label="Back to {_esc(got.back_label or "the start")}">'
+                 f'{_svg(_BACK_ARROW, 20)}</a><b>{_esc(got.title)}</b></div>')
     return (f'<nav class="rail" id="railnav" aria-label="Sections">{head}'
             f'<div class="nav">{"".join(rows)}</div>{_foot()}</nav>')
 
@@ -690,10 +687,9 @@ def _setup_card() -> str:
     product trains its users to stop reading, and the one screen that must survive that training
     is this one.
 
-    THE DESTINATION COMES FROM THE REGISTRY, NEVER FROM A URL WRITTEN HERE. `shell.setup_href()`
-    answers with whatever machine on this box serves a set-up screen; a box where none does gets
-    "" and this card does not draw. That is the honest behaviour rather than a fallback: a card
-    offering a way in, on a box with no way in, is worse than no card.
+    IT GOES TO THE BOX'S OWN SETTINGS, which every box serves, so it draws on every box with
+    something left to do. The channel rows beneath it still take their destination from the
+    registry (`_steps_left`), because core never writes a machine's URL.
     """
     # OWNER ONLY, and this was missing in the first version. Measured: a member saw "Finish
     # setting up your box", followed the link, and could not finish it — the set-up screen takes
@@ -707,33 +703,69 @@ def _setup_card() -> str:
     got = _setup_progress()
     if not got:
         return ""
-    done, total, waiting = got
+    done, total, _waiting = got
     if done >= total:
         return ""
-    href = shell.setup_href()
-    if not href:
-        return ""
-    # WHAT IS ACTUALLY LEFT, BY NAME — but only once something is done. "One of three" leaves a
-    # person hunting for WHICH one, so the names earn their place there; with nothing connected
-    # the list is every step and repeats the count in different words, which is the stutter this
-    # codebase keeps deleting. The titles are already written for a buyer rather than for us
-    # ("Your inbox", "Your AI key"), so they can be printed as they stand.
-    if done:
-        line = f"{done} of {total} connected."
-        if waiting:
-            line += " Still to connect: " + ", ".join(waiting) + "."
-    else:
-        line = f"{total} things to connect, and only you can do them."
-    # THE SENTENCE IS ONLY TRUE WHILE NOTHING IS CONNECTED, so it is only printed then. Caught by
-    # reading the rendered card rather than the code: with the mailbox connected and two steps
-    # left it said "Nothing arrives until at least one of these is connected" over a box that was
-    # already receiving mail. A screen that tells a buyer his working channel is not working is
-    # worse than one that says nothing.
-    if not done:
-        line += " Nothing arrives until at least one of these is connected."
+    # THE CARD GOES TO SYSTEM SETTINGS, NOT TO A MACHINE. Owner, 2026-09-23, looking at a fresh
+    # box: *"The link in the middle to set up your box should go into the System Settings not the
+    # unified inbox machine. It should immediately get them their LLM connection and their
+    # progressive Web App."* So the headline link is the box's own settings, and under it one row
+    # per thing still to do, in the order he named them: the AI account first, the mobile app
+    # second, and only then the channels a machine connects.
     return ('<div class="card"><h2>Finish setting up your box</h2>'
-            f'<p class="sub">{_esc(line)}</p>'
-            f'<p><a href="{_esc(href)}">Set up your box &rarr;</a></p></div>')
+            f'<p class="sub">{_esc(_setup_line(done, total))}</p>'
+            f'{_steps_left()}'
+            '<p><a href="/settings">Set up your box &rarr;</a></p></div>')
+
+
+# THE ORDER THE CARD OFFERS THE STEPS IN — the box's own first, because nothing a machine does
+# works without the AI account, and the mobile app is how the box reaches its owner at all.
+_SETUP_FIRST = (("anthropic", "/settings/ai"), ("mobile", "/settings/mobile"))
+# THE APP IS INSTALLED, NOT CONNECTED. The sentence above the rows counts connections, and the
+# mobile app is not one of them (it is optional, so it never holds "finished" back). Its own verb
+# keeps "3 things to connect" true over a card that shows four rows.
+_SETUP_VERB = {"mobile": "Install"}
+
+
+def _setup_line(done: int, total: int) -> str:
+    """How far along, in one sentence. A number is the difference between a chore and a finish
+    line: "two of three connected" says how much is behind them, "set up your box" says nothing.
+    The step names are left to the rows beneath, so the sentence does not say them twice."""
+    if done:
+        return f"{done} of {total} connected."
+    return f"{total} things to connect, and only you can do them."
+
+
+def _steps_left() -> str:
+    """One row per step still open, each going straight to the screen that finishes it.
+
+    THE BOX'S STEPS GO TO THE BOX'S SCREENS; A MACHINE'S GO WHERE THE REGISTRY SAYS. Core never
+    writes a machine's URL, so the channel rows follow `shell.setup_href()`, and a box whose
+    machines serve no set-up screen simply draws no channel rows.
+
+    THE MOBILE APP IS OFFERED EVEN THOUGH IT IS OPTIONAL. It is not counted towards "finished" —
+    `_setup_progress` holds that line, and the Stop button depends on it — but the owner asked
+    for it to be put in front of a new buyer straight away, and a row is how that is done without
+    changing what finished means.
+    """
+    try:
+        from core import box_secrets
+        steps = {str(e.get("key")): e for e in box_secrets.setup_state()}
+    except Exception:                            # noqa: BLE001 — the card must not 500 the page
+        return ""
+    open_ = [(k, e) for k, e in steps.items() if str(e.get("status") or "") in ("", "not_connected")]
+    where = shell.setup_href()
+    rows = []
+    for key, href in _SETUP_FIRST:
+        e = steps.get(key)
+        if e is not None and (key, e) in open_:
+            rows.append((str(e.get("title") or ""), href, _SETUP_VERB.get(key, "Set up")))
+    for key, e in open_:
+        if e.get("surface") == "machine" and not e.get("optional") and where:
+            rows.append((str(e.get("title") or ""), f"{where}#{key}", "Set up"))
+    return "".join(
+        f'<a class="row step" href="{_esc(h)}"><b>{_esc(t)}</b>'
+        f'<span class="go">{v}</span>{_FWD_CHEVRON}</a>' for t, h, v in rows if t)
 
 
 def _managed_card() -> str:
@@ -1010,10 +1042,10 @@ def settings():
     if _is_owner():
         body += ('<div class="card"><h2>The machine itself</h2>'
                  '<p class="sub">This box is a server you own outright. Put your own key on it '
-                 'and you have it at the command line — no account with us, and it keeps working '
-                 'if you move the box somewhere else.</p>'
-                 '<div class="foot"><a href="/settings/access">Your way in &rarr;</a></div>'
-                 '<div class="foot"><a href="/settings/move">Take this box to your own '
+                 'and you can sign in to the server itself — no account with us, and it keeps '
+                 'working if you move the box somewhere else.</p>'
+                 '<div class="foot"><a href="/settings/access">Server access &rarr;</a></div>'
+                 '<div class="foot"><a href="/settings/move">Move your box to your own '
                  'DigitalOcean account &rarr;</a></div></div>')
     return chrome("/settings", title="Settings",
                   lede="The parts of this box that belong to the box, not to one machine.",
@@ -1041,5 +1073,22 @@ shell.register_section("add_machine", order=80, machine="core", title="Add a Mac
 # own ruling — this one for what the box shares, and each machine's own for what only it has —
 # and two rows both reading "Settings" is the menu telling somebody they are in the same place
 # twice. The qualifier is what makes the pair legible.
+# SYSTEM SETTINGS IS A SUB-MENU. Owner, 2026-09-23: *"there are now sub menu items under
+# settings"* — so tapping it swaps the rail for these rows, the two-level menu he asked for on
+# 2026-09-17 (see `core/shell.py`). The AI account and the mobile app lead because they are the
+# two things he wants a new buyer to reach first. The four rows whose screens refuse a member are
+# `owner_only`, so a member is shown a shorter menu rather than doors that refuse them.
 shell.register_section("settings", order=90, machine="core", title="System Settings",
-                       href="/settings", icon=_GEAR_ICON)
+                       href="/settings", icon=_GEAR_ICON, items=[
+                           {"key": "overview", "label": "Overview", "href": "/settings"},
+                           {"key": "ai", "label": "AI account", "href": "/settings/ai",
+                            "owner_only": True},
+                           {"key": "mobile", "label": "Mobile app", "href": "/settings/mobile"},
+                           {"key": "agent", "label": "AI coworkers", "href": "/settings/agent",
+                            "owner_only": True},
+                           {"key": "updates", "label": "Updates", "href": "/settings/updates"},
+                           {"key": "access", "label": "Server access",
+                            "href": "/settings/access", "owner_only": True},
+                           {"key": "move", "label": "Move your box", "href": "/settings/move",
+                            "owner_only": True},
+                       ])

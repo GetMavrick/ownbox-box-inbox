@@ -97,6 +97,17 @@ class Item:
     href: str
     tone: str = ""
     icon: str = ""
+    # A ROW ONLY THE OWNER MAY OPEN IS A ROW ONLY THE OWNER IS SHOWN. The first second-level menu
+    # that needed this is System Settings, where putting your own key on the server and moving the
+    # box to your own cloud account are the owner's alone: a member offered those rows would press
+    # one and meet a refusal, which is the dead control this codebase keeps deleting by name. The
+    # renderer drops them for anyone else, so a member sees a shorter menu, not a broken one.
+    owner_only: bool = False
+    # THIS ROW OPENS A SUB-MENU, so the renderer draws a forward chevron at its right edge. Owner,
+    # 2026-09-23, on the reference he has sent more than once: *"Notice the forward chevron to show
+    # when a menu item has sub menu items."* Set by `rail()` from the section's own items, never by
+    # a caller, so a row cannot promise a sub-menu it does not have.
+    submenu: bool = False
 
 
 @dataclass(frozen=True)
@@ -189,7 +200,8 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
         # string, never a URL and never a file. Core holds no image and fetches nothing; the
         # machine that owns the section owns how it looks, exactly as it owns its title.
         built.append(Item(key=ikey, label=str(it["label"]).strip(),
-                          href=str(it["href"]), tone=tone, icon=str(it.get("icon") or "")))
+                          href=str(it["href"]), tone=tone, icon=str(it.get("icon") or ""),
+                          owner_only=bool(it.get("owner_only"))))
 
     if home:
         other = next((s for s in _SECTIONS.values() if s.home and s.key != key), None)
@@ -312,7 +324,8 @@ def rail(path: str) -> Rail:
                     back_label=home_title())
     # LEVEL 1 — the sections themselves, rendered through the same `Item` the second level uses so
     # a template has one row to draw and not two.
-    top = tuple(Item(key=s.key, label=s.title, href=s.href, icon=s.icon) for s in sections())
+    top = tuple(Item(key=s.key, label=s.title, href=s.href, icon=s.icon,
+                     submenu=bool(s.items) and not s.home) for s in sections())
     return Rail(level=1, title="", back="", items=top, here=path)
 
 

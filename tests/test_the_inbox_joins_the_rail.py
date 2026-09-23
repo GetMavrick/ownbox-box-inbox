@@ -202,29 +202,48 @@ def test_the_back_arrow_says_where_it_goes():
         got = shell.rail(path)
         ok(f"{path}: back goes to the box's home", got.back == "/dashboard", got.back)
         ok(f"{path}: ...and says so", got.back_label == "Dashboard", got.back_label)
-    # THE ELEMENT CHANGED CLASS, THE ASSERTION DID NOT. It was `<a class="back">` — chrome above
-    # the list — until the owner looked at a machine's menu on his box (2026-09-22): *"Please make
-    # sure Dashboard is in the sidebar!!!! It's a back button on the fly out menu!!!"* It is a row
-    # now, `class="home"`, and `rail_html` inserts it at the head of the nav rather than above it.
-    # What this test is for is unchanged and still has its teeth: whatever the control is dressed
-    # as, its HREF and its LABEL must be the pair `shell` resolved, because a menu whose words and
-    # destination come apart is the defect the 2026-09-17 ruling above was raised about.
+    # THE ELEMENT CHANGED THREE TIMES; THE ASSERTION DID NOT. It was `<a class="back">` above the
+    # list, then a Dashboard row inside it, and now — owner, 2026-09-23, of the reference he sent:
+    # *"the first thing at the top you have a back arrow/chevron that functions as the back
+    # button. And then settings is in bold showing that we are on the settings. I think we need to
+    # do away with the back arrow and the dashboard that we have."* So the way out is a chevron
+    # beside the section's own title. What this test is for still has its teeth: the control's
+    # HREF and the words that name it must be the pair `shell` resolved, because a menu whose
+    # words and destination come apart is the defect the 2026-09-17 ruling was raised about.
     html_ = home.rail_html("/inbox/inbox", who="Ownbox")
-    arrow = re.search(r'<a class="home" href="([^"]+)".*?<span class="lbl">([^<]*)</span>', html_)
+    arrow = re.search(r'<a class="home" href="([^"]+)" aria-label="Back to ([^"]*)">', html_)
     ok("the rendered way home carries both", bool(arrow) and arrow.group(1) == "/dashboard"
        and arrow.group(2) == "Dashboard",
-       arrow.groups() if arrow else "no Dashboard row rendered")
-    ok("...and it is a row in the list, not chrome above it",
-       'class="back"' not in html_, "a .back element is still being rendered")
-    # AND IT POINTS BACK, WHICH IS THE HALF THAT WAS SHIPPED WRONG. Making it a row was done by
-    # giving it the dashboard's own screen icon, and that quietly cost it the one thing the row
-    # has to say. Owner, 2026-09-22: *"The dashboard should have the back arrow... a smart web
-    # designer will put a back button to show that we want to go up one level in the menu."*
-    # A machine's menu is a sub-menu; the row out of it is drawn with an arrow that goes left.
-    ok("...and it carries the back arrow, because a machine's menu is one level down",
-       home._BACK_ARROW in html_ and home._HOME_ICON not in
-       html_[html_.index('class="home"'):html_.index('class="home"') + 400],
-       "the Dashboard row is not drawn with a back arrow")
+       arrow.groups() if arrow else "no back control rendered")
+    ok("...and there is exactly one of it", html_.count('class="home"') == 1,
+       str(html_.count('class="home"')))
+    ok("...drawn as the back chevron, not a row with the dashboard's icon",
+       home._BACK_ARROW in html_ and home._HOME_ICON not in html_)
+    # WHERE YOU ARE, IN BOLD, beside the way out — the other half of the reference.
+    title = re.search(r'<div class="subhead"><a class="home"[^>]*>.*?</a><b>([^<]*)</b></div>',
+                      html_, re.S)
+    ok("...beside the section's own title, in bold",
+       bool(title) and title.group(1) == shell.rail("/inbox/inbox").title,
+       title.group(1) if title else "no section title beside the back chevron")
+    ok("...and the old Dashboard row is gone from the list",
+       '<span class="lbl">Dashboard</span>' not in html_)
+
+
+def test_a_row_with_a_sub_menu_says_so():
+    print("test_a_row_with_a_sub_menu_says_so")
+    # Owner, 2026-09-23: *"Notice the forward chevron to show when a menu item has sub menu
+    # items."* Read off the rendered level-1 rail, row by row, not off the registry.
+    _restore()
+    html_ = home.rail_html("/dashboard", who="Ownbox")
+    rows = re.findall(r'<a href="([^"]+)"[^>]*>(.*?)</a>', html_, re.S)
+    by = {h: body for h, body in rows}
+    for sec in shell.sections():
+        body = by.get(sec.href)
+        if body is None:
+            continue
+        has = bool(sec.items) and not sec.home
+        ok(f"{sec.title}: {'carries' if has else 'does not carry'} the forward chevron",
+           ('class="fwd"' in body) == has, body[-200:])
 
 
 def test_the_label_cannot_come_apart_from_the_link():
