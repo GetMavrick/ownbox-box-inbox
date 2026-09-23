@@ -112,6 +112,26 @@ def _version_ok(req) -> tuple[bool, str]:
     return (got in SUPPORTED_VERSIONS), got
 
 
+def _ok(rpc_id, result: dict) -> dict:
+    """Every success response this server sends. The ONLY place a JSON-RPC `result` is built.
+
+    `resultType: "complete"` IS STAMPED HERE AND NOWHERE ELSE, because the spec makes it mandatory
+    and the earlier arrangement proved how that goes wrong: each method wrote its own envelope,
+    two remembered the field and two did not. One of the two was `initialize` — the HANDSHAKE — so
+    a client that enforces the field never connected at all, and the buyer saw "cannot connect to
+    your box" with no reason given. Claude does not enforce it, which is why nobody noticed until
+    the owner relayed it on 2026-09-23 ahead of connecting Grok.
+
+    A field that has to be on every response belongs in the one function that builds every
+    response; a field repeated across four dict literals is a field waiting for the fifth.
+    tests/test_every_mcp_result_says_complete.py fails if any other function builds a `result`.
+
+    Stamped LAST, so a method cannot overwrite it by accident — and additive, so it never
+    disturbs the payload beside it. Clients that predate the field ignore an unknown key.
+    """
+    return {"jsonrpc": "2.0", "id": rpc_id, "result": {**result, "resultType": "complete"}}
+
+
 def _err(rpc_id, code: int, message: str, data=None) -> dict:
     body = {"jsonrpc": "2.0", "id": rpc_id, "error": {"code": code, "message": message}}
     if data is not None:
@@ -194,8 +214,7 @@ def _handle(method: str, params: dict, rpc_id, seat: dict) -> dict | None:
     if method == "server/discover":
         # The current spec makes this mandatory. One request gets a client our identity, our
         # capabilities and every version we speak, so it never has to probe.
-        return {"jsonrpc": "2.0", "id": rpc_id, "result": {
-            "resultType": "complete",
+        return _ok(rpc_id, {
             "supportedVersions": list(SUPPORTED_VERSIONS),
             "capabilities": _capabilities(),
             "_meta": {"io.modelcontextprotocol/serverInfo": {
@@ -209,18 +228,18 @@ def _handle(method: str, params: dict, rpc_id, seat: dict) -> dict | None:
                             "tool is typed: reads return the box's state, and actions are "
                             "proposals a human on the box approves — no tool sends, publishes or "
                             "spends on its own.",
-        }}
+        })
 
     if method == "initialize":
         # The older handshake, answered from the same facts. A client that speaks only this still
         # works, which is what neutrality means in practice.
         want = (params or {}).get("protocolVersion")
         agreed = want if want in SUPPORTED_VERSIONS else SUPPORTED_VERSIONS[0]
-        return {"jsonrpc": "2.0", "id": rpc_id, "result": {
+        return _ok(rpc_id, {
             "protocolVersion": agreed,
             "capabilities": _capabilities(),
             "serverInfo": {"name": SERVER_NAME, "version": tools.CONTRACT_VERSION},
-        }}
+        })
 
     if method in ("notifications/initialized", "initialized"):
         return None                                   # a notification: accepted, nothing to say
@@ -233,8 +252,7 @@ def _handle(method: str, params: dict, rpc_id, seat: dict) -> dict | None:
         # visible_to() returns them sorted. The spec asks for a stable order because clients cache
         # the list; iterating a dict and hoping is how that silently stops being true.
         entries = [_tool_entry(s) for s in tools.visible_to(seat)]
-        return {"jsonrpc": "2.0", "id": rpc_id,
-                "result": {"resultType": "complete", "tools": entries}}
+        return _ok(rpc_id, {"tools": entries})
 
     if method == "tools/call":
         return _call_tool(params or {}, rpc_id, seat)
@@ -259,7 +277,7 @@ def _call_tool(params: dict, rpc_id, seat: dict) -> dict:
         return _err(rpc_id, _INVALID_PARAMS, payload.get("message", f"unknown tool: {name}"),
                     data={"tool": name})
 
-    return {"jsonrpc": "2.0", "id": rpc_id, "result": _tool_result(payload, status)}
+    return _ok(rpc_id, _tool_result(payload, status))
 
 
 @blueprint.get("/mcp")
