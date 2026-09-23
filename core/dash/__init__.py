@@ -807,6 +807,32 @@ def landing() -> str:
     return "/dash/login"
 
 
+def after_claim() -> str:
+    """Where a buyer goes the moment their login exists — `dash.after_claim`, or `landing()`.
+
+    A SETTING, NOT A PAGE WRITTEN HERE. Which step a new owner meets first is a product decision
+    that moves (the headline connection changed from Instagram to the Unified Inbox this week), so
+    the answer lives in one config line that can change without touching this function.
+
+    TRUSTED ONLY AS FAR AS IT IS CHECKED. The value goes through `safe_next` — the same rule the
+    login's return path obeys, because a config value is a string somebody typed — and must be a
+    route this box actually serves. Anything else falls back to `landing()`, so a mistyped value
+    costs the buyer nothing: they land where they always did, and the log line says why.
+    """
+    try:
+        from core import config as _config
+        want = str(((_config.get_config().get("dash") or {}).get("after_claim")) or "")
+    except Exception:                            # noqa: BLE001 — a claim must never fail on config
+        want = ""
+    want = safe_next(want)
+    if want:
+        from flask import current_app
+        if want in {str(r) for r in current_app.url_map.iter_rules()}:
+            return want
+        log.warning("dash.after_claim_unserved", want=want)
+    return landing()
+
+
 # ── the login, for every host on the box ─────────────────────────────────────
 
 def safe_next(value: str) -> str:
@@ -1180,7 +1206,7 @@ def claim_submit():
     _clear_failures(ip)
     # STRAIGHT IN. He has just proved he holds the order and chosen his password; sending him to
     # a login form to type it again is a door that opens onto another door.
-    resp = make_response(redirect(landing()))
+    resp = make_response(redirect(after_claim()))
     resp.set_cookie(COOKIE, new_session(owner["id"]), max_age=SESSION_DAYS * 86400,
                     httponly=True, samesite="Lax", secure=request.is_secure)
     return resp

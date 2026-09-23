@@ -285,6 +285,12 @@ dash:
   # while one that fails closed locks a paying customer out of his own box at 2am. Per-person
   # login itself is NOT tiered: it is a security fix and it ships in every box.
   max_users: 3
+  # WHERE A BUYER LANDS THE MOMENT THEIR LOGIN EXISTS (core/dash.after_claim). The dashboard,
+  # because the owner called it "the first screen someone sees" (2026-09-23), and its first card
+  # carries straight on into set-up: the AI account, then the mobile app, then the channels.
+  # One line to change if he rules the buyer should skip straight into a set-up screen instead
+  # (e.g. /settings/ai). Must be a path this box serves; anything else falls back safely.
+  after_claim: /dashboard
   # THE NAME AT THE TOP OF EVERY SCREEN. Owner, 2026-09-06, direct: "Get Mavrick off this app.
   # It's Your Company at the top." This is the one value those screens read (dash.brand()), so
   # it is the whole change — and it is deliberately a CONFIG value, because a clone sold to a

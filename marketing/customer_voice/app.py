@@ -364,15 +364,6 @@ a{color:inherit;text-decoration:none}
 @media (max-width:820px){ .bar{display:block} }
 .bar-in{display:flex;align-items:baseline;gap:10px;padding:13px 16px;max-width:620px;margin:0 auto}
 .brand{font-weight:650;letter-spacing:-.015em}
-/* THE WAY OUT. Sits before the mark and reads as a trail, not a button: the reference the owner
-   gave us puts one quiet arrow at the top left and nothing else competing with it. `align-self`
-   because `.bar-in` aligns on the BASELINE for the brand and the day — an icon on a text baseline
-   sits a couple of pixels low, which is the kind of wrongness that is felt and not seen. */
-.up{display:inline-flex;align-items:center;gap:4px;align-self:center;flex:none;
-  color:var(--dim);text-decoration:none;font-size:14px;font-weight:530;
-  margin:-4px 2px -4px -6px;padding:4px 6px;border-radius:8px}
-.up svg{display:block;flex:none}
-.up:hover{color:var(--ink);background:var(--bubble-in)}
 .day{margin-left:auto;font-size:13px;color:var(--dimmer)}
 /* THE DATE, NOW ON THE SCREEN INSTEAD OF IN THE CHROME. Owner, 2026-09-22: *"That date in the
    top needs to get out of there and move down into the today screen."* It sits beside the
@@ -700,15 +691,6 @@ a.row:active{background:var(--hair);border-radius:10px}
      is a blank strip. A phone's bottom bar pinned to the foot of a desktop window is the single
      thing that made this screen read as unfinished. */
   .wrap{padding-bottom:28px}
-  /* ONE BACK ARROW, AND ON A DESKTOP IT IS THE RAIL'S. Both visible at once is a stutter, so one
-     stands down — until 2026-09-21 that was the rail's, which put the way out in the bar while
-     the phone put it at the top of the drawer, above Messages. Owner, 2026-09-21: *"The dashboard
-     link should be on in the sidebar right above messages ... it's in the wrong place on desktop.
-     Somehow, it appears in the right place on Mobile."* So the BAR's stands down instead and the
-     two widths agree: the way back is the first row of the menu, wherever the menu is.
-     His 2026-09-17 ask ("a back arrow with a dashboard label") is still honoured — same arrow,
-     same label, both from core.shell; what moved is which of the two draws it. */
-  .bar-in .up{display:none}
   /* AND THE BAR STOPS REPEATING THE BOX'S NAME. With core's `.who` block restored to the top of
      the rail, the name sits eleven pixels from the bar that also carries it — the same name,
      twice, one above the other. The rail is the box's identity on a desktop; the bar keeps the
@@ -1283,46 +1265,6 @@ def _tabbar(here: str) -> str:
             f'<div class="tabs-in">{"".join(out)}</div></nav>')
 
 
-def _up() -> str:
-    """The way back out of the inbox, at the top of every page of it.
-
-    Owner, 2026-09-17: *"they can go back into the dashboard so there should be a back arrow with
-    a dashboard label"*, and earlier the same day: *"a back button back to the dashboard at the top
-    of our inbox."* Top, not bottom — this app's bottom edge is the tab bar he already approved.
-
-    EVERY WORD AND EVERY PATH COMES FROM `core.shell`, NOT FROM HERE. `home_href()` decides where
-    the box's home is and `home_title()` names it, through one resolution each, so the label cannot
-    say "Dashboard" while the link goes somewhere else. Hardcoding either would be a second answer
-    to a question core already answers — the mistake `_LANDINGS` was carrying this morning.
-
-    IT ASKS WHETHER THIS BOX SERVES THE DESTINATION, through `home._serving()` rather than a
-    re-derived url_map read. A box is one of four products; an arrow to a page this build does not
-    ship is a 404 handed to a buyer, and `rail_html` already refuses rows for that reason.
-
-    THE BOTTOM TAB BAR IS DELIBERATELY UNTOUCHED. Its three entries and the rail's level-2 items
-    are the same three destinations, so driving both from `shell.rail()` is the obvious next step
-    and the right one — but it would relabel "Inbox" to "Messages" and reorder a bar he has
-    approved and uses daily, which is not what he asked for here. Noted, not done.
-    """
-    from core import shell
-    from core.dash import home as _home_mod
-    try:
-        href, label = shell.home_href(), shell.home_title()
-    except Exception:                            # noqa: BLE001 — no registry, no arrow
-        return ""
-    if not href or href == "/dash/login":
-        # NOTHING TO GO BACK TO. `home_href` falls through to the login when no section claims
-        # home, and an arrow pointing at a password form is worse than no arrow.
-        return ""
-    have = _home_mod._serving()
-    if have and href not in have:
-        return ""
-    return (f'<a class="up" href="{_esc(href)}" aria-label="Back to {_esc(label)}">'
-            f'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-            f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-            f'<path d="M15 18l-6-6 6-6"/></svg><span>{_esc(label)}</span></a>')
-
-
 THEME_COOKIE = "aios_voice_theme"
 _THEME_BG = {"light": "#eff2f4", "dark": "#0d0d0d"}
 
@@ -1424,7 +1366,7 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
 <title>{_esc(brand)} · Unified Inbox</title><style>{CSS}</style></head>
 <body{' class="ib"' if wide else ''}>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
-<div class="bar"><div class="bar-in">{_menu_button()}{_up()}
+<div class="bar"><div class="bar-in">{_menu_button()}
 <span class="brand">{_esc(brand)}</span></div></div>
 <label class="scrim" for="navtoggle" aria-label="Close menu"></label>
 <div class="lay">{_rail(here or request.path)}
