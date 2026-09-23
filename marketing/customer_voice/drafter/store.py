@@ -103,7 +103,16 @@ def needs_a_draft(space: str, *, limit: int = 5) -> list[dict]:
             "   AND m.zernio_conversation_id = k.zernio_conversation_id "
             "   AND m.direction = 'in' "
             "   AND m.zernio_message_id IS NOT NULL "
-            " WHERE k.space = ? AND k.opted_out = 0 "
+            # ROBOTS ARE EXCLUDED IN SQL, NOT FILTERED AFTER, and that is not a style choice.
+            # `limit` is a SPEND BOUND, so the rows come back capped — 35 of the 62 email
+            # threads on the owner's box were automated senders (OSDev1, 2026-09-22), and a
+            # Python filter applied after LIMIT 5 would have returned the same five robots every
+            # sweep and starved every real customer behind them. That is the head-block shape
+            # #1436 and #1437 both cost us a day on.
+            #
+            # `IS NOT 1` RATHER THAN `= 0`, because NULL means nobody has looked yet and an
+            # unjudged thread must still get its draft. Only a thread PROVEN automated is skipped.
+            " WHERE k.space = ? AND k.opted_out = 0 AND k.automated IS NOT 1 "
             "   AND m.created_at = (SELECT MAX(m2.created_at) FROM inbox_messages m2 "
             "                        WHERE m2.space = k.space "
             "                          AND m2.zernio_conversation_id = k.zernio_conversation_id "
@@ -170,7 +179,11 @@ def waiting(space: str, *, limit: int = 50) -> list[dict]:
             "   AND k.zernio_conversation_id = d.zernio_conversation_id "
             "  LEFT JOIN inbox_messages m ON m.space = d.space "
             "   AND m.zernio_message_id = d.in_reply_to "
+            # AND THE SCREEN DOES NOT OFFER ONE EITHER. The drafter above stops paying for these;
+            # this is what stops the buyer being able to TICK one. Two gates, because a draft
+            # written before the column existed is still sitting in that table.
             " WHERE d.space = ? AND d.dismissed_at IS NULL AND k.opted_out = 0 "
+            "   AND k.automated IS NOT 1 "
             "   AND NOT EXISTS (SELECT 1 FROM inbox_messages o "
             "                    WHERE o.space = d.space "
             "                      AND o.zernio_conversation_id = d.zernio_conversation_id "

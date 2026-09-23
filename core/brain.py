@@ -527,6 +527,25 @@ def knowledge_context() -> str:
     return "\n\n".join(parts)
 
 
+def write_knowledge(name: str, text: str) -> bool:
+    """Write one generated file into my/knowledge/. `core` owns that folder, so `core` writes it.
+
+    NAMED, AND ONLY ITS OWN FILE. Everything else in there is the buyer's — what he typed about
+    his own business — and a machine that rewrote those would be destroying the thing it was
+    given. A generated file says so in its first line, so nobody mistakes it for their own.
+    """
+    try:
+        KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
+        (KNOWLEDGE_DIR / name).write_text(
+            "<!-- Written by your box from your own sent mail. Edit freely: this file is\n"
+            "     rewritten when the box learns again, so put anything you want kept in a\n"
+            "     file of your own beside it. -->\n\n" + str(text).strip() + "\n")
+        return True
+    except OSError as e:
+        log.warning("brain.knowledge_unwritable", file=name, error=type(e).__name__)
+        return False
+
+
 def _with_knowledge(cached_context: str | None, isolated: bool) -> str | None:
     if isolated:
         return cached_context                       # isolated calls load NO setting sources, by contract

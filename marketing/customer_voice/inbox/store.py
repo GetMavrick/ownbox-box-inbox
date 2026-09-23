@@ -727,3 +727,43 @@ def unread_conversations(space: str) -> int:
             " WHERE k.space = ? "
             f"   AND {_UNREAD}", (space,)).fetchone()
     return int(row["n"]) if row else 0
+
+
+def mark_automated(space: str, zcid: str, automated: bool) -> None:
+    """Record whether a machine is writing this thread. Written at INGEST, where the headers are.
+
+    NOT `INSERT OR IGNORE` AND NOT CONDITIONAL. A thread's answer can legitimately change — a
+    person replying from an address that used to send only notifications is exactly the case
+    worth getting right — so the newest inbound decides, like `participant` does.
+    """
+    with state.connect() as c:
+        c.execute("UPDATE inbox_conversations SET automated = ?, updated_at = ? "
+                  " WHERE space = ? AND zernio_conversation_id = ?",
+                  (1 if automated else 0, state._now(), space, str(zcid)))
+
+
+def unjudged_email_senders(space: str, *, limit: int = 500) -> list[dict]:
+    """Email conversations nobody has judged yet, with an address to judge them by.
+
+    THE BACKFILL EXISTS BECAUSE THE BLOCKER IS THE ROWS THAT ARE ALREADY THERE. Migration 56
+    leaves `automated` NULL on every existing conversation, which is honest — nothing had looked
+    — but the 35 robot drafts OSDev1 measured are all in that set, and a column that only helps
+    mail arriving from now on would not have removed one of them.
+
+    HEADERS ARE GONE BY NOW, so this judges on the address alone, which is the weaker half of
+    `is_automated`. That asymmetry is the right way round: the address half only ever fires on
+    names no business writes to customers from, so a backfill can mark a robot it is sure of and
+    leave everything else for the next message to decide with the full evidence.
+    """
+    with state.connect() as c:
+        rows = c.execute(
+            "SELECT k.zernio_conversation_id AS zcid, "
+            "       (SELECT m.sent_by FROM inbox_messages m "
+            "         WHERE m.space = k.space "
+            "           AND m.zernio_conversation_id = k.zernio_conversation_id "
+            "           AND m.direction = 'in' "
+            "         ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS sender "
+            "  FROM inbox_conversations k "
+            " WHERE k.space = ? AND k.platform = 'email' AND k.automated IS NULL "
+            " LIMIT ?", (space, int(limit))).fetchall()
+    return [dict(r) for r in rows if (r["sender"] or "")]

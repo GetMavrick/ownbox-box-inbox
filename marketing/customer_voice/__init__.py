@@ -71,6 +71,35 @@ register_periodic(_drafter.periodic, interval_s=_interval("drafts", 120), name="
 # SLOWER THAN THE DRAFTER (180s to its 120s) so a draft is normally written and settled before
 # this looks: a draft that arrives in the mailbox and is then superseded is worse than one that
 # arrives a minute later. NO `beat=`, like the drafter — a missing draft is not an outage.
+# ONCE A DAY IS PLENTY. A business's own sent mail does not change hour to hour, and this is one
+# model call over a hundred and fifty messages — cheap daily, wasteful hourly. It writes nothing
+# when it learns nothing, so a quiet mailbox costs one read and stops.
+from .drafter import learn_business as _learn                            # noqa: E402
+from .inbox import sent_mail as _sent                                    # noqa: E402
+
+
+def _learn_the_business() -> dict:
+    """Read the owner's sent mail, learn what the business is, write it down.
+
+    THE WIRING LIVES HERE BECAUSE NEITHER HALF MAY DO THE OTHER'S JOB: `inbox/` may open a
+    mailbox and may not think, `drafter/` may think and may not touch imaplib or a file. This
+    function only passes values between them, which is why it is allowed to see both.
+    """
+    try:
+        sent = _sent.read_sent()
+    except Exception as e:                                               # noqa: BLE001
+        return {"status": "unreadable", "error": type(e).__name__}
+    out = _learn.summarise(sent)
+    if out.get("status") == "ok" and out.get("text"):
+        from core import brain as _brain
+        out["written"] = _brain.write_knowledge(_learn.OUT_NAME, out["text"])
+        out.pop("text", None)
+    return out
+
+
+register_periodic(_learn_the_business, interval_s=_interval("learn_business", 86400),
+                  name="voice_learn_business")
+
 from .inbox import mailbox_drafts as _mailbox_drafts                     # noqa: E402
 register_periodic(_mailbox_drafts.periodic, interval_s=_interval("mailbox_drafts", 180),
                   name="voice_drafts_to_mailbox")

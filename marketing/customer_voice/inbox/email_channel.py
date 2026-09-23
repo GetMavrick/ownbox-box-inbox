@@ -80,6 +80,75 @@ def _header(msg, name: str) -> str:
         return str(raw).strip()
 
 
+# ── IS A MACHINE WRITING TO US ──────────────────────────────────────────────────────────────────
+#
+# MEASURED ON THE OWNER'S BOX (OSDev1, 2026-09-22): 35 of 62 email drafts were addressed to
+# automated senders — four LinkedIn job alerts, system@, alert@, noreply@, invitations@, and the
+# box's own Morning Review. Pressing "send the ones I ticked" would have mailed his business
+# address to 35 robots. The model had also been paid to write every one of those 35 replies.
+#
+# THE HEADERS ARE THE ANSWER AND THE ADDRESS IS THE FALLBACK, in that order, because that is the
+# order of confidence. `Auto-Submitted` is RFC 3834 §5 and exists precisely so software can say
+# "do not reply to this"; `List-Id` (RFC 2919) and `List-Unsubscribe` (RFC 2369) mark bulk mail.
+# A sender that sets any of them has TOLD us. Only when none is present do we look at the address,
+# and then conservatively: a blacklist alone would silently refuse to answer a real business whose
+# enquiries arrive from `alerts@` or `info@`, and never answering a customer is the more expensive
+# mistake of the two.
+#
+# WHAT IS DELIBERATELY NOT HERE: `Precedence: bulk`. It is not a standard, plenty of ordinary
+# mailers set it on perfectly personal mail, and it would cost real conversations.
+
+_AUTO_SUBMITTED_OK = "no"          # RFC 3834: the ONLY value meaning a person sent it
+
+# THE LINE IS "HAS THIS NAME ANY PLAUSIBLE CUSTOMER-FACING USE", and it is drawn on purpose.
+# Every local part below is a machine function word no business puts on mail it wants answered.
+#
+# DELIBERATELY ABSENT, and each one would cost a real customer: `info`, `sales`, `hello`,
+# `contact`, `support`, `admin`, `billing`, `accounts` — and `alert` / `alerts`, which reads like
+# a robot and is a perfectly ordinary address for a security or monitoring firm. OSDev1's
+# `alert@spaceship.com` is caught anyway, by its `Auto-Submitted` header, which is the whole
+# reason the headers are asked first: they catch the senders an address list would have to guess
+# at, and guessing wrong here means a customer is never answered and nobody finds out.
+_ROBOT_LOCALS = (
+    "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "do_not_reply",
+    "mailer-daemon", "postmaster", "bounce", "bounces", "notification", "notifications",
+    "invitations", "invitation", "automated", "auto-confirm", "mailer",
+    "system", "daemon", "root", "cron", "bot", "robot", "automailer",
+)
+_ROBOT_PREFIXES = ("noreply", "no-reply", "donotreply", "do-not-reply", "mailer-daemon",
+                   "bounce", "notification", "invitations")
+
+
+def is_automated(msg, sender: str = "") -> bool:
+    """Did a machine send this, on its own account? Never raises.
+
+    THE QUESTION IS NOT "IS THIS UNIMPORTANT". A shipping notice matters; it just has nobody at
+    the other end to read a reply. This decides only whether the box drafts an answer and offers
+    it for sending — the message is still ingested, still shown, still searchable.
+    """
+    try:
+        auto = _header(msg, "Auto-Submitted").strip().lower() if msg is not None else ""
+        if auto and not auto.startswith(_AUTO_SUBMITTED_OK):
+            return True                                  # RFC 3834: auto-generated, auto-replied…
+        if msg is not None and (_header(msg, "List-Id") or _header(msg, "List-Unsubscribe")):
+            return True                                  # bulk, RFC 2919 / RFC 2369
+        if msg is not None and _header(msg, "X-Auto-Response-Suppress"):
+            return True                                  # Microsoft's, widely set by ticketing
+    except Exception:                                    # noqa: BLE001 — a bad header is not fatal
+        pass
+    addr = str(sender or "").strip().lower()
+    if "@" not in addr:
+        return False
+    local = addr.split("@", 1)[0]
+    if local in _ROBOT_LOCALS or any(local.startswith(p) for p in _ROBOT_PREFIXES):
+        return True
+    # `jobs-listings@linkedin.com`, `jobalerts-noreply@…` — the marker is a WORD in the local
+    # part, not the whole of it. Split on the separators a local part may legally contain so
+    # "noreplyable@" (a real word containing one) cannot match.
+    return any(part in _ROBOT_LOCALS
+               for part in re.split(r"[.\-_+]", local) if part)
+
+
 def thread_key(msg) -> str:
     """The conversation a message belongs to: RFC 5322 threading, not a vendor's thread id.
 
@@ -479,7 +548,18 @@ def sweep(space: str) -> tuple[int, int]:
             store.record_message(space=space, zcid=zcid, zmid=mid,
                                  direction="in" if inbound else "out",
                                  sent_by=(addr or frm)[:200], body=_body_text(msg))
+            # JUDGED HERE, WHERE THE HEADERS STILL EXIST, and only on INBOUND: whether a machine
+            # is writing to this business is a fact about the other end, and the box's own
+            # outbound tells us nothing about them.
+            if inbound:
+                store.mark_automated(space, zcid, is_automated(msg, addr))
             stored += 1
+
+        # AND THE ROWS THAT WERE ALREADY THERE. The 35 robot drafts on the owner's box all predate
+        # migration 56, so a column that only judged new mail would not have removed one of them.
+        # Bounded, idempotent (it only ever reads rows still NULL), and on the sweep rather than a
+        # new timer because it is finished after one pass on any real box.
+        _judge_the_backlog(space)
 
         if newest > since:
             store.set_watermark(space, _MAILBOX_KEY,
@@ -662,3 +742,27 @@ def thread_tail(space: str, zcid: str) -> dict:
     parent = str(newest.get("zernio_message_id") or "")
     return {"to": str(newest.get("sent_by") or ""), "in_reply_to": parent,
             "references": f"{zcid} {parent}" if zcid and zcid != parent else parent}
+
+
+def _judge_the_backlog(space: str) -> int:
+    """Mark the email threads that existed before anything looked. -> how many were marked.
+
+    ADDRESS ONLY, because the headers are long gone — see `store.unjudged_email_senders`. Never
+    raises: this is housekeeping attached to the sweep, and a customer's mail being mirrored must
+    not depend on it.
+    """
+    try:
+        rows = store.unjudged_email_senders(space)
+    except Exception as e:                               # noqa: BLE001 — a box without the column
+        log.info("email.backlog_unreadable", extra={"error": type(e).__name__})
+        return 0
+    marked = 0
+    for r in rows:
+        try:
+            store.mark_automated(space, r["zcid"], is_automated(None, r["sender"]))
+            marked += 1
+        except Exception:                                # noqa: BLE001 — one row never stops the rest
+            continue
+    if marked:
+        log.info("email.backlog_judged", extra={"space": space, "rows": marked})
+    return marked

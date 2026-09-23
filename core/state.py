@@ -570,6 +570,8 @@ _MIGRATION_OWNER: dict[int, str] = {
     52: "customer_voice",
     # 55 adds inbox_drafts.mailbox_at — a table only a Customer Voice box carries.
     55: "customer_voice",
+    # 56 adds inbox_conversations.automated — the same table 48 and 51 touched.
+    56: "customer_voice",
 }
 # A table each machine is known by, for the one-time bootstrap of boxes that predate the split.
 _MACHINE_MARKER = {"customer_voice": "voice_rails", "content": "reel_scripts", "lead": "gtm_leads"}
@@ -651,7 +653,7 @@ def _replay_machine(conn, machine: str, upto: int) -> None:
 # concurrent migrators: worker, dispatch, and watchdog can all boot and call init_db;
 # exactly one runs the steps, the rest wait on the lock then see the bumped version.
 
-SCHEMA_VERSION = 55
+SCHEMA_VERSION = 56
 
 
 def _migration_1(c) -> None:
@@ -1722,6 +1724,36 @@ def _migration_55(c) -> None:
         _add_column_if_missing(c, "inbox_drafts", "mailbox_at", "TEXT")
 
 
+def _migration_56(c) -> None:
+    """IS THIS SENDER A ROBOT. NULL means nobody has looked yet.
+
+    OSDev1 measured it on the owner's box, 2026-09-22: 35 of 62 email drafts were addressed to
+    automated senders — four LinkedIn job alerts, system@, alert@, noreply@, invitations@, and
+    the box's OWN Morning Review. Pressing "send the ones I ticked" would have mailed his
+    business address to 35 robots. Independent of any transport; a launch blocker on its own.
+
+    A COLUMN RATHER THAN A CHECK AT DRAFT TIME, because the evidence only exists at INGEST. The
+    standards that say "a machine sent this" are HEADERS — RFC 3834's `Auto-Submitted`, and
+    `List-Id` / `List-Unsubscribe` for bulk mail — and `inbox_messages` stores a body and a
+    sender, not headers. Deciding later from the address alone means guessing, and the guess is
+    wrong in the expensive direction: a real business whose enquiries come from `alerts@` or
+    `info@` would silently never be answered.
+
+    ON THE CONVERSATION, NOT THE MESSAGE, because that is the grain the two readers work at —
+    `needs_a_draft` picks conversations and the Drafts tab lists them. A thread is automated
+    because of who it is WITH.
+
+    NULL ON EVERY EXISTING ROW, which is the honest value: those threads were filed before
+    anything looked. They are re-judged on the next message that arrives, and the Drafts tab's
+    own filter treats unknown as "show it" — the buyer keeps seeing what he already sees, and
+    only new evidence removes a row.
+
+    Tagged `customer_voice` in _MIGRATION_OWNER: a Lead or Content box has no such table.
+    """
+    if _table_exists(c, "inbox_conversations"):
+        _add_column_if_missing(c, "inbox_conversations", "automated", "INTEGER")
+
+
 MIGRATIONS = {
     46: _migration_46,   # the schema split's bootstrap (kernel step)
     1: _migration_1, 2: _migration_2, 3: _migration_3, 4: _migration_4,
@@ -1738,7 +1770,8 @@ MIGRATIONS = {
               42: _migration_42, 43: _migration_43, 44: _migration_44,
               45: _migration_45, 47: _migration_47, 48: _migration_48,
               49: _migration_49, 50: _migration_50, 51: _migration_51, 52: _migration_52,
-              53: _migration_53, 54: _migration_54, 55: _migration_55}
+              53: _migration_53, 54: _migration_54, 55: _migration_55,
+              56: _migration_56}
 
 
 # init_db IS SAFE TO CALL FROM MANY THREADS AND PROCESSES AT ONCE. Main went red on 2026-09-06
