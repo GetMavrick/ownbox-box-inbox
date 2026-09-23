@@ -56,16 +56,25 @@ def box_id() -> str:
     return row["box_id"]
 
 
-def machines() -> list:
-    """The machine packages this box loads, per its own config."""
+def _modules() -> list | None:
+    """This box's module list, or None when the config could not be read.
+
+    THE DIFFERENCE MATTERS EXACTLY ONCE, in box_type(): no modules means the BASE MACHINE, and a
+    config we could not read means we do not know what this is. Collapsing both to [] is how a
+    box with a broken config introduces itself confidently as a product it may not be.
+    """
     try:
         from core.config import get_config
-        mods = get_config().get("modules") or []
+        return list(get_config().get("modules") or [])
     except Exception as e:                                  # noqa: BLE001
         log.warning("connector.modules_unreadable", error=type(e).__name__)
-        return []
+        return None
+
+
+def machines() -> list:
+    """The machine packages this box loads, per its own config."""
     found = []
-    for m in mods:
+    for m in (_modules() or []):
         for prefix, label in _MACHINE_PREFIXES.items():
             if str(m).startswith(prefix) and label not in found:
                 found.append(label)
@@ -73,10 +82,17 @@ def machines() -> list:
 
 
 def box_type() -> str:
-    """lead | content | customer_voice | aios | unknown — DERIVED, and labelled as such."""
+    """base | lead | content | customer_voice | aios | unknown — DERIVED, and labelled as such."""
+    mods = _modules()
+    if mods is None:
+        return "unknown"                # the config did not read; we genuinely do not know
     found = set(machines())
     if not found:
-        return "unknown"
+        # NO MODULES IS THE BASE MACHINE, not an unknown box. It is the product ownbox.io sells on
+        # its own, and an agent told `unknown` describes a supported product to its buyer as an
+        # unrecognised one. Modules that are present but match no prefix ARE unknown — that is a
+        # box running something we did not write, which is a different sentence and stays one.
+        return "base" if not mods else "unknown"
     if len(found) == 1:
         only = next(iter(found))
         return {"lead_machine": "lead", "content_machine": "content",

@@ -220,13 +220,19 @@ ok("report_day advertises its day argument",
 # box answering /dispatch because a reporting tool collided. Asserted on the source, because
 # actually breaking the import would break this test process too.
 _disp = (ROOT / "core" / "dispatch.py").read_text()
-_imp = _disp.index("from core import report_tools")
-_try = _disp.rfind("try:", 0, _imp)
-_note = _disp.find('note_absent("core.report_tools"', _imp)
+# Asserted over the LIST of core tool modules rather than one import line. The list grew — box
+# health and spend joined the Morning Review — and a check pinned to one module name would have
+# gone on passing while a second core registration sat outside the protection it is testing for.
+_names = _disp.index("core.report_tools")
+_try = _disp.find("try:", _names)
+_note = _disp.find("note_absent(", _names)
+ok("every core tool module is named in one place",
+   all(m in _disp[_names:_names + 200] for m in ("core.report_tools", "core.box_tools")),
+   _disp[_names:_names + 200])
 ok("the core tool import sits inside a try, like a pack's does",
-   _try != -1 and (_imp - _try) < 200, f"nearest try is {_imp - _try} chars back")
+   _try != -1 and (_try - _names) < 200, f"nearest try is {_try - _names} chars on")
 ok("and its failure is RECORDED, not swallowed — absence stays legible",
-   _note != -1 and (_note - _imp) < 600, f"note_absent at offset {_note - _imp}")
+   _note != -1 and (_note - _names) < 700, f"note_absent at offset {_note - _names}")
 
 
 # ── audited ───────────────────────────────────────────────────────────────────────────────

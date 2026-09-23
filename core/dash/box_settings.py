@@ -268,7 +268,11 @@ def box_chatgpt():
         action = str(request.form.get("do") or "")
         try:
             if action == "start":
-                live = codex_login.start(user_id=who.get("id"))
+                # THE TICK TRAVELS WITH THE SIGN-IN IT IS ABOUT. See `codex_login.start`.
+                live = codex_login.start(
+                    consented=bool(request.form.get(
+                        str(_step("anthropic").get("consent_field") or "subscription_consent"))),
+                    user_id=who.get("id"))
             elif action == "cancel":
                 codex_login.cancel()
                 return redirect("/settings/ai", code=303)
@@ -309,10 +313,22 @@ def box_chatgpt():
             '<button type="submit">Cancel</button></form></div>')
         refresh = '<meta http-equiv="refresh" content="5">'
     else:
+        # THE SAME TICK THE CLAUDE CARD CARRIES, BECAUSE IT IS THE SAME DECISION. Signing in here
+        # runs a box on a consumer subscription exactly as signing in there does, so the gate
+        # counsel asked for belongs on both screens or on neither — and until 2026-09-22 it was on
+        # one. Both vendors' terms are linked beside it for the reason the owner gave on
+        # 2026-09-18: what we owe somebody standing here is the INFORMATION, at the moment they
+        # are deciding. Nothing is refused if it is left unticked.
+        e = _step("anthropic")
+        links = _terms_links(e)
         body.append(
             '<div class="card"><h2>Use your ChatGPT subscription</h2>'
-            '<form method="post" action="/settings/chatgpt">'
+            + (f'<p class="quiet">{_esc(e.get("terms_warning") or "")}</p>'
+               if e.get("terms_warning") else "")
+            + (f'<p class="quiet">{links}</p>' if links else "")
+            + '<form method="post" action="/settings/chatgpt">'
             '<input type="hidden" name="do" value="start">'
+            + _consent(e) +
             '<button type="submit">Connect</button></form>'
             '<p class="quiet" style="margin-top:12px">Not working? Turn on device code sign-in '
             'in ChatGPT under Settings &rarr; Security (a work account needs an admin to allow '
@@ -378,6 +394,15 @@ def _picker(e: dict, picked: dict) -> str:
             '<noscript><button type="submit">Show</button></noscript>'
             f'<p class="quiet" style="margin:10px 0 0">{_esc(choice.get("note") or "")}</p>'
             '</form></div>')
+
+
+def _terms_links(e: dict) -> str:
+    """Both vendors' terms, one click away. `TERMS_LINKS` is (label, url) PAIRS, not dicts —
+    read off the contract rather than assumed, because the first draft of this assumed dicts and
+    500'd the screen."""
+    return " · ".join(
+        f'<a href="{_esc(url)}" target="_blank" rel="noopener noreferrer">{_esc(label)}</a>'
+        for label, url in (e.get("terms_links") or ()))
 
 
 def _consent(e: dict) -> str:
@@ -478,9 +503,7 @@ def _key_form(e: dict) -> str:
     f = dict((e.get("fields") or [{}])[0])
     # `TERMS_LINKS` IS A TUPLE OF (label, url) PAIRS, not dicts. Read off the contract rather
     # than assumed — the first draft of this line assumed dicts and 500'd the screen.
-    links = " · ".join(
-        f'<a href="{_esc(url)}" target="_blank" rel="noopener noreferrer">{_esc(label)}</a>'
-        for label, url in (e.get("terms_links") or ()))
+    links = _terms_links(e)
     # THE TICK IS NOT HERE ANY MORE, ON THE OWNER'S INSTRUCTION, AND THE WARNING STAYS. It reads
     # "use my SUBSCRIPTION with this box", and this is the one card on the screen where what you
     # are connecting is not a subscription — a pasted `sk-ant-oat…` is the expert's back door and
@@ -773,12 +796,19 @@ def box_push_subscribe():
 
 # ── the AI coworkers ─────────────────────────────────────────────────────────────────────────────
 
+# THE WORDS HERE ARE A PERMISSION LIST A BUYER READS BEFORE HANDING OVER A KEY, so they have to
+# name everything the role can see. `read` gained the box's own health and `act` gained its
+# SPEND (core/box_tools.py), and a role described as "read your conversations" while it can also
+# read the billing figure is a consent screen that misleads. Whenever _ROLE_CAPABILITIES grows,
+# this text grows with it.
 _ROLE_CHOICES = (
     ("read", "Read only",
-     "It can read your conversations and your morning report. It cannot write anything."),
+     "It can read your conversations, your morning report, and whether the box is running. It "
+     "cannot write anything, and it cannot see what the box is spending."),
     ("act", "Read and draft replies",
-     "Everything above, plus it can leave a suggested reply waiting on the screen. It still "
-     "cannot send - you press send, or you do not."),
+     "Everything above, plus what the box has spent against its monthly ceiling, and it can "
+     "leave a suggested reply waiting on the screen. It still cannot send - you press send, or "
+     "you do not."),
 )
 
 
@@ -950,11 +980,188 @@ def box_agent():
                   body=body), 200
 
 
+# ── the buyer's own way in ───────────────────────────────────────────────────────────────────────
+
+def _key_rows(keys: list) -> str:
+    """The keys that can open this box, with the fingerprint the owner can check on their laptop.
+
+    A LIST OF KEYS WITH NO FINGERPRINTS IS NOT A SECURITY SCREEN. "You have two keys" is not
+    something anybody can act on; `ssh-keygen -lf ~/.ssh/id_ed25519.pub` prints this exact string,
+    so an owner can tell their own key from one they do not recognise and remove the second.
+    """
+    if not keys:
+        return ('<div class="card"><p>No key of yours is on this box yet, so SSH will refuse you. '
+                'Add one below and you are in.</p></div>')
+    out = ['<div class="card"><h2>Keys that can open this box</h2>']
+    for k in keys:
+        label = _esc(k.get("comment") or "no name")
+        out.append(f'<div class="row"><b style="flex:1;min-width:0">{label}</b>'
+                   f'<span class="quiet">{_esc(k.get("type"))}</span></div>'
+                   f'<p class="addr">{_esc(k.get("fingerprint"))}</p>'
+                   f'<div class="foot"><a href="/settings/access?remove={_esc(k.get("fingerprint"))}">'
+                   f'Remove this key</a></div>')
+    return "".join(out) + "</div>"
+
+
+@blueprint.route("/settings/access", methods=["GET", "POST"])
+def box_access_screen():
+    """Add the owner's own SSH key to this box, or take one away.
+
+    THE PRODUCT PROMISES FULL ACCESS AND THE BOX SHIPPED WITH NONE. The only key ever placed on a
+    droplet is ours, and first boot deletes it the moment bootstrap succeeds — deliberately, so
+    nobody here keeps standing access to a customer's machine. That left the buyer locked out of
+    the server they own. This is the other half, and it is done ON THE BOX so it needs no
+    DigitalOcean account, no provisioner change, and works the same after they move the box to a
+    Mac mini.
+
+    OWNER-ONLY, and not by a margin. A key here is root on the machine — strictly more than the
+    dashboard itself grants — so this is the one screen in the drawer where the gate matters most.
+    """
+    refuse = _admit(owner_only=False)
+    if refuse is not None:
+        return refuse
+    from core import box_access
+
+    if not _is_owner():
+        return chrome("/settings", title="Your way in",
+                      lede="This one is the owner's.",
+                      body='<div class="card"><p>Only the owner of this box can add a key to it, '
+                           'because a key here is full control of the machine — more than this '
+                           'dashboard gives anyone.</p></div>' + _back()), 403
+
+    note = ""
+    remove = (request.args.get("remove") or "").strip()
+    if remove:
+        try:
+            text, gone = box_access.remove(box_access.read(), remove)
+            if gone:
+                box_access.write(text)
+        except OSError:
+            # A BOX WHOSE KEY FILE CANNOT BE READ IS NOT A BOX THAT SHOULD 500. Say so and leave
+            # the file alone; an owner locked out by a failed write has no second way in.
+            pass
+        return redirect("/settings/access", code=303)
+
+    if request.method == "POST":
+        try:
+            text, fp = box_access.add(box_access.read(), request.form.get("key") or "")
+            box_access.write(text)
+            note = (f'<div class="card"><h2>That key is in.</h2><p class="quiet">Its fingerprint '
+                    f'is below — check it against your own machine before you rely on it.</p>'
+                    f'<p class="addr">{_esc(fp)}</p></div>')
+        except box_access.KeyRefused as e:
+            # THE REFUSAL IS THE TEACHING. Every message from box_access names what to do instead,
+            # so it is shown verbatim rather than replaced with "invalid key".
+            note = f'<div class="card"><h2>That was not stored.</h2><p>{_esc(e)}</p></div>'
+        except OSError as e:                             # noqa: BLE001
+            note = (f'<div class="card"><h2>The box could not write the file.</h2>'
+                    f'<p class="quiet">{_esc(type(e).__name__)} — nothing was changed.</p></div>')
+
+    try:
+        keys = box_access.listed(box_access.read())
+    except OSError:
+        keys = []
+        note += ('<div class="card"><p>This box cannot read its key file right now, so the list '
+                 'below may be incomplete. Nothing has been changed.</p></div>')
+
+    form = (
+        '<div class="card"><h2>Add your key</h2>'
+        '<p class="quiet">On your own computer, open a terminal and run '
+        '<b>cat ~/.ssh/id_ed25519.pub</b>. If it says no such file, run '
+        '<b>ssh-keygen -t ed25519</b> first and press enter at every question, then run the first '
+        'command again. Paste the whole line it prints — it begins with ssh-ed25519 and it is '
+        'safe to share. The file WITHOUT .pub on the end is your private key and must never leave '
+        'your computer.</p>'
+        '<form method="post" action="/settings/access">'
+        '<label for="pubkey">Your public key</label>'
+        '<textarea id="pubkey" name="key" rows="4" required '
+        'placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... you@your-computer"></textarea>'
+        '<button type="submit">Add this key</button></form></div>')
+
+    return chrome("/settings", title="Your way in",
+                  lede="Put your own key on this box, and the machine is yours at the command line.",
+                  body=note + _key_rows(keys) + form + _back()), 200
+
+
+# ── what release this box runs ───────────────────────────────────────────────────────────────────
+
+def _ago(seconds) -> str:
+    """"14 hours ago" from a number of seconds. Vague on purpose, and it stops at days.
+
+    A buyer does not need the minute, they need to know whether it was recent — and the units stop
+    at days because a box that has not checked in weeks has a problem no wording can soften.
+    """
+    try:
+        s = int(seconds)
+    except (TypeError, ValueError):
+        return "at an unknown time"
+    if s < 0:
+        return "at a time this box reads as the future"
+    if s < 3600:
+        return f"{max(1, s // 60)} minutes ago"
+    if s < 86400:
+        h = s // 3600
+        return f"{h} hour{'s' if h != 1 else ''} ago"
+    d = s // 86400
+    return f"{d} day{'s' if d != 1 else ''} ago"
+
+
+@blueprint.route("/settings/updates")
+def box_updates_screen():
+    """What release this box is on, when it last looked, and how updates arrive.
+
+    WE SELL A BOX THAT KEEPS GETTING BETTER and a buyer could not see it happening: three sections
+    on the dashboard, and not one said what release the machine ran or that anything was arriving.
+    A product that improves invisibly is, to the person paying for it, a product that does not
+    improve. Owner, 2026-09-23, made this demo-critical.
+
+    READ-ONLY, DELIBERATELY, and it does not need a button. The box updates itself twice a day, so
+    an update button would be a second way to do a thing that already happens — and a half-finished
+    manual update on a customer's box is a far worse outcome than waiting twelve hours.
+
+    NOT OWNER-ONLY. Somebody who works in this box every day should be able to see whether it is
+    current. This page publishes a version string and nothing else: no money, no keys, no customer
+    data. The screens beside it gate on ownership because they hand out access or spend; this one
+    does neither, and hiding it would be the dead end the walk suite already caught once.
+    """
+    refuse = _admit(owner_only=False)
+    if refuse is not None:
+        return refuse
+    from core import box_updates
+
+    try:
+        st = box_updates.state()
+    except Exception as e:                               # noqa: BLE001 — a settings screen never 500s
+        st = {"release": None, "ok": None, "checked_at": None, "checked_s_ago": None,
+              "said": f"This box could not read its own update state ({type(e).__name__}). It is "
+                      f"still running the release it has; nothing has changed."}
+
+    release = st.get("release")
+    # THE TAG, PLAINLY, AND NOT DRESSED UP AS A VERSION NUMBER. It is the string a buyer would
+    # quote to us and the one our release list is keyed by. A prettier invented name here would
+    # mean the thing they read and the thing we look up are two different strings.
+    body = ('<div class="card"><h2>This box</h2>'
+            + (f'<p class="quiet">Release</p><p class="addr">{_esc(release)}</p>'
+               if release else '<p>This box cannot tell which release it is on.</p>')
+            + f'<p>{_esc(st.get("said"))}</p>'
+            + (f'<p class="quiet">Last checked {_esc(_ago(st.get("checked_s_ago")))}.</p>'
+               if st.get("checked_at") else "")
+            + '</div>'
+            '<div class="card"><h2>How updates arrive</h2>'
+            f'<p>{_esc(box_updates.HOW_UPDATES_ARRIVE)}</p>'
+            '<p class="quiet">Nothing here needs pressing. The box does this on its own.</p>'
+            '</div>')
+    return chrome("/settings", title="Updates",
+                  lede="What this box is running, and how it stays current.",
+                  body=body + _back()), 200
+
+
 # THE THREE DOORS ABOVE ARE WHAT `core/dash/home.py` OFFERS, and it learns them from the step data
 # rather than from this file: `_AI_STEP["action_href"]`, `_PHONE_STEP["action_href"]` and
 # `_AGENT_STEP["link"]["url"]` all name paths served here. Keeping the stnotifies in the contract is
 # what lets one screen render a step it has never heard of.
-_DOORS = ("/settings/ai", "/settings/mobile", "/settings/agent")
+_DOORS = ("/settings/ai", "/settings/mobile", "/settings/agent", "/settings/access",
+          "/settings/updates")
 # The handout hangs off the mobile-app door rather than being one of its own: it is not a
 # step a buyer finishes, it is a sheet they hand to somebody else.
 _HANDOUT = "/settings/mobile/print"

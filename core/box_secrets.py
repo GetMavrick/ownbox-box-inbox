@@ -44,8 +44,15 @@ ANTHROPIC_DETAIL = "anthropic_detail"
 CLAUDE_OAUTH = "claude_code_oauth_token"
 # THE RECORD THAT THE PERSON TICKED THE BOX, kept because legal counsel asked for the gate and a
 # gate nobody can evidence afterwards is decoration (owner, 2026-09-18, relaying his counsel). It
-# holds WHEN and WHO, never the token. `put_claude_oauth` refuses without it, so this row exists
-# for every stored subscription token on every box, with no path that writes one and not the other.
+# holds WHEN and WHO, never the token.
+#
+# IT IS RECORDED, NEVER REQUIRED — and this comment said the opposite until 2026-09-22, when it
+# still described the store as refusing a token that arrived without the tick. That was true of
+# the first cut and the owner overruled it the same day: a box does not hold its owner's
+# credential hostage to our comfort (the long note in `put_claude_oauth` carries his ruling in
+# full). The stale sentence outlived the behaviour it described by months and was read back as
+# fact by the next person in the file — which is the whole reason a comment about a rule belongs
+# next to the code that enforces the rule, never next to the constant it names.
 CLAUDE_OAUTH_CONSENT = "claude_code_oauth_consent"
 CLAUDE_OAUTH_STATUS = "claude_code_oauth_status"
 CLAUDE_OAUTH_DETAIL = "claude_code_oauth_detail"
@@ -54,6 +61,15 @@ CLAUDE_OAUTH_DETAIL = "claude_code_oauth_detail"
 # keeps only a status beside it, the way it keeps one beside the mailbox and Zernio.
 CODEX_STATUS = "codex_login_status"
 CODEX_DETAIL = "codex_login_detail"
+# THE SAME RECORD, FOR THE OTHER SUBSCRIPTION. A buyer signing in with ChatGPT is doing exactly
+# what a buyer signing in with Claude is doing — running a box on a consumer subscription — so the
+# tick counsel asked for belongs on both screens or on neither. It shipped on one: #1423 landed
+# the ChatGPT sign-in with no consent row and no tick, so a box could be drafting on somebody's
+# ChatGPT subscription with nothing on record that they were ever shown the terms.
+#
+# Same shape and same rule as CLAUDE_OAUTH_CONSENT: WHEN and WHO, never a credential, written
+# only when the tick is given, and never a condition of signing in.
+CODEX_CONSENT = "codex_login_consent"
 # Anthropic's own terms, linked on the set-up screen so the choice is made with them in front of
 # the person making it rather than described second-hand by us.
 ANTHROPIC_TERMS_URL = "https://www.anthropic.com/legal/consumer-terms"
@@ -422,7 +438,8 @@ def validate(name: str, value: str) -> str:
     # been written, so the box was left with a half-written status AND an exception in the poller.
     # Reproduced, then moved. A guard placed after the thing it guards is not a guard.
     if name in (EMAIL, EMAIL_DETAIL, EMAIL_SEND_DETAIL, ZERNIO_DETAIL, ZERNIO_PROFILE,
-                ANTHROPIC_DETAIL, CLAUDE_OAUTH_DETAIL, CLAUDE_OAUTH_CONSENT):
+                ANTHROPIC_DETAIL, CLAUDE_OAUTH_DETAIL, CLAUDE_OAUTH_CONSENT,
+                CODEX_DETAIL, CODEX_CONSENT):
         return str(value or "")
     value = str(value or "").strip()
     if not value:
@@ -636,9 +653,29 @@ def note_codex_status(status: str, detail: str = "", *, user_id: str | None = No
         clear(CODEX_DETAIL, user_id=user_id)
 
 
+def note_codex_consent(*, user_id: str | None = None) -> None:
+    """Write down that the tick was given for the ChatGPT sign-in. WHEN and WHO, nothing else.
+
+    THE TWIN OF THE LINE IN `put_claude_oauth`, and deliberately a separate call rather than an
+    argument on `note_codex_status`. The status is written by the CLI helper every time it learns
+    something — including on a re-auth months later, where nobody has been shown a tick — and a
+    consent row that could be rewritten by a background probe would record a decision the person
+    never made twice over.
+    """
+    put(CODEX_CONSENT, f"{state._now()} {user_id or 'unknown'}"[:300], user_id=user_id)
+
+
+def codex_consent_record() -> str:
+    """When the ChatGPT tick was given and by whom, for whoever has to answer that later."""
+    return get(CODEX_CONSENT)
+
+
 def clear_codex(*, user_id: str | None = None) -> None:
+    # THE CONSENT GOES WITH THE SIGN-IN IT WAS GIVEN FOR, exactly as `clear_claude_oauth` does it.
+    # Leaving it behind would let the next person's sign-in inherit a tick somebody else gave.
     clear(CODEX_STATUS, user_id=user_id)
     clear(CODEX_DETAIL, user_id=user_id)
+    clear(CODEX_CONSENT, user_id=user_id)
 
 
 def note_anthropic_status(status: str, detail: str = "", *, user_id: str | None = None) -> None:

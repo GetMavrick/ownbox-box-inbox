@@ -12,6 +12,7 @@ that live HERE, at the SQL layer, not in caller discipline:
     double-click cannot produce two vendor calls.
 """
 import hashlib
+import json
 import uuid
 
 from core import state
@@ -338,18 +339,38 @@ def messages_for(space: str, zcid: str, *, limit: int = 200) -> list[dict]:
     # already exists — LEFT JOINs, because a message the machine sent, or one that arrived
     # inbound, has no ledger row and must still render. SQLite will not match NULL to NULL, so
     # rows with no vendor id cannot accidentally join to each other.
+    # AND WHAT ACTUALLY ARRIVED, where we kept it. A third LEFT JOIN, for the same reason as the
+    # other two: a message with no detail row — everything stored before 2026-09-23, and every
+    # Messenger and Instagram message ever — must still render, with NULLs the caller falls back
+    # from. `full_text` is why: `m.body` is capped at 2000 characters and long mail was being cut
+    # off on screen, silently, because the preview was the only copy.
+    #
+    # `body_html` IS DELIBERATELY NOT SELECTED. It is routinely tens of kilobytes and nothing
+    # renders it yet; pulling 200 of them to draw a thread would be paying for a feature that has
+    # not shipped. When safe rendering lands it asks for it by id, for the one message shown.
     with state.connect() as c:
         rows = c.execute(
             "SELECT m.*, l.user_id AS sender_user_id, u.name AS sender_name, "
-            "       u.email AS sender_email "
+            "       u.email AS sender_email, "
+            "       d.body_text AS full_text, d.headers AS raw_headers "
             "  FROM inbox_messages m "
             "  LEFT JOIN inbox_send_ledger l "
             "         ON l.space = m.space AND l.zernio_message_id = m.zernio_message_id "
             "  LEFT JOIN users u ON u.id = l.user_id "
+            "  LEFT JOIN inbox_message_detail d ON d.message_id = m.id "
             " WHERE m.space = ? AND m.zernio_conversation_id = ? "
             " ORDER BY m.created_at ASC, m.id ASC LIMIT ?",
             (space, zcid, int(limit))).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        row = dict(r)
+        try:
+            got = json.loads(row.pop("raw_headers", None) or "{}")
+        except Exception:                                # noqa: BLE001 — unreadable JSON is none
+            got = {}
+        row["headers"] = got if isinstance(got, dict) else {}
+        out.append(row)
+    return out
 
 
 def set_opted_out(space: str, zcid: str) -> None:
@@ -575,12 +596,25 @@ def _mirror_key(space: str, zcid: str, direction: str, sent_by: str,
 
 
 def record_message(*, space: str, zcid: str, zmid: str | None, direction: str,
-                   sent_by: str, body: str | None, sent_at: str | None = None) -> None:
+                   sent_by: str, body: str | None, sent_at: str | None = None,
+                   detail: dict | None = None) -> None:
     """Mirror one message, exactly once.
 
     Idempotent by the VENDOR's message id when there is one, and by `_mirror_key` when there is
     not — see there for why a missing id is not a small problem. `sent_at` is optional only so
     that callers which never had it keep working; pass it wherever the vendor gives one.
+
+    `detail` IS WHAT ARRIVED, BESIDE WHAT WE SHOW. `body` above is a PREVIEW — capped at 2000
+    characters and read to draw the conversation list — and that cap has been silently cutting
+    long mail since the machine shipped. A channel that has the real parts passes them here:
+    {"body_html": …, "body_text": …, "headers": {…}}. Stored untruncated, in its own table, read
+    only when a message is opened. See `marketing/customer_voice/schema.py`.
+
+    IT BACKFILLS, WHICH IS THE POINT OF LOOKING THE ID UP RATHER THAN REMEMBERING IT. The message
+    row is INSERT OR IGNORE, so on a re-read of a mailbox the row is already there and the insert
+    does nothing — but the detail row may be missing, because the message was first stored before
+    any of this existed. Resolving the id by key writes detail for those too, so a re-poll
+    recovers mail we have already lost the HTML for instead of skipping it.
     """
     key = (zmid or "").strip() or _mirror_key(space, zcid, direction, sent_by, body, sent_at)
     with state.connect() as c:
@@ -590,6 +624,66 @@ def record_message(*, space: str, zcid: str, zmid: str | None, direction: str,
             "created_at) VALUES (?,?,?,?,?,?,?,?)",
             (str(uuid.uuid4()), space, zcid, key, direction, sent_by,
              (body or "")[:2000], state._now()))
+        if not detail:
+            return
+        row = c.execute("SELECT id FROM inbox_messages WHERE zernio_message_id = ?",
+                        (key,)).fetchone()
+        if not row:                                      # cannot happen; costs one branch to say so
+            return
+        c.execute(
+            "INSERT OR IGNORE INTO inbox_message_detail "
+            "(message_id, body_html, body_text, headers, created_at) VALUES (?,?,?,?,?)",
+            (str(row["id"]), str(detail.get("body_html") or ""),
+             str(detail.get("body_text") or ""),
+             json.dumps(detail.get("headers") or {}, ensure_ascii=False), state._now()))
+
+
+def html_for(space: str, zcid: str, *, limit: int = 200) -> dict:
+    """{message_id: body_html} for one conversation, for the ONE screen that frames it.
+
+    A SEPARATE CALL BECAUSE `messages_for` HAS OTHER CALLERS. This is the only view that renders
+    a sender's markup, and an HTML part is routinely tens of kilobytes; joining it into the query
+    that every other caller of `messages_for` shares would make them all pay for a screen they do
+    not draw. Asking for it by conversation, from the view that needs it, keeps the cost where
+    the feature is.
+
+    EMPTY IS THE NORMAL ANSWER — a Messenger thread, and every message stored before the HTML was
+    kept. The caller falls back to the text it already has.
+    """
+    try:
+        with state.connect() as c:
+            rows = c.execute(
+                "SELECT d.message_id AS mid, d.body_html AS h "
+                "  FROM inbox_message_detail d "
+                "  JOIN inbox_messages m ON m.id = d.message_id "
+                " WHERE m.space = ? AND m.zernio_conversation_id = ? "
+                "   AND d.body_html IS NOT NULL AND d.body_html != '' "
+                " LIMIT ?", (space, zcid, int(limit))).fetchall()
+    except Exception:                                    # noqa: BLE001 — a box mid-update has none
+        return {}
+    return {str(r["mid"]): str(r["h"] or "") for r in rows}
+
+
+def message_detail(message_id: str) -> dict:
+    """What arrived for one message: {"body_html", "body_text", "headers"}. {} when there is none.
+
+    A MESSAGE WITHOUT DETAIL IS NORMAL, NOT AN ERROR — every message stored before 2026-09-23 has
+    none, and Messenger and Instagram have none to give. Every caller renders without it.
+    """
+    try:
+        with state.connect() as c:
+            row = c.execute("SELECT * FROM inbox_message_detail WHERE message_id = ?",
+                            (str(message_id),)).fetchone()
+    except Exception:                                    # noqa: BLE001 — a box mid-update has no table
+        return {}
+    if not row:
+        return {}
+    try:
+        headers = json.loads(row["headers"] or "{}")
+    except Exception:                                    # noqa: BLE001 — unreadable JSON is no headers
+        headers = {}
+    return {"body_html": row["body_html"] or "", "body_text": row["body_text"] or "",
+            "headers": headers if isinstance(headers, dict) else {}}
 
 
 def get_watermark(space: str, zcid: str) -> dict | None:

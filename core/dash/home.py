@@ -988,6 +988,31 @@ def settings():
             '<p class="sub">What every machine on this box shares. Each machine keeps its own '
             'settings in its own menu.</p>'
             + _box_rows(owner=_is_owner()) + '</div>')
+    # THE MACHINE ITSELF, and it is the owner's alone. A key added there is root on the server —
+    # strictly more than this dashboard grants anybody — so the row is drawn only for the owner,
+    # who is the only person the screen behind it admits. Offering it to a member would be the
+    # dead end the walk suite already caught once: a door that refuses you reads as a broken box.
+    #
+    # IT IS NOT ONE OF THE CREDENTIAL ROWS ABOVE and must not become one. Those come from
+    # `setup_state()` — things the box is waiting to be GIVEN before a machine can work. This is
+    # not a set-up step with a done state; it is a standing door to the machine the buyer owns,
+    # available on day one and on day four hundred.
+    # WHAT THIS BOX IS RUNNING, and it is for everybody. Somebody who works in this box daily
+    # should be able to see whether it is current; the page behind this publishes a version string
+    # and nothing else — no money, no keys, no customer data — so there is nothing to gate on
+    # ownership. It sits ABOVE the owner-only card so the order of the page does not change
+    # depending on who is looking at it.
+    body += ('<div class="card"><h2>Updates</h2>'
+             '<p class="sub">This box improves on its own. See what it is running now, when it '
+             'last looked for something newer, and how that works.</p>'
+             '<div class="foot"><a href="/settings/updates">What this box is running &rarr;</a>'
+             '</div></div>')
+    if _is_owner():
+        body += ('<div class="card"><h2>The machine itself</h2>'
+                 '<p class="sub">This box is a server you own outright. Put your own key on it '
+                 'and you have it at the command line — no account with us, and it keeps working '
+                 'if you move the box somewhere else.</p>'
+                 '<div class="foot"><a href="/settings/access">Your way in &rarr;</a></div></div>')
     return chrome("/settings", title="Settings",
                   lede="The parts of this box that belong to the box, not to one machine.",
                   body=body), 200

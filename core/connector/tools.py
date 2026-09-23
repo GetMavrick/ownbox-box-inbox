@@ -89,10 +89,16 @@ _CAPABILITY = re.compile(r"^(read|write):[a-z][a-z0-9_]{2,39}$")
 # `read:leads_pii` STAYS UNGRANTED, and the contrast is the point: it is not an oversight that
 # some capability has no holder, it is how a capability is kept for a decision nobody has made
 # yet. This list is where that decision gets made, visibly.
+# read:spend is held by act and service and NOT by read. That is not a rank judgement — a read
+# seat holds four other reads — it is the one field this system has already decided is the owner's
+# alone: core/report_tools.py withholds the meters segment from a read seat, by name and loudly.
+# Granting read:spend to `read` would hand the same number back through a different door.
 _ROLE_CAPABILITIES = {
-    "read":    frozenset({"read:manifest", "read:reports", "read:inbox"}),
-    "act":     frozenset({"read:manifest", "read:reports", "read:inbox", "write:proposals"}),
-    "service": frozenset({"read:manifest", "read:reports", "read:inbox", "write:proposals"}),
+    "read":    frozenset({"read:manifest", "read:reports", "read:inbox", "read:health"}),
+    "act":     frozenset({"read:manifest", "read:reports", "read:inbox", "read:health",
+                          "read:spend", "write:proposals"}),
+    "service": frozenset({"read:manifest", "read:reports", "read:inbox", "read:health",
+                          "read:spend", "write:proposals"}),
 }
 
 

@@ -143,15 +143,16 @@ app.register_blueprint(_connector_mcp.blueprint)
 #
 # The registry's refusal is still right; it must not be silent. So it fails the same way a pack
 # does: the tools are absent, the reason is recorded, and the box keeps answering.
-try:
-    from core import report_tools as _report_tools  # noqa: E402,F401
-except Exception as _e:                            # noqa: BLE001
-    log.error("dispatch.core_tools_import_failed", module="core.report_tools", error=str(_e))
+for _mod in ("core.report_tools", "core.box_tools"):
     try:
-        from core.connector import tools as _ctools2
-        _ctools2.note_absent("core.report_tools", f"{type(_e).__name__}: {_e}")
-    except Exception:                              # noqa: BLE001
-        pass
+        __import__(_mod)
+    except Exception as _e:                        # noqa: BLE001
+        log.error("dispatch.core_tools_import_failed", module=_mod, error=str(_e))
+        try:
+            from core.connector import tools as _ctools2
+            _ctools2.note_absent(_mod, f"{type(_e).__name__}: {_e}")
+        except Exception:                          # noqa: BLE001
+            pass
 
 _load_web_modules()
 

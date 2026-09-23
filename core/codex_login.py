@@ -181,8 +181,20 @@ def pending() -> dict:
             "error": _read(d, "error")}
 
 
-def start(*, user_id: str | None = None) -> dict:
-    """Begin a sign-in. Returns {url, code} the buyer uses on their own device. Raises LoginError."""
+def start(*, consented: bool = False, user_id: str | None = None) -> dict:
+    """Begin a sign-in. Returns {url, code} the buyer uses on their own device. Raises LoginError.
+
+    `consented` IS CARRIED, NOT ASSUMED — the same arrangement `core/claude_login.py` uses, and
+    for the same reason. The tick is on the form that starts the login, the login finishes in a
+    detached helper minutes later in another process, and the two are joined by a file in the
+    session directory. Nothing else can join them: the request that held the tick is long gone by
+    the time the CLI returns, and a box that wrote the consent down at button-press would be
+    recording a tick for a sign-in that may never have completed.
+
+    IT IS NEVER A CONDITION. A sign-in with the box unticked proceeds exactly as one with it
+    ticked and simply records nothing — the owner's 2026-09-18 ruling, which `put_claude_oauth`
+    carries in full: a box does not hold its owner's own credential hostage to our comfort.
+    """
     if not cli_present():
         raise LoginError("This box cannot sign in to ChatGPT yet — the Codex CLI is not installed "
                          "on it. Ask support@ownbox.io and we will put it on.")
@@ -193,6 +205,10 @@ def start(*, user_id: str | None = None) -> dict:
     _write(d, "status", "starting")
     if user_id:
         _write(d, "user", str(user_id))
+    # BEFORE THE CHILD IS SPAWNED, so the helper cannot reach its success path and find the file
+    # half-written. Written every time, empty when untricked, so a stale "1" from an earlier
+    # session directory can never be read as this person's answer.
+    _write(d, "consent", "1" if consented else "")
     root = pathlib.Path(__file__).resolve().parents[1]
     try:
         logf = open(d / "log", "wb")                     # noqa: SIM115 — handed to the child
@@ -365,7 +381,17 @@ def _serve(d: pathlib.Path) -> int:
     if not logged_in():
         return fail("ChatGPT finished, but this box is still not signed in. Press Connect to try "
                     "again — and if it keeps happening, tell support@ownbox.io.")
-    box_secrets.note_codex_status("connected", user_id=_read(d, "user") or None)
+    _user = _read(d, "user") or None
+    box_secrets.note_codex_status("connected", user_id=_user)
+    # ONLY NOW, AND ONLY IF IT WAS GIVEN. The tick answers "did this person agree to run their box
+    # on their own subscription", so it is recorded at the moment there IS a box running on one —
+    # not when a button was pressed on a sign-in that might still have failed.
+    if _read(d, "consent") == "1":
+        try:
+            box_secrets.note_codex_consent(user_id=_user)
+        except Exception as e:                           # noqa: BLE001 — a working sign-in is not
+            # undone by an unwritable row; it is logged so the gap is visible rather than silent.
+            log.warning("codex_login.consent_unwritable", error=type(e).__name__)
     _write(d, "status", "done")
     log.info("codex_login.connected")
     return 0

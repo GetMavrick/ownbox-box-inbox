@@ -165,8 +165,88 @@ def thread_key(msg) -> str:
     return _header(msg, "In-Reply-To") or _header(msg, "Message-ID") or ""
 
 
+# THE HEADERS THE DETAILS PANEL NEEDS, AS A FIXED LIST. Not "every header": a message carries
+# dozens, several are unbounded (`Received` chains), and some are nobody's business to keep. This
+# is the set that answers the questions Gmail's own details drop-down answers, and one more.
+#
+#   From / To / Cc / Subject / Date   who, who else, when — shown verbatim, ADDRESS INCLUDED.
+#                                     The screen shows a display name today and nothing else,
+#                                     which is precisely what a spoof relies on.
+#   Return-Path                       the envelope sender → Gmail's "mailed-by".
+#   DKIM-Signature                    carries `d=` → Gmail's "signed-by".
+#   Authentication-Results            the receiving server's SPF/DKIM/DMARC verdicts.
+#
+# NO `Received` AND NO TLS LINE. Gmail's "security: standard encryption (TLS)" describes the hop
+# into Google's own servers, written by Google. We did not make that hop and cannot honestly
+# report on it; the authentication results answer the question a buyer actually has — is this
+# really from who it says — and that we can stand behind.
+_KEEP_HEADERS = ("From", "To", "Cc", "Subject", "Date", "Return-Path",
+                 "DKIM-Signature", "Authentication-Results")
+# One header is stored at this size at most. `Authentication-Results` from a forwarder can run
+# long, and a details panel that needs four kilobytes of it is not a details panel.
+_HEADER_MAX = 2000
+
+
+def _kept_headers(msg) -> dict:
+    """The allowlist above, as a plain dict, skipping the ones this message does not carry.
+
+    REPEATED HEADERS ARE JOINED, NOT DROPPED. `Authentication-Results` and `DKIM-Signature` both
+    legitimately appear more than once — one per hop, one per signature — and keeping only the
+    first would report on one signer while a second went unmentioned.
+    """
+    out = {}
+    for name in _KEEP_HEADERS:
+        got = [str(v) for v in msg.get_all(name) or () if str(v).strip()]
+        if got:
+            out[name] = "\n".join(got)[:_HEADER_MAX]
+    return out
+
+
+def _body_parts(msg) -> tuple:
+    """(text, html) — BOTH parts, each verbatim, neither derived from the other.
+
+    THE BUG THIS REPLACES. `_body_text` returned one string: the `text/plain` part if there was
+    one, otherwise a tag-stripped `text/html`. So on the overwhelmingly common multipart/alternative
+    message the HTML was read, found, and discarded — and what a buyer saw was the fallback the
+    sender's mailer generated and nobody at that company has ever looked at.
+
+    NEITHER IS SYNTHESISED. The text part is the sender's own text or "", and the HTML part is the
+    sender's own markup or "". A stripped-HTML string is not a text part and must not be stored as
+    one: it is a lossy guess, and storing a guess beside the real thing is how the real thing stops
+    being consulted.
+    """
+    def decode(part) -> str:
+        try:
+            return part.get_payload(decode=True).decode(
+                part.get_content_charset() or "utf-8", "replace")
+        except Exception:                                # noqa: BLE001
+            return ""
+
+    if not msg.is_multipart():
+        got = decode(msg).strip()
+        return ("", got) if msg.get_content_type() == "text/html" else (got, "")
+    text = html_part = ""
+    for part in msg.walk():
+        if part.get_content_maintype() == "multipart":
+            continue
+        if part.get_filename():                          # an attachment is not the body
+            continue
+        kind = part.get_content_type()
+        if kind == "text/plain" and not text:
+            text = decode(part).strip()
+        elif kind == "text/html" and not html_part:
+            html_part = decode(part)
+    return (text, html_part)
+
+
 def _body_text(msg) -> str:
-    """The plain-text body. Prefers text/plain; falls back to stripping a text/html part."""
+    """The plain-text body. Prefers text/plain; falls back to stripping a text/html part.
+
+    STILL HERE, AND STILL LOSSY, BECAUSE `inbox_messages.body` IS A PREVIEW. That column is read
+    to draw the conversation list and is capped at 2000 characters; a tag-stripped fallback is
+    the right thing to put in it. What changed is that it is no longer the ONLY thing kept —
+    `_body_parts` puts both real parts in `inbox_message_detail`, untruncated.
+    """
     def decode(part) -> str:
         try:
             return part.get_payload(decode=True).decode(
@@ -545,9 +625,14 @@ def sweep(space: str) -> tuple[int, int]:
                 account_id=cred.get("user"))
             # record_message is INSERT OR IGNORE on the message id, so the RFC Message-ID IS the
             # exactly-once key — re-reading a UID after a crash writes nothing twice.
+            # BOTH PARTS AND THE HEADERS, ALONGSIDE THE PREVIEW. `body` stays what it always
+            # was — the capped, list-view string — and `detail` carries what actually arrived.
+            text, html_part = _body_parts(msg)
             store.record_message(space=space, zcid=zcid, zmid=mid,
                                  direction="in" if inbound else "out",
-                                 sent_by=(addr or frm)[:200], body=_body_text(msg))
+                                 sent_by=(addr or frm)[:200], body=_body_text(msg),
+                                 detail={"body_html": html_part, "body_text": text,
+                                         "headers": _kept_headers(msg)})
             # JUDGED HERE, WHERE THE HEADERS STILL EXIST, and only on INBOUND: whether a machine
             # is writing to this business is a fact about the other end, and the box's own
             # outbound tells us nothing about them.

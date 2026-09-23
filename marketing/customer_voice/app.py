@@ -58,6 +58,21 @@ def _readable(text: str) -> str:
         return _esc(text)
 
 
+def _mail_frame(body_html: str, label: str) -> str:
+    """A sender's own HTML in a sandboxed frame, or "" — the same fallback shape as `_readable`.
+
+    THE SAFETY IS IN `render.safe_frame`, NOT HERE. Read the long note there before changing
+    anything: the boundary is a `sandbox` iframe with no `allow-scripts` and no
+    `allow-same-origin`, plus a CSP inside it that blocks every remote fetch — which is what
+    stops a tracking pixel telling the sender the moment the buyer opened their mail.
+    """
+    try:
+        from marketing.customer_voice.inbox.render import safe_frame
+        return safe_frame(body_html, label=label)
+    except Exception:                                    # noqa: BLE001 — a thread must still open
+        return ""
+
+
 def _esc(v) -> str:
     return html.escape(str(v if v is not None else ""))
 
@@ -749,13 +764,72 @@ a.row:active{background:var(--hair);border-radius:10px}
 .msg{max-width:82%}
 .msg.in{align-self:flex-start}
 .msg.out{align-self:flex-end;text-align:right}
-.msg .b{background:var(--bubble-in);border-radius:19px;padding:9px 14px;white-space:pre-wrap;
-  overflow-wrap:anywhere;font-size:16px;line-height:1.35;text-align:left}
+/* COMPACT, BECAUSE THESE ARE EMAILS NOW AND NOT ONE-LINE DMs. Owner, 2026-09-23: "things need
+   to be much more compact as far as line spacing on these emails." A chat bubble tuned for
+   "yes, Thursday works" turns a forty-line email into a page of scrolling: 1.35 line-height and
+   14px of side padding are generous per line and ruinous multiplied by forty. 1.28 and tighter
+   padding read the same on a short message and give back most of a screen on a long one. */
+.msg .b{background:var(--bubble-in);border-radius:19px;padding:8px 13px;white-space:pre-wrap;
+  overflow-wrap:anywhere;font-size:16px;line-height:1.28;text-align:left}
+/* A LONG MESSAGE IS WIDER THAN A SHORT ONE. 82% of the column is the right bubble width for a
+   sentence and the wrong one for an email, where it forces a narrow ragged column down the
+   page; an email-length message takes the full width it needs. */
+.msg.long{max-width:100%}
 .msg.out .b{background:var(--bubble-out);color:var(--bubble-out-ink)}
 /* A LINK IN A BUBBLE TAKES THE BUBBLE'S COLOUR and is underlined, because an accent
    colour that reads on the white bubble is unreadable on the tinted one. */
 .msg .b a{color:inherit;text-decoration:underline;text-underline-offset:2px;word-break:break-word}
-.msg .m{margin-top:3px;margin-bottom:9px;color:var(--dimmer);font-size:12px}
+.msg .m{margin-top:3px;margin-bottom:8px;color:var(--dimmer);font-size:12px}
+
+/* ── the sender's own document ─────────────────────────────────────────────────────────────
+   A framed message is a CARD, not a bubble: no tint, no 19px radius, a hairline border. That
+   is honest about what it is — their page, shown inside ours — where a chat bubble wrapped
+   around somebody else's letterhead reads as ours. */
+.msg .b.mail{background:var(--surface);padding:0;border:1px solid var(--line);border-radius:14px;
+  overflow:hidden}
+/* NO SCRIPT MEANS NO AUTO-HEIGHT. The frame is an opaque origin with `sandbox` and no
+   `allow-scripts`, so neither side can measure the other — see `render.safe_frame`. A fixed
+   cap that scrolls inside a bordered card is the honest answer, not a shortcoming to fix. */
+/* NO BACKGROUND HERE, DELIBERATELY. The frame's own document paints its body white inside the
+   srcdoc, because a sender's email is designed for white paper and a themed token would render
+   their black text on our dark ground. Setting it out here as well would be an unnameable
+   colour in our palette for a surface that is not ours. */
+iframe.mail{display:block;width:100%;border:0}
+/* The text, folded under it. Kept because a frame cannot be searched, swept with one selection,
+   or copied out of the way a person copies an address out of a message. */
+.orig{border-top:1px solid var(--line)}
+.orig summary{cursor:pointer;color:var(--dimmer);font-size:13px;padding:9px 13px;min-height:24px;
+  list-style:none}
+.orig summary::-webkit-details-marker{display:none}
+.orig summary::after{content:" ▾"}
+.orig[open] summary::after{content:" ▴"}
+.ot{padding:0 13px 11px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;
+  line-height:1.3}
+
+/* ── who really sent it ────────────────────────────────────────────────────────────────────
+   The address under the name, then Gmail's caret. Both are absent rather than empty when the
+   box kept no headers for this thread — a details panel with nothing in it is worse than none,
+   because it invites a tap that answers nothing. */
+.addr{margin:-6px 0 0;color:var(--dimmer);font-size:14px;overflow-wrap:anywhere}
+.det{margin:10px 0 0}
+.det summary{display:inline-block;cursor:pointer;color:var(--dimmer);font-size:13px;
+  padding:6px 0;min-height:24px;list-style:none}
+.det summary::-webkit-details-marker{display:none}
+.det summary::after{content:" ▾"}
+.det[open] summary::after{content:" ▴"}
+.dt{margin-top:6px;padding:10px 12px;background:var(--surface);border:1px solid var(--line);
+  border-radius:12px}
+/* LABEL OVER VALUE ON A PHONE, two columns once there is room. A 90px label column next to a
+   long From line leaves about eleven characters per row at 390px, which is not a table, it is
+   a stack of fragments. */
+.dr{display:block;padding:3px 0;font-size:13px;line-height:1.35}
+.dk{display:block;color:var(--dimmer)}
+.dv{display:block;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media (min-width:560px){
+  .dr{display:flex;gap:10px}
+  .dk{flex:0 0 88px;text-align:right}
+  .dv{flex:1 1 auto}
+}
 
 /* ── the reply box ─────────────────────────────────────────────────────────────────────────
    16px IS NOT A STYLE CHOICE: iOS Safari zooms the page when a focused input is under 16px, and
@@ -2747,6 +2821,23 @@ def r_thread(zcid):
     # saying which channel this is before he starts typing.
     _p = conv.get("platform")
     head = [f'<h1>{_esc(who)} <span class="chan">{_esc(_channel(_p))}{_mark(_p, 15)}</span></h1>']
+    # THE ADDRESS, AND THEN THE REST BEHIND A CARET. Taken from the newest message this thread
+    # has headers for — which is the newest one polled since the box started keeping them, and
+    # nothing at all on a thread that has not been polled since. Both render: the address line
+    # and the caret each disappear rather than printing an empty row.
+    # ONE LOOKUP FOR THE WHOLE THREAD, not one per bubble. Asked for here rather than joined
+    # into `messages_for`, because this is the only view that renders a sender's markup and an
+    # HTML part is tens of kilobytes — see `store.html_for`.
+    try:
+        _html_by_id = _store.html_for(space, zcid)
+    except Exception as e:                       # noqa: BLE001 — a thread must still open
+        log.warning("voice.html_for_failed", extra={"error": f"{type(e).__name__}"[:80]})
+        _html_by_id = {}
+    _hdrs = next((m.get("headers") or {} for m in reversed(msgs) if m.get("headers")), {})
+    _addr = _addr_of(_hdrs)
+    if _addr and _addr.lower() != who.lower():
+        head.append(f'<div class="addr">{_esc(_addr)}</div>')
+    head.append(_details(_hdrs))
     if conv.get("opted_out"):
         head.append('<div class="card needs"><div class="row"><span class="t">'
                     'This person has opted out. Nothing is sent to them.</span></div></div>')
@@ -2795,16 +2886,41 @@ def r_thread(zcid):
         stamp = _when(m.get("created_at"))
         show = stamp != last_stamp
         last_stamp = stamp
+        # AN EMAIL-LENGTH MESSAGE GETS THE FULL COLUMN. Measured off the owner's own morning
+        # review: at 82% and 390px it wrapped into a 44-character ragged column forty lines
+        # deep. The threshold is on the text, not the channel — a one-line email still reads
+        # as a chat bubble, which is the shape he asked to keep.
+        _txt = str(m.get("full_text") or m.get("body") or "")
+        _long = " long" if len(_txt) > 400 or _txt.count("\n") > 6 else ""
+        # THE SENDER'S OWN HTML WHERE THERE IS ANY, AND THE TEXT WHERE THERE IS NOT. This is the
+        # whole point of having kept it: a message written in HTML has been showing the buyer the
+        # fallback its mailer generated. A framed message takes the column, because an email is
+        # not a chat line — and the frame is never the whole story, so the text stays available
+        # under it rather than being replaced by a box the reader cannot search.
+        _frame = _mail_frame(_html_by_id.get(str(m.get("id")), ""), who)
+        _long = " long" if (_frame or _long) else ""
         bubbles.append(
-            f'<div class="msg {"in" if inbound else "out"}">'
+            f'<div class="msg {"in" if inbound else "out"}{_long}">'
+            # TWO SHAPES, AND WHICH ONE IS DECIDED BY WHAT ARRIVED. A message written in HTML
+            # gets the sender's own document in a sandboxed frame, with the plain text folded
+            # under it — kept, not replaced, because a frame is not searchable, not selectable
+            # in one sweep, and not what somebody wants when they are copying an address out of
+            # a message. Everything else gets the text it always got.
+            #
             # `readable`, NOT `_esc`. It escapes FIRST and then makes the message legible: runs
-            # of blank lines collapsed, `<https://…>` turned into a real link. What a buyer was
-            # reading here is the mailer's plain-text FALLBACK — see inbox/render.py — and
-            # `.msg .b` is `white-space:pre-wrap`, so every throwaway blank line in it was dead
-            # space on their screen. No sender HTML is rendered and none can be: the only tags
-            # this emits are its own, built from already-escaped characters.
-            f'<div class="b">{_readable(m.get("body") or "")}</div>'
-            f'<div class="m">{_esc(by)}'
+            # of blank lines collapsed, `<https://…>` turned into a real link. `.msg .b` is
+            # `white-space:pre-wrap`, so every throwaway blank line in a mailer's fallback was
+            # dead space on the buyer's screen. It emits no sender markup and cannot: the only
+            # tags it produces are its own, built from already-escaped characters.
+            #
+            # `full_text` FIRST, `body` ONLY AS THE FALLBACK. `inbox_messages.body` is a
+            # 2000-character PREVIEW — right for the list, and it was the only copy kept, so
+            # long mail was cut off mid-sentence here with nothing to say it had been.
+            + (f'<div class="b mail">{_frame}'
+               '<details class="orig"><summary>Plain text</summary>'
+               f'<div class="ot">{_readable(_txt)}</div></details></div>'
+               if _frame else f'<div class="b">{_readable(_txt)}</div>')
+            + f'<div class="m">{_esc(by)}'
             + (f' · {_esc(stamp)}' if show else "") + '</div></div>')
     back = '<div class="foot"><a href="/inbox/inbox">← Inbox</a></div>'
     return _shell("".join(head) + f'<div class="thread">{"".join(bubbles)}</div>'
@@ -3112,6 +3228,68 @@ def r_reply(zcid):
         log.info("voice.reply_duplicate_absorbed", extra={"conversation": zcid})
     # PRG: redirect after post, so a refresh cannot re-submit the form at all.
     return redirect(here, code=303)
+
+
+# ── WHO REALLY SENT IT ───────────────────────────────────────────────────────────────────────
+# WHAT THIS SCREEN SHOWED UNTIL 2026-09-23: a display name, and nothing else. "Morning Review"
+# tells a reader nothing — a display name is the one part of an email anybody can set to
+# anything, and it is precisely what a spoof relies on. Gmail puts the address beside the name
+# and hides the rest behind a caret. Owner, 2026-09-23: *"our inbox doesn't even show what the
+# email address is of the sender... study Gmail and how they have a little drop-down."*
+#
+# BUILT FROM `inbox_message_detail`, so it is empty on a Messenger thread, empty on mail stored
+# before the headers were kept, and populated the moment that mail is polled again.
+_AUTH = re.compile(r"\b(spf|dkim|dmarc)\s*=\s*([a-z]+)", re.I)
+
+
+def _addr_of(headers: dict) -> str:
+    """The sender's bare address, or "" — for the line under the name."""
+    import email.utils
+    _n, addr = email.utils.parseaddr(str((headers or {}).get("From") or ""))
+    return addr.strip()
+
+
+def _domain_of(value: str) -> str:
+    """The domain in an address or a `d=` tag, without the angle brackets or the semicolon."""
+    got = str(value or "").strip().strip("<>").rstrip(";")
+    return got.rsplit("@", 1)[-1].strip().strip("<>").rstrip(";") if got else ""
+
+
+def _signed_by(headers: dict) -> str:
+    """The `d=` of the first DKIM signature — Gmail calls this "signed-by"."""
+    m = re.search(r"\bd\s*=\s*([^;\s]+)", str((headers or {}).get("DKIM-Signature") or ""))
+    return m.group(1).strip() if m else ""
+
+
+def _checks(headers: dict) -> str:
+    """SPF / DKIM / DMARC as the receiving server recorded them, or "".
+
+    NOT "STANDARD ENCRYPTION (TLS)", WHICH IS WHAT GMAIL PRINTS HERE. That line describes the hop
+    into Google's own servers and Google wrote it. This box did not make that hop and cannot
+    honestly report on it, so it answers the question a buyer actually has — is this really from
+    who it says — with the verdicts the mail carries.
+    """
+    seen = {}
+    for kind, verdict in _AUTH.findall(str((headers or {}).get("Authentication-Results") or "")):
+        seen.setdefault(kind.upper(), verdict.lower())
+    return ", ".join(f"{k} {v}" for k, v in seen.items())
+
+
+def _details(headers: dict) -> str:
+    """Gmail's caret, with the rows we can fill honestly. "" when we kept nothing for this one."""
+    if not headers:
+        return ""
+    rows = [("from", headers.get("From")), ("to", headers.get("To")), ("cc", headers.get("Cc")),
+            ("date", headers.get("Date")), ("subject", headers.get("Subject")),
+            ("mailed-by", _domain_of(headers.get("Return-Path"))),
+            ("signed-by", _signed_by(headers)), ("security", _checks(headers))]
+    body = "".join(f'<div class="dr"><span class="dk">{_esc(k)}</span>'
+                   f'<span class="dv">{_esc(str(v))}</span></div>'
+                   for k, v in rows if str(v or "").strip())
+    if not body:
+        return ""
+    return ('<details class="det"><summary>Details</summary>'
+            f'<div class="dt">{body}</div></details>')
 
 
 def _thread_notice(zcid: str, kind: str, message: str) -> str:

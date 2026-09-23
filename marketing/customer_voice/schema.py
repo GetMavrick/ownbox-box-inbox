@@ -185,6 +185,38 @@ CREATE TABLE IF NOT EXISTS inbox_draft_lessons (
 CREATE INDEX IF NOT EXISTS ix_inbox_draft_lessons_space
   ON inbox_draft_lessons (space, edited, created_at);
 
+-- ── WHAT ARRIVED, BESIDE WHAT WE SHOW (OSDev5, 2026-09-23) ────────────────────────────────
+-- WHAT WAS BEING THROWN AWAY. `email_channel._body_text()` prefers `text/plain` and DISCARDS the
+-- `text/html` part, so a buyer reads the fallback nobody at the sending company ever looks at:
+-- tables exploded one value per line, `<https://…>` link syntax, stacks of blank lines. Gmail
+-- shows the HTML part. We never kept it — and what is not kept at ingest cannot be recovered
+-- without re-reading somebody's mailbox. Owner, 2026-09-23, on seeing the two side by side:
+-- "that if you are smart is the most urgent thing to do."
+--
+-- A SEPARATE TABLE, NOT COLUMNS ON `inbox_messages`, and the reason is not squeamishness about
+-- migrations. An HTML part is routinely tens of kilobytes; `inbox_messages` is read whole to
+-- draw the conversation LIST, where none of this is wanted. Detail is read when one message is
+-- opened, which is exactly when a second lookup is free. It also keeps the hot row the shape it
+-- has been since the machine shipped.
+--
+-- SCHEMA, NOT A MIGRATION, per the governing rule above: a brand-new table needs no version
+-- number. (It also keeps this out of a race — #1443 has 56 in flight, and two branches claiming
+-- one number is the `_migration_28` incident this file was rewritten to prevent.)
+--
+-- NOTHING HERE IS EVER RENDERED AS HTML BY THE CODE THAT SHIPPED WITH IT. `body_html` is stored
+-- verbatim and is a SENDER'S markup: rendering it needs a sanitiser, a sandboxed frame, a
+-- restrictive CSP and remote images blocked until asked for, because a remote image is a read
+-- receipt and sender CSS can restyle the page around it. That is its own change. This table
+-- exists so that when it lands, the mail is already here.
+CREATE TABLE IF NOT EXISTS inbox_message_detail (
+  message_id  TEXT PRIMARY KEY,       -- inbox_messages.id, one to one
+  body_html   TEXT,                   -- the text/html part VERBATIM. Never rendered unsanitised.
+  body_text   TEXT,                   -- the full text part, UNTRUNCATED (inbox_messages.body
+                                      -- keeps its 2000-char cap, which silently cut long mail)
+  headers     TEXT,                   -- JSON, a fixed allowlist — see `_kept_headers`
+  created_at  TEXT NOT NULL
+);
+
 -- Poll watermark: the newest vendor message id seen per conversation (+ the raw
 -- activity marker so an unchanged conversation costs zero message fetches).
 CREATE TABLE IF NOT EXISTS inbox_state (
