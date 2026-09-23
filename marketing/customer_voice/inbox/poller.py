@@ -377,6 +377,35 @@ def _mirror_page(space: str, ch, zcid: str, msgs: list) -> int:
     return mirrored
 
 
+def _sweep_comments(space: str, sp: dict, ch) -> tuple[int, int, bool]:
+    """One Space's comments. Returns (scanned, stored, listed_ok).
+
+    FAILS ALONE, like every channel here. A box with no Instagram account linked errors on that
+    platform every single sweep, and that must never cost the Messenger DMs beside it —
+    `comment_channel.sweep` already isolates each platform inside itself, and this isolates the
+    channel from the rest of the sweep.
+
+    AN UNCONNECTED BOX IS NOT A FAILURE AND NOT A SUCCESS. Same contract as `_sweep_email`: a
+    buyer who has linked no social account reads no comments, which is an ordinary state and must
+    not be recorded as a channel that broke.
+    """
+    from . import comment_channel
+    if not sp.get("zernio_key") or not sp.get("zernio_profile_id"):
+        return (0, 0, False)
+    try:
+        scanned, stored = comment_channel.sweep(space, sp)
+    except zernio.ZernioError as e:
+        _note_poll_failure(space, ch.key, str(e))
+        _note_zernio_health(False, str(e))
+        return (0, 0, False)
+    except Exception as e:                    # noqa: BLE001 — one channel never stops the sweep
+        _note_poll_failure(space, ch.key, f"{type(e).__name__}: {e}"[:160])
+        return (0, 0, False)
+    _note_poll_success(space, ch.key)
+    _note_zernio_health(True, "")
+    return (scanned, stored, True)
+
+
 def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, int]:
     """One channel's page of conversations for one Space → (scanned, enqueued).
 
@@ -613,6 +642,18 @@ def poll_sweep() -> dict:
         for ch in channels.POLLED:
             if ch.vendor == channels.IMAP:
                 ch_scanned, ch_stored, ch_ok = _sweep_email(space, ch)
+                scanned += ch_scanned
+                enqueued += ch_stored
+                ok_channels += 1 if ch_ok else 0
+                continue
+            # COMMENTS ARE A DIFFERENT SHAPE OF CALL, NOT A DIFFERENT KIND OF THING. Every other
+            # Zernio channel here is `inbox.list` → conversations → messages; comments are
+            # `comments.list_inbox_comments` → POSTS → comments-on-a-post, so the body below
+            # cannot serve them and a branch is honest where a parameter would be a pretence.
+            # It lands in the same store, as the same rows, and everything downstream — the
+            # screen, the drafter, `awaiting_reply` — treats it as one more channel.
+            if ch.vendor == channels.COMMENTS:
+                ch_scanned, ch_stored, ch_ok = _sweep_comments(space, sp, ch)
                 scanned += ch_scanned
                 enqueued += ch_stored
                 ok_channels += 1 if ch_ok else 0

@@ -140,12 +140,30 @@ _RULES = {
         "free_hours": None, "tag_hours": None, "no_window": True,
         "cite": "https://www.ecfr.gov/current/title-16/part-316",
     },
+    # A COMMENT IS NOT A CONVERSATION WITH A CLOCK, and the note below this table said so before
+    # the channel existed: one private reply per comment, ever, within seven days OF THE COMMENT
+    # rather than of an inbound message. A one-shot claim, not a window. So the honest entry is
+    # not a shorter clock — it is no send lane at all.
+    #
+    # AND THE PUBLIC PATH IS A DIFFERENT DECISION AGAIN. The vendor offers `reply_to_inbox_post`,
+    # which publishes under the business's own post where its customers can read it. Whether a
+    # box may do that is the owner's call, and `decide` refusing an unruled platform is what
+    # stops a config change from quietly authorising it — the most important branch in this file.
+    "comment": {
+        "free_hours": None, "tag_hours": None, "no_send_lane": True,
+        "cite": "https://developers.facebook.com/docs/messenger-platform/instagram/features/private-replies/",
+        "no_send_lane_why": "a comment has no send window: a private reply is one-per-comment "
+                            "within seven days of the comment itself, and a public reply is "
+                            "published under your post. The owner has not ruled on either, so "
+                            "the box reads and drafts; a person answers from the app.",
+    },
 }
 
 # Channels that are deliberately absent, so nobody reads their absence as an oversight:
 #
-#   instagram_comment  NOT A WINDOW. One private reply per comment, ever, within 7 days OF THE
-#                      COMMENT — not of an inbound message. A one-shot claim, not a clock.
+#   instagram_comment  HAS A RULE NOW — see `comment` above, added when the channel began
+#                      ingesting. The reasoning that lived here is kept there rather than
+#                      deleted: it is why the rule is `no_send_lane` instead of a clock.
 #                      developers.facebook.com/docs/messenger-platform/instagram/features/private-replies/
 #   reddit             Blocked above the code: Reddit's developer terms require a separate written
 #                      agreement for commercial use, and explicit consent before any private
@@ -344,7 +362,12 @@ def pretty_platform(platform: str) -> str:
     # Title-cased rather than echoed raw, because the fallback is what a buyer reads when we have
     # not written a rule for their channel — "whatsapp" in a sentence looks like a bug in the box.
     return {"instagram": "Instagram", "messenger": "Messenger", "tiktok": "TikTok",
-            "email": "Email"}.get(key, key.replace("_", " ").title() or "the platform")
+            "email": "Email",
+            # NAMED, NOT DERIVED. The fallback would give "Comment" for a channel every screen
+            # and every sentence in this product calls "Comments" — `channels.NAMES` has said so
+            # since before the channel was polled, and two spellings of one channel is how a
+            # notification ends up disagreeing with the row it is about.
+            "comment": "Comments"}.get(key, key.replace("_", " ").title() or "the platform")
 
 
 def explain(platform: str, last_inbound_at: str | None, now: datetime | None = None) -> dict:

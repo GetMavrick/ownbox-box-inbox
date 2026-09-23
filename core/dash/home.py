@@ -1012,7 +1012,9 @@ def settings():
                  '<p class="sub">This box is a server you own outright. Put your own key on it '
                  'and you have it at the command line — no account with us, and it keeps working '
                  'if you move the box somewhere else.</p>'
-                 '<div class="foot"><a href="/settings/access">Your way in &rarr;</a></div></div>')
+                 '<div class="foot"><a href="/settings/access">Your way in &rarr;</a></div>'
+                 '<div class="foot"><a href="/settings/move">Take this box to your own '
+                 'DigitalOcean account &rarr;</a></div></div>')
     return chrome("/settings", title="Settings",
                   lede="The parts of this box that belong to the box, not to one machine.",
                   body=body), 200

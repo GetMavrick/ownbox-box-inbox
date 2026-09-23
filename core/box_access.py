@@ -39,6 +39,7 @@ import hashlib
 import os
 import pathlib
 import re
+import time
 
 from core.logging import get_logger
 
@@ -227,3 +228,130 @@ def write(text: str) -> None:
     tmp.write_text(text)
     os.chmod(tmp, 0o600)
     os.replace(tmp, AUTHORIZED_KEYS)
+
+
+# ── where the owner connects ─────────────────────────────────────────────────────────────────────
+#
+# A KEY WITH NO ADDRESS IS HALF A WAY IN. The screen let an owner add a key and then left them to
+# guess what to type — measured on main by OSDev1, 2026-09-23. These say it: the literal command,
+# the name in it, the address that name leads to, and whether that address is THIS box.
+
+SSH_USER = "root"                                   # AUTHORIZED_KEYS above is root's
+HOST_KEY = pathlib.Path(os.environ.get("AIOS_SSH_HOST_KEY") or "/etc/ssh/ssh_host_ed25519_key.pub")
+# DigitalOcean's metadata service: link-local, answers only from inside the droplet, needs no key.
+# On a box that has left DigitalOcean it simply does not answer, and the screen says less.
+_METADATA_IP = "http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address"
+_UNUSABLE = ("localhost", "127.", "0.0.0.0", "::1", "169.254.")
+_CACHE_SECONDS = 300
+_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _usable(host: str) -> bool:
+    h = (host or "").strip().lower().strip("[]")
+    return bool(h) and not h.endswith(".localhost") and not any(
+        h == u.rstrip(".") or h.startswith(u) for u in _UNUSABLE)
+
+
+def _host_of(url: str) -> str:
+    """`https://acme.ownbox.app/dash` → `acme.ownbox.app`. Port and credentials dropped."""
+    host = (url or "").strip().split("//", 1)[-1].split("/", 1)[0].split("@")[-1]
+    if host.startswith("["):
+        return host[1:].split("]", 1)[0]
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def _resolve(host: str, timeout: float = 2.0) -> list[str]:
+    """The IPv4 addresses a name leads to right now, or [] if it leads nowhere within `timeout`.
+
+    BOUNDED, because this runs inside a page request: a resolver that hangs must cost the owner two
+    seconds and a sentence, not a spinning screen. The lookup runs in a daemon thread so a hung one
+    is abandoned rather than waited for.
+    """
+    if os.environ.get("AIOS_HERMETIC_TEST"):
+        return []
+    import socket
+    import threading
+    got: list[str] = []
+
+    def look():
+        try:
+            for info in socket.getaddrinfo(host, 22, socket.AF_INET, socket.SOCK_STREAM):
+                if info[4][0] not in got:
+                    got.append(info[4][0])
+        except OSError:
+            pass
+    t = threading.Thread(target=look, daemon=True)
+    t.start()
+    t.join(timeout)
+    return list(got) if not t.is_alive() else []
+
+
+def _own_public_ip(timeout: float = 0.5) -> str:
+    """This droplet's public IPv4, from DigitalOcean's metadata service. "" off DigitalOcean."""
+    if os.environ.get("AIOS_HERMETIC_TEST"):
+        return ""
+    import ipaddress
+    import urllib.request
+    try:
+        # NO PROXY: the metadata address is link-local, and a proxy in the environment would send
+        # the question somewhere that cannot know the answer.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(_METADATA_IP, timeout=timeout) as r:
+            ip = r.read(64).decode().strip()
+        return str(ipaddress.IPv4Address(ip))
+    except Exception:                                    # noqa: BLE001 — absence is an answer
+        return ""
+
+
+def host_key_fingerprint() -> str:
+    """The fingerprint this box's SSH presents on first contact, so the owner can check it.
+
+    The first `ssh` to any machine asks "are you sure you want to continue connecting?" over a
+    fingerprint. Printed here, from the box's own host key, it is something the owner can compare
+    rather than a question they answer blind.
+    """
+    try:
+        parts = HOST_KEY.read_text().split()
+        return fingerprint(parts[1]) if len(parts) >= 2 else ""
+    except (OSError, ValueError, IndexError):
+        return ""
+
+
+def where_to_connect(base_url: str, fallback_host: str = "") -> dict:
+    """Everything the screen needs to say where to connect. Never raises.
+
+    `base_url` is the box's own address (DASHBOARD_BASE_URL, written by bootstrap). `fallback_host`
+    is the name the page was opened at, used only when the box was never told its own and only if
+    another computer could reach it — `localhost` is never offered.
+
+    Returned:
+      host        the name to put in the command ("" if there is none worth printing)
+      ips         what that name leads to right now
+      box_ip      this box's own public address, when the box can tell
+      points_here True / False when both are known, None when they cannot be compared
+      use         the one address the owner should type after `root@`
+      command     `ssh root@<use>`, or "" when there is nothing honest to print
+    """
+    host = _host_of(base_url)
+    if not _usable(host):
+        host = _host_of(fallback_host)
+        if not _usable(host):
+            host = ""
+    key = host or "-"
+    hit = _cache.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < _CACHE_SECONDS:
+        return {**hit[1], "ips": list(hit[1]["ips"])}
+    ips = _resolve(host) if host else []
+    box_ip = _own_public_ip()
+    points = (box_ip in ips) if (ips and box_ip) else None
+    # THE NAME IS WHAT TO TYPE, UNLESS IT PROVABLY LEADS ELSEWHERE OR NOWHERE. A name survives a
+    # rebuild and reads better on a sticky note; an address is the fallback, not the headline.
+    if host and points is not False and (ips or not box_ip):
+        use = host
+    else:
+        use = box_ip
+    out = {"host": host, "ips": ips, "box_ip": box_ip, "points_here": points, "use": use,
+           "command": f"ssh {SSH_USER}@{use}" if use else ""}
+    _cache[key] = (now, {**out, "ips": list(ips)})
+    return out

@@ -36,6 +36,7 @@ asking waits for a root-scoped worker, which is a separate change with its own b
 # ring, call, dial, line, voice or answer. `tests/test_no_voice_words_on_the_app.py` enforces it.
 
 import html as _html
+import os
 
 from flask import jsonify, redirect, request
 
@@ -1003,6 +1004,70 @@ def _key_rows(keys: list) -> str:
     return "".join(out) + "</div>"
 
 
+def _connect_card(where: dict, has_keys: bool, host_fp: str) -> str:
+    """The literal command, the name in it, where that name leads, and what a refusal means.
+
+    DONE-WHEN, set by OSDev1 on 2026-09-23: a person who has never seen this box can connect using
+    ONLY what this page renders — no email, no docs, no asking us. So every branch below prints
+    something typeable, and the one case with nothing honest to print says how to make it appear.
+    """
+    cmd = where.get("command") or ""
+    host, ips, box_ip = where.get("host") or "", where.get("ips") or [], where.get("box_ip") or ""
+    out = ['<div class="card"><h2>Where you connect</h2>']
+    if not cmd:
+        out.append('<p>This box was opened at an address only this computer can reach, and it has '
+                   'not been told its public one, so there is no command to print yet. Open the '
+                   'dashboard at the web address you normally use and come back to this page — the '
+                   'command appears here.</p></div>')
+        return "".join(out)
+    if not has_keys:
+        out.append('<p><b>First add your key below.</b> No key of yours is on this box yet, so '
+                   'SSH will refuse you until one is.</p>')
+    out.append('<p class="quiet">On a Mac, open Terminal (in Applications, then Utilities). On '
+               'Windows 10 or 11, open PowerShell. On Linux, open your terminal. Then type this and '
+               'press enter:</p>'
+               f'<p class="addr" style="font-size:16px">{_esc(cmd)}</p>'
+               '<p class="quiet">Tap or click it once to select all of it.</p>')
+    ip_cmd = f"ssh root@{box_ip}" if box_ip else ""
+    pts = where.get("points_here")
+    if pts is True:
+        out.append(f'<p class="quiet">{_esc(host)} leads to {_esc(box_ip)}, which is this box. If '
+                   f'the name ever stops working, <b>{_esc(ip_cmd)}</b> reaches the same place.</p>')
+    elif pts is False:
+        out.append(f'<p><b>{_esc(host)} leads to {_esc(", ".join(ips))}, which is not this box.</b> '
+                   f'This box is at {_esc(box_ip)}, so the command above uses that until the name '
+                   'is pointed here.</p>')
+    elif ips:
+        out.append(f'<p class="quiet">{_esc(host)} leads to {_esc(", ".join(ips))}.</p>')
+    elif host and box_ip:
+        out.append(f'<p class="quiet">{_esc(host)} did not lead anywhere when this page looked it '
+                   'up, so the command above uses this box\'s own address instead.</p>')
+    elif host:
+        out.append('<p class="quiet">This box could not look its own name up just now. If your '
+                   'computer says it cannot resolve the name, wait a few minutes and try again.</p>')
+    first = ('<p class="quiet">The first time, your computer asks whether you are sure you want to '
+             'continue connecting. Type <b>yes</b> and press enter.')
+    if host_fp:
+        first += (' The fingerprint it shows should be exactly this — if it is different, stop, '
+                  'because you have reached some other machine:</p>'
+                  f'<p class="addr">{_esc(host_fp)}</p>')
+    else:
+        first += '</p>'
+    out.append(first)
+    out.append('<h2 style="margin-top:18px">If it refuses you</h2>'
+               '<p><b>Permission denied (publickey)</b> — this box does not hold the key your '
+               'computer offered. Either none has been added yet, or a different one was. On your '
+               'computer run <b>ssh-keygen -lf ~/.ssh/id_ed25519.pub</b> and compare what it prints '
+               'with the fingerprints under Keys that can open this box.</p>'
+               '<p><b>Connection refused</b>, or it waits and then times out — your computer did not '
+               'reach this box at all, so no key was checked. Some office and public wifi networks '
+               'block SSH; try again from another network.</p>')
+    if ip_cmd and cmd != ip_cmd:
+        out.append('<p><b>Could not resolve hostname</b> — the name has not reached your network '
+                   f'yet. Use <b>{_esc(ip_cmd)}</b> instead.</p>')
+    return "".join(out) + "</div>"
+
+
 @blueprint.route("/settings/access", methods=["GET", "POST"])
 def box_access_screen():
     """Add the owner's own SSH key to this box, or take one away.
@@ -1069,7 +1134,7 @@ def box_access_screen():
         '<p class="quiet">On your own computer, open a terminal and run '
         '<b>cat ~/.ssh/id_ed25519.pub</b>. If it says no such file, run '
         '<b>ssh-keygen -t ed25519</b> first and press enter at every question, then run the first '
-        'command again. Paste the whole line it prints — it begins with ssh-ed25519 and it is '
+        'command again. Paste everything it prints — it begins with ssh-ed25519 and it is '
         'safe to share. The file WITHOUT .pub on the end is your private key and must never leave '
         'your computer.</p>'
         '<form method="post" action="/settings/access">'
@@ -1078,9 +1143,17 @@ def box_access_screen():
         'placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... you@your-computer"></textarea>'
         '<button type="submit">Add this key</button></form></div>')
 
+    # THE CONNECTION COMES FIRST, above the paste box (OSDev1, 2026-09-23): a stranger needs to
+    # see where the key takes them before being asked for one.
+    where = box_access.where_to_connect(os.environ.get("DASHBOARD_BASE_URL", ""),
+                                        str(request.host_url or ""))
     return chrome("/settings", title="Your way in",
-                  lede="Put your own key on this box, and the machine is yours at the command line.",
-                  body=note + _key_rows(keys) + form + _back()), 200
+                  lede="Put your own key on this box, and the machine is yours from your own terminal.",
+                  body=(note + _connect_card(where, bool(keys), box_access.host_key_fingerprint())
+                        # SAID ONCE. With a command showing, the card above already says there is
+                        # no key yet; the empty list would say it a second time in other words.
+                        + (_key_rows(keys) if keys or not where.get("command") else "")
+                        + form + _back())), 200
 
 
 # ── what release this box runs ───────────────────────────────────────────────────────────────────
@@ -1156,12 +1229,149 @@ def box_updates_screen():
                   body=body + _back()), 200
 
 
+# ── take this box to your own DigitalOcean account ──────────────────────────────────────────────────
+
+# One sentence per state, in one place. The provisioner writes the state; this is what a buyer reads.
+_MOVE_SAID = {
+    "requested": ("Waiting to start",
+                  "Your request is in. Within a few minutes we will start making the copy."),
+    "imaging": ("Making the copy",
+                "A full copy of this box is being made. This box pauses its work while that "
+                "happens — usually a few minutes — and then carries on by itself. If you are "
+                "reading this on the NEW server in your own account, this is the copy: press "
+                "Start on the dashboard to switch it on."),
+    "sent": ("Sent to your account",
+             "The copy is on its way to your DigitalOcean account. Next: open the email "
+             "DigitalOcean sends you and accept it. Then in DigitalOcean go to Backups & Snapshots, "
+             "then Snapshots, and create a server from it. The copy starts paused so it cannot work "
+             "your inbox at the same time as this one — press Start on its dashboard when you are "
+             "ready."),
+    "failed": ("That did not work",
+               "The copy could not be made or sent. Nothing about this box has changed and it is "
+               "running as before. You can try again below."),
+}
+
+
+@blueprint.route("/settings/move", methods=["GET", "POST"])
+def box_move_screen():
+    """Take this box to the owner's own DigitalOcean account. Owner, 2026-09-23: a button, now.
+
+    WHAT IT CAN AND CANNOT DO, said on the screen because a buyer will assume otherwise: DigitalOcean
+    cannot move a running server, or its IP address, between accounts. It moves a full COPY — an
+    image — to the email of the receiving account. So the button makes that copy and sends it; the
+    buyer builds a server from it in their own account. Everything on the box comes with it.
+
+    THIS SCREEN ONLY RECORDS THE REQUEST. The box holds no DigitalOcean key and could not image
+    itself if it tried; the provisioner, which does, reads the request and does the work
+    (core/box_move.py). That split is the reason a stolen box cannot be used to copy anybody else's.
+
+    OWNER-ONLY, on the page AND the post. A copy of the box carries every conversation on it, and
+    choosing where that goes is the owner's decision alone.
+    """
+    refuse = _admit(owner_only=False)
+    if refuse is not None:
+        return refuse
+    from core import box_move
+
+    if not _is_owner():
+        return chrome("/settings", title="Take this box with you",
+                      lede="This one is the owner's.",
+                      body='<div class="card"><p>Only the owner of this box can move it, because a '
+                           'copy of it carries every conversation on it.</p></div>' + _back()), 403
+
+    note = ""
+    if request.method == "POST":
+        do = str(request.form.get("do") or "")
+        who = (_who().get("email") or _who().get("id") or None)
+        if do == "cancel":
+            note = ('<div class="card"><p>Cancelled. Nothing was copied.</p></div>'
+                    if box_move.cancel(by=who) else
+                    '<div class="card"><p>That can no longer be cancelled — the copy has already '
+                    'been started.</p></div>')
+        elif do == "request":
+            if request.form.get("confirm") != "yes":
+                note = ('<div class="card"><p>Tick the box to confirm you want a copy of this box '
+                        'sent to that account.</p></div>')
+            else:
+                try:
+                    box_move.request(request.form.get("email") or "", by=who)
+                except box_move.MoveRefused as e:
+                    note = f'<div class="card"><h2>Not started.</h2><p>{_esc(e)}</p></div>'
+
+    now = box_move.current()
+    if now:
+        title, said = _MOVE_SAID.get(now.get("state"), ("In progress", ""))
+        body = (f'<div class="card"><h2>{_esc(title)}</h2><p>{_esc(said)}</p>'
+                f'<p class="quiet">Sending to</p><p class="addr">{_esc(now.get("email"))}</p>'
+                + (f'<p class="quiet">{_esc(now.get("detail"))}</p>' if now.get("detail") else "")
+                + '</div>')
+        if now.get("state") == "requested":
+            body += ('<form method="post" action="/settings/move" class="card">'
+                     '<input type="hidden" name="do" value="cancel">'
+                     '<button type="submit">Cancel — do not copy this box</button></form>')
+        if now.get("state") in ("sent", "failed"):
+            body += _move_form()
+    else:
+        body = _move_explainer() + _move_form()
+    return chrome("/settings", title="Take this box with you",
+                  lede="Move a full copy of this box into your own DigitalOcean account.",
+                  body=note + body + _back()), 200
+
+
+def _move_explainer() -> str:
+    return ('<div class="card"><h2>What happens</h2>'
+            '<p>We make a full copy of this box — everything on it — and send it to the '
+            'DigitalOcean account you name. You accept it there and create a server from it. '
+            'That server is yours, on your own bill, and we have no access to it.</p>'
+            '<p class="quiet">DigitalOcean does not let a server keep its numeric address when it '
+            'changes accounts, so the new one gets a new address. The web address you use '
+            'stays the same once it is pointed at the new server.</p>'
+            '<p class="quiet">You need a DigitalOcean account first. Creating one is free at '
+            'digitalocean.com.</p></div>')
+
+
+def _move_form() -> str:
+    # A DESTRUCTIVE-LOOKING ACTION IS NEVER THE EASIEST THING TO HIT BY ACCIDENT (mobile-first ruling).
+    # This is not destructive — the original keeps running — but it sends a copy of every
+    # conversation to another account, so it takes a typed address AND a tick, not one tap.
+    return ('<form method="post" action="/settings/move" class="card">'
+            '<input type="hidden" name="do" value="request">'
+            '<label for="do-email">Your DigitalOcean account email</label>'
+            '<input id="do-email" name="email" type="email" autocomplete="email" required '
+            'placeholder="you@yourcompany.com">'
+            '<label><input type="checkbox" name="confirm" value="yes"> Send a full copy of this '
+            'box, and everything on it, to that account</label>'
+            '<button type="submit">Send a copy to my account</button></form>')
+
+
+# THE PROVISIONER'S TWO REQUESTS, behind the /deploy prefix so `_auth_gate` holds them to the per-box
+# deploy token and nothing else. See `_deploy_authorized` in core/dispatch.py for what that token
+# may now do and why.
+@blueprint.get("/deploy/move-request")
+def deploy_move_request():
+    """What the provisioner reads: a pending move and its address, or nothing."""
+    from core import box_move
+    return jsonify({"move": box_move.pending()}), 200
+
+
+@blueprint.post("/deploy/move-status")
+def deploy_move_status():
+    """The provisioner reporting progress. An unknown state is refused, never stored."""
+    from core import box_move
+    body = request.get_json(silent=True) or {}
+    try:
+        box_move.set_status(str(body.get("state") or ""), str(body.get("detail") or ""))
+    except ValueError as e:
+        return jsonify({"error": "bad_state", "message": str(e)}), 400
+    return jsonify({"ok": True}), 200
+
+
 # THE THREE DOORS ABOVE ARE WHAT `core/dash/home.py` OFFERS, and it learns them from the step data
 # rather than from this file: `_AI_STEP["action_href"]`, `_PHONE_STEP["action_href"]` and
 # `_AGENT_STEP["link"]["url"]` all name paths served here. Keeping the stnotifies in the contract is
 # what lets one screen render a step it has never heard of.
 _DOORS = ("/settings/ai", "/settings/mobile", "/settings/agent", "/settings/access",
-          "/settings/updates")
+          "/settings/updates", "/settings/move")
 # The handout hangs off the mobile-app door rather than being one of its own: it is not a
 # step a buyer finishes, it is a sheet they hand to somebody else.
 _HANDOUT = "/settings/mobile/print"

@@ -38,6 +38,23 @@ from typing import NamedTuple
 # tests cannot drift apart about what "not a Zernio channel" means.
 IMAP = "imap"
 
+# NOT A PLATFORM, A RESOURCE — the same kind of marker `IMAP` is. Comments do not arrive from a
+# "comments network": they arrive from Instagram and Facebook, through a different pair of vendor
+# calls than DMs use. This token is what tells the sweep to take that branch, and naming it here
+# rather than spelling it in the poller is what keeps the poller and its tests from drifting
+# about which channels are not `inbox.list`.
+COMMENTS = "comments"
+
+# THE CHANNELS THAT DO NOT GO THROUGH `inbox.list`, named once so the poller and the suites cannot
+# drift about it — the same reason `IMAP` is named here rather than spelled in the poller.
+#
+# `test_inbox_instagram` asserts that every channel the vendor serves is asked for BY NAME, so
+# none of them rides the client's Messenger default. Email was excluded from that list by hand
+# when it arrived, and comments would have needed the same hand-edit — a second exception written
+# in a second place is how the third one gets forgotten. The property the test defends is
+# unchanged: these two make no `inbox.list` call at all, so there is no default for them to ride.
+NOT_INBOX_LIST = (IMAP, COMMENTS)
+
 
 class Channel(NamedTuple):
     vendor: str          # Zernio's `platform=` token
@@ -77,6 +94,19 @@ POLLED: tuple[Channel, ...] = (
     # from their own address, through their own mailbox. The channel still ingests, the drafter
     # still writes without ever consulting the window, and nothing sends with nobody reading it.
     Channel(IMAP, "email"),
+    # COMMENTS ARE ON. Measured against the live vendor by OSDev2 on 2026-09-16:
+    # `comments.list_inbox_comments` returned 22 real rows across Instagram and LinkedIn, which
+    # is why this channel went first and reviews second — reviews answered n=0, having no Google
+    # Business Profile connected anywhere to answer about.
+    #
+    # LAST IN THE SWEEP ORDER, deliberately, on the rule the top of this tuple already sets:
+    # the channels carrying live conversations go first, and a new one must never delay them.
+    # Comments are also the most expensive sweep here — a call per platform, then a call per
+    # post — so it is the one that should yield, not the one that should be waited on.
+    #
+    # ITS RULE IS `no_send_lane` (window._RULES["comment"]), so nothing auto-sends: the box
+    # reads the comment and the drafter writes a suggestion a person sends by hand.
+    Channel(COMMENTS, "comment"),
 )
 
 

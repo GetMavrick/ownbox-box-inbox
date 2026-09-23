@@ -214,7 +214,12 @@ def test_an_instagram_dm_reaches_the_box_stamped_as_instagram():
     # polled channel would assert that the Zernio client is asked for a mailbox. The property this
     # line was written for is unchanged: every channel the VENDOR serves is asked for by name,
     # rather than one of them riding the client's Messenger default.
-    _vendor_polled = [c.vendor for c in channels.POLLED if c.vendor != channels.IMAP]
+    # FROM `channels.NOT_INBOX_LIST`, NOT A HAND-KEPT EXCEPTION. This read `!= channels.IMAP`,
+    # written when email arrived; comments then needed the identical edit here, which is how the
+    # third such channel gets forgotten and this assertion starts demanding a `inbox.list` call
+    # for something that never makes one. The exclusions are named beside the channels now.
+    _vendor_polled = [c.vendor for c in channels.POLLED
+                      if c.vendor not in channels.NOT_INBOX_LIST]
     ok("the sweep asks the vendor for BOTH channels",
        INBOX.calls == _vendor_polled, f"{INBOX.calls} != {_vendor_polled}")
     ok("both threads are ingested in one sweep", res["enqueued"] == 2, str(res))

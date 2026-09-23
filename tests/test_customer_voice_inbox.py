@@ -320,7 +320,13 @@ def main():
     # touches `INBOX.list`, so it cannot produce this warning; an unconnected mailbox does not even
     # count as a failure (poller._sweep_email). Counting it here would demand a warning nothing
     # emits.
-    n_chan = len([c for c in poller.channels.POLLED if c.vendor != poller.channels.IMAP])
+    # THE CHANNELS THAT ACTUALLY MAKE THE FAILING CALL. This counted "everything but IMAP", which
+    # was the same thing until comments arrived — they are served by the vendor but through
+    # `comments.*`, so they never reach the `inbox.list` path this throttle guards and never
+    # produce one of its warnings. `channels.NOT_INBOX_LIST` names both exceptions in one place,
+    # beside the channels, so the next one does not need an edit in a third file.
+    n_chan = len([c for c in poller.channels.POLLED
+                  if c.vendor not in poller.channels.NOT_INBOX_LIST])
     ok("repeated poll failure warns once PER CHANNEL (throttled)",
        sum(1 for m in warns if m == "inbox.poll_list_failed") == n_chan)
     ok("suppressed repeats still counted",

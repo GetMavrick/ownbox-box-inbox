@@ -242,7 +242,17 @@ print("\n— a button for a channel nothing ingests is a button that delivers si
 from marketing.customer_voice.inbox import channels  # noqa: E402
 
 offered = {p for p, _ in voice_app._CONNECTABLE}
-polled = {ch.vendor for ch in channels.POLLED if ch.vendor != channels.IMAP}
+# FROM `channels.NOT_INBOX_LIST`, NOT A HAND-KEPT EXCEPTION — the THIRD suite to need this same
+# edit, after test_inbox_instagram and test_customer_voice_inbox. It read `!= channels.IMAP`,
+# written when email arrived; comments then broke it, and this one is a set EQUALITY so it broke
+# loudly rather than drifting.
+#
+# COMMENTS ARE NOT SEPARATELY CONNECTABLE, AND THAT IS WHY THEY ARE EXCLUDED RATHER THAN ADDED TO
+# THE SCREEN. They ride the Instagram and Facebook accounts a buyer has already connected — there
+# is no third button to press and nothing extra to authorise. The property this line defends is
+# untouched: every button on the connect screen still maps to a channel the poller reads, so no
+# button delivers silence.
+polled = {ch.vendor for ch in channels.POLLED if ch.vendor not in channels.NOT_INBOX_LIST}
 ok("every connectable platform is one the poller sweeps", offered == polled,
    f"offered={sorted(offered)} polled={sorted(polled)}")
 

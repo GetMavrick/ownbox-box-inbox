@@ -182,6 +182,13 @@ def _deploy_authorized(req) -> bool:
 
     Set it and it becomes the ONLY key to this door — the wide token stops working here, which
     is the whole point. Leave it unset and nothing changes for an existing box.
+
+    WIDENED ONCE, ON PURPOSE, 2026-09-23, and written here so this docstring stays true. The same
+    token now also opens `/deploy/move-request` and `/deploy/move-status` — the owner's "take this
+    box to my own DigitalOcean account" button. The first READS the one address the owner typed for
+    exactly that purpose; the second writes a progress state from a fixed list. Neither can read a
+    conversation, a key or a setting, and neither can send. The alternative was a second per-box
+    credential for one screen, which is more to rotate and no less to leak.
     """
     narrow = getattr(settings, "deploy_token", "") or ""
     if not narrow:
