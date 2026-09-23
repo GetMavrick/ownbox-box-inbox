@@ -1021,8 +1021,9 @@ def _connect_card(where: dict, has_keys: bool, host_fp: str) -> str:
                    'command appears here.</p></div>')
         return "".join(out)
     if not has_keys:
-        out.append('<p><b>First add your key below.</b> No key of yours is on this box yet, so '
-                   'SSH will refuse you until one is.</p>')
+        out.append('<p><b>Add your key above first \u2014 this command cannot work yet.</b> No key '
+                   'of yours is on this box, so SSH will refuse you until one is. Once the key is '
+                   'in, come back to this command.</p>')
     out.append('<p class="quiet">On a Mac, open Terminal (in Applications, then Utilities). On '
                'Windows 10 or 11, open PowerShell. On Linux, open your terminal. Then type this and '
                'press enter:</p>'
@@ -1131,29 +1132,79 @@ def box_access_screen():
 
     form = (
         '<div class="card"><h2>Add your key</h2>'
-        '<p class="quiet">On your own computer, open a terminal and run '
-        '<b>cat ~/.ssh/id_ed25519.pub</b>. If it says no such file, run '
-        '<b>ssh-keygen -t ed25519</b> first and press enter at every question, then run the first '
-        'command again. Paste everything it prints — it begins with ssh-ed25519 and it is '
-        'safe to share. The file WITHOUT .pub on the end is your private key and must never leave '
-        'your computer.</p>'
+        '<p>Three steps, about two minutes, and you only do this once. You do not need to know '
+        'what any of it means \u2014 just follow it in order.</p>'
+
+        '<h3>Step 1 &mdash; Open a terminal on your own computer</h3>'
+        '<p class="quiet">Not on this page \u2014 on the computer in front of you.</p>'
+        '<ul>'
+        '<li><b>On a Mac:</b> hold <b>Command</b> and press the <b>spacebar</b>, type '
+        '<b>Terminal</b>, press <b>Enter</b>.</li>'
+        '<li><b>On Windows 10 or 11:</b> click <b>Start</b>, type <b>PowerShell</b>, press '
+        '<b>Enter</b>.</li>'
+        '<li><b>On Linux:</b> open <b>Terminal</b> from your applications.</li>'
+        '</ul>'
+        '<p class="quiet">A window opens with a blinking cursor. Everything below gets typed '
+        'into that window, one at a time, pressing Enter after each.</p>'
+
+        '<h3>Step 2 &mdash; Get your key</h3>'
+        '<p>Type this and press Enter:</p>'
+        '<p class="addr">cat ~/.ssh/id_ed25519.pub</p>'
+        '<ul>'
+        '<li><b>If a long row of text appears</b> starting with <b>ssh-ed25519</b> \u2014 that is your key. '
+        'Select all of it and copy it. Go to step 3.</li>'
+        '<li><b>If it says "No such file or directory"</b> \u2014 you do not have a key yet. Type '
+        '<b>ssh-keygen -t ed25519</b> and press Enter. It asks three questions: press <b>Enter</b> '
+        'at each one without typing anything. Then run the <b>cat</b> command above again, and copy '
+        'all of what it prints.</li>'
+        '<li><b>If it asks to overwrite an existing key</b> \u2014 type <b>n</b> and press Enter. You '
+        'already have one; run the <b>cat</b> command above to see it.</li>'
+        '</ul>'
+        '<p class="quiet">What you copy is the <b>public</b> half. It is safe to share and it '
+        'is the only half you ever paste anywhere. The file without <b>.pub</b> on the end is your '
+        '<b>private key</b> and must <b>never leave your computer</b> \u2014 not to us, not to '
+        'anyone. Nobody legitimate will ever ask you for it.</p>'
+
+        '<h3>Step 3 &mdash; Paste it below, then connect</h3>'
+        '<p class="quiet">Paste it into the box below and press <b>Add this key</b>. Then go '
+        'back to your terminal window and type the connect command shown further down this page.</p>'
+        '<ul>'
+        '<li><b>If it asks "The authenticity of host ... can\u2019t be established"</b> and whether '
+        'you are sure \u2014 that is normal, not an error. Type <b>yes</b> and press Enter. It only '
+        'asks the first time.</li>'
+        '<li><b>You are in</b> when the prompt starts with <b>root@</b>. To leave, type <b>exit</b> '
+        'and press Enter.</li>'
+        '<li><b>If it still says "Permission denied (publickey)"</b> \u2014 the key did not save. '
+        'Check it appears in the list on this page, and that you pasted all of it including '
+        'the <b>ssh-ed25519</b> at the front.</li>'
+        '</ul>'
         '<form method="post" action="/settings/access">'
         '<label for="pubkey">Your public key</label>'
         '<textarea id="pubkey" name="key" rows="4" required '
         'placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... you@your-computer"></textarea>'
         '<button type="submit">Add this key</button></form></div>')
 
-    # THE CONNECTION COMES FIRST, above the paste box (OSDev1, 2026-09-23): a stranger needs to
-    # see where the key takes them before being asked for one.
     where = box_access.where_to_connect(os.environ.get("DASHBOARD_BASE_URL", ""),
                                         str(request.host_url or ""))
+    # THE ORDER IS THE INSTRUCTION, AND I HAD IT BACKWARDS. My own note here read "the connection
+    # comes first, a stranger needs to see where the key takes them before being asked for one",
+    # and OSDev4 built exactly that. Then the owner claimed a real box, ran the command at the top
+    # of the page, and got `Permission denied (publickey)` — because on a box with no key of yours
+    # the first thing this page offers is the one thing that cannot work yet.
+    #
+    # So the page now leads with whatever the reader can actually DO. No key: the paste box first,
+    # and the command below it saying plainly that it will not work until the key is in. Key
+    # already added: the command first, because that is the only reason they came back.
+    has = bool(keys)
+    connect = _connect_card(where, has, box_access.host_key_fingerprint())
+    # SAID ONCE: with a command showing, the connect card already reports the empty state.
+    rows = _key_rows(keys) if keys or not where.get("command") else ""
     return chrome("/settings", title="Your way in",
-                  lede="Put your own key on this box, and the machine is yours from your own terminal.",
-                  body=(note + _connect_card(where, bool(keys), box_access.host_key_fingerprint())
-                        # SAID ONCE. With a command showing, the card above already says there is
-                        # no key yet; the empty list would say it a second time in other words.
-                        + (_key_rows(keys) if keys or not where.get("command") else "")
-                        + form + _back())), 200
+                  lede=("Add your key, then the machine is yours from your own terminal."
+                        if not has else
+                        "Put your own key on this box, and the machine is yours from your own terminal."),
+                  body=(note + (connect + rows + form if has else form + connect + rows)
+                        + _back())), 200
 
 
 # ── what release this box runs ───────────────────────────────────────────────────────────────────

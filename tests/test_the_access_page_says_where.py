@@ -219,18 +219,36 @@ world([BOX_IP], BOX_IP)
 page = owner.get("/settings/access").get_data(as_text=True)
 text = visible(page)
 ok("THE LITERAL COMMAND IS ON THE PAGE", "ssh root@acme.ownbox.app" in text)
-ok("...ABOVE the paste box, where a stranger meets it first",
-   0 <= page.find("ssh root@acme.ownbox.app") < page.find('<textarea'),
-   f"{page.find('ssh root@acme.ownbox.app')} vs {page.find('<textarea')}")
+# THE ORDER FOLLOWS WHAT THE READER CAN DO, and this assertion used to say the OPPOSITE. It
+# pinned "the connection comes first, a stranger needs to see where the key takes them" —
+# OSDev1's own instruction on #1467. Then the owner claimed a real box, ran that command, and got
+# `Permission denied (publickey)`, because with no key of his on the box the page's first offer
+# was the one thing that could not work. With NO key the paste box comes first; WITH one the
+# command comes first, because that is the only reason to come back. Both branches are pinned.
+ok("with NO key yet, the paste box comes FIRST",
+   0 <= page.find('<textarea') < page.find("ssh root@acme.ownbox.app"),
+   f"textarea {page.find('<textarea')} vs command {page.find('ssh root@acme.ownbox.app')}")
 ok("...selectable in one tap (the .addr block selects all)",
    re.search(r'class="addr"[^>]*>ssh root@acme\.ownbox\.app<', page) is not None)
+
+# WITH a key already added the order flips: they came back for the command, not the form.
+A.write(f"ssh-ed25519 {USER_ED} me@laptop\n")
+world([BOX_IP], BOX_IP)
+_with = owner.get("/settings/access").get_data(as_text=True)
+ok("WITH a key on the box, the command comes FIRST — they came back for it",
+   0 <= _with.find("ssh root@acme.ownbox.app") < _with.find('<textarea'),
+   f"command {_with.find('ssh root@acme.ownbox.app')} vs textarea {_with.find('<textarea')}")
+ok("...and it no longer says the command cannot work", "cannot work yet" not in visible(_with))
+A.write("")
+world([BOX_IP], BOX_IP)
 ok("...and in 16px type, the size that does not zoom a mobile screen", 'font-size:16px">ssh root@' in page)
 ok("the address the name leads to is shown, and said to be this box",
    BOX_IP in text and "which is this box" in text)
 ok("...with the address-only command as a fallback", f"ssh root@{BOX_IP}" in text)
 ok("it says where to type it, on each kind of computer",
    "Terminal" in text and "PowerShell" in text and "Linux" in text)
-ok("a box with no key yet says to add one FIRST", "First add your key below" in text)
+ok("a box with no key yet says to add one FIRST, pointing UP at the form above it",
+   "Add your key above first" in text and "cannot work yet" in text)
 ok("the first-contact question is explained", "continue connecting" in text and "yes" in text)
 ok("...and the fingerprint to compare is this box's own host key", A.fingerprint(HOST_ED) in text)
 ok("REFUSED IS EXPLAINED: a key refusal says which key and how to check",

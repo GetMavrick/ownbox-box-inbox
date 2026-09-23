@@ -152,8 +152,16 @@ ok("...and the older createdAt shape still works, so nothing that polled before 
 # to send, with "No inbound yet" on every row.
 from marketing.customer_voice.inbox import window  # noqa: E402
 
+# THE CLOCK HERE IS RELATIVE TO NOW, not the fixed date above. That date is fine for proving the
+# poller READS `sentAt`; it is not fine for asking whether the window is open, because the window
+# is measured from today. Pinned to 2026-09-16 this passed for seven days and then failed every PR
+# on 2026-09-23, the day Messenger's 7-day window closed on it. Same shape, a fresh clock.
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+_stamp = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+_live = dict(newer, sentAt=_stamp, createdAt=_stamp)
 ok("A CONVERSATION WITH A REAL sentAt IS ALLOWED TO REPLY",
-   window.decide("messenger", poller._f(newer, *poller._SENT_AT_KEYS))["decision"] != window.BLOCKED)
+   window.decide("messenger", poller._f(_live, *poller._SENT_AT_KEYS))["decision"] != window.BLOCKED)
 ok("...whereas the empty clock this used to store is BLOCKED, which is what shipped",
    window.decide("messenger", "")["decision"] == window.BLOCKED)
 
