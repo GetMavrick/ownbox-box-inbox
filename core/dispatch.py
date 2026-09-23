@@ -55,6 +55,21 @@ def _load_web_modules() -> None:
         app.register_blueprint(mod.blueprint)
         log.info("dispatch.web_module_loaded", module=path)
     _load_packs()
+    _load_custom_machines()
+
+
+def _load_custom_machines() -> None:
+    """The owner's own machines (`my/machines/`), imported here as well as in the worker, and any
+    Flask blueprint they offer mounted. Each is isolated: one that fails to import or to mount is
+    logged and skipped, and `/dispatch` keeps answering — see core/custom_machines.py (R8)."""
+    from core import custom_machines
+    custom_machines.load("dispatch")
+    for slug, bp in custom_machines.blueprints().items():
+        try:
+            app.register_blueprint(bp)
+        except Exception as e:                         # noqa: BLE001 — a clash costs that machine
+            log.error("dispatch.custom_machine_blueprint_failed", slug=slug,
+                      error=f"{type(e).__name__}: {str(e)[:200]}")
 
 
 def _load_packs() -> None:
@@ -189,6 +204,10 @@ def _deploy_authorized(req) -> bool:
     exactly that purpose; the second writes a progress state from a fixed list. Neither can read a
     conversation, a key or a setting, and neither can send. The alternative was a second per-box
     credential for one screen, which is more to rotate and no less to leak.
+
+    AND ONCE MORE, 2026-09-23 (#1472 R9): `/deploy/updates-plan`, where the provisioner tells the box
+    whether updates come with its plan. It stores "on" or "off" and a date, nothing else, and it only
+    explains the Updates screen — the box's key, removed on our side, is what stops updates.
     """
     narrow = getattr(settings, "deploy_token", "") or ""
     if not narrow:

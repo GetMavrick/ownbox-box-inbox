@@ -196,6 +196,17 @@ v = verify_release(SRC, "release/2026.09.19.2", PINNED, current_tag=INSTALLED)
 ok("a tracked file edited by hand refuses the install", not v.ok and v.reason == "dirty_tree", str(v))
 git("checkout", "--", "app.py")
 
+# A BUYER'S OWN MACHINE NEVER STOPS AN UPDATE (#1472; OSDev1 asked for this on 2026-09-23). It is
+# untracked, under my/machines/, and neither the dirty-tree check nor the collision check may count
+# it. Measured through the real verify_release on a signed tag, not a helper.
+mine = SRC / "my" / "machines" / "acme"
+mine.mkdir(parents=True)
+(mine / "__init__.py").write_text("# the buyer's own machine\n")
+(mine / "machine.yaml").write_text("name: acme\n")
+v = verify_release(SRC, "release/2026.09.19.2", PINNED, current_tag=INSTALLED)
+ok("A MACHINE THE BUYER BUILT IN my/machines/ DOES NOT REFUSE THE UPDATE", v.ok, str(v))
+shutil.move(str(SRC / "my"), str(T / "my-machines-kept"))   # stepped aside, not deleted
+
 print("\n— online and air-gapped take the identical path —")
 bundle = T / "releases.bundle"
 git("bundle", "create", str(bundle), "--all")

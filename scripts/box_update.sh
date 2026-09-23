@@ -90,7 +90,30 @@ install_deps() {                            # run from the tree being installed;
     .venv/bin/python -m pip install -q -e .
   fi
 }
+# A CHECKOUT THAT FAILS MUST SAY SO. Under `set -e` a refused checkout used to exit here with the last
+# line of updates.jsonl still reading "selected", so the Updates screen said "being installed" for
+# ever (#1472 R7). verify.py now refuses the known cause (a file added on the box in the release's
+# way) before we get here; this catches anything else git refuses, writes it where the screen reads,
+# and leaves the box exactly as it was — nothing has been switched yet.
+# The checkout line stays EXACTLY as it was — tests/test_self_deploy.py pins which refs this script
+# may ever check out by those literal lines — so its stderr is captured by redirecting around it.
+set +e
+exec 3>&2 2>/tmp/aios-checkout-err.txt
 git checkout --quiet --detach "$TAG"
+checkout_rc=$?
+exec 2>&3 3>&-
+set -e
+if [ "$checkout_rc" -ne 0 ]; then
+  checkout_err=$(cat /tmp/aios-checkout-err.txt 2>/dev/null || true)
+  echo "DEPLOY ABORTED: could not switch to $TAG — nothing was installed. git said:"
+  printf '%s\n' "$checkout_err"
+  .venv/bin/python - "$TAG" "$checkout_err" >> /var/lib/aios/updates.jsonl <<'PY' || true
+import datetime, json, sys
+print(json.dumps({"at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  "status": "install_failed", "tag": sys.argv[1], "detail": sys.argv[2][:300]}))
+PY
+  exit 1
+fi
 printf '%s\n' "$TAG" > /var/lib/aios/release
 echo "installing verified release $TAG (was ${PREV_RELEASE:-$PREV_SHA})"
 install_deps

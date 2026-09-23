@@ -31,6 +31,9 @@ all of them, in this order:
                           change who is trusted, so a stolen everyday key cannot promote itself
   dirty_tree              tracked files on the box were edited by hand; installing over them would
                           either fail halfway or silently discard someone's change
+  collision               a file somebody ADDED on the box sits at a path this release adds. Git
+                          would refuse the checkout after verification had passed, and the update
+                          would stop with nothing said; refused here, it names the file
 
 WHY NOT `git verify-tag`. Measured, not assumed (tests/test_release_verify.py prints it): a tag
 signed by a key the trust file RETIRED with `valid-before="20260101"`, but backdated to 2025 by the
@@ -200,11 +203,50 @@ def verify_release(repo: str | Path, tag: str, trust_file: str | Path, *,
                            commit=commit, principal=principal)
 
     if _git(repo, "rev-parse", "--is-inside-work-tree").stdout.strip() == b"true":
+        # `--untracked-files=no` IS LOAD-BEARING FOR EVERY BUYER WHO BUILDS A MACHINE. Their work
+        # lives in my/machines/ and is untracked; this flag is what keeps it from reading as an edit
+        # and stopping updates (OSDev1, 2026-09-23). Drop it and every custom machine forks its box.
+        # tests/test_release_verify.py asserts an untracked my/machines/ file installs cleanly.
         dirty = _git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip()
         if dirty:
             return _refuse(tag, "dirty_tree", dirty.decode()[:200], commit=commit, principal=principal)
+        clash = collisions(repo, commit)
+        if clash:
+            return _refuse(tag, "collision", ", ".join(clash)[:200], commit=commit, principal=principal)
 
     return Verdict(ok=True, tag=tag, reason="ok", commit=commit, principal=principal)
+
+
+def collisions(repo: Path, commit: str) -> list[str]:
+    """Files added on the box (untracked, not ignored) that this release would need to write.
+
+    WHY THIS IS A REFUSAL AND NOT A DETAIL. `git checkout` refuses to overwrite an untracked file,
+    and it refuses AFTER every check above has passed — in `box_update.sh`, under `set -e`, which
+    exited with nothing written to the update log, so the screen said "being installed" for ever
+    (measured 2026-09-23, #1472 R7). Ignored files (`.env`, the database, `.venv/`) are not listed:
+    git replaces those without asking. `my/` and `DEVSTATE.md` are never in a release
+    (`scripts/publish_box.sh`), so nothing a buyer keeps there can clash.
+
+    EXACTLY WHAT GIT REFUSES, NO MORE. Three shapes: the same path; a file the buyer added at
+    `tools` where the release needs a folder `tools/`; and a folder the buyer added at `tools/`
+    where the release needs a file `tools`. A buyer's `operations/notes.md` beside a release's new
+    `operations/run.py` is NOT a clash — git writes one beside the other — and refusing it would
+    stop updates for a box that is fine.
+    """
+    added = [p for p in _git(repo, "diff", "--name-only", "--no-renames", "--diff-filter=A",
+                               "HEAD", commit).stdout.decode().splitlines() if p]
+    if not added:
+        return []
+    mine = [p for p in _git(repo, "ls-files", "--others", "--exclude-standard").stdout.decode()
+            .splitlines() if p]
+    if not mine:
+        return []
+    hit = set()
+    for path in added:
+        for m in mine:
+            if m == path or path.startswith(m + "/") or m.startswith(path + "/"):
+                hit.add(m)
+    return sorted(hit)
 
 
 def main(argv: list[str] | None = None) -> int:

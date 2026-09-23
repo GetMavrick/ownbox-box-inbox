@@ -179,6 +179,10 @@ margin-bottom:14px}
 .card .sub{color:var(--dim);font-size:13px;margin:0 0 12px}
 .row{display:flex;align-items:baseline;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
 .row:first-of-type{border-top:0}
+.card ol.steps{margin:4px 0 12px;padding-left:22px}
+.card ol.steps li{margin:8px 0;line-height:1.5}
+.card code{font-size:.92em;background:var(--hover);padding:1px 5px;border-radius:5px;
+overflow-wrap:anywhere}
 .card a.step{align-items:center;flex-wrap:nowrap;min-height:48px;color:var(--ink)}
 .card a.step b{flex:1;min-width:0;font-weight:600}
 .card a.step .go{color:var(--dim);flex:none;font-size:14px}
@@ -1052,6 +1056,83 @@ def settings():
                   body=body), 200
 
 
+# WHAT A BUYER MAY ADD, SAID ON THEIR OWN BOX. Owner, 2026-09-23: *"Please scope out an add machine
+# page ... explain that they can build their own machine with their SSH access and customize it to
+# their business use cases and workflows. And then on that page you would provide a link to our
+# website where we are going to have machines available for purchase."* Scope and decisions:
+# docs/SCOPE_ADD_MACHINE_PAGE.md §2.
+_MACHINE_SHOP_MAIL = "mailto:help@ownbox.io?subject=Add%20a%20machine%20to%20my%20box"
+
+
+def _custom_machine_rows() -> str:
+    """One row per folder in my/machines/, and whether it started. Read-only: the loader owns this."""
+    try:
+        from core import custom_machines
+        seen = custom_machines.status()
+    except Exception:                            # noqa: BLE001 — the page must not 500 on a reader
+        seen = []
+    if not seen:
+        return '<p class="quiet">None yet.</p>'
+    rows = []
+    for m in seen:
+        said = ("Running" if m.get("ok") else
+                "Not started — " + str(m.get("reason") or "see the box's log"))
+        tone = "" if m.get("ok") else "stale"
+        rows.append('<div class="row"><b style="flex:1;min-width:0">' + _esc(m.get("slug"))
+                    + f'</b><span class="{tone}">{_esc(said)}</span></div>')
+    return "".join(rows)
+
+
+@blueprint.route("/add-machine")
+def add_machine():
+    """THE ADD A MACHINE PAGE — on the box, never a link that leaves it.
+
+    IT NEVER 404s. The rail row points here on every box, including one with no machine of the
+    owner's own: that box shows "None yet", not an error.
+
+    THE SAME GATE AS SETTINGS. Anyone signed in may read what a machine is; only the owner is shown
+    how to build one, because building one means signing in to the server, which only the owner can.
+    """
+    from core.dash import review as _review
+    refuse = _review._admit(owner_only=False)
+    if refuse is not None:
+        return refuse
+    # MACHINES FROM US. The shop page on ownbox.io does not exist yet, so this offers the one door
+    # that works today — an email to us — rather than a link to a page that 404s.
+    body = ('<div class="card"><h2>Get a machine from us</h2>'
+            '<p class="sub">A machine is a new job your box does: its own screens, its own work in '
+            'the background, the same AI account as everything else. Ready-made machines are added '
+            'to your box by us.</p>'
+            f'<div class="foot"><a href="{_MACHINE_SHOP_MAIL}">Ask us to add one &rarr;</a></div>'
+            '</div>')
+    if _is_owner():
+        body += ('<div class="card"><h2>Build your own</h2>'
+                 '<p class="sub">This box is a server you own. Sign in to it and you can add a '
+                 'machine shaped to your own business and the way you work.</p>'
+                 '<ol class="steps">'
+                 '<li>Set up <b>Server access</b> so you can sign in to the server.</li>'
+                 '<li>Make a folder in <code>my/machines/</code> named after your machine, with a '
+                 '<code>machine.yaml</code> and an <code>__init__.py</code>. The guide on your box, '
+                 '<code>BUILD_A_MACHINE.md</code>, has a working example to copy.</li>'
+                 '<li>Restart the box and your machine appears in this menu.</li></ol>'
+                 '<div class="foot"><a href="/settings/access">Server access &rarr;</a></div>'
+                 '</div>'
+                 '<div class="card"><h2>Your machines</h2>'
+                 '<p class="sub">Every folder in <code>my/machines/</code>, and whether it started.'
+                 '</p>' + _custom_machine_rows() + '</div>'
+                 '<div class="card"><h2>The one rule</h2>'
+                 '<p class="sub">Build inside <code>my/machines/</code> and no update ever touches '
+                 'your machine. Change any of the box\'s own files and updates pause until they are '
+                 'put back. Updates come with Managed support.</p></div>')
+    else:
+        body += ('<div class="card"><h2>Build your own</h2>'
+                 '<p class="sub">The box\'s owner can build machines of their own for this box.</p>'
+                 '</div>')
+    return chrome("/add-machine", title="Add a Machine",
+                  lede="Give your box a new job — from us, or one you build yourself.",
+                  body=body), 200
+
+
 # THE BOX'S HOME IS A CORE SECTION, and it is the only one core registers. Everything else in the
 # rail is a machine's to declare, which is what keeps this file from becoming the list of every
 # product we sell.
@@ -1061,13 +1142,12 @@ shell.register_section("dashboard", order=0, machine="core", title="Dashboard",
 # SETTINGS IS THE SECOND, AND THE LAST. `order=90` leaves the whole middle of the rail to the
 # machines: a box with five of them still ends with Settings, which is where a person looks for
 # it. Owner, 2026-09-22, on where these belong: the system drawer.
-# ADD A MACHINE LEAVES THE BOX, and that is the point rather than a compromise. A machine is
-# bought, not configured: the shop is on ownbox.io and no screen this box serves can sell one.
-# Owner, 2026-09-22, gave the destination himself and said the page is not built yet — his
-# domain, his call. The row carries the out-arrow and opens in a new tab, both DERIVED from the
-# https:// href by `rail_html`, so a buyer knows before pressing that they are leaving.
+# ADD A MACHINE STAYS ON THE BOX. It left for ownbox.io/machines from 2026-09-22 — the owner's
+# destination then, before that page existed — and a buyer read it as leaving their own machine.
+# Owner, 2026-09-23, asked for a page on the box that explains building your own and links to the
+# shop from there; that page is `add_machine()` above, and the shop link rides on it once it exists.
 shell.register_section("add_machine", order=80, machine="core", title="Add a Machine",
-                       href="https://www.ownbox.io/machines", icon=_ADD_ICON)
+                       href="/add-machine", icon=_ADD_ICON)
 
 # SYSTEM SETTINGS, NOT SETTINGS. Owner, 2026-09-22. The box now has two settings screens by his
 # own ruling — this one for what the box shares, and each machine's own for what only it has —

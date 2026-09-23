@@ -78,6 +78,11 @@ def load_modules() -> None:
             continue                                   # a config recipe: the host runs it by kind
         importlib.import_module(mod)
         log.info("worker.pack_loaded", slug=m["slug"], module=mod, host=m["host"])
+    # THE OWNER'S OWN MACHINES, AND NEVER A CRASH. Unlike `modules:` above, which are ours and may
+    # fail loudly, these are the buyer's code: one that raised here would stop the worker, fail the
+    # post-update health check, and roll every future release back. `load` never raises.
+    from core import custom_machines
+    custom_machines.load("worker")
 
 
 _REGISTRATIONS_IMPORTED = False
@@ -120,6 +125,11 @@ def import_registrations() -> list[str]:
             failed.append(path)
             log.error("worker.registrations_import_failed", module=path, error=type(e).__name__,
                       detail=str(e)[:200])
+    try:
+        from core import custom_machines
+        failed += [r["slug"] for r in custom_machines.load("registrations") if not r["ok"]]
+    except Exception as e:                          # noqa: BLE001 — the loader never raises; belt
+        log.error("worker.custom_machines_failed", error=type(e).__name__, detail=str(e)[:200])
     return failed
     for path, why in packs.invalid():
         log.warning("worker.pack_invalid", path=path, reason=why)

@@ -1242,9 +1242,11 @@ def box_updates_screen():
     A product that improves invisibly is, to the person paying for it, a product that does not
     improve. Owner, 2026-09-23, made this demo-critical.
 
-    READ-ONLY, DELIBERATELY, and it does not need a button. The box updates itself twice a day, so
-    an update button would be a second way to do a thing that already happens — and a half-finished
-    manual update on a customer's box is a far worse outcome than waiting twelve hours.
+    NO UPDATE BUTTON, DELIBERATELY. The box updates itself twice a day, so an update button would be
+    a second way to do a thing that already happens — and a half-finished manual update on a
+    customer's box is a far worse outcome than waiting twelve hours. The one button here is the way
+    BACK when the box's own files have been edited (#1472 R3): it saves the changes under my/ and
+    restores the files, so the box's own twice-daily check can install again.
 
     NOT OWNER-ONLY. Somebody who works in this box every day should be able to see whether it is
     current. This page publishes a version string and nothing else: no money, no keys, no customer
@@ -1254,6 +1256,10 @@ def box_updates_screen():
     refuse = _admit(owner_only=False)
     if refuse is not None:
         return refuse
+    return _updates_page()
+
+
+def _updates_page(note: str = ""):
     from core import box_updates
 
     try:
@@ -1264,6 +1270,11 @@ def box_updates_screen():
                       f"still running the release it has; nothing has changed."}
 
     release = st.get("release")
+    resume_card = ('<div class="card"><h2>Managed</h2><p>Updates come with Ownbox Managed. Resume it '
+                   'and this box starts receiving them again at its next check.</p>'
+                   '<p><a href="/dash/managed">Resume Managed &rarr;</a></p></div>'
+                   if st.get("state") == "no_managed" and _is_owner() else "")
+    edited_card = _edited_card(st.get("changed") or [], _is_owner()) if st.get("state") == "edited" else ""
     # THE TAG, PLAINLY, AND NOT DRESSED UP AS A VERSION NUMBER. It is the string a buyer would
     # quote to us and the one our release list is keyed by. A prettier invented name here would
     # mean the thing they read and the thing we look up are two different strings.
@@ -1274,13 +1285,76 @@ def box_updates_screen():
             + (f'<p class="quiet">Last checked {_esc(_ago(st.get("checked_s_ago")))}.</p>'
                if st.get("checked_at") else "")
             + '</div>'
+            + resume_card + edited_card +
             '<div class="card"><h2>How updates arrive</h2>'
             f'<p>{_esc(box_updates.HOW_UPDATES_ARRIVE)}</p>'
-            '<p class="quiet">Nothing here needs pressing. The box does this on its own.</p>'
-            '</div>')
+            + ('' if edited_card else
+               '<p class="quiet">Nothing here needs pressing. The box does this on its own.</p>')
+            + '</div>')
     return chrome("/settings/updates", title="Updates",
                   lede="What this box is running, and how it stays current.",
-                  body=body + _back()), 200
+                  body=note + body + _back()), 200
+
+
+_SHOWN_FILES = 20
+
+
+def _edited_card(files: list, owner: bool) -> str:
+    """Which of the box's own files are changed, and — for the owner — the way back.
+
+    THE WAY BACK IS BEHIND A TICK, not a bare button: it restores files somebody may be working on,
+    so it must never be the easiest thing on the screen to hit by accident. What it does is said
+    before it is done — the changes are saved to my/ first, and nothing is deleted.
+    """
+    shown = "".join(f'<p class="addr">{_esc(f)}</p>' for f in files[:_SHOWN_FILES])
+    more = (f'<p class="quiet">…and {len(files) - _SHOWN_FILES} more.</p>'
+            if len(files) > _SHOWN_FILES else "")
+    out = ['<div class="card"><h2>Changed on this box</h2>'
+           '<p class="quiet">These came with the box and have been edited on it. While they are, '
+           'the box keeps the release it has rather than install over somebody\'s work.</p>',
+           shown, more]
+    if owner:
+        out.append('<form method="post" action="/settings/updates/put-back">'
+                   '<label class="consent"><input type="checkbox" name="confirm" value="yes" '
+                   'required> Save these changes to my/put-aside, then put the files back as they '
+                   'came</label>'
+                   '<button type="submit" style="margin-top:14px">Put them back</button></form>'
+                   '<p class="quiet">Your changes are saved first, never deleted.</p>'
+                   '<p class="quiet">Build your own work into a machine in my/ instead, and '
+                   'updates keep arriving.</p>')
+    else:
+        out.append('<p class="quiet">The owner of this box can put them back from this page.</p>')
+    return "".join(out) + "</div>"
+
+
+def _put_back_note(res: dict) -> str:
+    """The result, drawn straight onto the page the POST returns — never carried in a URL, where
+    anybody could write a link that makes this box say something it did not."""
+    tone = "" if res.get("ok") else ' style="border-color:var(--danger)"'
+    return (f'<div class="card"{tone}><h2>{"Put back" if res.get("ok") else "Not finished"}</h2>'
+            f'<p>{_esc(res.get("said") or "")}</p></div>')
+
+
+@blueprint.route("/settings/updates/put-back", methods=["POST"])
+def box_updates_put_back():
+    """Save the changes to the box's own files under my/, then restore them. Owner-only.
+
+    OWNER-ONLY ON THE POST, not just the page: it rewrites files on the machine. The tick is checked
+    here too, so a form posted without it does nothing.
+    """
+    refuse = _admit(owner_only=False)
+    if refuse is not None:
+        return refuse
+    if not _is_owner():
+        return chrome("/settings/updates", title="Updates", lede="This one is the owner's.",
+                      body='<div class="card"><p>Only the owner of this box can put its files '
+                           'back.</p></div>' + _back()), 403
+    from core import box_updates
+    if request.form.get("confirm") != "yes":
+        res = {"ok": False, "said": "Nothing was changed — tick the box to confirm first."}
+    else:
+        res = box_updates.put_back(by=str(_who().get("id") or ""))
+    return _updates_page(_put_back_note(res))
 
 
 # ── take this box to your own DigitalOcean account ──────────────────────────────────────────────────
@@ -1406,6 +1480,22 @@ def deploy_move_request():
     """What the provisioner reads: a pending move and its address, or nothing."""
     from core import box_move
     return jsonify({"move": box_move.pending()}), 200
+
+
+@blueprint.post("/deploy/updates-plan")
+def deploy_updates_plan():
+    """The provisioner telling this box whether updates come with its plan (#1472 R9).
+
+    Behind the per-box deploy token, like the move. It stores "on" or "off" and a date, and nothing else;
+    an unknown value is refused, never stored. It EXPLAINS the Updates screen — what actually stops
+    updates is the box's key removed on Ownbox's side, so a forged "on" here buys nothing."""
+    from core import box_updates
+    body = request.get_json(silent=True) or {}
+    try:
+        box_updates.set_plan(str(body.get("updates") or ""), str(body.get("until") or ""))
+    except ValueError as e:
+        return jsonify({"error": "bad_plan", "message": str(e)}), 400
+    return jsonify({"ok": True}), 200
 
 
 @blueprint.post("/deploy/move-status")

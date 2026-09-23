@@ -193,8 +193,8 @@ member.set_cookie(dash.COOKIE, dash.new_session(
 r = owner.get("/settings/updates")
 page = r.get_data(as_text=True)
 ok("the page answers the owner", r.status_code == 200, str(r.status_code))
-ok("...and carries the one sentence about how updates arrive",
-   "Updates arrive on their own" in page)
+ok("...and carries the one sentence about how updates arrive — WITH MANAGED (owner, 2026-09-23)",
+   "Updates come with Ownbox Managed, and they arrive on their own" in page)
 ok("...and says the settings and data are never touched", "never touched" in page)
 ok("...and tells them nothing needs pressing", "needs pressing" in page)
 
