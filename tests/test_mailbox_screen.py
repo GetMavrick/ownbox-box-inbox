@@ -176,9 +176,13 @@ def test_day_one_tells_a_stuck_person_where_to_look():
     # host and a password and offers one button. Scoped, it says exactly that, and it would
     # still catch a third field appearing in the form.
     _form = body.split("<form", 1)[-1].split("</form>", 1)[0]
-    ok("there are two fields and one button",
-       _form.count("<input") == 2 and body.count("</button>") == 1,
-       f"{_form.count('<input')} fields in the form, {body.count('<input')} inputs on the page")
+    # WHERE THE MAIL LIVES IS NOW ASKED FIRST (#1483 finding 1: the inbox only knew Gmail). So the
+    # form is one choice — the provider — and three fields: the server (used only for "Another
+    # provider"), the address and the password. Still one button, still nothing else.
+    ok("there is one provider choice, three fields and one button",
+       _form.count("<select") == 1 and _form.count("<input") == 3 and body.count("</button>") == 1,
+       f"{_form.count('<select')} selects, {_form.count('<input')} fields in the form, "
+       f"{body.count('</button>')} buttons on the page")
     ok("...and the password field is a password field", 'type="password"' in body)
 
 

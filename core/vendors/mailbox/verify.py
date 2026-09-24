@@ -33,7 +33,7 @@ class MailboxAuthError(RuntimeError):
         self.detail = detail
 
 
-def classify_auth_failure(msg: str) -> MailboxAuthError:
+def classify_auth_failure(msg: str, host: str = "") -> MailboxAuthError:
     """Turn an opaque IMAP refusal into something a buyer can act on.
 
     Google returns the same shape whether the app password was revoked — which happens
@@ -42,6 +42,16 @@ def classify_auth_failure(msg: str) -> MailboxAuthError:
     they can do about it, and the two answers have completely different next steps: make a new
     one, or go and ask somebody.
     """
+    # NOT EVERY MAILBOX IS GOOGLE'S (#1483, finding 1). The Google sentences below name Google's own
+    # settings; a Yahoo or iCloud buyer told to go and look there is sent somewhere that does not
+    # exist. `host` is the mailbox's own server; empty means Gmail, the only default there is.
+    from .providers import is_google
+    if not is_google(host):
+        return MailboxAuthError("needs_reauth",
+                                "Your email provider refused that password. Most providers need an "
+                                "app password for an app like this, not the one you sign in with — "
+                                "look for app passwords in your account's security settings, then "
+                                "paste a new one in.")
     low = (msg or "").lower()
     if "disabled" in low or "not enabled" in low or "administrator" in low:
         return MailboxAuthError("admin_disabled",
@@ -75,7 +85,7 @@ def verify_credential(host: str, user: str, password: str) -> tuple[bool, str, s
         # be the thing that marks somebody's mail as read.
         conn.select("INBOX", readonly=True)
     except imaplib.IMAP4.error as e:
-        err = classify_auth_failure(str(e))
+        err = classify_auth_failure(str(e), host)
         return False, err.status, err.detail
     except (OSError, imaplib.IMAP4.abort) as e:      # DNS, TLS, refused, timed out
         return False, "unreachable", (

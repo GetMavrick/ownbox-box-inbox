@@ -1660,3 +1660,4 @@ from core.dash import home as _home  # noqa: E402,F401
 # of them. Imported HERE for the reason above it: a blueprint stops accepting routes the moment it
 # is registered on an app.
 from core.dash import box_settings as _box_settings  # noqa: E402,F401
+from core.dash import box_email as _box_email  # noqa: E402,F401 — its own file, same drawer

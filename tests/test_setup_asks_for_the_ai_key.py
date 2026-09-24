@@ -298,16 +298,23 @@ from core import box_secrets as _bs  # noqa: E402
 # url -> who opened it, and when. Nothing else may carry a path.
 VERIFIED_DEEP_LINKS = {
     "https://zernio.com/dashboard/connections": "owner, 2026-09-21, read off his own dashboard",
+    "https://myaccount.google.com/apppasswords": ("OSDev4, 2026-09-23: the link Google's own help "
+                                                  "article gives (support.google.com/accounts/"
+                                                  "answer/185833, 'Create and manage your app "
+                                                  "passwords')"),
 }
 
+# `help` IS HELD TO THE SAME RULE AS `link` — a step's always-live "where this comes from" link is
+# still a URL a buyer taps in the middle of setting up, and a 404 there is the same dead end.
 for _step in tuple(_bs.SETUP_STEPS) + (_bs._AI_STEP, _bs._MOBILE_STEP):
-    _url = str((_step.get("link") or {}).get("url") or "")
-    if not _url.startswith("http"):
-        continue
-    _path = urlsplit(_url).path
-    ok(f"{_step['key']}: {_url}",
-       _path in ("", "/") or _url in VERIFIED_DEEP_LINKS,
-       f"path {_path!r} is neither a root nor on the verified list — has anyone opened it?")
+    for _which in ("link", "help"):
+        _url = str((_step.get(_which) or {}).get("url") or "")
+        if not _url.startswith("http"):
+            continue
+        _path = urlsplit(_url).path
+        ok(f"{_step['key']} {_which}: {_url}",
+           _path in ("", "/") or _url in VERIFIED_DEEP_LINKS,
+           f"path {_path!r} is neither a root nor on the verified list — has anyone opened it?")
 
 print("\n— and this file cannot silently fall out of CI —")
 import pathlib  # noqa: E402

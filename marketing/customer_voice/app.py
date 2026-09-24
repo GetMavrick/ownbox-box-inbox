@@ -3537,8 +3537,10 @@ self.addEventListener('notificationclick', function (event) {
   event.notification.close();
   var to = (event.notification.data && event.notification.data.navigate) || '/inbox/inbox';
   // ONLY OUR OWN APP. The payload is authored by the box and encrypted to this subscription, so
-  // this is defence in depth, not a fix — the same rule safe_next applies on the way in.
-  if (typeof to !== 'string' || to.indexOf('/inbox/') !== 0) { to = '/inbox/inbox'; }
+  // this is defence in depth, not a fix — the same rule safe_next applies on the way in. The
+  // morning review (/app/review) is the one door outside the inbox a notification may open.
+  if (typeof to !== 'string' || (to.indexOf('/inbox/') !== 0 && to !== '/app/review'
+      && to.indexOf('/app/review/') !== 0)) { to = '/inbox/inbox'; }
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     .then(function (list) {
       for (var i = 0; i < list.length; i++) {
@@ -3713,6 +3715,21 @@ _MAILBOX_ADMIN = ("If App passwords is missing, your Google administrator has sw
                   "for your organisation — ask them to allow it.")
 
 
+def _mailbox_host(form) -> str:
+    """The IMAP host a posted form names: a preset's, or the one typed for "Another provider".
+
+    RAISES `SecretRejected` WITH THE SENTENCE, so both screens show a bad server exactly as they
+    show a bad password. A form from before the provider field existed posts no provider, and that
+    is Gmail — the only thing it could have meant."""
+    from core import box_secrets
+    from core.vendors.mailbox import providers
+    try:
+        return providers.host_for(str(form.get("provider") or providers.DEFAULT),
+                                  str(form.get("host") or ""))
+    except ValueError as e:
+        raise box_secrets.SecretRejected(str(e)) from None
+
+
 def _mailbox_form(*, user: str = "", note: str = "", verb: str = "Start reading this inbox") -> str:
     """The two fields and the button. THE PASSWORD IS NEVER PRE-FILLED and never echoed back —
     the address is, because retyping it after a rejected password is a punishment for their
@@ -3723,13 +3740,21 @@ def _mailbox_form(*, user: str = "", note: str = "", verb: str = "Start reading 
     return (note +
             '<form class="compose" method="post" action="/inbox/mailbox" '
             'style="display:flex;flex-direction:column;gap:10px;align-items:stretch">'
+            + _mailbox_provider_fields() +
             f'<input type="email" name="user" value="{_esc(user)}" autocomplete="email" '
             'spellcheck="false" aria-label="The email address to read" '
             f'placeholder="you@yourcompany.com" style="{field}">'
             '<input type="password" name="password" autocomplete="off" spellcheck="false" '
-            'aria-label="App password" placeholder="sixteen letters from Google" '
+            'aria-label="App password" placeholder="the app password for this mailbox" '
             f'style="{field}">'
             f'<button class="btn" type="submit">{_esc(verb)}</button></form>')
+
+
+def _mailbox_provider_fields() -> str:
+    """Where the mail lives, and the server for "Another provider" — from the same contract fields
+    the set-up screen draws, so the two screens cannot offer different lists."""
+    spec = {f.get("name"): f for f in _step_spec("email").get("fields") or ()}
+    return "".join(_setup_field(spec[n]) for n in ("provider", "host") if n in spec)
 
 
 def _mailbox_no_password_yet() -> str:
@@ -3747,7 +3772,7 @@ def _mailbox_steps() -> str:
     items = "".join(f'<div class="row"><span class="n">{i}</span>'
                     f'<span class="t">{_esc(t)}</span></div>'
                     for i, t in enumerate(_MAILBOX_STEPS, 1))
-    return (f'<div class="card">{items}</div>'
+    return (f'<div class="card">{items}{_step_extras(_step_spec("email"))}</div>'
             f'<p class="quiet">{_esc(_MAILBOX_ADMIN)}</p>')
 
 
@@ -3842,7 +3867,7 @@ def _setup_save(which: str, form, *, user_id: str | None) -> None:
         return
     # THE OLD WRITE — the only place in this file that knows a step by name, and it is dated.
     if which == "email":
-        box_secrets.put_email(host="imap.gmail.com", user=str(form.get("user") or ""),
+        box_secrets.put_email(host=_mailbox_host(form), user=str(form.get("user") or ""),
                               password=str(form.get("password") or ""), user_id=user_id)
     elif which == "zernio":
         box_secrets.put_zernio(str(form.get("key") or ""), user_id=user_id)
@@ -3908,6 +3933,17 @@ def _setup_field(f: dict, value: str = "") -> str:
              'border:1px solid var(--line);border-radius:12px;'
              'background:var(--card);color:var(--ink)')
     kind = str(f.get("type") or "text")
+    if kind == "select":
+        # A CHOICE THE CONTRACT DECLARED, e.g. where the buyer's email lives. The first option is
+        # the default unless the buyer already picked one (a refused save keeps their choice).
+        chosen = value or (f.get("options") or (("", ""),))[0][0]
+        opts = "".join(f'<option value="{_esc(k)}"{" selected" if k == chosen else ""}>{_esc(v)}</option>'
+                       for k, v in f.get("options") or ())
+        return (f'<label style="display:block;margin-top:10px">'
+                f'<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
+                f'{_esc(f.get("label"))}</span>'
+                f'<select name="{_esc(f.get("name"))}" style="{style};appearance:auto">{opts}</select>'
+                f'</label>')
     return (f'<label style="display:block;margin-top:10px">'
             f'<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
             f'{_esc(f.get("label"))}</span>'
@@ -4016,6 +4052,28 @@ def _choice_picker(choice: dict) -> str:
             'color:var(--ink)">' + opts + '</select></div>')
 
 
+def _step_extras(e: dict) -> str:
+    """WHERE THE CREDENTIAL COMES FROM, one tap away and always live (`help`), and every other
+    provider's one line (`alternatives`) with any provider that cannot work said plainly
+    (`caveat`). All are contract keys; nothing here knows which step it is drawing. Used by the
+    set-up screen and by /inbox/mailbox, so the two cannot drift."""
+    out = ""
+    help_ = e.get("help") or {}
+    if help_.get("url"):
+        out += (f'<p style="margin:10px 0 0"><a href="{_esc(help_["url"])}" target="_blank" '
+                f'rel="noopener noreferrer" style="color:var(--accent);font-weight:600">'
+                f'{_esc(help_.get("label") or "")} &rarr;</a></p>')
+    if e.get("alternatives"):
+        out += ('<details style="margin-top:12px"><summary><b>'
+                + _esc(e.get("alternatives_title") or "Other providers") + '</b></summary>'
+                + "".join(f'<p class="quiet" style="margin:8px 0 0"><b>{_esc(a)}:</b> {_esc(b)}</p>'
+                          for a, b in e["alternatives"])
+                + (f'<p class="quiet" style="margin:8px 0 0"><b>{_esc(e.get("caveat_title") or "")}'
+                   f':</b> {_esc(e.get("caveat") or "")}</p>' if e.get("caveat") else "")
+                + '</details>')
+    return out
+
+
 def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
                 owner: bool) -> str:
     """ONE ENTRY, RENDERED THE SAME WAY WHATEVER IT IS. This is the whole point of the contract:
@@ -4038,6 +4096,7 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
     steps = "".join(f'<div class="row"><span class="n">{i}</span>'
                     f'<span class="t">{_esc(t)}</span></div>'
                     for i, t in enumerate(e.get("steps") or (), 1))
+    steps += _step_extras(e)
     fields = "".join(_setup_field(f, typed.get(f.get("name"), "")) for f in e.get("fields") or ())
     # BELOW THE FIELD, ABOVE SUBMIT — where the owner asked for it, and where a person reads it
     # before they press anything rather than after.
@@ -4264,7 +4323,7 @@ def r_mailbox():
         try:
             # VALIDATED IN THE STORE, NOT HERE, so the rule is the same whoever writes one. This
             # screen's job is to show the sentence the store wrote for the person in front of it.
-            box_secrets.put_email(host="imap.gmail.com", user=typed,
+            box_secrets.put_email(host=_mailbox_host(request.form), user=typed,
                                   password=str(request.form.get("password") or ""),
                                   user_id=whoami)
             return redirect("/inbox/mailbox?saved=1")

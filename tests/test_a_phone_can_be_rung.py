@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import sys
 import tempfile
 
@@ -73,7 +74,8 @@ print("\ntest_the_box_has_one_identity_not_two")
 have, why = push.available()
 if not have:
     print(f"  --   no crypto on this machine ({why}); the identity half is not exercised")
-    ok("...and the box says so plainly instead of throwing", "push keys" in why, why)
+    ok("...and the box says so plainly instead of throwing — a sentence, never an exception class",
+       why and "notifications" in why and not re.search(r"[A-Z][a-z]+(Exception|Error)\b|\(", why), why)
 else:
     a = push.public_key()
     b = push.public_key()

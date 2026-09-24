@@ -168,6 +168,15 @@ print("\n— exactly one place may hand a message to a mail server —")
 MAY_SEND = {
     # The send itself, reached ONLY through reply.py, which claims the ledger key first.
     "marketing/customer_voice/inbox/email_channel.py",
+    # THE SECOND PATH, NAMED WITH ITS REASON (OSDev1, 2026-09-23, on #1473). The property above is
+    # about CUSTOMER REPLIES — one path, so a customer can never get the same reply twice outside the
+    # ledger claim, the opt-out and the idempotency key. box_mail sends OWNER NOTIFICATIONS: the
+    # Morning Review, the box's own alerts, the owner's test email, over the owner's own Resend key or
+    # SMTP login (owner ruling, 2026-09-23). Its callers are all in core/ and address the box's own
+    # people (`to_box_people`) or the review address the operator configured; it claims its own
+    # ledger row before handing a message over. What keeps it from ever becoming a reply path — no
+    # customer-facing code may send through it — is asserted below.
+    "core/box_mail.py",
 }
 MAY_OPEN_A_SESSION = MAY_SEND | {
     # Asks whether a credential MAY send. Cannot send: no sendmail, no send_message, no recipient.
@@ -185,9 +194,34 @@ for f in list((ROOT / "marketing" / "customer_voice").rglob("*.py")) + \
         openers.append(rel)
     if (".sendmail(" in t or ".send_message(" in t) and rel not in MAY_SEND:
         senders.append(rel)
-ok("only the mail channel may hand a message to a mail server", not senders, str(senders))
+ok("only the mail channel — and the owner-notice path, named — may hand a message to a mail server",
+   not senders, str(senders))
 ok("...and only it and the credential check may even open an SMTP session",
    not openers, str(openers))
+# THE OWNER-NOTICE PATH CAN NEVER BECOME A REPLY PATH. Nothing that answers a customer may send
+# through box_mail. email_channel DOES import it — for `ORIGIN_HEADER`, the mark it reads to skip the
+# box's own notices — so the rule is on the SEND, not the import: no `box_mail.send`, no importing
+# `send` by name, anywhere a customer reply is built. reply.py may not import box_mail at all.
+_reply_side = [ROOT / "marketing" / "customer_voice" / "inbox" / "reply.py",
+               ROOT / "marketing" / "customer_voice" / "inbox" / "email_channel.py"]
+_reply_side += [f for f in (ROOT / "marketing").rglob("*.py")]
+_leaks = []
+for f in _reply_side:
+    try:
+        t = f.read_text()
+    except Exception:                        # noqa: BLE001
+        continue
+    if _re_guard.search(r"box_mail\.send\s*\(|from\s+core\.box_mail\s+import[^\n]*\bsend\b", t):
+        _leaks.append(str(f.relative_to(ROOT)))
+ok("NO CODE UNDER marketing/ SENDS THROUGH box_mail — it cannot become a way to answer a customer",
+   not _leaks, str(sorted(set(_leaks))))
+_reply_src = (ROOT / "marketing" / "customer_voice" / "inbox" / "reply.py").read_text()
+ok("...and reply.py does not import box_mail at all", "box_mail" not in _reply_src)
+_ec = (ROOT / "marketing" / "customer_voice" / "inbox" / "email_channel.py").read_text()
+ok("...and the mail channel uses box_mail for its origin mark and nothing else",
+   set(_re_guard.findall(r"box_mail\.(\w+)", _ec)) <= {"ORIGIN_HEADER"},
+   str(set(_re_guard.findall(r"box_mail\.(\w+)", _ec))))
+
 # THE CREDENTIAL CHECK IS HELD TO THE OLD RULE STILL. Being allowed to open a session is not
 # being allowed to send down it, and #1435's whole safety argument is that it stops at AUTH.
 _verify = (ROOT / "core" / "vendors" / "mailbox" / "verify.py").read_text()

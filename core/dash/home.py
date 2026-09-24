@@ -1044,6 +1044,17 @@ def settings():
              '<div class="foot"><a href="/settings/updates">What this box is running &rarr;</a>'
              '</div></div>')
     if _is_owner():
+        # EMAIL IS OPTIONAL, SO IT IS A DOOR AND NOT A SET-UP STEP (owner, 2026-09-23): the review
+        # and alerts reach the owner in the mobile app without it. Owner-only, like the page.
+        from core import box_mail
+        mail = box_mail.describe()
+        said = (f"Set up — sending from {_esc(mail['from'])}." if mail["kind"] else
+                "Not set up. Your Morning Review and alerts come to the mobile app; add email to "
+                "get them in your inbox too.")
+        body += ('<div class="card"><h2>Email</h2>'
+                 f'<p class="sub">{said}</p>'
+                 '<div class="foot"><a href="/settings/email">Email from your box &rarr;</a>'
+                 '</div></div>')
         body += ('<div class="card"><h2>The machine itself</h2>'
                  '<p class="sub">This box is a server you own outright. Put your own key on it '
                  'and you can sign in to the server itself — no account with us, and it keeps '
@@ -1156,7 +1167,7 @@ shell.register_section("add_machine", order=80, machine="core", title="Add a Mac
 # SYSTEM SETTINGS IS A SUB-MENU. Owner, 2026-09-23: *"there are now sub menu items under
 # settings"* — so tapping it swaps the rail for these rows, the two-level menu he asked for on
 # 2026-09-17 (see `core/shell.py`). The AI account and the mobile app lead because they are the
-# two things he wants a new buyer to reach first. The four rows whose screens refuse a member are
+# two things he wants a new buyer to reach first. The five rows whose screens refuse a member are
 # `owner_only`, so a member is shown a shorter menu rather than doors that refuse them.
 shell.register_section("settings", order=90, machine="core", title="System Settings",
                        href="/settings", icon=_GEAR_ICON, items=[
@@ -1164,6 +1175,8 @@ shell.register_section("settings", order=90, machine="core", title="System Setti
                            {"key": "ai", "label": "AI account", "href": "/settings/ai",
                             "owner_only": True},
                            {"key": "mobile", "label": "Mobile app", "href": "/settings/mobile"},
+                           {"key": "email", "label": "Email", "href": "/settings/email",
+                            "owner_only": True},
                            {"key": "agent", "label": "AI coworkers", "href": "/settings/agent",
                             "owner_only": True},
                            {"key": "updates", "label": "Updates", "href": "/settings/updates"},

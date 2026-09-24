@@ -624,7 +624,71 @@ def render(day: date, now: datetime | None = None) -> str:
     return text
 
 
-def run(now: datetime | None = None, send=None, send_email=None) -> dict:
+def _send_clock(now: datetime) -> datetime:
+    """`now` on the clock of the person being told — the buyer's, not the box's.
+
+    A SOLD BOX SHIPS ON UTC (`cost.timezone`), so "8am" on the box's clock is 1am for a Pacific
+    buyer: a notification that wakes them in the night. `notify.buyer_timezone()` is the same
+    answer the inbox notices already use — the claim-time browser zone, else the config — so the
+    two things that tell the owner something agree on when morning is. On the operator's box the
+    two clocks are the same, so nothing there moves.
+    """
+    try:
+        from core import notify
+        return now.astimezone(ZoneInfo(notify.buyer_timezone()))
+    except Exception:  # noqa: BLE001 — an unreadable zone is the box's clock, not a crash
+        return now
+
+
+def _owner_id() -> str:
+    try:
+        return str((state.owner_user() or {}).get("id") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _owner_devices(owner: str) -> list:
+    """The owner's devices with the app installed. The review is owner-only, so only theirs."""
+    if not owner:
+        return []
+    try:
+        from core import push
+        return push.subscriptions_for(owner)
+    except Exception:  # noqa: BLE001 — no table, no crypto: no device
+        return []
+
+
+def _owner_email(owner: str) -> str:
+    """The owner's own sign-in address, when the box has a way to send and it can receive mail."""
+    try:
+        from core import box_mail
+        if not owner or not box_mail.is_configured():
+            return ""
+        people = box_mail.to_box_people(owner)
+        return people[0]["email"] if people else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _app(devices: list, about: date) -> str:
+    """Tell each of the owner's devices the review is ready. -> "sent" | "failed". Never raises.
+
+    ONE FIXED SENTENCE, NEVER A FIGURE. The notification renders on a locked screen; what the day
+    held belongs behind the login it opens.
+    """
+    from core import push
+    got = 0
+    for sub in devices:
+        try:
+            ok, _why = push.send(sub, title="Morning Review", body="Your morning review is ready",
+                                 navigate=f"/app/review/{about.isoformat()}")
+            got += 1 if ok else 0
+        except Exception:  # noqa: BLE001
+            pass
+    return "sent" if got else "failed"
+
+
+def run(now: datetime | None = None, send=None, send_email=None, send_app=None) -> dict:
     """The send periodic. Once a day at or after `review.hour_local` (default 8) on a
     `review.send_days` day — a box asleep at 08:00 sends when it wakes rather than skipping (§1.7,
     the cost_digest shape, copied rather than reinvented). Refreshes today's row first so
@@ -640,25 +704,40 @@ def run(now: datetime | None = None, send=None, send_email=None) -> dict:
     THE EMAIL (owner, 2026-09-10: "Wish it was an email with the 3 sections") goes beside the DM
     when `review.email_to` is set: the same once-a-day gate, its own marker. A Slack outage never
     costs the email, and a mail outage never re-sends the DM; the next tick retries only the
-    channel that failed. Either channel alone is enough to run; neither is `no_operator`."""
+    channel that failed. Either channel alone is enough to run; neither is `no_operator`.
+
+    THE APP IS THE THIRD CHANNEL, AND ON A SOLD BOX THE FIRST (owner, 2026-09-23: "Go with C"). A
+    sold box has no Slack and, deliberately, no email of ours; until the owner adds their own on
+    /settings/email, the review would reach nobody. So the owner's devices with the app installed
+    are told "Your morning review is ready", and the tap opens the review itself. With email set up
+    on the box, the review is ALSO mailed to the owner's own sign-in address when `email_to` is not
+    configured. Each channel keeps its own marker, as the two above always have.
+
+    THE HOUR AND THE DAY ARE THE OWNER'S (`_send_clock`), and so are the markers — a marker keyed
+    on the box's UTC date would roll over in a Pacific afternoon and send the morning twice."""
     cfg = _cfg()
     if not cfg.get("enabled", True):
         return {"status": "off"}
     operator = getattr(settings, "operator_slack_user_id", "") or ""
-    email_to = str(cfg.get("email_to") or "").strip()
-    if not operator and not email_to:
+    owner = _owner_id()
+    email_to = str(cfg.get("email_to") or "").strip() or _owner_email(owner)
+    devices = _owner_devices(owner) if send_app is None else ["injected"]
+    if not operator and not email_to and not devices:
         return {"status": "no_operator"}
     if send is None and operator:
         from core import slack
         send = lambda text: slack.send_dm(operator, text)     # noqa: E731
     now = now or now_local()
     t = today(now)
+    clock = _send_clock(now)
+    mark = clock.date().isoformat()
     st = _read_state()
-    want_dm = bool(operator) and st.get("sent") != t.isoformat()
-    want_mail = bool(email_to) and st.get("emailed") != t.isoformat()
-    if now.hour < int(cfg.get("hour_local", 8)) or not (want_dm or want_mail):
+    want_dm = bool(operator) and st.get("sent") != mark
+    want_mail = bool(email_to) and st.get("emailed") != mark
+    want_app = bool(devices) and st.get("pushed") != mark
+    if clock.hour < int(cfg.get("hour_local", 8)) or not (want_dm or want_mail or want_app):
         return {"status": "quiet"}
-    if _DAYS[t.weekday()] not in send_days():
+    if _DAYS[clock.weekday()] not in send_days():
         return {"status": "not_a_send_day"}
     if _leased(st, now):
         return {"status": "retry_later", "retry_at": st.get("retry_at")}
@@ -670,7 +749,7 @@ def run(now: datetime | None = None, send=None, send_email=None) -> dict:
     out = {"status": "send_failed", "about": yday.isoformat()}
     if want_dm:
         if send(render(yday, now)):
-            st["sent"] = t.isoformat()
+            st["sent"] = mark
             out["dm"] = "sent"
             log.info("report.sent", day=t.isoformat(), about=yday.isoformat())
         else:
@@ -678,9 +757,14 @@ def run(now: datetime | None = None, send=None, send_email=None) -> dict:
     if want_mail:
         out["email"] = _email(email_to, yday, now, t, send_email)
         if out["email"] == "sent":
-            st["emailed"] = t.isoformat()
+            st["emailed"] = mark
+    if want_app:
+        out["app"] = send_app(yday) if send_app is not None else _app(devices, yday)
+        if out["app"] == "sent":
+            st["pushed"] = mark
+            log.info("report.app_notified", day=t.isoformat(), about=yday.isoformat())
     _write_state(st)
-    if "sent" in (out.get("dm"), out.get("email")):
+    if "sent" in (out.get("dm"), out.get("email"), out.get("app")):
         out["status"] = "sent"
     return out
 

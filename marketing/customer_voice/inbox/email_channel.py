@@ -56,7 +56,7 @@ class EmailAuthError(RuntimeError):
         self.detail = detail
 
 
-def _classify_auth_failure(msg: str) -> EmailAuthError:
+def _classify_auth_failure(msg: str, host: str = "") -> EmailAuthError:
     """Turn an opaque IMAP refusal into something a buyer can act on.
 
     THE SENTENCES LIVE IN `core.vendors.mailbox` AND THERE IS ONE COPY. They are read in two very
@@ -64,7 +64,7 @@ def _classify_auth_failure(msg: str) -> EmailAuthError:
     poller weeks later when Google revokes it — and two copies would drift, with the drifted half
     being whichever one somebody is reading while they try to fix something. This keeps the
     machine's own exception type (the sweep catches it by name) and takes the wording from core."""
-    err = _core_mailbox.classify_auth_failure(msg)
+    err = _core_mailbox.classify_auth_failure(msg, host)
     return EmailAuthError(err.status, err.detail)
 
 
@@ -312,7 +312,7 @@ def _connect(cred: dict):
             conn.logout()
         except Exception:                                # noqa: BLE001
             pass
-        raise _classify_auth_failure(str(e)) from None
+        raise _classify_auth_failure(str(e), cred.get("host") or "") from None
     # READONLY IS THE FIRST OF THE TWO GUARDS: the server itself refuses to change a flag on this
     # session, so even a future bug that asked for one could not mark the buyer's mail as read.
     conn.select(_FOLDER, readonly=True)
@@ -784,7 +784,7 @@ def send(cred: dict, *, to: str, subject: str, body: str,
         conn.login(cred["user"], cred["password"])       # channel — never the list read in clear
         conn.send_message(msg)
     except smtplib.SMTPAuthenticationError as e:
-        raise _classify_auth_failure(str(e)) from e
+        raise _classify_auth_failure(str(e), cred.get("host") or "") from e
     except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused,
             smtplib.SMTPDataError, smtplib.SMTPNotSupportedError) as e:
         # THE SERVER ANSWERED, AND THE ANSWER WAS NO. Determinate: nothing was queued.

@@ -29,6 +29,12 @@ permission, an uninstalled app, a dropped subscription, a push service having a 
 until it has proven itself on real boxes, a duplicate notification is a far cheaper mistake than a
 missed customer. Tuning this is a settings question for later, not a default to guess at now.
 
+EACH CHANNEL STANDS ON ITS OWN (owner, 2026-09-23, "Go with C"). Both still fire where both exist.
+But a sold box ships with no way to send email, and gating the app notification on the email beside
+it meant a box with no key told its owner nothing at all. Now the notification goes to any device
+that has the app, the email goes when the box can send one (/settings/email), and neither waits on
+the other.
+
 PER PERSON, NOT PER BOX — a box seats three, and one of them having a phone installed says nothing
 about the others, who must still be told.
 
@@ -67,13 +73,24 @@ def _cfg() -> dict:
 
 
 def is_on() -> bool:
-    """Both halves, and a box that is half-configured is OFF rather than nearly on.
+    """Is the notifier switched on at all? The owner's setting, and nothing else.
 
-    `is_configured` is the honest one: Resend rejects an unverified sender, so a key with no
-    from-address sends nothing at all. Reporting that as "notifications are on" is the exact
-    class of claim this repo spent a night deleting — enabled, ok and connected are not works.
+    NOT "IS EMAIL SET UP" ANY MORE (owner, 2026-09-23: "Go with C"). A sold box ships with no way to
+    send email, on purpose, and until today that silenced the mobile app as well — the notification
+    was gated on the email it rides beside. Each channel now answers for itself inside
+    `send_notice`: the app notification goes to any device that has it, the email goes when the box
+    has a complete way to send one, and a box with neither says so rather than claiming either.
     """
-    return bool(_cfg().get("enabled", True)) and box_mail.is_configured()
+    return bool(_cfg().get("enabled", True))
+
+
+def _has_device(person_id: str) -> bool:
+    """Does this person have the app installed on any device? Never raises."""
+    try:
+        from core import push
+        return bool(push.subscriptions_for(str(person_id)))
+    except Exception:                          # noqa: BLE001 — a missing table is "no device"
+        return False
 
 
 # QUIET HOURS ARE GONE, AND THAT IS A SIMPLIFICATION RATHER THAN A LOSS. They existed to stop an
@@ -229,7 +246,7 @@ def send_notice(key: str, subject: str, text_body: str, html_body: str | None = 
     now = now or datetime.now(timezone.utc)
     try:
         if not is_on():
-            return {"sent": 0, "skipped": "off", "detail": "notifications are not configured"}
+            return {"sent": 0, "skipped": "off", "detail": "notifications are switched off"}
         marker = slot_key(key, now)
         if marker is None:
             # Between the two windows, or before the first. The night belongs to the buyer.
@@ -243,6 +260,11 @@ def send_notice(key: str, subject: str, text_body: str, html_body: str | None = 
         people = box_mail.to_box_people(user_id)
         if not people:
             return {"sent": 0, "skipped": "nobody", "detail": "this box has no signed-in people"}
+        mail_ok = box_mail.is_configured()
+        if not mail_ok and not any(_has_device(p["id"]) for p in people):
+            # NEITHER CHANNEL EXISTS, and that is said as "off" — never as a send that failed.
+            return {"sent": 0, "skipped": "off",
+                    "detail": "no email is set up on this box and nobody has the app installed"}
 
         sent, failed, notified = 0, [], 0
         for p in people:
@@ -251,6 +273,8 @@ def send_notice(key: str, subject: str, text_body: str, html_body: str | None = 
             # mail goes regardless; that is the whole point of sending both while push is new.
             if _notify_devices(p["id"], waiting):
                 notified += 1
+            if not mail_ok:
+                continue                       # the app notification was the whole delivery
             try:
                 box_mail.send(p["email"], subject, text_body, html_body or _plain_html(text_body),
                               idem_key=f"notify:{marker}:{p['id']}",

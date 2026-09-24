@@ -624,11 +624,12 @@ def box_mobile():
                 'about it, never the only way.</p></div>')
 
     if not ok:
-        # AN HONEST EMPTY ANSWER BEATS FOUR STEPS THAT CANNOT SUCCEED. A box whose release predates
-        # the crypto dependency cannot mint a push identity at all.
+        # AN HONEST EMPTY ANSWER BEATS FOUR STEPS THAT CANNOT SUCCEED. `why` is a sentence written
+        # for this screen, never an exception class (#1483 finding 8) — the class is in the log.
         body.append('<div class="card"><p>One thing first: this box cannot send notifications yet '
-                    f'— {_esc(why)}. The steps above still work and are worth doing; the box will '
-                    'be able to notify you once it updates itself.</p></div>')
+                    f'— {_esc(why)}. The steps above still work and are worth doing. The box tries '
+                    'again every time it updates; if this is still here after an update, tell us.'
+                    '</p></div>')
 
     body.append('<div class="card"><p><b>For somebody else on this box</b></p>'
                 '<p>Whoever watches the inbox is often not whoever bought the box. This page '
@@ -1515,7 +1516,7 @@ def deploy_move_status():
 # `_AGENT_STEP["link"]["url"]` all name paths served here. Keeping the stnotifies in the contract is
 # what lets one screen render a step it has never heard of.
 _DOORS = ("/settings/ai", "/settings/mobile", "/settings/agent", "/settings/access",
-          "/settings/updates", "/settings/move")
+          "/settings/updates", "/settings/move", "/settings/email")
 # The handout hangs off the mobile-app door rather than being one of its own: it is not a
 # step a buyer finishes, it is a sheet they hand to somebody else.
 _HANDOUT = "/settings/mobile/print"

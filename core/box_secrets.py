@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 
 from core import state
+from core.vendors.mailbox import providers as _mailbox_providers
 from core.logging import get_logger
 
 log = get_logger(__name__)
@@ -294,14 +295,37 @@ def email_credential() -> dict:
 
 def put_email(*, host: str, user: str, password: str, user_id: str | None = None) -> None:
     """Store the mailbox credential as one row. Raises SecretRejected with a sentence for the buyer."""
-    host = str(host or "").strip() or "imap.gmail.com"
+    _providers = _mailbox_providers
+    host = str(host or "").strip().lower() or "imap.gmail.com"
     user = str(user or "").strip()
-    password = _clean_app_password(password)
     if not user or "@" not in user:
         raise SecretRejected("Put in the full email address of the mailbox you want read.")
-    if not password:
+    # MICROSOFT IS REFUSED BEFORE A PASSWORD IS SENT ANYWHERE (#1483 finding 1; see
+    # core/vendors/mailbox/providers.py for the source). Told "wrong password" after a twenty-second
+    # wait, a buyer makes a new one and it fails the same way; told why, they know what to do.
+    if _providers.is_microsoft(host, user):
+        raise SecretRejected(_providers.MICROSOFT_SAID)
+    if _providers.provider_of(host) == "other":
+        try:
+            host = _providers.host_for("other", host)       # a host name, never a URL or a port
+        except ValueError as e:
+            raise SecretRejected(str(e)) from None
+    if not _providers.is_google(host):
+        # EVERY OTHER PROVIDER HAS ITS OWN PASSWORD SHAPE — iCloud's has dashes, Zoho's is twelve,
+        # a web host's is whatever the buyer chose — so the only check is that there is one. The
+        # server is the judge, a line below. Surrounding space is a paste artefact; inner space is
+        # left alone, because on these providers it may be part of the password.
+        password = str(password or "").strip()
+        if not password:
+            raise SecretRejected("Paste the password for this mailbox — for most providers an app "
+                                 "password made in your account's security settings.")
+        if len(password) > 256:
+            raise SecretRejected("That is too long to be a password. Paste only the password.")
+    else:
+        password = _clean_app_password(password)
+    if _providers.is_google(host) and not password:
         raise SecretRejected("Paste the app password Google gave you.")
-    if len(password) != _APP_PASSWORD_LEN or not password.isalnum():
+    if _providers.is_google(host) and (len(password) != _APP_PASSWORD_LEN or not password.isalnum()):
         # The mistake people actually make is pasting their ACCOUNT password — the one thing that must
         # never reach this table. It is far broader than the box needs, and it would keep working after
         # they revoked the thing they believed they had given us.
@@ -804,14 +828,33 @@ SETUP_STEPS = (
     {"key": "email", "title": "Your inbox", "surface": SURFACE_MACHINE,
      "why": "Ownbox reads the mail your customers send you, and drafts replies. It never sends "
             "anything and it never marks a message as read.",
-     "fields": ({"name": "user", "label": "The email address to read", "type": "email",
+     # NOT ONLY GMAIL (#1483 finding 1). The provider is a choice, Gmail first because it is the
+     # commonest; "Another provider" takes the IMAP server from the field under it. The steps below
+     # stay Google's — most buyers are there — and every other provider has its one line in
+     # `alternatives`, with Microsoft's honest refusal as `caveat`.
+     "fields": ({"name": "provider", "label": "Where your email lives", "type": "select",
+                 "options": tuple((k, v[0]) for k, v in _mailbox_providers.PRESETS.items())},
+                {"name": "host", "label": "IMAP server — only if you chose Another provider",
+                 "type": "text", "placeholder": "imap.example.com"},
+                {"name": "user", "label": "The email address to read", "type": "email",
                  "placeholder": "you@yourcompany.com"},
                 {"name": "password", "label": "App password", "type": "password",
-                 "placeholder": "sixteen letters from Google"}),
+                 "placeholder": "the app password for this mailbox"}),
      "steps": ("In your Google Account, open Security and turn on 2-Step Verification.",
-               "Search that page for App passwords and open it.",
+               "Search that page for App passwords and open it — or use the link below.",
                "Create one — name it Ownbox — and Google shows sixteen letters.",
                "Paste those here with your email address. The spaces do not matter."),
+     # ALWAYS LIVE, unlike `link` (which waits for a key): this is where the password comes FROM.
+     # Verified 2026-09-23 against Google's own help article (support.google.com/accounts/answer/
+     # 185833, "Create and manage your app passwords"). tests/test_setup_asks_for_the_ai_key.py
+     # holds every set-up URL to that standard.
+     "help": {"label": "Open Google's App passwords page",
+              "url": "https://myaccount.google.com/apppasswords"},
+     "alternatives": tuple((v[0], v[2]) for k, v in _mailbox_providers.PRESETS.items()
+                           if k != "gmail"),
+     "alternatives_title": "Not on Gmail?",
+     "caveat": _mailbox_providers.MICROSOFT_SAID,
+     "caveat_title": "Outlook, Hotmail or Microsoft 365",
      "note": "If App passwords is missing, your Google administrator has switched it off for your "
              "organisation — ask them to allow it."},
     # NAME THE THING BEFORE ASKING FOR A KEY TO IT. Owner, 2026-09-19: "does that screen explain

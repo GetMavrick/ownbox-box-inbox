@@ -58,10 +58,14 @@ def _b64(raw: bytes) -> str:
 def available() -> tuple[bool, str]:
     """Can this box mint a VAPID identity at all?
 
-    SAID OUT LOUD RATHER THAN CRASHED. `cryptography` is not in requirements.lock yet, so a box
-    running today's release has no ECDSA and no way to make one — the standard library has no
-    P-256. A screen asking a buyer to turn on notifications must be able to say that plainly
-    instead of throwing a 500 at them.
+    SAID OUT LOUD RATHER THAN CRASHED. `cryptography` is pinned in requirements.lock (50.0.1, with its
+    own wheels), and on a box built from it this answers True. It answers False when that native
+    library cannot load — a wheel that does not match the interpreter — and a screen asking a buyer
+    to turn on notifications must say that plainly instead of throwing a 500 at them.
+
+    THE BUYER NEVER READS AN EXCEPTION CLASS (#1483, finding 8: "…no push keys yet
+    (PanicException)" on /settings/mobile). The class goes to the log, where somebody fixing it
+    needs it; the sentence goes to the screen, where somebody reading it needs that.
     """
     try:
         from cryptography.hazmat.primitives.asymmetric import ec  # noqa: F401
@@ -78,7 +82,8 @@ def available() -> tuple[bool, str]:
     except (Exception, BaseException) as e:                       # noqa: BLE001
         if isinstance(e, (KeyboardInterrupt, SystemExit)):        # never swallow a shutdown
             raise
-        return False, f"this box has no push keys yet ({type(e).__name__})"
+        log.warning("push.unavailable", error=f"{type(e).__name__}: {str(e)[:160]}")
+        return False, "the part of this box that sends notifications did not start"
     return True, ""
 
 
@@ -193,7 +198,8 @@ def note_result(endpoint: str, *, ok: bool, detail: str = "") -> None:
 #
 # THE PAYLOAD CARRIES A NUMBER, NEVER A CUSTOMER'S WORDS. A notification renders on a locked
 # screen in front of whoever is holding the phone; the message itself belongs behind the login the
-# homepage promises. Callers pass a count and a destination, never a body.
+# homepage promises. Callers pass a count and a destination — or one fixed sentence of our own,
+# like "Your morning review is ready" — and never a customer's words or a figure.
 
 TTL_SECONDS = 12 * 3600
 _RECORD_SIZE = 4096
@@ -263,7 +269,7 @@ def _vapid_header(endpoint: str, *, subject: str) -> dict[str, str]:
 
 def send(subscription: dict, *, waiting: int | None = None, navigate: str = "/inbox/inbox",
          subject: str = "mailto:support@ownbox.io", timeout: int = 10,
-         resolve=None) -> tuple[bool, str]:
+         resolve=None, title: str = "Unified Inbox", body: str | None = None) -> tuple[bool, str]:
     """Notify one device. Returns (delivered, detail); a gone subscription is forgotten here.
 
     THROUGH `core.net`, NOT `requests`, AND THAT IS A SECURITY BOUNDARY. The endpoint is DATA: the
@@ -281,14 +287,16 @@ def send(subscription: dict, *, waiting: int | None = None, navigate: str = "/in
 
     endpoint = str(subscription.get("endpoint") or "")
     try:
-        body = json.dumps({"title": "Unified Inbox",
-                           # A COUNT WHERE THERE IS ONE, a neutral line where there is not.
-                           # Never the notice's own words: this renders on a locked screen.
-                           "body": ("Something is waiting for you" if waiting is None else
-                                    ("1 waiting for a reply" if waiting == 1
-                                     else f"{waiting} waiting for a reply")),
-                           "navigate": navigate}, separators=(",", ":")).encode()
-        payload = encrypt(body, p256dh=subscription["p256dh"], auth=subscription["auth"])
+        # `body` IS FOR A FIXED SENTENCE THE CALLER OWNS ("Your morning review is ready"), never
+        # a customer's words or a figure: this renders on a locked screen in front of whoever is
+        # holding the device.
+        said = body if body is not None else (
+            # A COUNT WHERE THERE IS ONE, a neutral line where there is not.
+            "Something is waiting for you" if waiting is None else
+            ("1 waiting for a reply" if waiting == 1 else f"{waiting} waiting for a reply"))
+        raw = json.dumps({"title": title, "body": said, "navigate": navigate},
+                         separators=(",", ":")).encode()
+        payload = encrypt(raw, p256dh=subscription["p256dh"], auth=subscription["auth"])
         headers = {"Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream",
                    "TTL": str(TTL_SECONDS), **_vapid_header(endpoint, subject=subject)}
         status, _body = net.post_public(endpoint, data=payload, headers=headers,

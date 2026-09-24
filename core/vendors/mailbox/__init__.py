@@ -8,8 +8,9 @@ one a person is reading while they try to fix something.
 IN `core`, NOT IN THE INBOX MACHINE, because `core.box_secrets` has to verify a credential before
 storing it and core imports no machine — a Lead box has no `marketing/customer_voice` at all.
 """
+from . import providers
 from .verify import (IMAP_HOST_DEFAULT, SMTP_HOST_DEFAULT, SMTP_PORT, MailboxAuthError,
                      classify_auth_failure, smtp_host_for, verify_credential, verify_send)
 
 __all__ = ["verify_credential", "verify_send", "classify_auth_failure", "MailboxAuthError",
-           "IMAP_HOST_DEFAULT", "SMTP_HOST_DEFAULT", "SMTP_PORT", "smtp_host_for"]
+           "IMAP_HOST_DEFAULT", "SMTP_HOST_DEFAULT", "SMTP_PORT", "smtp_host_for", "providers"]
