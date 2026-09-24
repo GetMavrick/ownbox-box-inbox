@@ -1403,7 +1403,6 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
 <meta name="robots" content="noindex,nofollow">
 {tc}
 <link rel="manifest" href="/inbox/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/inbox/icon-192.png">
 <!-- APPLE STILL READS ITS OWN META. The manifest's `display` is what MDN says iOS requires before
      `Notification` even exists, and this legacy pair is what older iOS reads for the same thing.
      Both cost one line and the failure they prevent is silent. -->
@@ -3336,7 +3335,7 @@ def _thread_notice(zcid: str, kind: str, message: str) -> str:
 # carries crossorigin="use-credentials" — so a gated manifest fails to install with no error a
 # person could act on, which is the silent failure this whole file is written against. The same is
 # true of the icons it names. None of these four carries a customer's name, a message, or a
-# number: the manifest is a colour and a title, the icons are drawn from constants in this module,
+# number: the manifest is a colour and a title, the icons are the Ownbox mark (core/dash/look.py),
 # and the worker is our own code. `start_url` still points at `/inbox/`, which IS gated — so
 # opening the installed app asks for the password exactly as the browser does.
 PUBLIC_PATHS = frozenset({
@@ -3348,13 +3347,8 @@ PUBLIC_PATHS = frozenset({
 })
 
 THEME = "#0b0d10"
-ICON_BG = (11, 13, 16)
-ICON_FG = (125, 211, 252)
 
 
-# COMPUTED ONCE PER PROCESS. The 512px icon is ~262k pixels of pure-Python loop (~80 ms on a
-# laptop, more on the one-vCPU box) on a route that is deliberately unauthenticated; a browser
-# caches it for a day, but a stranger fetching it in a loop should not be able to buy CPU.
 # ── settings, and the light/dark switch ─────────────────────────────────────────────────────
 def _mailbox_row() -> str:
     """The Settings row that makes /inbox/mailbox reachable AFTER it has been set up.
@@ -3495,44 +3489,19 @@ def r_theme():
 
 @functools.lru_cache(maxsize=4)
 def _png(size: int) -> bytes:
-    """A square PNG, drawn here rather than shipped as a file.
+    """The app's icon at `size`: the Ownbox mark, drawn by core/dash/look.py.
 
-    WHY BYTES IN THE MODULE. Invariant 7 and spec §1.2: a clone installs this department and gets
-    a working app with no dependency on `sites/`, which is a different deploy entirely. The crest
-    precedent inlines an image as a data URI to avoid adding a route; that cannot work here,
-    because a manifest's `icons` entries are URLs the browser fetches.
+    IT WAS A PLACEHOLDER, a sky-blue ring, and said so here from the day it shipped. Owner,
+    2026-09-24, with the installed app on a home screen beside the Ownbox icon: *"Right now it
+    has just a blue O, but I want the actual."* So the app wears the box's one mark, the same one
+    ownbox.io and every box screen use. It is drawn to the edge, as a maskable icon must be: the
+    launcher cuts the corners, and the cream square sits inside the safe zone.
 
-    WRITTEN BY HAND because Pillow is not a dependency of this box — `test_box_boots` fails on a
-    missing PIL today, so importing it here would take the whole app down on exactly the machine
-    this ships to. A PNG is a signature, an IHDR, an IDAT of zlib-compressed filtered rows and an
-    IEND; that is little enough code to be worth not adding a dependency for.
-
-    IT IS A PLACEHOLDER AND SAYS SO. A flat mark on the brand ground, safe inside the maskable
-    circle so Android's mask cannot crop it. It should be replaced by a real drawn icon before
-    this is put in front of a buyer, and that is named in the PR rather than left to be noticed.
+    WHY BYTES IN THE MODULE still holds. A manifest's `icons` are URLs the browser fetches, so this
+    app keeps its own two addresses; the picture comes from core, which every box has, and never
+    from `sites/`, which no box has. The drawing is Pillow-free for the same reason as before.
     """
-    import struct
-    import zlib
-
-    cx = cy = size / 2
-    # The mark sits inside 40% of the width, which keeps it within the maskable safe zone (the
-    # inner 80% circle) on every Android launcher shape.
-    r_out, r_in = size * 0.30, size * 0.17
-    rows = bytearray()
-    for y in range(size):
-        rows.append(0)                           # filter type 0 (None) for each scanline
-        for x in range(size):
-            dx, dy = x + 0.5 - cx, y + 0.5 - cy
-            d = (dx * dx + dy * dy) ** 0.5
-            rows.extend(ICON_FG if r_in <= d <= r_out else ICON_BG)
-
-    def chunk(tag: bytes, data: bytes) -> bytes:
-        return (struct.pack(">I", len(data)) + tag + data
-                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
-
-    ihdr = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)   # 8-bit truecolour RGB
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
-            + chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b""))
+    return _look.mark_png(size)
 
 
 @blueprint.get("/inbox/manifest.webmanifest")

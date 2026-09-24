@@ -17,9 +17,13 @@ WHAT IS HERE.
                       was just going to tell you geist mono."* It replaces the system monospace
                       stack, which he did not like (*"I do not like the Mono font that we have
                       chosen there. Need a replacement"*).
+  `static/icon.svg`   the Ownbox mark, the same file as sites/ownbox/app/icon.svg: an ink tile with a
+                      cream square in it. It is the box's icon everywhere a browser or a home screen
+                      shows one — see "THE MARK" below.
   `/ui/box.css`       the stylesheet, versioned by content hash so a new release is fetched once
                       and an unchanged one is never fetched twice.
   `/ui/font/<k>.woff2` exactly two keys, never a path.
+  `/ui/icon.svg`, `/favicon.ico`, `/apple-touch-icon.png`   the mark, for a tab and a home screen.
   `/ui`               every component on one page, for whoever is checking a screen against it.
 
 SERVED FROM THE BOX, NEVER A CDN — the same reason `marketing/customer_voice/fonts/README.md` gives:
@@ -31,9 +35,12 @@ nothing of its own for colour, type size, font, radius or shadow.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import html as _html
 import pathlib
+import struct
+import zlib
 
 from flask import Response, request
 
@@ -65,9 +72,16 @@ def version() -> str:
 
 def head_tags() -> str:
     """What a screen puts in its <head> to wear the box's look. Preloads the text face, so the
-    first paint is already Inter rather than a fallback that swaps a frame later."""
+    first paint is already Inter rather than a fallback that swaps a frame later.
+
+    THE ICON RIDES HERE TOO, so every screen that wears the look also wears the mark: the tab, and
+    the home screen when a page is added to one. The .ico is for browsers that do not read SVG
+    icons; ownbox.io declares the same three links."""
     return ('<link rel="preload" href="/ui/font/sans.woff2" as="font" type="font/woff2" crossorigin>'
-            f'<link rel="stylesheet" href="/ui/box.css?v={version()}">')
+            f'<link rel="stylesheet" href="/ui/box.css?v={version()}">'
+            '<link rel="icon" href="/favicon.ico" sizes="32x32">'
+            '<link rel="icon" href="/ui/icon.svg" type="image/svg+xml">'
+            '<link rel="apple-touch-icon" href="/apple-touch-icon.png">')
 
 
 @blueprint.get("/ui/box.css")
@@ -101,6 +115,128 @@ def ui_font(name: str):
     # serves it at the same address and an installed app must be able to pick it up.
     return Response(blob, mimetype="font/woff2",
                     headers={"Cache-Control": "public, max-age=2592000"})
+
+
+# ── THE MARK ────────────────────────────────────────────────────────────────────────────────────
+#
+# OWNER, 2026-09-24, looking at a home screen with the installed Unified Inbox next to the Ownbox
+# icon: *"Right now it has just a blue O, but I want the actual."* The blue O was the inbox's own
+# placeholder, a ring drawn in marketing/customer_voice/app.py and labelled a placeholder there
+# from the day it shipped. The box now has one icon, and it is ownbox.io's.
+#
+# ONE MARK, THE SITE'S. static/icon.svg is sites/ownbox/app/icon.svg byte for byte: a 240-unit ink
+# tile with corner radius 64, and a cream square 120 across at (60, 60) with corner radius 30. The
+# constants below are that geometry as fractions of the side, and
+# tests/test_the_box_wears_the_ownbox_mark.py reads the SVG to hold them to it.
+#
+# DRAWN, NOT SHIPPED AS PNG FILES, for the reason app.py gave for the ring: Pillow is not a
+# dependency of this box, and a PNG is little enough format to write by hand. Drawing from the
+# same numbers also means a size cannot drift from the SVG, because there is no second picture.
+#
+# TWO SHAPES OF THE SAME MARK.
+#   A home screen (`tile=False`): the ink runs to the edge, because iOS and Android cut their own
+#   corners. An icon that rounds its own gets them cut twice, and iOS paints anything transparent
+#   black. The cream square is half the side and its corners are rounded, so no part of it is more
+#   than 30% of the side from the centre: inside the 40% circle a maskable icon is never cropped to.
+#   A tab (`tile=True`): the tile keeps its own rounded corners, transparent outside, as on the site.
+_INK = (17, 17, 17)            # --ink, the tile
+_GROUND = (246, 244, 239)      # --ground, the cream square
+_TILE_R = 64 / 240             # the tile's corner radius, as a fraction of the side
+_SQUARE = 120 / 240            # the cream square's side
+_SQUARE_R = 30 / 240           # ...and its corner radius
+_ICON_CACHE = "public, max-age=86400"
+
+
+def _outside(px: float, py: float, half: float, r: float) -> float:
+    """How far a point (measured from the centre) is outside a rounded square; negative inside."""
+    qx, qy = abs(px) - half + r, abs(py) - half + r
+    ox, oy = max(qx, 0.0), max(qy, 0.0)
+    return (ox * ox + oy * oy) ** 0.5 + min(max(qx, qy), 0.0) - r
+
+
+def _cover(d: float) -> float:
+    """How much of a pixel a shape covers, from the distance at the pixel's centre. This is the
+    anti-aliasing: an edge pixel is part ink and part cream rather than a staircase."""
+    return 0.0 if d >= 0.5 else 1.0 if d <= -0.5 else 0.5 - d
+
+
+@functools.lru_cache(maxsize=8)
+def mark_png(size: int, tile: bool = False) -> bytes:
+    """The mark as a `size`-pixel square PNG. RGB for a home screen, RGBA with rounded corners for a tab.
+
+    CACHED, because every route that serves it is public: a stranger fetching the 512 in a loop
+    must cost a dictionary lookup, not a quarter of a second of this box's one CPU.
+    """
+    c = size / 2
+    sq_half, sq_r, tile_r = size * _SQUARE / 2, size * _SQUARE_R, size * _TILE_R
+    # The only rows and columns the cream square reaches. Everything else is ink, which is most of
+    # a home-screen icon and is copied rather than computed.
+    lo, hi = max(0, int(c - sq_half) - 1), min(size, int(c + sq_half) + 2)
+    ink = bytes(_INK)
+    raw = bytearray()
+    for y in range(size):
+        raw.append(0)                                  # filter type 0 (None) for each scanline
+        if not tile and not lo <= y < hi:
+            raw += ink * size
+            continue
+        py = y + 0.5 - c
+        for x in range(size):
+            px = x + 0.5 - c
+            if lo <= x < hi and lo <= y < hi:
+                k = _cover(_outside(px, py, sq_half, sq_r))
+                raw += bytes(round(i + (g - i) * k) for i, g in zip(_INK, _GROUND))
+            else:
+                raw += ink
+            if tile:
+                raw.append(round(255 * _cover(_outside(px, py, c, tile_r))))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    ihdr = struct.pack(">IIBBBBB", size, size, 8, 6 if tile else 2, 0, 0, 0)   # 8-bit RGBA / RGB
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
+
+
+@functools.lru_cache(maxsize=1)
+def favicon_ico() -> bytes:
+    """16, 32 and 48 pixels in one .ico, each stored as a PNG, which every current browser reads."""
+    images = [(s, mark_png(s, tile=True)) for s in (16, 32, 48)]
+    head = struct.pack("<HHH", 0, 1, len(images))                 # reserved, type 1 = icon, count
+    offset = len(head) + 16 * len(images)
+    entries, blobs = b"", b""
+    for s, png in images:
+        entries += struct.pack("<BBBBHHII", s, s, 0, 0, 1, 32, len(png), offset)
+        offset += len(png)
+        blobs += png
+    return head + entries + blobs
+
+
+# ALL THREE ARE PUBLIC. A browser asks for a tab icon on the sign-in page, before anyone has signed
+# in, and a home screen fetches its icon on its own terms. None of them carries anything but the
+# mark. The two root addresses are also where a browser looks on its own when a page names
+# no icon, which covers the screens not yet on head_tags().
+@blueprint.get("/favicon.ico")
+def favicon():
+    return Response(favicon_ico(), mimetype="image/x-icon", headers={"Cache-Control": _ICON_CACHE})
+
+
+@blueprint.get("/apple-touch-icon.png")
+@blueprint.get("/apple-touch-icon-precomposed.png")
+def apple_touch_icon():
+    """180 pixels, the size an iPhone asks for."""
+    return Response(mark_png(180), mimetype="image/png", headers={"Cache-Control": _ICON_CACHE})
+
+
+@blueprint.get("/ui/icon.svg")
+def ui_icon():
+    try:
+        blob = (_DIR / "icon.svg").read_bytes()
+    except OSError as e:                              # the .ico beside it still answers
+        log.warning("look.icon_unreadable", error=type(e).__name__)
+        return ("", 404)
+    return Response(blob, mimetype="image/svg+xml", headers={"Cache-Control": _ICON_CACHE})
 
 
 _CHEV = ('<svg class="ui-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
