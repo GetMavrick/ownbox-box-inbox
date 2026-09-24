@@ -162,8 +162,12 @@ def test_day_one_tells_a_stuck_person_where_to_look():
     body = c.get("/inbox/mailbox").get_data(as_text=True)
     words = _text(body)
     ok("it says what the box will do with the mailbox", "reads the mail your customers send" in words)
-    ok("...and what it will never do",
-       "never sends anything" in words and "never marks a message as read" in words)
+    # IT SENDS WHAT THE BUYER SENDS, AND SAYS SO. Until 2026-09-24 this line read "it never sends
+    # anything", while Send on an email thread went out through this very mailbox
+    # (inbox/reply.py -> email_channel.send). The promise that holds is the narrower one.
+    ok("...what it sends, which is only what they send",
+       "sends only the replies you send" in words and "never sends anything" not in words)
+    ok("...and what it will never do", "never marks a message read" in words)
     ok("...and why it will not take their ordinary password", "app password" in words)
     i2, iapp = words.lower().find("2-step verification"), words.lower().find("app passwords and open")
     ok("2-Step Verification comes BEFORE App passwords", 0 <= i2 < iapp, f"{i2} vs {iapp}")

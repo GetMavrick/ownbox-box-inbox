@@ -95,6 +95,10 @@ def _back() -> str:
 
 # ── the AI account ───────────────────────────────────────────────────────────────────────────────
 
+# THE ONE LINE THAT SAYS WHAT CONNECTING NEEDS. Read by its test, so the words live once.
+AI_NEEDS = "Needs a Claude or ChatGPT subscription, or an API key."
+
+
 @blueprint.route("/settings/ai", methods=["GET", "POST"])
 def box_ai():
     """Sign in to Claude, or paste a key. Owner, 2026-09-18: "There's no key. It's a login."
@@ -166,9 +170,42 @@ def box_ai():
 
     e = _step("anthropic")
     picked = _picked(e)
+
+    # CONNECTED COMES FIRST, AND SAYS WHICH ACCOUNT. System Settings reads "Your AI account:
+    # Connected", and this page, one tap later, drew a fresh Connect screen with the terms tick and
+    # a paste field, as if nothing were set up: it never asked. It now asks the same reader the
+    # row does, says what the drafts are written with, and folds the ways to connect under "Use a
+    # different account". Not while a sign-in is running, after a refusal, or when the buyer has
+    # picked another model: then they are mid-change and the cards are the page.
+    try:
+        ai = box_secrets.anthropic_state()
+    except Exception:                                # noqa: BLE001 — a status read never 500s this page
+        ai = {}
+    settled = (ai.get("status") == "connected" and not url and not note
+               and request.method == "GET" and not request.args.get("model"))
+
+    def page(parts: list, lede: str):
+        if settled:
+            kind = ("ChatGPT subscription" if ai.get("provider") == "chatgpt" else
+                    "Claude subscription" if box_secrets.claude_oauth_token() else
+                    "Anthropic API key")
+            parts = (['<div class="card"><h2>Connected</h2>'
+                      f'<p>Your drafts are written with your {_esc(kind)}, on your own account '
+                      'and your own bill.</p></div>',
+                      '<details class="fold ai-other"><summary>Use a different account</summary>']
+                     + parts + ['</details>', _back()])
+            lede = "What writes your drafts, and how to change it."
+        else:
+            parts = parts + [_back()]
+        return chrome("/settings/ai", title="Your AI account", lede=lede,
+                      body="".join(parts)), 200
+
     body = ['<div class="card"><p>' + _esc(e.get("why") or
             "This is what writes your replies, on your own account and your own bill.")
-            + '</p></div>', _picker(e, picked)]
+            # WHAT YOU NEED, BEFORE ANY CHOICE. A buyer with none of the three read the whole page
+            # and learned only that we could do it for them (walk #3, 2026-09-23). One line, at
+            # the top, whichever model is picked below.
+            + '</p><p class="quiet">' + _esc(AI_NEEDS) + '</p></div>', _picker(e, picked)]
     if note:
         body.append(f'<div class="card"><p>{_esc(note)}</p></div>')
 
@@ -178,10 +215,7 @@ def box_ai():
     # take a credential it cannot use.
     if not picked.get("available"):
         body.append(_preview(picked, _models(e)))
-        body.append(_back())
-        return chrome("/settings/ai", title="Your AI account",
-                      lede=f"What {picked.get('name')} would look like on this box.",
-                      body="".join(body)), 200
+        return page(body, f"What {picked.get('name')} would look like on this box.")
 
     # A LIVE MODEL CONNECTED SOMEWHERE ELSE GETS ITS OWN DOOR, AND NONE OF CLAUDE'S CARDS.
     # This is the half of the owner's ruling that was missing while ChatGPT was still greyed out:
@@ -191,15 +225,17 @@ def box_ai():
     # elsewhere returns before any of them is built.
     if (picked.get("connect_href") or "/settings/ai") != "/settings/ai":
         body.append(_door(picked))
-        body.append(_back())
-        return chrome("/settings/ai", title="Your AI account",
-                      lede=f"Sign in with {picked.get('name')}.",
-                      body="".join(body)), 200
+        return page(body, f"Sign in with {picked.get('name')}.")
 
     if url:
         body.append(
             '<div class="card">'
-            '<p><b>1.</b> Open this link and sign in to Claude, then approve access.</p>'
+            # WALK #4: SAY WHERE YOU GO AND HOW YOU COME BACK. Claude's sign-in shows a code to
+            # paste rather than returning to the box, so the round trip is the buyer's to make;
+            # the page's job is to make it obvious, and to still be here when they return (it
+            # keeps the login running across a reload, see "COMING BACK" above).
+            '<p><b>1.</b> Sign in to Claude and approve access. Claude opens in a new tab; this '
+            'page stays here and waits for you.</p>'
             f'<p style="margin:12px 0"><a href="{_esc(url)}" target="_blank" '
             'rel="noopener noreferrer">Sign in to Claude &rarr;</a></p>'
             # THE LINK IS ENOUGH (#1483, finding 5). The raw URL is about 400 characters of query
@@ -207,7 +243,10 @@ def box_ai():
             # one tap away, folded, for the phone whose app will not open links in a browser.
             '<details class="quiet"><summary>Link not opening? Copy it instead</summary>'
             f'<p style="word-break:break-all;margin:8px 0 0">{_esc(url)}</p></details>'
-            '<p><b>2.</b> Claude will show you a short code. Paste it here.</p>'
+            '<p><b>2.</b> Claude shows you a short code. Copy it, come back to this tab and '
+            'paste it here.</p>'
+            '<p class="quiet">Using the box as an app on your mobile? Claude opens in your '
+            'browser. When you have the code, switch back to the app: it keeps your place.</p>'
             '<form method="post" action="/settings/ai">'
             '<input type="hidden" name="do" value="code">'
             '<input name="code" autocomplete="off" spellcheck="false" '
@@ -233,8 +272,11 @@ def box_ai():
             '<button type="submit">Connect</button></form>'
             # SAID ONCE. The line above already says the box never sees the password; this one
             # used to say it again, two sentences apart, in the same card.
-            '<p class="quiet" style="margin-top:12px">You sign in at claude.com and paste back a '
-            'short code.</p></div>')
+            # WHAT HAPPENS NEXT, BEFORE IT HAPPENS (walk #4). A buyer who knows they will leave
+            # and come back does not read the new tab as the box breaking.
+            '<p class="quiet" style="margin-top:12px">Next: Claude opens in a new tab. You sign '
+            'in there and Claude shows a short code, which you paste back on this page. It takes '
+            'about a minute.</p></div>')
 
     # THE SECOND DOOR, under the first, only when the step declares one (a box mid-update may not).
     if e.get("alt_action_href"):
@@ -244,10 +286,7 @@ def box_ai():
             f'<p><a href="{_esc(e.get("alt_action_href"))}">'
             f'{_esc(e.get("alt_action_label") or "Sign in to ChatGPT")} &rarr;</a></p></div>')
     body.append(_key_form(e))
-    body.append(_back())
-    return chrome("/settings/ai", title="Your AI account",
-                  lede="What writes your drafts, on your own account.",
-                  body="".join(body)), 200
+    return page(body, "What writes your drafts, on your own account.")
 
 
 @blueprint.route("/settings/chatgpt", methods=["GET", "POST"])
@@ -297,7 +336,7 @@ def box_chatgpt():
     if st == "error" and not note:
         note = str(live.get("error") or "")
         live = {}
-    body = ['<div class="card"><p>Sign in to ChatGPT on your phone or computer and this box will '
+    body = ['<div class="card"><p>Sign in to ChatGPT on your mobile or computer and this box will '
             'draft on your own subscription. There is no key, and the box never sees your '
             'password.</p></div>']
     if note:
@@ -317,7 +356,7 @@ def box_chatgpt():
             'seconds and takes you back to settings when the sign-in is done.</p>'
             '<form method="post" action="/settings/chatgpt" style="margin-top:12px">'
             '<input type="hidden" name="do" value="cancel">'
-            '<button type="submit">Cancel</button></form></div>')
+            '<button class="ghost" type="submit">Cancel</button></form></div>')
         refresh = '<meta http-equiv="refresh" content="5">'
     else:
         # THE SAME TICK THE CLAUDE CARD CARRIES, BECAUSE IT IS THE SAME DECISION. Signing in here
@@ -398,7 +437,7 @@ def _picker(e: dict, picked: dict) -> str:
             + "".join(out) + '</select>'
             # NO SCRIPT, NO DEAD END. `onchange` is the nicety; the button is what makes the
             # control work for somebody whose browser ran none of it.
-            '<noscript><button type="submit">Show</button></noscript>'
+            '<noscript><button class="ghost" type="submit">Show</button></noscript>'
             f'<p class="quiet" style="margin:10px 0 0">{_esc(choice.get("note") or "")}</p>'
             '</form></div>')
 
@@ -527,7 +566,10 @@ def _key_form(e: dict) -> str:
             f'<input id="ai-key" name="key" type="{_esc(f.get("type") or "password")}" '
             f'autocomplete="off" spellcheck="false" '
             f'placeholder="{_esc(f.get("placeholder") or "")}">'
-            + '<button type="submit">Save</button></form>'
+            # THE FALLBACK IS NOT THE PRIMARY. The Connect or Finish above is the thing to do next;
+            # this Save is for the few who already hold a key, so it wears the outline (walk drift,
+            # OSDev0, 2026-09-24: /settings/ai drew three ink pills).
+            + '<button class="ghost" type="submit">Save</button></form>'
             + (f'<p class="quiet" style="margin-bottom:0">{_esc(e.get("terms_note"))}</p>'
                if e.get("terms_note") else "")
             + '</div>')
@@ -640,6 +682,10 @@ def box_mobile():
                     'doing. The box tries again every time it updates; if this is still here after '
                     'an update, tell us.</p></div>')
 
+    # THE DEVICE IN YOUR HAND, FIRST (walk #9). The card below is the box as a whole; this one is
+    # the answer a person who just installed is looking for.
+    body.append(device_card())
+
     # THE STATE, SAID AS NARROWLY AS THE SERVER CAN HONESTLY SAY IT. A subscription row proves SOME
     # device on this box is set up; it can never prove the one in your hand is, because the same
     # person reading this on a laptop has a mobile the box cannot see. So it reports the box, and
@@ -648,9 +694,8 @@ def box_mobile():
     body.append('<div class="card"><h2>Where this box stands</h2>'
                 + (f'<p>{_esc(detail)}.</p>' if detail else
                    '<p>No device on this box has notifications switched on yet.</p>')
-                + '<p class="quiet">This is what the box can see across everybody who uses it. It '
-                  'cannot tell whether the device you are holding is one of them — open the box '
-                  'from its Home Screen icon and it will know.</p></div>')
+                + '<p class="quiet">This is what the box can see across everybody who uses it. '
+                  'The card above is about the device you are holding.</p></div>')
 
     body.append('<div class="card">' + _platform_cards() + '</div>')
 
@@ -825,6 +870,36 @@ def box_push_subscribe():
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
     return jsonify({"ok": True, "new": fresh})
+
+
+@blueprint.route("/settings/push/mine", methods=["POST"])
+def box_push_mine():
+    """Is the endpoint this device holds stored against the person asking? (walk #9)
+
+    ONE BIT, AND ONLY ABOUT YOURSELF. It answers for the signed-in person's own rows and nothing
+    else, so it cannot be used to learn anything about anybody else's devices.
+    """
+    refuse = _admit(owner_only=False)
+    if refuse is not None:
+        return jsonify({"mine": False}), 403
+    from core import push
+    who = _who()
+    body = request.get_json(silent=True) or {}
+    return jsonify({"mine": push.is_mine(str(who.get("id") or ""), str(body.get("endpoint") or ""))})
+
+
+def device_card() -> str:
+    """The one sentence about the device in your hand, filled in by push.DEVICE_JS (walk #9).
+
+    Without JavaScript it says what it cannot know, rather than leaving a blank card."""
+    from core import push
+    return ('<div class="card"><h2>On this device</h2>'
+            '<p id="ownbox-device" data-state="unknown" aria-live="polite">Open this page with '
+            'JavaScript on, from the box\'s Home Screen icon, to see whether this device is '
+            'connected.</p></div>'
+            # DEVICE_JS ONLY. The notification client carries the permission prompt, and this page
+            # never loads anything that could fire it (owner, 2026-09-20).
+            f'<script>{push.DEVICE_JS}</script>')
 
 
 # ── the AI coworkers ─────────────────────────────────────────────────────────────────────────────

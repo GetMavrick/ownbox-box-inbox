@@ -231,6 +231,40 @@ def test_ci_actually_runs_this_file():
        "CI would skip this file and still print green")
 
 
+def test_today_says_each_number_once():
+    """Measured on the demo box, 2026-09-24: "2 waiting" appeared four times on one screen.
+
+    The greeting said it, then the report's headline, a tile and the watch list said it again, and
+    "messages today" repeated "messages came in". Each number is now said once, where it is most
+    use; a figure nothing else on the screen says still gets its tile.
+    """
+    inbox = {"headline": {"value": 2, "label": "waiting on you"},
+             "needs_you": [{"text": "2 conversations are waiting on your reply",
+                            "href": "/inbox/inbox"}],
+             "figures": {"inbox_waiting": {"value": 2, "label": "waiting on you"},
+                         "inbox_unread": {"value": 3, "label": "not opened yet"},
+                         "inbox_today": {"value": 3, "label": "messages today"},
+                         "uptime": {"value": "99.0%", "label": "of checks answered today"}},
+             "happened": [{"text": "messages came in", "value": 3},
+                          {"text": "people wrote for the first time", "value": 3}],
+             "watch": [{"text": "Inbox — 2 waiting on you"},
+                       {"text": "Your site answered slowly twice"}]}
+    _, body = _with(listening=True, report=inbox)
+    words = _text(body)
+    ok("the greeting says the two inbox numbers", "3 unread" in words and "2 people" in words,
+       words[:200])
+    ok("...and the rest of the screen does not say 'waiting on you' again",
+       not re.search(r"waiting on you\b", words), words[:600])
+    ok("the reply that needs him is still offered", "waiting on your reply" in words)
+    ok("'messages today' is not a tile beside 'messages came in'", "messages today" not in words)
+    ok("a figure nothing else says keeps its tile", "of checks answered today" in words)
+    ok("...and so does a watch line that is not the greeting's",
+       "answered slowly twice" in words)
+    ok("what happened still reads in full",
+       "messages came in" in words and "people wrote for the first time" in words)
+    ok("no reader meets the word 'rails'", "rails" not in words.lower(), words[-200:])
+
+
 if __name__ == "__main__":
     for fn in (test_a_box_nothing_can_reach_opens_on_the_set_up_not_a_report,
                test_the_one_thing_he_can_do_is_offered_and_cannot_404,
@@ -240,6 +274,7 @@ if __name__ == "__main__":
                test_an_href_this_box_does_not_serve_is_not_a_link,
                test_a_row_that_goes_somewhere_looks_like_one_and_not_like_a_web_link,
                test_an_unreadable_report_on_a_bare_box_is_still_the_set_up,
+               test_today_says_each_number_once,
                test_ci_actually_runs_this_file):
         print(fn.__name__)
         fn()

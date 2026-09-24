@@ -307,7 +307,7 @@ ok("...and it now OFFERS a connect surface, which it never did before",
 # nav link at the top of every page and this assertion passes or fails for the wrong reason. The
 # row the buyer does second is the one that says who WRITES the drafts.
 ok("...above the drafts row, the order a buyer does them in",
-   body.find("Your channels") < body.find("Writing your drafts")
+   body.find("Your social accounts") < body.find("Writing your drafts")
    if "Writing your drafts" in body else False)
 
 r = _c.get("/inbox/connect")

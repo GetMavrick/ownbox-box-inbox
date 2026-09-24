@@ -218,29 +218,43 @@ def vendor_says_yes():
         sys.modules["anthropic"] = was if was is not None else sys.modules.pop("anthropic", None)
 
 
-with vendor_says_yes():
-    quiet(_app._setup_save, "anthropic", {"key": GOOD_KEY}, user_id=None)
-ok("the save path the screen posts to stores the key", bs.anthropic_key() == GOOD_KEY)
+# THE AI ACCOUNT HAS ONE HOME, System Settings (owner, 2026-09-24: one place per setting), so set-up
+# no longer stores it. Its old save path refuses and stores nothing; the store's own rule, which
+# /settings/ai calls, still takes a good key and refuses a bad one before any round trip.
+bs.clear_anthropic()
 try:
     with vendor_says_yes():
-        quiet(_app._setup_save, "anthropic", {"key": "nope"}, user_id=None)
+        quiet(_app._setup_save, "anthropic", {"key": GOOD_KEY}, user_id=None)
+    set_up_refused = False
+except bs.SecretRejected:
+    set_up_refused = True
+ok("set-up no longer stores the AI key", set_up_refused and bs.anthropic_key() == "")
+with vendor_says_yes():
+    quiet(bs.put_ai_credential, GOOD_KEY, user_id=None)
+ok("the store the AI account's home calls takes a good key", bs.anthropic_key() == GOOD_KEY)
+try:
+    with vendor_says_yes():
+        quiet(bs.put_ai_credential, "nope", user_id=None)
     refused = False
 except bs.SecretRejected:
     refused = True
 # THE SHAPE CHECK, NOT THE VENDOR — the stub above says yes to everything, so a refusal here can
 # only have come from `validate`. That is the point: the cheap rule still runs first and still
 # catches the wrong thing entirely without spending anything.
-ok("...and refuses a bad one through the same door, before any round trip", refused)
+ok("...and refuses a bad one, before any round trip", refused)
 
 # ASSERTED ON THE COPY AS IT IS RENDERED, not on the source text. My first version of this check
 # searched the whole function for "Two things only you can do" and failed — on MY OWN COMMENT,
 # which quotes the old sentence to explain why it went. A test that greps for prose finds the
 # prose explaining the fix.
 src = inspect.getsource(_app.r_setup)
-ok("THE HEADING COUNTS THE STEPS rather than saying 'Two', which my third step made false",
-   'quiet">Two things' not in src and "len(steps)" in src)
-ok("...and with three steps it reads 'Three things', in words rather than a digit",
-   'Three things' in src and '{_n} only you can do' in src)
+# THE COUNT IS THE PROGRESS BAR'S NOW, the one number on the page (walk #6, "one honest count"),
+# and it is counted from the steps. The heading says what the page is and names no number at all,
+# so it cannot go false when a step is added.
+ok("THE HEADING NAMES NO NUMBER, so a new step cannot make it false",
+   'quiet">Two things' not in src and "Three things" not in src and "only you can do" not in src)
+ok("...and the one count on the page is the progress bar, counted from the steps",
+   "_setup_progress(steps)" in src)
 
 print("\n— the model list cannot promise what the box cannot do —")
 # OWNER, 2026-09-21, asked for the other three shown GREYED OUT, and greyed out is a promise
@@ -298,6 +312,7 @@ from core import box_secrets as _bs  # noqa: E402
 # url -> who opened it, and when. Nothing else may carry a path.
 VERIFIED_DEEP_LINKS = {
     "https://zernio.com/dashboard/connections": "owner, 2026-09-21, read off his own dashboard",
+    "https://zernio.com/dashboard/api-keys": "owner, 2026-09-24, confirmed on his own dashboard",
     "https://myaccount.google.com/apppasswords": ("OSDev4, 2026-09-23: the link Google's own help "
                                                   "article gives (support.google.com/accounts/"
                                                   "answer/185833, 'Create and manage your app "

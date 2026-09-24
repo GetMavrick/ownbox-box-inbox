@@ -191,8 +191,14 @@ def test_read_is_the_resting_state_so_a_missing_flag_is_quiet():
     bold = re.search(r"\.conv\.unread \.w b\{([^}]*)\}", CSS, re.S)
     ok("both weights are declared", bool(base and bold))
     if base and bold:
-        bw = int(re.search(r"font-weight:(\d+)", base.group(1)).group(1))
-        uw = int(re.search(r"font-weight:(\d+)", bold.group(1)).group(1))
+        # THE WEIGHTS ARE THE BOX'S TOKENS NOW (the design language: Inter at 400 and 600 only,
+        # docs/BOX_DESIGN_REFERENCE.md), so a token is read as the number it stands for.
+        _w = {"var(--w-regular)": 400, "var(--w-strong)": 600}
+
+        def _weight(rule):
+            v = re.search(r"font-weight:\s*(\d+|var\(--w-[a-z]+\))", rule).group(1)
+            return int(v) if v.isdigit() else _w[v]
+        bw, uw = _weight(base.group(1)), _weight(bold.group(1))
         ok(f"...and unread is decisively heavier ({bw} vs {uw})", uw - bw >= 180, f"{bw} -> {uw}")
 
 

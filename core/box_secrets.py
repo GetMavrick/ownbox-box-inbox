@@ -826,8 +826,8 @@ def surface_of(step) -> str:
 
 SETUP_STEPS = (
     {"key": "email", "title": "Your inbox", "surface": SURFACE_MACHINE,
-     "why": "Ownbox reads the mail your customers send you, and drafts replies. It never sends "
-            "anything and it never marks a message as read.",
+     "why": "Ownbox reads the mail your customers send you, and drafts replies. It sends "
+            "only the replies you send, and never marks a message read.",
      # NOT ONLY GMAIL (#1483 finding 1). The provider is a choice, Gmail first because it is the
      # commonest; "Another provider" takes the IMAP server from the field under it. The steps below
      # stay Google's — most buyers are there — and every other provider has its one line in
@@ -873,9 +873,15 @@ SETUP_STEPS = (
             "your conversations are never on ours.",
      "fields": ({"name": "key", "label": "Zernio API key", "type": "password",
                  "placeholder": "paste the key from your Zernio account"},),
+     # THREE STEPS, NOT FOUR (walk #11, docs/JOURNEY_WALK_2026-09-23.md). The second used to be
+     # "Add a payment method", and for most buyers it was never needed. Zernio's own docs,
+     # https://docs.zernio.com/ (read 2026-09-24), say "The first 2 connected accounts are free without a card,
+     # except X (platform value `twitter`), which needs one because X bills every API call." A
+     # business connecting Instagram and Facebook needs no card, so the card is said once, in the
+     # note below, where it applies. If Zernio does refuse for want of one, the box already says
+     # so in its own sentence (note_zernio_status "payment_required").
      "steps": ("Create a Zernio account, or sign in to the one you have.",
-               "Add a payment method — connecting accounts is billed to you, not to us.",
-               "Open API keys, create one, and paste it in the field here.",
+               "Open API keys in Zernio (the link below), create one, and paste it in the field here.",
                "Then use the button below: it opens Zernio in a new tab, and you connect "
                "Instagram, Messenger, TikTok or any other account there."),
      # THE CONNECTING HAPPENS IN ZERNIO, NOT HERE (owner, 2026-09-16). OAuth with Instagram belongs
@@ -892,6 +898,11 @@ SETUP_STEPS = (
      # why it is allowed to be a path at all. `tests/test_setup_asks_for_the_ai_key.py` holds the
      # rule: an outbound set-up link is a site root UNLESS it is on the verified list there, and
      # adding to that list means somebody loaded the page.
+     # THE API KEYS PAGE, ONE TAP AWAY. Zernio's docs name it and the owner confirmed it on his own
+     # dashboard, 2026-09-24: "Yes correct: https://zernio.com/dashboard/api-keys." That is what
+     # puts it on the verified list in tests/test_setup_asks_for_the_ai_key.py.
+     "help": {"label": "Open API keys in Zernio",
+              "url": "https://zernio.com/dashboard/api-keys"},
      "link": {"label": "Connect your accounts in Zernio",
               "url": "https://zernio.com/dashboard/connections",
               "new_tab": True,
@@ -905,9 +916,10 @@ SETUP_STEPS = (
               # connection failed and re-does work that already worked.
               "after": "When you are done, your connected accounts show up under Settings, on "
                        "'Add or remove a channel' — not on this page."},
-     "note": "A key with no payment method on the account still saves, and says so: connecting an "
-             "account is what needs the card, not the key. Leaving this step alone costs you "
-             "nothing and breaks nothing — email keeps arriving either way."},
+     "note": "No card is needed for the key or for your first two connected accounts. Zernio "
+             "asks for one after that, and for X from the start, because X charges for every "
+             "request. Leaving this step alone costs you nothing and breaks nothing — email keeps "
+             "arriving either way."},
 )
 
 
@@ -983,7 +995,7 @@ DRAFTING_MODELS = (
      "subscription": True,
      "connect_href": "/settings/chatgpt",
      "lede": "The ChatGPT subscription you already pay for. The box shows you a link and a "
-             "one-time code; you sign in on your own phone or computer and enter the code "
+             "one-time code; you sign in on your own mobile or computer and enter the code "
              "there. No key, and the box never sees your password.",
      "billing": "Your own ChatGPT Plus, Pro or Business subscription — nothing extra, and no "
                 "prepaid API credits. Your box keeps a hard spending cap on top of it.",
@@ -1160,7 +1172,7 @@ _AI_STEP = {
     "alt_action_href": "/settings/chatgpt",
     "alt_action_label": "Sign in to ChatGPT",
     "alt_action_why": "Have a ChatGPT subscription instead? Sign in with a one-time code on your "
-                      "phone or computer — no key, and the box never sees your password.",
+                      "mobile or computer — no key, and the box never sees your password.",
     "action_why": "Have a Claude Pro or Max subscription? Sign in and this box drafts on it — no "
                   "key to find, nothing to install. You sign in at claude.com; the box never sees "
                   "your password.",

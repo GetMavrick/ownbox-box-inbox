@@ -125,6 +125,11 @@ class Section:
     home: bool = False
     icon: str = ""
     group: str = "base"
+    # A SECTION INSIDE ANOTHER SECTION'S MENU (owner, 2026-09-24: "The unified inbox settings
+    # should have sub menu choices"). It is not listed at level 1; its back arrow returns to the
+    # parent; and it claims the pages its own items point at, because a setting's one home need not
+    # live under the section's own path (/inbox/mailbox is the Unified Inbox's mailbox setting).
+    parent: str = ""
 
 
 @dataclass(frozen=True)
@@ -162,7 +167,7 @@ GROUPS = ("base", "addons")
 
 def register_section(key: str, *, order: int, machine: str, title: str, href: str,
                      items: Iterable = (), home: bool = False, icon: str = "",
-                     group: str = "") -> None:
+                     group: str = "", parent: str = "") -> None:
     """Declare one rail section. Called at import, like every other seam in this box.
 
     CHECKED HERE, AT IMPORT, where a mistake is a failed boot line — not on the screen, where it
@@ -191,6 +196,19 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
     # A MACHINE IS AN ADD-ON UNLESS IT IS THE BOX ITSELF. Only core's own rows default to "base";
     # a machine has to be added to a box to be on it, so it lands in the add-on group without
     # having to know the group exists.
+    if parent:
+        # A CHILD BELONGS TO ITS PARENT'S MACHINE, registered first, and nests one level only: a
+        # menu inside a menu inside a menu is a maze, not a settings page.
+        up = _SECTIONS.get(parent)
+        if up is None:
+            raise ValueError(f"rail section {key!r} names parent {parent!r}, which is not registered")
+        if up.machine != machine:
+            raise ValueError(f"rail section {key!r} cannot nest under {parent!r}, another machine's")
+        if up.parent:
+            raise ValueError(f"rail section {key!r} cannot nest under {parent!r}, itself nested")
+        if home:
+            raise ValueError(f"rail section {key!r} cannot be both nested and home")
+        group = group or up.group
     group = group or ("base" if machine == "core" else "addons")
     if group not in GROUPS:
         raise ValueError(f"rail section {key!r} has group {group!r}; expected one of {list(GROUPS)}")
@@ -231,7 +249,7 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
 
     _SECTIONS[key] = Section(key=key, order=order, machine=machine, title=title.strip(),
                              href=href, items=tuple(built), home=bool(home), icon=str(icon or ""),
-                             group=group)
+                             group=group, parent=str(parent or ""))
     log.info("shell.section_registered", key=key, machine=machine, items=len(built))
 
 
@@ -320,10 +338,14 @@ def current(path: str) -> Section | None:
     THE LONGEST MATCH WINS, so a section nested under another (`/settings/keys` beneath
     `/settings`) is answered by the nearer of the two rather than by whichever registered first.
     """
-    best = None
+    best, best_len = None, -1
     for s in sections():
-        if _within(path or "", s.href) and (best is None or len(s.href) > len(best.href)):
-            best = s
+        # A NESTED SECTION ALSO CLAIMS ITS ITEMS' PAGES (see Section.parent): the mailbox setting
+        # lives at /inbox/mailbox, not under /inbox/settings, and must still light that menu.
+        hrefs = [s.href] + ([it.href for it in s.items] if s.parent else [])
+        for h in hrefs:
+            if _within(path or "", h) and len(h) > best_len:
+                best, best_len = s, len(h)
     return best
 
 
@@ -341,11 +363,17 @@ def rail(path: str) -> Rail:
     path = path or "/"
     here = current(path)
     if here is not None and here.items and not here.home:
+        up = _SECTIONS.get(here.parent) if here.parent else None
+        if up is not None:
+            # BACK GOES UP ONE, to the menu this one opened from, never all the way home.
+            return Rail(level=2, title=here.title, back=up.href, items=here.items, here=path,
+                        back_label=up.title)
         return Rail(level=2, title=here.title, back=home_href(), items=here.items, here=path,
                     back_label=home_title())
     # LEVEL 1 — the sections themselves, rendered through the same `Item` the second level uses so
-    # a template has one row to draw and not two.
-    got = sections()
+    # a template has one row to draw and not two. A NESTED section is reached from its parent,
+    # never listed here.
+    got = tuple(s for s in sections() if not s.parent)
     top = tuple(Item(key=s.key, label=s.title, href=s.href, icon=s.icon,
                      submenu=bool(s.items) and not s.home,
                      group_start=i > 0 and s.group != got[i - 1].group)

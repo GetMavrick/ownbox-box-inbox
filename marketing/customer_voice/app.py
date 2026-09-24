@@ -349,7 +349,7 @@ a{color:inherit;text-decoration:none}
   backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid var(--hair)}
 @media (max-width:820px){ .bar{display:block} }
 .bar-in{display:flex;align-items:baseline;gap:10px;padding:13px 16px;max-width:620px;margin:0 auto}
-.brand{font-weight:650;letter-spacing:-.015em}
+.brand{font-weight:var(--w-strong);letter-spacing:-.015em}
 .day{margin-left:auto;font-size:13px;color:var(--dimmer)}
 /* THE DATE, NOW ON THE SCREEN INSTEAD OF IN THE CHROME. Owner, 2026-09-22: *"That date in the
    top needs to get out of there and move down into the today screen."* It sits beside the
@@ -357,13 +357,13 @@ a{color:inherit;text-decoration:none}
    nothing they did not know, and this file already said so about the h1 it replaced. Not bold
    and not a heading: it is the caption on the heading, and it must not compete with the
    sentence underneath. */
-h1 .daystamp{font-weight:500;font-size:13px;color:var(--dimmer);letter-spacing:0;
+h1 .daystamp{font-weight:var(--w-regular);font-size:13px;color:var(--dimmer);letter-spacing:0;
   margin-left:8px;white-space:nowrap}
 /* HEADINGS ARE THE ONLY PLACE THE DISPLAY FACE SPEAKS, and there is not much of it: every
    heading in this app is one word — Inbox, Search, Today, Settings. That is precisely why the
    greeting on Today was worth building; it is the one heading long enough to have a shape. */
 h1{font-family:var(--sans);
-  font-size:22px;font-weight:670;letter-spacing:-.022em;margin:18px 0 2px;color:var(--ink)}
+  font-size:22px;font-weight:var(--w-strong);letter-spacing:-.022em;margin:18px 0 2px;color:var(--ink)}
 .head .v,.hello h1{font-family:var(--sans)}
 h1 .chan{vertical-align:middle}
 .sub{color:var(--dim);font-size:15px;margin:0 0 14px}
@@ -379,12 +379,12 @@ h1 .chan{vertical-align:middle}
    and 9 people waiting on a reply" is the reason to have opened the app — so it gets a readable
    size and the numbers get the weight. */
 .hello{padding:14px 2px 4px}
-.hello h1{margin:0;font-size:30px;line-height:1.1;font-weight:680;letter-spacing:-.03em}
+.hello h1{margin:0;font-size:30px;line-height:1.1;font-weight:var(--w-strong);letter-spacing:-.03em}
 .hello .line{margin:7px 0 0;font-size:16.5px;line-height:1.42;color:var(--dim)}
-.hello .line b{font-weight:650;color:var(--ink)}
+.hello .line b{font-weight:var(--w-strong);color:var(--ink)}
 
 .head{padding:8px 2px 18px}
-.head .v{font-size:34px;line-height:1.15;font-weight:680;letter-spacing:-.03em}
+.head .v{font-size:var(--t-title);line-height:1.15;font-weight:var(--w-strong);letter-spacing:-.03em}
 .head .v em{font-style:normal;color:var(--accent)}
 .head .l{margin-top:6px;color:var(--dim);font-size:15px}
 
@@ -395,7 +395,7 @@ h1 .chan{vertical-align:middle}
   box-shadow:var(--lift)}
 .row{display:flex;gap:12px;align-items:baseline;padding:13px 0;border-bottom:1px solid var(--hair)}
 .row:last-child{border-bottom:0}
-.row .n{font-variant-numeric:tabular-nums;font-weight:650;min-width:2.2em}
+.row .n{font-variant-numeric:tabular-nums;font-weight:var(--w-strong);min-width:2.2em}
 .row .t{color:var(--dim);font-size:15px}
 /* A ROW THAT GOES SOMEWHERE LOOKS LIKE ONE. Same row, made an <a>: no underline, no link blue —
    the whole row is the target, exactly as a conversation row already is, with a chevron so the
@@ -410,10 +410,22 @@ a.row:active{background:var(--hair);border-radius:10px}
 .needs{background:var(--bad-soft);box-shadow:none;border:1px solid var(--bad)}
 .needs .t{color:var(--ink)}
 .figs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.figs .fig:last-child:nth-child(odd){grid-column:1/-1}
 .fig{background:var(--surface);border-radius:16px;padding:15px;box-shadow:var(--lift)}
-.fig .v{font-size:23px;font-weight:660;font-variant-numeric:tabular-nums}
+.fig .v{font-size:23px;font-weight:var(--w-strong);font-variant-numeric:tabular-nums}
 .fig .l{margin-top:3px;color:var(--dim);font-size:13px;line-height:1.35}
 .quiet{color:var(--dim);font-size:15px;padding:18px 2px;line-height:1.55}
+.row .t.quiet{padding:0}
+/* THE SERVER FIELD ONLY WHEN IT MEANS SOMETHING. A Gmail buyer was shown an "IMAP server" box
+   they must leave empty. Hidden until "Another provider" is picked; a browser without :has()
+   shows it as before, so nothing becomes unsettable. */
+.compose:has(select[name="provider"]) .fld-host{display:none!important}
+.compose:has(select[name="provider"] option[value="other"]:checked) .fld-host{display:block!important}
+/* A DRAFT CARD IS ONE LABEL, so the whole card ticks its box; box.css sets labels bold and
+   .quiet carries padding meant for a notice standing alone. Neither belongs inside it. */
+.dcard label{font-weight:400;padding:14px 0}
+.dcard label .quiet{padding:0}
+.dcard .dm{font-size:13px}
 .foot{margin-top:26px;color:var(--dimmer);font-size:13px}
 .foot a{color:var(--href)}
 
@@ -424,14 +436,14 @@ a.row:active{background:var(--hair);border-radius:10px}
   gap:2px 12px;padding:11px 0;min-height:44px;border-bottom:1px solid var(--hair);align-items:center}
 .conv:last-child{border-bottom:0}
 .conv .av{grid-row:1/4;width:42px;height:42px;border-radius:50%;display:flex;align-items:center;
-  justify-content:center;font-size:15px;font-weight:600;letter-spacing:.01em;
+  justify-content:center;font-size:15px;font-weight:var(--w-strong);letter-spacing:.01em;
   background:var(--accent-soft);color:var(--accent);flex:none;
   /* NO PHOTO EXISTS. The vendor sends us a display name and nothing else, so initials are not a
      placeholder for an avatar we failed to load — they are the avatar, the way Apple's Messages
      draws a contact with no picture. */}
 .conv .w{grid-row:1;grid-column:2;font-size:15.5px;letter-spacing:-.01em;
   display:flex;align-items:baseline;gap:7px;min-width:0}
-.conv .w b{font-weight:500;color:var(--dim);overflow:hidden;text-overflow:ellipsis;
+.conv .w b{font-weight:var(--w-regular);color:var(--dim);overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap}
 .conv .t{font-weight:400;font-size:13px;color:var(--dimmer);flex:none}
 /* ── READ AND UNREAD, THE WAY EVERY INBOX SAYS IT ────────────────────────────────────────────
@@ -455,9 +467,9 @@ a.row:active{background:var(--hair);border-radius:10px}
 
    AND A WORD FOR THE PEOPLE WHO CANNOT SEE IT AT ALL. Bold is invisible to a screen reader, so
    an unread row carries the word in `.vh` — no pixels, the whole fact. */
-.conv.unread .w b{font-weight:700;color:var(--ink)}
-.conv.unread .t{font-weight:600;color:var(--dim)}
-.conv.unread .p{font-weight:470;color:var(--ink)}
+.conv.unread .w b{font-weight:var(--w-strong);color:var(--ink)}
+.conv.unread .t{font-weight:var(--w-strong);color:var(--dim)}
+.conv.unread .p{font-weight:var(--w-regular);color:var(--ink)}
 /* THE MESSAGE, TWO LINES. Owner, 2026-09-17: "The conversation should run two lines so people
    can see more information on the screen." It was one clipped line, on the reasoning that a row
    which grows with what somebody wrote makes the list jump about — but the cost of that was the
@@ -533,7 +545,7 @@ a.row:active{background:var(--hair);border-radius:10px}
    differ too, because a red pill and a grey pill are the same pill to a colourblind reader
    and this app already refuses colour-only meaning on the channel marks. */
 .tag{flex:none;display:inline-flex;align-items:center;border:1px solid transparent;
-  border-radius:6px;padding:1px 7px;font-size:11.5px;font-weight:620;letter-spacing:.015em;
+  border-radius:6px;padding:1px 7px;font-size:11.5px;font-weight:var(--w-strong);letter-spacing:.015em;
   line-height:1.6;white-space:nowrap}
 .tag.stop{color:var(--bad);background:var(--bad-soft);border-color:var(--bad-soft)}
 .tag.warn{color:var(--dim);background:var(--bg);border-color:var(--accent-line)}
@@ -556,7 +568,7 @@ a.row:active{background:var(--hair);border-radius:10px}
 .acts .menu{position:absolute;right:0;top:calc(100% + 4px);z-index:30;min-width:186px;
   background:var(--raised);border:1px solid var(--line);border-radius:12px;padding:5px;
   box-shadow:var(--lift);display:flex;flex-direction:column}
-.acts .menu a{padding:9px 11px;border-radius:8px;font-size:14.5px;font-weight:540;
+.acts .menu a{padding:9px 11px;border-radius:8px;font-size:14.5px;font-weight:var(--w-regular);
   white-space:nowrap}
 .acts .menu a:hover,.acts .menu a:focus-visible{background:var(--bg)}
 
@@ -569,7 +581,7 @@ a.row:active{background:var(--hair);border-radius:10px}
   clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 .chan{display:inline-flex;align-items:center;gap:5px;vertical-align:middle;margin-left:7px;
   color:var(--dim);background:var(--bg);border-radius:7px;padding:3px 8px;font-size:12px;
-  font-weight:560;letter-spacing:.01em;white-space:nowrap}
+  font-weight:var(--w-regular);letter-spacing:.01em;white-space:nowrap}
 
 /* ── the search field ──────────────────────────────────────────────────────────────────────
    THE CARD SOLD THIS AND THE SCREEN DID NOT HAVE IT. `store.search_conversations` has been
@@ -593,13 +605,13 @@ a.row:active{background:var(--hair);border-radius:10px}
 .find input::-webkit-search-decoration,.find input::-webkit-search-cancel-button{
   -webkit-appearance:none}
 .find button{flex:none;border:0;background:transparent;color:var(--accent);font:inherit;
-  font-size:14.5px;font-weight:600;padding:8px 0 8px 4px;cursor:pointer}
+  font-size:14.5px;font-weight:var(--w-strong);padding:8px 0 8px 4px;cursor:pointer}
 /* QUIETER THAN THE RESULTS IT COUNTS. Set at 14.5px first and the "Show everything" link wrapped
    onto its own line reading like a call to action — the loudest thing on a screen whose job is
    the rows underneath it. */
 .found{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:11px 2px 0;
   color:var(--dim);font-size:13.5px;font-variant-numeric:tabular-nums}
-.found a{color:var(--href);font-weight:540}
+.found a{color:var(--href);font-weight:var(--w-regular)}
 
 /* ── Older and Newer ───────────────────────────────────────────────────────────────────────
    AT THE BOTTOM, WHERE HE RUNS OUT OF ROWS, because that is where a person is when they want
@@ -615,7 +627,7 @@ a.row:active{background:var(--hair);border-radius:10px}
 .pager .pg.next:only-child{margin-left:auto}
 .pg{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:12px;
   background:var(--surface);box-shadow:var(--lift);color:var(--href);font-size:15px;
-  font-weight:580}
+  font-weight:var(--w-regular)}
 .pg:focus-visible{outline:2px solid var(--accent-line);outline-offset:2px}
 
 /* ── channel chips ─────────────────────────────────────────────────────────────────────────
@@ -624,7 +636,7 @@ a.row:active{background:var(--hair);border-radius:10px}
   -webkit-overflow-scrolling:touch;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;color:var(--dim);
-  background:var(--surface);border-radius:999px;padding:7px 13px;font-size:14px;font-weight:540;
+  background:var(--surface);border-radius:999px;padding:7px 13px;font-size:14px;font-weight:var(--w-regular);
   white-space:nowrap;box-shadow:var(--lift)}
 .chip.on{color:var(--accent-ink);background:var(--accent)}
 .chip.on .n{color:var(--accent-ink);opacity:.75}
@@ -690,7 +702,7 @@ a.row:active{background:var(--hair);border-radius:10px}
    and to get the finished ones out of the way of the one you still owe. */
 .wiz{margin:16px 0 4px}
 .wiz-n{margin:0 0 8px;font-size:15px;color:var(--dim)}
-.wiz-n b{color:var(--ink);font-weight:650}
+.wiz-n b{color:var(--ink);font-weight:var(--w-strong)}
 /* A SEGMENT PER STEP. Gap, not a divider, so the unfilled ones read as empty rather than as
    something drawn — a track with hairlines in it looks like it is already partly full. */
 .wiz-bar{display:flex;gap:4px}
@@ -718,10 +730,26 @@ a.row:active{background:var(--hair);border-radius:10px}
   color:var(--accent-ink);display:flex;align-items:center;justify-content:center;
   font-size:13px;line-height:1}
 .stepsum-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
-.stepsum-t b{font-size:15.5px;font-weight:620}
+.stepsum-t b{font-size:15.5px;font-weight:var(--w-strong)}
 .stepsum-s{font-size:13.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap}
 .stepsum-v{flex:none;font-size:13.5px;color:var(--dim)}
+/* ── THE SET-UP GUIDE (docs/SCOPE_ONE_PLACE_PER_SETTING.md) ─────────────────────────────────
+   One row per step, and the whole row is the link to that step's one home: GOV.UK's task list
+   makes the row the target because people tap whatever looks tappable. 56px tall, well past the
+   48px floor, so a thumb cannot miss it. Status is plain text, never a chip. */
+.guide{display:flex;flex-direction:column;gap:10px;margin-top:18px}
+.grow{display:flex;align-items:center;gap:12px;min-height:56px;padding:14px 16px;
+  background:var(--surface);border-radius:16px;color:var(--ink);text-decoration:none;
+  box-shadow:var(--lift)}
+.grow .gn{flex:none;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;border:1px solid var(--line);font-size:14px;font-weight:var(--w-strong)}
+.grow.done .gn{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.grow .gt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.grow .gt b{font-size:16px;font-weight:var(--w-strong)}
+.grow .gs{font-size:14px;color:var(--dim)}
+.grow .gtag{flex:none;font-size:13px;color:var(--dimmer)}
+.grow .chev{flex:none;font-size:20px;color:var(--dimmer)}
 /* THE STEP STILL OWED IS THE ONE THAT LOOKS LIKE WORK. Everything above it has folded away, so
    it does not need a highlight to be found — it needs the heading weight the folded rows gave up. */
 .wstep:not(.done) > h1{margin-bottom:0}
@@ -805,15 +833,19 @@ iframe.mail{display:block;width:100%;border:0}
 .compose{margin-top:18px;display:flex;flex-direction:column;gap:9px}
 .compose textarea{width:100%;font:inherit;font-size:16px;line-height:1.45;color:var(--ink);
   background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:12px 15px;
-  resize:vertical;min-height:78px;box-shadow:var(--lift)}
+  resize:vertical;min-height:78px;max-height:60vh;field-sizing:content;box-shadow:var(--lift)}
 .compose textarea:focus{outline:2px solid var(--accent-line);outline-offset:1px;
   border-color:transparent}
 .compose .btn{align-self:flex-end}
-.btn{font:inherit;font-size:var(--t-body-2);font-weight:var(--w-strong);border:0;
+.btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;
+  font:inherit;font-size:var(--t-body-2);font-weight:var(--w-strong);border:0;
   border-radius:var(--r-pill);padding:12px 26px;background:var(--accent);color:var(--accent-ink);
   cursor:pointer;min-height:var(--control);width:100%}
 /* FULL WIDTH ON A MOBILE, ITS LABEL'S WIDTH ONCE A POINTER EXISTS (walk #12, mobile first). */
 @media (min-width:720px){.btn{width:auto}}
+/* THE SECOND WAY IS THE OUTLINE (OSDev0's drift check, 2026-09-24): one ink pill per screen, the
+   thing to do next; every other action on it wears this. */
+.btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
 .drafted{color:var(--dim);font-size:13px;display:flex;align-items:center;gap:7px}
 .drafted::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);
   flex:none}
@@ -828,7 +860,7 @@ iframe.mail{display:block;width:100%;border:0}
   padding-bottom:env(safe-area-inset-bottom,0px)}
 .tabs-in{max-width:620px;margin:0 auto;display:flex}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 7px;
-  min-height:52px;color:var(--dimmer);font-size:10.5px;font-weight:540;letter-spacing:.01em}
+  min-height:52px;color:var(--dimmer);font-size:10.5px;font-weight:var(--w-regular);letter-spacing:.01em}
 .tab svg{display:block}
 .tab.on{color:var(--accent)}
 /* THE DOT SAYS SOMETHING IS WAITING, AND SAYS ONLY THAT. Owner, 2026-09-17, picking it over a
@@ -884,27 +916,28 @@ iframe.mail{display:block;width:100%;border:0}
    that needs a script is a theme that flashes the wrong one first. */
 .seg{display:flex;gap:4px;background:var(--bg);border-radius:12px;padding:4px;margin-top:4px}
 .seg a{flex:1;text-align:center;padding:9px 0;border-radius:9px;font-size:14.5px;
-  font-weight:540;color:var(--dim);min-height:44px;display:flex;align-items:center;
+  font-weight:var(--w-regular);color:var(--dim);min-height:44px;display:flex;align-items:center;
   justify-content:center}
 .seg a.on{background:var(--surface);color:var(--ink);box-shadow:var(--lift)}
 .setrow{display:flex;flex-direction:column;gap:2px;padding:14px 0;border-bottom:1px solid var(--hair)}
 .setrow:last-child{border-bottom:0}
-.setrow b{font-weight:570;font-size:15.5px}
+.setrow b{font-weight:var(--w-regular);font-size:15.5px}
 .setrow span{color:var(--dim);font-size:13.5px;line-height:1.45}
 
 /* ── the install steps ─────────────────────────────────────────────────────────────────────*/
 .flow{margin-top:16px}
 .step{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start}
 .stepn{width:29px;height:29px;border-radius:999px;display:flex;align-items:center;
-  justify-content:center;font-weight:650;font-size:14px;background:var(--accent-soft);
+  justify-content:center;font-weight:var(--w-strong);font-size:14px;background:var(--accent-soft);
   color:var(--accent);flex:none}
 .stepb{background:var(--surface);border-radius:14px;padding:13px 15px;min-width:0;
   box-shadow:var(--lift)}
 .steph b{font-size:15px}
+.steph b b{font-weight:inherit}
 .stepb p{color:var(--dim);font-size:14px;margin:5px 0 0}
 .stepjoin{width:1px;height:14px;margin:4px 0 4px 14px;background:var(--line)}
 
-@media (min-width:560px){ .figs{grid-template-columns:1fr 1fr 1fr} }
+@media (min-width:560px){ .figs{grid-template-columns:1fr 1fr 1fr} .figs .fig:last-child:nth-child(odd){grid-column:auto} }
 @media (prefers-reduced-motion:reduce){ *{animation:none!important;transition:none!important} }
 
 /* ── WHERE THIS APP PUTS THE BOX'S MENU BUTTON ───────────────────────────────────────────────
@@ -1170,6 +1203,22 @@ shell.register_section(
          "icon": _TAB_ICON.get("/inbox/settings", "")},
     ])
 
+# THE UNIFIED INBOX'S OWN SETTINGS, AS A MENU (owner, 2026-09-24: "The unified inbox settings should
+# have sub menu choices"). The same two-level shape System Settings has: tap Settings in the inbox
+# and the rail lists one row per setting's ONE HOME (docs/SCOPE_ONE_PLACE_PER_SETTING.md), with the
+# back arrow returning to the Unified Inbox. Nested through `shell.register_section(parent=...)`,
+# which keeps it out of the top-level menu and lets it claim pages that do not live under its path.
+shell.register_section(
+    "inbox_settings", order=10, machine="customer_voice", title="Settings",
+    href="/inbox/settings", parent="inbox", icon=_TAB_ICON.get("/inbox/settings", ""),
+    items=[
+        {"key": "overview", "label": "Overview", "href": "/inbox/settings"},
+        {"key": "mailbox", "label": "Mailbox", "href": "/inbox/mailbox"},
+        {"key": "channels", "label": "Social accounts", "href": "/inbox/connect"},
+        {"key": "drafts", "label": "AI and drafts", "href": "/inbox/drafts"},
+        {"key": "install", "label": "Home screen", "href": "/inbox/install"},
+    ])
+
 
 def _unread() -> int:
     """How many conversations he has not read — 0 on any box that cannot answer.
@@ -1191,6 +1240,14 @@ def _unread() -> int:
 def _tabbar(here: str) -> str:
     unread = _unread()
     out = []
+    # EVERY SETTING'S HOME LIGHTS THE SETTINGS TAB, not only pages under /inbox/settings: the
+    # mailbox lives at /inbox/mailbox and is still one of Settings' rows (the nested section).
+    try:
+        _sec = shell.current(here)
+        if _sec is not None and _sec.key == "inbox_settings":
+            here = "/inbox/settings"
+    except Exception:                                    # noqa: BLE001 — a tab bar never 500s
+        pass
     for href, label, d in _TABS:
         on = " on" if (here == href or (href != "/inbox/" and here.startswith(href))) else ""
         cur = ' aria-current="page"' if on else ""
@@ -1551,7 +1608,11 @@ def r_today():
         # block was fine under an `<h1>Today</h1>` that promised nothing. It is kept whenever it
         # carries a real value — a box that watches a website still sees its headline.
         _hv = str(head.get("value") or "").strip()
-        if _hv and _hv != "—":
+        # SAID ONCE. The report's inbox headline is "N waiting on you", which the greeting has just
+        # said in a sentence; on the owner's demo box the same 2 appeared four times on one screen.
+        _said_hv = ("inbox_waiting" in (v.get("figures") or {})
+                    and str(head.get("label") or "") == "waiting on you")
+        if _hv and _hv != "—" and not _said_hv:
             parts.append(f'<div class="head">'
                          f'<div class="v">{_esc(_hv)}</div>'
                          f'<div class="l">{_esc(head.get("label") or "")}</div></div>')
@@ -1562,6 +1623,14 @@ def r_today():
         parts.append('<h1>Needs you</h1>' + _rows(v["needs_you"], needs=True))
 
     figs = v.get("figures") or {}
+    # EACH NUMBER ONCE, where it is most use. The greeting says unread and waiting in a sentence,
+    # and "What happened" says how many came in; the 8am message needs those as figures, this
+    # screen has already said them. Only the tiles nothing above or below repeats are drawn.
+    _said = set()
+    if "inbox_waiting" in figs and not first_run:
+        _said |= {"inbox_waiting", "inbox_unread"}
+    if any(str(r.get("text") or "") == "messages came in" for r in (v.get("happened") or [])):
+        _said.add("inbox_today")
     if figs:
         # A DASH IS NOT A FIGURE HERE EITHER, and it is the same rule as the headline above. On
         # an inbox-only box — which is most boxes this product is sold to — the website segment
@@ -1571,15 +1640,18 @@ def r_today():
         # close the gap.
         cells = "".join(f'<div class="fig"><div class="v">{_esc(f.get("value"))}</div>'
                         f'<div class="l">{_esc(f.get("label"))}</div></div>'
-                        for f in figs.values()
-                        if str(f.get("value") or "").strip() not in ("", "—"))
+                        for k, f in figs.items()
+                        if k not in _said and str(f.get("value") or "").strip() not in ("", "—"))
         if cells:
             parts.append(f'<div class="figs">{cells}</div>')
 
     if v.get("happened"):
         parts.append('<h1>What happened</h1>' + _rows(v["happened"]))
-    if v.get("watch"):
-        parts.append('<h1>Worth watching</h1>' + _rows(v["watch"]))
+    # THE WATCH LIST'S INBOX LINE is the greeting's number again ("Inbox — 2 waiting on you").
+    _watch = [r for r in (v.get("watch") or [])
+              if not ("inbox_waiting" in _said and "waiting on you" in str(r.get("text") or ""))]
+    if _watch:
+        parts.append('<h1>Worth watching</h1>' + _rows(_watch))
 
     # A QUIET DAY SAYS SO, ONCE. An empty screen reads as a broken app, which is the single most
     # expensive thing a page like this can do — it is the defect the lead app spent two days
@@ -1591,16 +1663,15 @@ def r_today():
         # nothing; said to a box with nothing connected it promises a poll that will never find
         # anything — the same lie the empty inbox screen was just fixed for telling.
         parts.append('<div class="quiet">Nothing has come through yet today. '
-                     'The rails you own are being polled; the first thing they find appears here.'
+                     'Your accounts are being polled; the first thing they find appears here.'
                      '</div>')
 
     # THE FOOTER EXPLAINS FIGURES, so it only belongs under some. "Every figure here is read from
     # your own rails" under a screen carrying no figure is the same small untruth this app keeps
     # deleting — and on a first run that is exactly what it was.
     if figs or v.get("happened"):
-        parts.append('<div class="foot">Every figure here is read from your own rails. '
-                     'This is the same report that goes out at 8am, on the screen instead of in '
-                     'an inbox.</div>')
+        parts.append('<div class="foot">Every figure here comes from your own accounts. '
+                     'It is the same report that goes out at 8am.</div>')
     return _shell("".join(parts), day=label), 200
 
 # ── time a person can read ──────────────────────────────────────────────────────────────────
@@ -1727,7 +1798,7 @@ def _channel(value: str) -> str:
     return _ch.name(value, fallback="Unknown")
 
 
-def _drafts_row() -> str:
+def _drafts_row(*, primary: bool = True) -> str:
     """docs/COPY_INBOX_FIRST_RUN.md §2.6 — the row that turns drafting on.
 
     THIS IS NOT AN OPTION AT LAUNCH, IT IS THE ONLY SWITCH. A delivered box ships
@@ -1751,13 +1822,26 @@ def _drafts_row() -> str:
     # different questions the moment a key can be revoked. `anthropic_state()` is the one reader
     # the set-up screen already uses, so the two cannot disagree about the same key.
     _ai = box_secrets.anthropic_state()
+
+    # EVERY DOOR TO THE AI ACCOUNT GOES TO ITS ONE HOME, System Settings → AI account (owner,
+    # 2026-09-24: one place per setting). It is the owner's page, so a member reads who to ask
+    # instead of meeting a refusal. ONE INK PILL PER SCREEN: where a row above already carries
+    # the screen's pill (Settings on a fresh box, channels first), this door is a link instead.
+    def _door(label: str) -> str:
+        if not _is_owner():
+            return ('<p class="quiet" style="margin:10px 0 0">Only the owner of this box can '
+                    'change the AI account.</p>')
+        if not primary:
+            return (f'<p style="margin:10px 0 0"><a href="/settings/ai" style="color:var(--href)">'
+                    f'{_esc(label)} &rarr;</a></p>')
+        return (f'<p style="margin:10px 0 0"><a class="btn" href="/settings/ai">{_esc(label)}'
+                '</a></p>')
     if _ai["status"] == "not_connected":
         return ('<div class="setrow"><b>Writing your drafts</b>'
                 '<span>Ownbox can write a reply for every message, ready for you to read and '
                 'send. It needs an AI account to write with — yours, on your own bill, so '
                 'nothing you receive passes through us.</span>'
-                '<p style="margin:10px 0 0"><a class="btn" href="/inbox/drafts">'
-                'Connect an AI account</a></p></div>')
+                + _door("Connect an AI account") + '</div>')
     # STOPPED, AND WHY, IN THE WORDS OF THE FIX. The key was checked when it was pasted, so a box
     # that lands here has had something CHANGE at the vendor — and the buyer's only clue used to
     # be drafts that stopped appearing. The two reasons take different actions, so they get
@@ -1773,22 +1857,23 @@ def _drafts_row() -> str:
     if _ai["status"] == "needs_reauth":
         return ('<div class="setrow"><b>Writing your drafts</b>'
                 '<span>Paused. Your AI account stopped accepting the key this box has — that '
-                'usually means it was deleted or replaced in the console. Paste the new one and '
+                'usually means it was deleted or replaced in the console. Connect it again and '
                 'drafting starts again. Every message is still arriving in the meantime.</span>'
-                '<p style="margin:10px 0 0"><a class="btn" href="/inbox/drafts">'
-                'Paste a new key</a></p></div>')
+                + _door("Fix it in AI account") + '</div>')
     # THE SECOND SENTENCE IS LOAD-BEARING AND DOES NOT GET CUT (§2.6). It is the promise the
     # whole product rests on, and Settings is where a nervous buyer goes to check it.
     return ('<div class="setrow"><b>Writing your drafts</b>'
             '<span>On. Ownbox writes a reply for every message that arrives. You read it and '
             'you send it — nothing goes out on its own.</span>'
             '<span style="margin-top:8px">Writing with your own AI account. '
-            '<a href="/inbox/drafts" style="color:var(--href)">Change</a> · '
+            + ('<a href="/settings/ai" style="color:var(--href)">Change</a> · '
+               if _is_owner() else '')
+            + 
             '<a href="/inbox/drafts?off=1" style="color:var(--href)">Turn off</a></span>'
             '</div>')
 
 
-def _channels_row() -> str:
+def _channels_row(*, primary: bool = True) -> str:
     """B1 — the row that connects the accounts the inbox reads FROM.
 
     THE PRODUCT HAD NO SUCH ROW UNTIL NOW, and that is the whole of why this exists. Measured
@@ -1803,31 +1888,37 @@ def _channels_row() -> str:
     hangs when the vendor is slow. The live account list lives one click away, on /inbox/connect,
     where a person has said they want to look."""
     from core import box_secrets
+
+    # ONE INK PILL PER SCREEN: the inbox row above owns it while the mailbox is undone, and this
+    # optional step's door is a link until then.
+    def _door(label: str) -> str:
+        if primary:
+            return (f'<p style="margin:10px 0 0"><a class="btn" href="/inbox/connect">'
+                    f'{_esc(label)}</a></p>')
+        return (f'<p style="margin:10px 0 0"><a href="/inbox/connect" style="color:var(--href)">'
+                f'{_esc(label)} &rarr;</a></p>')
     st = box_secrets.zernio_state()
     status = st.get("status")
     if status == "not_connected":
-        return ('<div class="setrow"><b>Your channels</b>'
+        return ('<div class="setrow"><b>Your social accounts</b>'
                 '<span>Ownbox reads your Instagram and Messenger for you and keeps every '
                 'conversation in one place. Connect them with your own social account — it stays '
                 'yours, and you can take it back any day.</span>'
-                '<p style="margin:10px 0 0"><a class="btn" href="/inbox/connect">'
-                'Connect your channels</a></p></div>')
+                + _door("Connect your social accounts") + '</div>')
     if status == "payment_required":
         # THE ONE FAILURE A BUYER CAN ACTUALLY FIX, so it gets its own sentence instead of the
         # word the API uses. Told "authentication failed" they re-paste a perfectly good key.
-        return ('<div class="setrow"><b>Your channels</b>'
+        return ('<div class="setrow"><b>Your social accounts</b>'
                 '<span>Your social account needs a payment method before it will connect any '
                 'more channels. Add one there, then come back — nothing here needs changing.'
                 '</span>'
-                '<p style="margin:10px 0 0"><a class="btn" href="/inbox/connect">'
-                'Check your channels</a></p></div>')
+                + _door("Check your social accounts") + '</div>')
     if status == "needs_reauth":
-        return ('<div class="setrow"><b>Your channels</b>'
+        return ('<div class="setrow"><b>Your social accounts</b>'
                 '<span>Ownbox can no longer reach your social account, so nothing new is '
                 'arriving. Re-connect it and the inbox catches up on its own.</span>'
-                '<p style="margin:10px 0 0"><a class="btn" href="/inbox/connect">'
-                'Re-connect</a></p></div>')
-    return ('<div class="setrow"><b>Your channels</b>'
+                + _door("Re-connect") + '</div>')
+    return ('<div class="setrow"><b>Your social accounts</b>'
             '<span>Connected. New messages arrive on their own.</span>'
             '<span style="margin-top:8px">'
             '<a href="/inbox/connect" style="color:var(--href)">Add or remove a channel</a>'
@@ -3003,10 +3094,11 @@ def _compose(zcid: str, conv: dict, msgs: list[dict]) -> str:
                 'this conversation yet. Every channel here is reply-only, so there is nothing to '
                 'reply to until they write — and then the box appears.</span></div></div>')
     if not (conv.get("account_id") or "").strip():
-        return ('<div class="card"><div class="row"><span class="t quiet">This thread was '
-                'mirrored before the box started recording which account owns it, so it cannot '
-                'be replied to from here yet. The next message on it fixes that.</span></div>'
-                '</div>')
+        # SAID AS THE BUYER SEES IT. The old sentence ("mirrored before the box started
+        # recording which account owns it") described our plumbing, not his thread.
+        return ('<div class="card"><div class="row"><span class="t quiet">You cannot reply to '
+                'this one from here yet: it arrived before the box knew which of your accounts '
+                'it came through. Their next message fixes that.</span></div></div>')
     # WHAT THE CHANNEL WILL PROBABLY DO, SAID BEFORE HE TYPES. OSDev4's `window.explain()`
     # (#1290) turns the decision `decide()` already makes into a sentence for the person about to
     # write. Bound to `state`, NEVER to `reason` or to the English: `reason` is dev-facing on
@@ -3053,22 +3145,20 @@ def _compose(zcid: str, conv: dict, msgs: list[dict]) -> str:
         # empty reply box on every thread with no sentence anywhere.
         _ai = box_secrets.anthropic_state()["status"]
         if _ai == "not_connected":
-            # STRAIGHT TO WHERE THEY ARE TURNED ON, not to the menu that lists it (#1356). This
-            # pointed at `/inbox/settings`, so a buyer who read "Turn them on" landed on a page
-            # that does not turn anything on and had to find "Connect an AI account" to reach the
-            # one field they wanted — two clicks for a promise worded as one. `/inbox/drafts` IS
-            # that page: it is titled "Add your AI key", it carries the only `name="key"` input in
-            # the app, and its button says "Turn drafts on".
+            # STRAIGHT TO WHERE THEY ARE TURNED ON, not to the menu that lists it (#1356): two
+            # clicks for a promise worded as one is the bug. That place is now the AI account's
+            # one home, System Settings (owner, 2026-09-24: one place per setting), so the owner
+            # goes there; a member goes to the page that says whose account it is (`_ai_home`).
             off_note = ('<div class="quiet" style="margin-top:8px">Drafts are off. '
-                        '<a href="/inbox/drafts" style="color:var(--href)">'
+                        f'<a href="{_ai_home()}" style="color:var(--href)">'
                         'Turn them on</a>.</div>')
         elif _ai == "needs_reauth":
             # SAME RULE AS THE LINE ABOVE, APPLIED TO THE OTHER STATE THAT HAS A FIELD BEHIND IT.
-            # A key the vendor no longer accepts is fixed by pasting a new one, and that is the
-            # same page — so this goes straight there rather than through Settings.
+            # A key the vendor no longer accepts is fixed by connecting the account again, and
+            # that is the same page — so this goes straight there rather than through Settings.
             off_note = ('<div class="quiet" style="margin-top:8px">Drafts are paused — your AI '
-                        'account no longer accepts this key. <a href="/inbox/drafts" '
-                        'style="color:var(--href)">Paste a new one</a>.</div>')
+                        f'account no longer accepts this key. <a href="{_ai_home()}" '
+                        'style="color:var(--href)">Connect it again</a>.</div>')
         elif _ai == "payment_required":
             # AND THIS ONE GOES TO SETTINGS, deliberately, because the fix is NOT a field on this
             # box — it is a card in the Anthropic console. Settings is where that sentence and its
@@ -3082,12 +3172,17 @@ def _compose(zcid: str, conv: dict, msgs: list[dict]) -> str:
     # `id` IS LOAD-BEARING NOW, not decoration: the inbox row's Reply item links to `#reply`,
     # and an anchor with no target scrolls nowhere and looks like a dead control. The two agree
     # on when it exists because they test the same two fields — see `_acts`.
+    # THE BOX FITS THE DRAFT. At three fixed rows a four-line draft was cut off mid-sentence on a
+    # mobile, so the owner read half a reply above a Send button. Rows are counted at about 34
+    # characters a line (390px, 16px type), capped at ten; `field-sizing` grows it as he edits
+    # where the browser supports it.
+    _tall = min(10, max(3, sum(-(-len(ln) // 34) or 1 for ln in (drafted or "").split("\n"))))
     return (win
             + '<form class="compose" id="reply" method="post" '
             'action="' + _esc(f"/inbox/inbox/{zcid}/reply") + '">'
             f'<input type="hidden" name="n" value="{_esc(_reply.new_nonce())}">'
             + note +
-            '<textarea name="text" rows="3" maxlength="1800" required '
+            f'<textarea name="text" rows="{_tall}" maxlength="1800" required '
             f'placeholder="Write a reply…">{_esc(drafted)}</textarea>'
             '<button class="btn" type="submit">Send</button>'
             '</form>' + off_note)
@@ -3290,12 +3385,18 @@ def _mailbox_row() -> str:
                 'be read.')
         verb = "What to do"
     elif who:
-        said = f'Ownbox is reading <b>{_esc(who)}</b>. It never sends and never marks a message read.'
+        said = f'Ownbox is reading <b>{_esc(who)}</b>. It sends only the replies you send, and never marks a message read.'
         verb = "Change or stop it"
     else:
         said = ('Ownbox can read the mail your customers send you and draft replies. Nothing is '
                 'connected yet.')
         verb = "Connect your inbox"
+    # THE REQUIRED STEP OWNS THE SCREEN'S ONE INK PILL while it is undone or refused: reading the
+    # mail is what the box is. It was a small link while the optional social accounts row below
+    # carried the pill, so a fresh box pointed its buyer at the step that can wait.
+    if status == "needs_reauth" or not who:
+        return (f'<div class="setrow"><b>Your inbox</b><span>{said}</span>'
+                f'<p style="margin:10px 0 0"><a class="btn" href="{go}">{verb}</a></p></div>')
     return (f'<div class="setrow"><b>Your inbox</b><span>{said} '
             f'<a href="{go}" style="color:var(--href)">{verb}</a>.</span></div>')
 
@@ -3329,6 +3430,9 @@ def r_settings():
               ' href="/inbox/theme?to=light">Light</a>'
               + seg("dark", "Dark")
               + '</div>').replace("seg-a", "")
+    # THE FIRST UNFINISHED ROW OWNS THE SCREEN'S ONE INK PILL; the drafts row below it defers.
+    _mb = _mailbox_row()
+    _above = _mb + _channels_row(primary='class="btn"' not in _mb)
     body = (
       '<h1>Settings</h1>'
       '<div class="card">'
@@ -3338,18 +3442,36 @@ def r_settings():
       # Reading the mail is what the box IS; the channels widen what it reads; drafting is what it
       # does with what it read, and a row for the last above the first asks somebody to configure
       # an answer to a question nothing is yet asking.
-      + _mailbox_row() + _channels_row() + _drafts_row() + _coworkers_row(_is_owner()) +
+      + _above + _drafts_row(primary='class="btn"' not in _above) + _coworkers_row(_is_owner()) +
       '<div class="setrow"><b>Appearance</b>'
-      '<span>System follows your phone, including its own light and dark schedule.</span>'
+      # THE OLD SENTENCE DESCRIBED A "System" CHOICE THAT WAS DROPPED ON 2026-09-18 (see above),
+      # and used a reserved noun (CLAUDE.md, mobile first). It says what the two choices are.
+      '<span>How the inbox looks on this device. Light is the box\'s own look.</span>'
       f'{switch}</div>'
-      '<div class="setrow"><b>On your home screen</b>'
-      '<span>Installed, this opens without a browser around it and can notify you. '
-      '<a href="/inbox/install" style="color:var(--href)">Show me how</a>.</span></div>'
+      # WALK #9: WHETHER THIS DEVICE IS CONNECTED, ANSWERED FROM INSIDE THE APP. The installed
+      # app's scope is /inbox/, so this tab is the one place an iPhone can check its own
+      # registration; core.push.DEVICE_JS fills the sentence in.
+      '<div class="setrow"><b>On this device</b>'
+      '<span><span id="ownbox-device" data-state="unknown" aria-live="polite">Checking whether '
+      'this device gets notifications…</span> '
+      '<a href="/settings/mobile" style="color:var(--href)">Install and notifications</a>'
+      '</span></div>'
       '<div class="setrow"><b>How this stays current</b>'
       '<span>The box checks for new messages on a schedule rather than holding a connection '
       'open. Pull down to check now.</span></div>'
       '</div>')
+    body += f'<script>{_push_client_js()}</script><script>{_device_js()}</script>'
     return _shell(body), 200
+
+
+def _device_js() -> str:
+    """core.push.DEVICE_JS, loaded like _push_client_js: a box whose release predates it still
+    renders Settings, with the sentence left saying it is checking."""
+    try:
+        from core import push
+        return push.DEVICE_JS
+    except Exception:                                    # noqa: BLE001 — a screen outranks a feature
+        return ""
 
 
 @blueprint.get("/inbox/theme")
@@ -3619,61 +3741,21 @@ def r_drafts():
         # refusal. Same contract as `clear_zernio`.
         box_secrets.clear_anthropic(user_id=whoami)
         return redirect("/inbox/settings")
-    note = ""
+    # THE AI ACCOUNT HAS ONE HOME, and it is System Settings → AI account (owner, 2026-09-24:
+    # "there's only one place to add a key or change a setting"; docs/SCOPE_ONE_PLACE_PER_SETTING.md).
+    # This page used to carry a second paste form for the same credential. Now it says which account
+    # the drafts use and links to that home; a post (an old page left open) stores nothing.
     if request.method == "POST":
-        try:
-            # VALIDATED IN THE STORE, NOT HERE, so the rule is the same whoever writes a key —
-            # this screen, a future one, or a script. The screen's job is to show the sentence.
-            # `put_anthropic`, NOT `put`: the front door that asks Anthropic whether the key
-            # works before it is stored, the same as the Zernio and mailbox doors. A bare `put`
-            # took a well-formed dud and left this screen saying drafts were on.
-            # BOTH DOORS TAKE BOTH CREDENTIALS. Set up routes by prefix through
-            # `put_ai_credential`; if this screen still took API keys only, a buyer who pasted a
-            # subscription token HERE would be told their token was not an Anthropic key — while
-            # the other screen accepted it. One rule, or the box contradicts itself.
-            box_secrets.put_ai_credential(
-                str(request.form.get("key") or ""),
-                consented=bool(request.form.get("subscription_consent")), user_id=whoami)
-            return redirect("/inbox/settings")
-        except box_secrets.SecretRejected as e:
-            # Never a lecture and never an echo — the same discipline as the claim form. The
-            # field comes back empty: a key is not something to re-display for correction.
-            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
-    body = (
-      '<h1>Add your AI key.</h1>'
-      '<div class="card">'
-      '<div class="setrow">'
-      '<span>Ownbox writes replies in your voice using your own AI account. The words never '
-      'pass through us, and you pay the provider directly instead of a markup on our bill.</span>'
-      '<p style="margin:10px 0 0"><a href="https://console.anthropic.com/settings/keys" '
-      'target="_blank" rel="noopener" style="color:var(--href)">How to get a key →</a></p>'
-      '</div></div>'
-      + note +
-      '<form class="compose" method="post" action="/inbox/drafts">'
-      '<input type="password" name="key" autocomplete="off" spellcheck="false"'
-      ' aria-label="Paste your API key or subscription token" '
-      'placeholder="Paste your API key or subscription token" '
-      'style="width:100%;font:inherit;font-size:16px;padding:12px 14px;'
-      'border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)">'
-      # THE SAME GATE THIS SCREEN'S STORE NOW ENFORCES. Without the tick HERE, a buyer pasting a
-      # subscription token into Settings would be refused by `put_claude_oauth` with no way on the
-      # page to satisfy it — a door that asks for a key it does not hand out. Rendered from the
-      # same contract the set-up screen uses, so the two cannot drift apart in wording.
-      + _setup_consent(next((e for e in box_secrets.SETUP_STEPS
-                             if e.get("key") == "anthropic"), {})) +
-      '<button class="btn" type="submit">Turn drafts on</button>'
-      '</form>'
-      # THE SAME PROMISE THE CONNECT SCREEN MAKES, NOW THAT THIS SCREEN CAN KEEP IT. `_connect_
-      # key_form` has carried this sentence since it was written, and the two forms are the same
-      # shape on purpose — a buyer who has done one should recognise the second on sight. Until
-      # `put_anthropic`, this was the one of the two that could not have said it.
-      '<p class="quiet" style="margin-top:12px">Checked with your AI account before it is saved, '
-      'so you find out here if it is wrong — not tomorrow, from an empty draft box.</p>'
-      '<p class="quiet" style="margin-top:8px">You can change or remove this key any day. '
-      'Nothing about it reaches us.</p>'
-      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--href)">'
-      '← Settings</a></p>')
-    return _shell(body, here="/inbox/settings"), 200
+        return redirect("/settings/ai" if _is_owner() else "/inbox/drafts", code=303)
+    # ONE CARD, NOT TWO. The row already says whether drafts are on and carries the one door to
+    # the account (a member reads whose it is instead); a second card repeating it was noise.
+    body = ('<h1>AI and drafts</h1>'
+            '<div class="card">' + _drafts_row() + '</div>'
+            '<p class="quiet" style="margin-top:12px">The AI account lives in one place, System '
+            'Settings, and every machine on this box drafts through it.</p>'
+            '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--href)">'
+            '&larr; Settings</a></p>')
+    return _shell(body, here="/inbox/drafts"), 200
 
 
 # ── the mailbox ─────────────────────────────────────────────────────────────────────────────
@@ -3729,13 +3811,21 @@ def _mailbox_form(*, user: str = "", note: str = "", verb: str = "Start reading 
     return (note +
             '<form class="compose" method="post" action="/inbox/mailbox" '
             'style="display:flex;flex-direction:column;gap:10px;align-items:stretch">'
-            + _mailbox_provider_fields() +
+            + _trip_field() + _mailbox_provider_fields() +
+            # LABELLED, NOT ONLY PLACEHOLDERED: a placeholder vanishes the moment the buyer
+            # types, and on a mobile that is the moment they switch apps to fetch the password.
+            '<label style="display:block;margin-top:10px">'
+            '<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
+            'Your email address</span>'
             f'<input type="email" name="user" value="{_esc(user)}" autocomplete="email" '
             'spellcheck="false" aria-label="The email address to read" '
-            f'placeholder="you@yourcompany.com" style="{field}">'
+            f'placeholder="you@yourcompany.com" style="{field}"></label>'
+            '<label style="display:block">'
+            '<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
+            'App password</span>'
             '<input type="password" name="password" autocomplete="off" spellcheck="false" '
             'aria-label="App password" placeholder="the app password for this mailbox" '
-            f'style="{field}">'
+            f'style="{field}"></label>'
             f'<button class="btn" type="submit">{_esc(verb)}</button></form>')
 
 
@@ -3842,6 +3932,15 @@ def _setup_source() -> list:
     return [e for e in out if box_secrets.surface_of(e) == box_secrets.SURFACE_MACHINE]
 
 
+# EACH STEP'S HOME, and whether it is required. Named here, in the machine, because core may not
+# learn an inbox route (tests/test_core_boundary.py). A step a machine registers through core's seam
+# declares its own `home`; one with none falls back to this machine's Settings.
+_SETUP_HOMES = {
+    "email": ("/inbox/mailbox", "Connect your inbox", True),
+    "zernio": ("/inbox/connect", "Connect your social accounts", False),
+}
+
+
 def _setup_save(which: str, form, *, user_id: str | None) -> None:
     """Store one step's values. Raises an error whose str() is a sentence for the buyer.
 
@@ -3854,27 +3953,11 @@ def _setup_save(which: str, form, *, user_id: str | None) -> None:
         from core import onboarding
         onboarding.save(which, form, user_id=user_id)
         return
-    # THE OLD WRITE — the only place in this file that knows a step by name, and it is dated.
-    if which == "email":
-        box_secrets.put_email(host=_mailbox_host(form), user=str(form.get("user") or ""),
-                              password=str(form.get("password") or ""), user_id=user_id)
-    elif which == "zernio":
-        box_secrets.put_zernio(str(form.get("key") or ""), user_id=user_id)
-    elif which == "anthropic":
-        # A FRONT DOOR OF ITS OWN NOW, like the two above. This read `put`, with a comment saying
-        # it deliberately did not call Anthropic because "only they can say whether a key works"
-        # — which is the argument FOR asking them, not against it. What it was really refusing
-        # was a guessed regex, and `put_anthropic` still keeps the shape check that catches the
-        # wrong thing entirely; it just no longer stops there.
-        # ONE FIELD, EITHER CREDENTIAL. `put_ai_credential` reads the prefix and routes: an
-        # sk-ant-oat… subscription token is stored as one and selects the claude_code backend; an
-        # API key takes the verified path it always did. A buyer knows which of the two they hold
-        # and should not have to tell a form so when the credential itself says it.
-        box_secrets.put_ai_credential(str(form.get("key") or ""),
-                                      consented=bool(form.get("subscription_consent")),
-                                      user_id=user_id)
-    else:
-        raise box_secrets.SecretRejected("That form is not one this screen knows.")
+    # NO OTHER STEP IS SAVED HERE. The mailbox, social accounts and the AI account each have one
+    # home that saves them (owner, 2026-09-24: one place per setting), and set-up only links to it.
+    # The legacy arm that wrote all three from this screen went with that ruling; `r_setup` already
+    # refused to reach it, and tests/test_one_place_per_setting.py holds that nothing does again.
+    raise box_secrets.SecretRejected("That form is not one this screen knows.")
 
 
 def _setup_rejections() -> tuple:
@@ -3933,7 +4016,7 @@ def _setup_field(f: dict, value: str = "") -> str:
                 f'{_esc(f.get("label"))}</span>'
                 f'<select name="{_esc(f.get("name"))}" style="{style};appearance:auto">{opts}</select>'
                 f'</label>')
-    return (f'<label style="display:block;margin-top:10px">'
+    return (f'<label class="fld-{_esc(f.get("name"))}" style="display:block;margin-top:10px">'
             f'<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
             f'{_esc(f.get("label"))}</span>'
             f'<input type="{_esc(kind)}" name="{_esc(f.get("name"))}" '
@@ -4050,7 +4133,7 @@ def _step_extras(e: dict) -> str:
     help_ = e.get("help") or {}
     if help_.get("url"):
         out += (f'<p style="margin:10px 0 0"><a href="{_esc(help_["url"])}" target="_blank" '
-                f'rel="noopener noreferrer" style="color:var(--href);font-weight:600">'
+                f'rel="noopener noreferrer" style="color:var(--href);font-weight:var(--w-strong)">'
                 f'{_esc(help_.get("label") or "")} &rarr;</a></p>')
     if e.get("alternatives"):
         out += ('<details style="margin-top:12px"><summary><b>'
@@ -4064,7 +4147,7 @@ def _step_extras(e: dict) -> str:
 
 
 def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
-                owner: bool) -> str:
+                owner: bool, primary: bool = True) -> str:
     """ONE ENTRY, RENDERED THE SAME WAY WHATEVER IT IS. This is the whole point of the contract:
     two vendors, two kinds of secret, one shape — a number, a title, why it is wanted, what is
     set, the instructions, the fields, and whatever the buyer can press."""
@@ -4167,8 +4250,91 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
                'style="display:flex;flex-direction:column;gap:2px;align-items:stretch">'
                f'<input type="hidden" name="step" value="{_esc(e.get("key"))}">'
                f'{fields}<p style="margin:12px 0 0">'
-               f'<button class="btn" type="submit">{verb}</button></p></form>' if fields else "")
+               # ONE INK PILL PER SCREEN: the step to do next carries it, every other step's
+               # button is the outline (OSDev0's drift check, 2026-09-24: two ink Saves here).
+               f'<button class="btn{"" if primary else " ghost"}" type="submit">{verb}</button>'
+               '</p></form>' if fields else "")
             + out + f'</{tag}>')
+
+
+# ── SET-UP IS A GUIDE, NOT A SETTINGS PAGE ──────────────────────────────────────────────────────
+# Owner, 2026-09-24 (relayed by OSDev1): "there's only one place to add a key or change a setting",
+# and "I don't think a setup tab should have actual settings on it … set up tab should be more like
+# a guide or a wizard." docs/SCOPE_ONE_PLACE_PER_SETTING.md holds the research: a checklist that
+# links to each setting's one home and brings the buyer back (Shopify's setup guide, Stripe's
+# account checklist, Wix, GOV.UK's task list), with status read from the box, never ticked.
+#
+def _safe_setup_source() -> list:
+    try:
+        return _setup_source()
+    except Exception:                                    # noqa: BLE001 — a post decides nothing
+        return []
+
+
+def _from_setup() -> bool:
+    """Did the buyer arrive from set-up? Carried as `from=setup` on the link and in the form."""
+    try:
+        return str(request.values.get("from") or "") == "setup"
+    except Exception:                                    # noqa: BLE001 — outside a request: no
+        return False
+
+
+def _trip_field() -> str:
+    """The hidden field that carries the return trip through a form post."""
+    return '<input type="hidden" name="from" value="setup">' if _from_setup() else ""
+
+
+def _setup_way_back() -> str:
+    """On a home page past its first form, the way back to set-up, when that is where they came from."""
+    if not _from_setup():
+        return ""
+    return ('<p style="margin-top:14px"><a href="/inbox/setup" style="color:var(--href)">'
+            '&larr; Back to set-up</a></p>')
+
+
+def _back_link() -> str:
+    """Back to set-up when that is where the buyer came from, otherwise back to Settings."""
+    if _from_setup():
+        return ('<p style="margin-top:14px"><a href="/inbox/setup" style="color:var(--href)">'
+                '&larr; Back to set-up</a></p>')
+    return ('<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--href)">'
+            '&larr; Settings</a></p>')
+
+
+def _has_home(e: dict) -> bool:
+    """Does this step have a page of its own? A step a machine registered through core's seam
+    without declaring a `home` does not, so set-up stays its one home (its form renders there)
+    until it gets one: nothing a buyer can set today stops being settable."""
+    return str(e.get("key") or "") in _SETUP_HOMES or bool(e.get("home"))
+
+
+def _setup_home(e: dict) -> tuple:
+    """(href, verb, required) for a step: this machine's table, or what a seam step declared."""
+    key = str(e.get("key") or "")
+    if key in _SETUP_HOMES:
+        return _SETUP_HOMES[key]
+    return (str(e.get("home") or "/inbox/settings"),
+            str(e.get("action_label") or "Set this up"), bool(e.get("required", True)))
+
+
+def _guide_row(n: int, e: dict) -> str:
+    """ONE ROW: the whole row is the link to the step's home (GOV.UK's task list). Status is plain
+    text, never a button-shaped chip, because people tap chips (GOV.UK's research finding)."""
+    label, tone, _verb = _SET_STATUS.get(e.get("status"), _SET_STATUS["not_connected"])
+    who = e.get("who") or ""
+    done = e.get("status") == "connected"
+    said = f"{label} — {who}" if (who and e.get("status") != "not_connected") else label
+    href, _verb2, required = _setup_home(e)
+    go = f'{href}{"&" if "?" in href else "?"}from=setup'
+    mark = "\u2713" if done else str(n)
+    return (f'<a class="grow{" done" if done else ""}" id="{_esc(e.get("key"))}" href="{_esc(go)}">'
+            f'<span class="gn" aria-hidden="true">{mark}</span>'
+            f'<span class="gt"><b>{_esc(e.get("title"))}</b>'
+            f'<span class="gs {_esc(tone)}">{_esc(said)}</span></span>'
+            # A DONE ROW NAMES THE WAY BACK INTO IT; an open optional one says it can wait.
+            + ('<span class="gtag">Change</span>' if done else
+               "" if required else '<span class="gtag">Optional</span>')
+            + '<span class="chev" aria-hidden="true">&rsaquo;</span></a>')
 
 
 @blueprint.route("/inbox/setup", methods=["GET", "POST"])
@@ -4181,8 +4347,7 @@ def r_setup():
 
     NOTHING IN THIS FUNCTION KNOWS WHAT A STEP IS — no key is named in it, and no key is named in
     the renderer either. A machine that registers a third credential gets a screen for it with no
-    change at all here. The one remaining mention of a key by name lives in `_setup_save`'s legacy
-    arm, which is dated and exists only until every machine has moved onto the seam.
+    change at all here. The steps with a page of their own are named once, in `_SETUP_HOMES`.
 
     THE WRITE GOES THROUGH CORE, which hands the machine only the fields its step declared — so a
     hidden field posted from a crafted form cannot reach a store. A rejection carries a sentence
@@ -4199,10 +4364,16 @@ def r_setup():
         _u = {}                                  # only whose name the audit line carries
     whoami = _u.get("id")
 
+    # A POST SAVES ONLY A STEP WHOSE ONE HOME IS THIS PAGE: a seam step with no page of its own
+    # (see _has_home). Anything else (an old page left open, a cached form, a crafted request)
+    # saves nothing and lands back on the guide. Every other setting is written on its home.
     notes: dict = {}
     typed: dict = {}
     if request.method == "POST":
         which = str(request.form.get("step") or "")
+        homeless = {str(e.get("key")) for e in _safe_setup_source() if not _has_home(e)}
+        if which not in homeless:
+            return redirect("/inbox/setup", code=303)
         typed = {k: str(v) for k, v in request.form.items() if k != "step"}
         try:
             _setup_save(which, request.form, user_id=whoami)
@@ -4210,56 +4381,60 @@ def r_setup():
         except _setup_rejections() as e:
             notes[which] = (f'<p class="quiet" style="color:var(--accent);margin-top:10px">'
                             f'{_esc(str(e))}</p>')
-        # A PASSWORD IS NEVER PUT BACK IN THE PAGE, whatever else is. The address they typed is,
-        # because retyping it after the other field was rejected is a punishment for their typo.
         typed = {k: v for k, v in typed.items() if k != "password" and k != "key"}
 
     try:
         steps = _setup_source()
     except Exception as e:                       # noqa: BLE001 — the set-up page outranks the cause
         log.warning("voice.setup_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
-        # `here` IS THIS SCREEN, EVEN WHEN IT CANNOT DRAW ITS LIST. A failure branch that lights a
-        # different row tells a person they are somewhere they are not, on the screen where they
-        # are least sure what is happening.
         return _shell('<h1>Set-up</h1><div class="quiet">This box could not read its own set-up '
                       'list. Nothing you have already connected is affected.</div>',
                       here="/inbox/setup"), 200
 
-    done = sum(1 for e in steps if e.get("status") == "connected")
-    # COUNTED, NOT WRITTEN. This read "Two things only you can do" while the list had two entries,
-    # and went false the moment the AI key became the third (OSDev4, #1287-era audit: a buyer
-    # connected Gmail and Zernio, read "You are set up", and had a box that could not draft a
-    # single reply because nothing had ever asked him for a key). Deriving it means the next step
-    # added cannot make this sentence lie either.
-    _n = {1: "One thing", 2: "Two things", 3: "Three things"}.get(len(steps),
-                                                                 f"{len(steps)} things")
-    head = (f'<h1>Set up your box.</h1><p class="quiet">{_n} only you can do. Your box is '
-            'already running — this is what tells it where to listen.</p>'
-            if done < len(steps) else
-            '<h1>You are set up.</h1><p class="quiet">Everything below is connected. Change any '
-            'of it whenever you like.</p>')
-    body = head + _setup_progress(steps) + "".join(
-        _setup_step(i, e, note=notes.get(e.get("key"), ""), typed=typed,
-                    owner=(_u.get("role") or "") == "owner")
-        for i, e in enumerate(steps, 1))
-    # THE PHONE STEP'S SCRIPT, loaded only by this screen. It is not in the inbox's own JS block
-    # because that block is guarded against fetch and timers — the inbox must never imply it is
-    # live-updating — and this belongs to set-up, where the phone step lives.
-    # THE SCRIPT IS CORE'S NOW, because the two endpoints it fetches are (`/settings/push/*`).
-    # THE ASKING CANNOT MOVE WITH THEM: this machine's service worker is the only scope on the box,
-    # so `serviceWorker.ready` resolves on these screens and on no others.
-    body += f'<script>{_push_client_js()}</script>'
-    body += ('<p style="margin-top:22px"><a href="/inbox/settings" '
-             'style="color:var(--href)">← Settings</a></p>')
-    # THIS SCREEN LIGHTS ITS OWN ROW. Until #1374 there was no Set up row, so pointing `here` at
-    # Settings was the honest answer — set-up had no seat in the rail and Settings was the nearest
-    # true thing. Adding the row without moving this left the bar lighting Settings on the one
-    # screen go-to-market funnels every buyer to, and the new row never lit at all. Found by
-    # OSDev5 reading the rendered bar on this branch, not the diff.
-    #
-    # DELIBERATELY NOT A SWEEP. `r_drafts` (line ~3269) carries the identical line and must KEEP
-    # it — it is a screen of Settings and has no row of its own. A sed across this file would
-    # have been right twice and wrong once, which is the revert OSDev5 has already paid for.
+    # PROGRESS COUNTS WHAT IS REQUIRED, and says what is optional out loud (Shopify's guidelines;
+    # an optional step left undone is not a failure). Read from the box every time, never ticked.
+    req = [e for e in steps if _setup_home(e)[2]]
+    req_done = sum(1 for e in req if e.get("status") == "connected")
+    opt_left = [e for e in steps if not _setup_home(e)[2] and e.get("status") != "connected"]
+    finished = req_done == len(req)
+    if finished:
+        head = ('<h1>You are set up.</h1><p class="quiet">Your box is reading your messages. '
+                + ('The rest is optional: add it whenever you like.' if opt_left else
+                   'Everything is connected. Change any of it from here or from Settings.')
+                + '</p>')
+    else:
+        # ONE COUNT ON THE PAGE, and it is the owner's progress bar (2026-09-21) just below: the
+        # heading says what the page is, not a second number (walk #6, "one honest count").
+        head = ('<h1>Set up your box.</h1><p class="quiet">Each step opens its own page and '
+                'brings you back here.'
+                + (' Anything marked Optional can wait.' if opt_left else '') + '</p>')
+
+    # WHAT JUST HAPPENED, confirmed from the box's own state rather than from the link that
+    # brought them back (Stripe: returning proves nothing until you check).
+    just = str(request.args.get("done") or "")
+    back_ok = next((e for e in steps if e.get("key") == just and e.get("status") == "connected"),
+                   None)
+    note = (f'<div class="card"><p style="margin:0"><b>{_esc(back_ok.get("title"))}</b> '
+            'is connected.</p></div>' if back_ok else "")
+
+    # THE ONE INK PILL: the next required step, at the top where a thumb is (the research's
+    # "next up"). With everything required done there is no next thing and no pill.
+    nxt = next((e for e in req if e.get("status") != "connected"), None)
+    cta = ""
+    if nxt is not None:
+        href, verb, _r = _setup_home(nxt)
+        cta = (f'<p style="margin:16px 0 4px"><a class="btn" '
+               f'href="{_esc(href)}{"&" if "?" in href else "?"}from=setup">{_esc(verb)}</a></p>')
+
+    body = (head + _setup_progress(steps) + note + cta
+            + '<div class="guide">' + "".join(
+                _guide_row(i, e) if _has_home(e) else
+                _setup_step(i, e, note=notes.get(e.get("key"), ""), typed=typed,
+                            owner=(_u.get("role") or "") == "owner", primary=False)
+                for i, e in enumerate(steps, 1))
+            + '</div>'
+            + '<p style="margin-top:22px"><a href="/inbox/settings" '
+              'style="color:var(--href)">&larr; Settings</a></p>')
     return _shell(body, here="/inbox/setup"), 200
 
 
@@ -4315,6 +4490,10 @@ def r_mailbox():
             box_secrets.put_email(host=_mailbox_host(request.form), user=typed,
                                   password=str(request.form.get("password") or ""),
                                   user_id=whoami)
+            # THE RETURN TRIP: from set-up, saving goes straight back to the guide, which checks
+            # the box's own state and says so (docs/SCOPE_ONE_PLACE_PER_SETTING.md).
+            if _from_setup():
+                return redirect("/inbox/setup?done=email#email", code=303)
             return redirect("/inbox/mailbox?saved=1")
         except box_secrets.SecretRejected as e:
             note = (f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>')
@@ -4336,8 +4515,7 @@ def r_mailbox():
                 + _mailbox_form(user=who, note=note, verb="Use this password instead")
                 + _mailbox_no_password_yet()
                 + _mailbox_steps()
-                + '<p style="margin-top:14px"><a href="/inbox/settings" '
-                  'style="color:var(--href)">← Settings</a></p>')
+                + _back_link())
     elif status == "admin_disabled":
         body = ('<h1>Your administrator has switched this off.</h1>'
                 '<p class="quiet">App passwords are turned off for your Google organisation, so '
@@ -4345,8 +4523,7 @@ def r_mailbox():
                 'Admin console; until then Ownbox cannot read this inbox, and nothing else about '
                 'your box is affected.</p>'
                 + (f'<p class="quiet">Google said: {_esc(detail)}</p>' if detail else "")
-                + '<p style="margin-top:14px"><a href="/inbox/settings" '
-                  'style="color:var(--href)">← Settings</a></p>')
+                + _back_link())
     elif who:
         saved = request.args.get("saved")
         body = ('<h1>Your inbox is set.</h1>'
@@ -4356,7 +4533,7 @@ def r_mailbox():
                    if saved else
                    "If Google ever refuses the password, this screen says so and tells you what "
                    "to do.")
-                + ' Ownbox only reads: it never sends anything and never marks a message read.'
+                + ' It sends only the replies you send, and never marks a message read.'
                   '</p>'
                 '<div class="card"><div class="setrow"><b>Change the password</b>'
                 '<span>Make a new app password in Google and paste it here. The address stays '
@@ -4364,12 +4541,11 @@ def r_mailbox():
                 + _mailbox_form(user=who, note=note, verb="Save this password")
                 + '<p style="margin-top:16px"><a href="/inbox/mailbox?off=1" '
                   'style="color:var(--href)">Stop reading this inbox</a></p>'
-                '<p style="margin-top:14px"><a href="/inbox/settings" '
-                'style="color:var(--href)">← Settings</a></p>')
+                + _back_link())
     else:
         body = ('<h1>Connect your inbox.</h1>'
                 '<p class="quiet">Ownbox reads the mail your customers send you, and drafts '
-                'replies. It never sends anything and it never marks a message as read.</p>'
+                'replies. It sends only the replies you send, and never marks a message read.</p>'
                 '<p class="quiet">Google will not take your ordinary password for this, and it '
                 'should not — an <b>app password</b> is sixteen letters that only Ownbox uses and '
                 'that you can revoke on its own, without changing anything else.</p>'
@@ -4388,9 +4564,8 @@ def r_mailbox():
                 + _mailbox_form(user=typed, note=note)
                 + _mailbox_no_password_yet()
                 + _mailbox_steps()
-                + '<p style="margin-top:14px"><a href="/inbox/settings" '
-                  'style="color:var(--href)">← Settings</a></p>')
-    return _shell(body, here="/inbox/settings"), 200
+                + _back_link())
+    return _shell(body, here="/inbox/mailbox"), 200
 
 
 # ── B1: where a buyer connects the accounts the inbox reads from ────────────────────────────
@@ -4480,13 +4655,14 @@ def r_connect():
     if request.method == "POST":
         try:
             box_secrets.put_zernio(str(request.form.get("key") or ""), user_id=whoami)
-            return redirect("/inbox/connect", code=303)
+            return redirect("/inbox/connect?from=setup" if _from_setup() else "/inbox/connect",
+                            code=303)
         except box_secrets.SecretRejected as e:
             # Never an echo of what they pasted. Same discipline as the AI key form.
             note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
 
     if not box_secrets.is_set(box_secrets.ZERNIO):
-        return _shell(_connect_key_form(note), here="/inbox/settings"), 200
+        return _shell(_connect_key_form(note), here="/inbox/connect"), 200
 
     # ── connected: show what is on, and what can still be added ──────────────────────────────
     sp = _connect_space()
@@ -4505,7 +4681,7 @@ def r_connect():
         if not pid:
             pid, choices = _resolve_profile(z, brand)
         if choices:
-            return _shell(_connect_profile_chooser(choices), here="/inbox/settings"), 200
+            return _shell(_connect_profile_chooser(choices) + _setup_way_back(), here="/inbox/connect"), 200
         sp = dict(sp, zernio_profile_id=pid)
         z = zernio.client(sp)
         live = z.accounts.discover()
@@ -4517,14 +4693,14 @@ def r_connect():
             return _shell(_connect_trouble(
                 "Your social account needs a payment method before it will connect any more "
                 "channels. Add one there, then come back — nothing here needs changing."),
-                here="/inbox/settings"), 200
+                here="/inbox/connect"), 200
         log.warning("connect.discover_failed", extra={"err": detail[:200]})
         return _shell(_connect_trouble(
             "Ownbox could not reach your social account just now. Nothing is lost — try again "
-            "in a minute."), here="/inbox/settings"), 200
+            "in a minute."), here="/inbox/connect"), 200
 
     just = request.args.get("connected") or ""
-    return _shell(_connect_page(live, just), here="/inbox/settings"), 200
+    return _shell(_connect_page(live, just) + _setup_way_back(), here="/inbox/connect"), 200
 
 
 @blueprint.get("/inbox/connect/<platform>")
@@ -4552,7 +4728,7 @@ def r_connect_start(platform: str):
         log.warning("connect.url_failed", extra={"platform": platform, "err": str(e)[:200]})
         return _shell(_connect_trouble(
             "That channel would not start just now. Nothing is lost — try again in a minute."),
-            here="/inbox/settings"), 200
+            here="/inbox/connect"), 200
     return redirect(url, code=303)
 
 
@@ -4563,7 +4739,7 @@ def _connect_key_form(note: str) -> str:
     recognise the second on sight, and the sentence underneath is the same promise in both places:
     the account is theirs, on their bill, and they can take it back."""
     return (
-      '<h1>Connect your channels.</h1>'
+      '<h1>Connect your social accounts.</h1>'
       '<div class="card"><div class="setrow">'
       '<span>Ownbox reads your Instagram and Messenger through your own social account, so the '
       'connection stays yours and you can take it back any day without asking us.</span>'
@@ -4571,21 +4747,44 @@ def _connect_key_form(note: str) -> str:
       # and that is the whole of what we actually know; a made-up /settings/api path that 404s in
       # front of a buyer at the exact moment they are trying to find something is worse than one
       # extra click.
-      '<p style="margin:10px 0 0"><a href="https://zernio.com" target="_blank" '
-      'rel="noopener" style="color:var(--href)">Where to find your key &rarr;</a></p>'
-      '</div></div>'
+      # ONLY WHEN THE STEP'S CONTRACT CARRIES NO BETTER LINK: once it names the API keys page
+      # (owner-confirmed, #1506), _connect_contract draws that one and this would be a second.
+      + ('' if (_step_spec("zernio").get("help") or {}).get("url") else
+         '<p style="margin:10px 0 0"><a href="https://zernio.com" target="_blank" '
+         'rel="noopener" style="color:var(--href)">Where to find your key &rarr;</a></p>')
+      + '</div></div>'
+      + _connect_contract()
       + note +
-      '<form class="compose" method="post" action="/inbox/connect">'
+      '<form class="compose" method="post" action="/inbox/connect">' + _trip_field() +
+      # LABELLED, like the mailbox form: the placeholder is gone the moment they paste.
+      '<label style="display:block">'
+      '<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
+      'Your Zernio API key</span>'
       '<input type="password" name="key" autocomplete="off" spellcheck="false"'
       ' aria-label="Paste your key" placeholder="Paste your key" '
       'style="width:100%;font:inherit;font-size:16px;padding:12px 14px;'
       'border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)">'
+      '</label>'
       '<button class="btn" type="submit">Continue</button>'
       '</form>'
       '<p class="quiet" style="margin-top:12px">Checked with your provider before it is saved, '
       'so you find out here if it is wrong — not tomorrow, from an empty inbox.</p>'
-      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--href)">'
-      '&larr; Settings</a></p>')
+      + _back_link())
+
+
+def _connect_contract() -> str:
+    """THE SOCIAL STEP'S OWN INSTRUCTIONS, ON ITS ONE HOME. They used to live only on set-up; now
+    set-up is a guide that links here (docs/SCOPE_ONE_PLACE_PER_SETTING.md), so this page draws the
+    same contract the guide's row reads: the steps, the help link and the note."""
+    e = _step_spec("zernio")
+    if not e:
+        return ""
+    steps = "".join(f'<div class="row"><span class="n">{i}</span>'
+                    f'<span class="t">{_esc(t)}</span></div>'
+                    for i, t in enumerate(e.get("steps") or (), 1))
+    return ((f'<div class="card">{steps}{_step_extras(e)}</div>' if steps else "")
+            + (f'<p class="quiet" style="margin-top:10px">{_esc(e.get("note"))}</p>'
+               if e.get("note") else ""))
 
 
 def _connect_profile_chooser(choices: list) -> str:
@@ -4631,7 +4830,7 @@ def _connect_page(live: dict, just: str) -> str:
                         f'href="/inbox/connect/{_esc(vendor_token)}">Connect {_esc(label)}</a>'
                         '</p></div>')
     return (
-      '<h1>Your channels.</h1>'
+      '<h1>Your social accounts.</h1>'
       + done +
       '<div class="card">' + "".join(rows) + '</div>'
       '<p class="quiet" style="margin-top:12px">Connected with your own social account. '
@@ -4643,7 +4842,7 @@ def _connect_page(live: dict, just: str) -> str:
 
 def _connect_trouble(sentence: str) -> str:
     """One sentence a person can act on, and a way back. Never a stack trace, never a code."""
-    return ('<h1>Your channels.</h1>'
+    return ('<h1>Your social accounts.</h1>'
             f'<div class="card"><div class="setrow"><span>{_esc(sentence)}</span></div></div>'
             '<p style="margin-top:14px"><a href="/inbox/connect" style="color:var(--href)">'
             'Try again</a> · <a href="/inbox/settings" style="color:var(--href)">Settings</a>'
@@ -4710,11 +4909,13 @@ def r_install():
                 f'<p class="quiet">{_esc(note)}</p>')
 
     body = (
+        # ONE HEADING AND ITS REASON UNDER IT. This was a second heading stacked on the first
+        # ("Why it matters") and a sentence that shipped a literal \\u2019 and a reserved noun
+        # to every buyer who opened it (CLAUDE.md, mobile first). Plain text, and no escape.
         '<h1>Put this on your home screen</h1>'
-        '<div class="head"><div class="v">Why it matters</div>'
-        '<div class="l">Notifications only work once this is installed. In a browser tab they '
-        'stop arriving after about a week of not being opened — that is the phone\\u2019s rule, '
-        'not ours. Installed, they keep coming.</div></div>'
+        '<p class="quiet">Notifications only work once the app is installed. In a browser tab '
+        'they stop arriving after about a week of not being opened. That rule is Apple and '
+        'Google\'s, not ours. Installed, they keep coming.</p>'
         + block("On an iPhone or iPad", steps_ios,
                 "Safari has no button we can show you for this — Apple does not provide one, "
                 "so these three taps are the whole path.")
@@ -4723,8 +4924,8 @@ def r_install():
         + '<div class="card"><div class="row"><span class="t">Already done it? Open the app from '
         'your home screen rather than this tab, and you are set. Nothing else to switch on.'
         '</span></div></div>'
-        '<div class="foot"><a href="/inbox/">← Today</a></div>')
-    return _shell(body), 200
+        '<div class="foot"><a href="/inbox/settings">← Settings</a></div>')
+    return _shell(body, here="/inbox/install"), 200
 
 
 # ── search, as a screen of its own ──────────────────────────────────────────────────────────
@@ -4776,6 +4977,15 @@ def _is_owner() -> bool:
         return False                                     # not the owner, and never a 500
 
 
+def _ai_home() -> str:
+    """Where the person reading goes to change the AI account.
+
+    The owner goes to its one home, System Settings. A member would be refused there, so they go
+    to the inbox's AI and drafts page, which says whose account it is and who can change it.
+    """
+    return "/settings/ai" if _is_owner() else "/inbox/drafts"
+
+
 def _coworkers_row(owner: bool) -> str:
     """The row a member sees is the same sentence WITHOUT the link.
 
@@ -4818,13 +5028,13 @@ def _coworkers_row(owner: bool) -> str:
 def _draft_card(d: dict, n: int) -> str:
     asked = str(d.get("asked") or "").strip()
     return (
-        f'<div class="card" style="margin-top:12px">'
+        f'<div class="card dcard" style="margin-top:12px">'
         f'<label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">'
         f'<input type="checkbox" name="pick" value="{_esc(str(d["zcid"]))}" '
         f'style="margin-top:4px;width:18px;height:18px;flex:0 0 auto">'
         f'<span style="flex:1 1 auto">'
         f'<b>{_esc(str(d.get("participant") or "Someone"))}</b>'
-        f'<span class="quiet"> · {_esc(_channel(str(d.get("platform") or "")))}'
+        f'<span class="quiet dm"> · {_esc(_channel(str(d.get("platform") or "")))}'
         f' · asked {_esc(_when(d.get("asked_at") or d.get("created_at")))}</span>'
         # WHAT THEY ASKED, ABOVE WHAT WE WOULD SAY. A reply read without the question is a reply
         # nobody can judge, and judging it is the whole point of this screen.
@@ -4914,9 +5124,9 @@ def r_waiting():
 
     rows = drafts.waiting(space, limit=200)
     if not rows:
-        body = ('<h1>Drafts.</h1>'
+        body = ('<h1>Drafts</h1>'
                 '<div class="card"><div class="row"><span class="t">Nothing is waiting. When a '
-                'customer writes and your box drafts an answer, it appears here for you to read '
+                'customer writes and your box drafts a reply, it appears here for you to read '
                 'and send.</span></div></div>'
                 '<div class="foot"><a href="/inbox/inbox">← All conversations</a></div>')
         return _shell(note + body, here="/inbox/waiting"), 200

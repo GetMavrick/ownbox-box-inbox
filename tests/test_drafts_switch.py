@@ -77,6 +77,12 @@ def clear():
     box_secrets.clear(box_secrets.ANTHROPIC)
 
 
+def _member_id():
+    """A signed-in member who is not the owner, made once."""
+    u = state.user_by_email("sam@example.com")
+    return (u or state.add_user("sam@example.com", name="Sam"))["id"]
+
+
 class _Refused(Exception):
     """Stands in for the SDK's AuthenticationError / PermissionDeniedError, by STATUS.
 
@@ -245,7 +251,19 @@ def test_settings_offers_the_switch_when_there_is_no_key():
     ok("...phrased as what the box can do", "write a reply for every message" in html)
     ok("...and the reason BYOK is an advantage, not an apology",
        "nothing you receive passes through us" in html)
-    ok("...with a control that goes somewhere", 'href="/inbox/drafts"' in html)
+    # THE AI ACCOUNT HAS ONE HOME, System Settings (owner, 2026-09-24: one place per setting), and
+    # the owner's control goes there rather than to a second paste form in the inbox.
+    ok("...with a control that goes to the AI account's one home", 'href="/settings/ai"' in html)
+    # ONE INK PILL PER SCREEN (mobile first). On a fresh box the channels row above already has it,
+    # so this row's door is a link; before, a fresh Settings carried two black pills.
+    ok("...and the screen still carries one ink pill, not two", html.count('class="btn"') == 1,
+       str(html.count('class="btn"')))
+    # AND IT IS THE REQUIRED STEP'S: with no mailbox, the pill connects the inbox, not the
+    # optional social accounts that used to hold it.
+    import re as _re
+    _pill = _re.search(r'<a class="btn" href="[^"]*">([^<]*)</a>', html)
+    ok("...and that pill connects the inbox, the step the box cannot work without",
+       _pill is not None and _pill.group(1) == "Connect your inbox", _pill and _pill.group(1))
     low = html.lower()
     ok("never a fault report", "not configured" not in low and "api key configured" not in low
        and "missing" not in low)
@@ -268,14 +286,31 @@ def test_the_threads_offer_lands_where_the_thing_is_turned_on():
     html = client().get("/inbox/inbox/conv-offer").get_data(as_text=True)
     ok("the thread says drafts are off", "Drafts are off" in html)
     ok("...and the offer goes to the page that TURNS THEM ON, not to the menu that lists it",
-       'href="/inbox/drafts"' in html, html[html.find("Drafts are off"):][:200])
+       'href="/settings/ai"' in html[html.find("Drafts are off"):][:200],
+       html[html.find("Drafts are off"):][:200])
     ok("...and it no longer sends them to Settings to go looking",
        'href="/inbox/settings" style="color:var(--accent)">Turn' not in html)
 
     # AND THE DESTINATION REALLY IS THE PLACE, rather than another signpost: it carries the field.
-    dest = client().get("/inbox/drafts").get_data(as_text=True)
+    dest = client().get("/settings/ai").get_data(as_text=True)
     ok("the page it lands on has the key field", 'name="key"' in dest)
-    ok("...and a control that says what it does", "Turn drafts on" in dest)
+    # AND THE INBOX'S OWN AI PAGE NO LONGER CARRIES A SECOND ONE. Two forms for one credential is
+    # the thing the one-place ruling removes: they drift, and a buyer cannot tell which one counts.
+    inbox_ai = client().get("/inbox/drafts").get_data(as_text=True)
+    ok("/inbox/drafts has no key field of its own", 'name="key"' not in inbox_ai, inbox_ai[-400:])
+    ok("...and a door that says what it does, to the one home",
+       'href="/settings/ai"' in inbox_ai and "Connect an AI account" in inbox_ai)
+    # A MEMBER IS NEVER SENT TO A DOOR THEY ARE REFUSED AT. /settings/ai is the owner's; the
+    # member's offer goes to the inbox page that says whose account it is.
+    mem = flask_app.test_client()
+    mem.set_cookie("aios_session", dash.new_session(_member_id()), domain="localhost")
+    mhtml = mem.get("/inbox/inbox/conv-offer").get_data(as_text=True)
+    ok("a member's offer goes to the page that says who can turn it on",
+       'href="/inbox/drafts"' in mhtml[mhtml.find("Drafts are off"):][:200],
+       mhtml[mhtml.find("Drafts are off"):][:200])
+    mdest = mem.get("/inbox/drafts").get_data(as_text=True)
+    ok("...which says it is the owner's, with no door the member is refused at",
+       "Only the owner of this box" in mdest and 'href="/settings/ai"' not in mdest)
 
 
 def test_settings_says_it_is_on_and_keeps_the_promise_in_view():
@@ -313,31 +348,48 @@ def test_the_buyer_can_turn_it_on_and_off():
     print("test_the_buyer_can_turn_it_on_and_off")
     clear()
     c = client()
-    # A VENDOR THAT SAYS YES, because since `put_anthropic` the screen asks one. Before this the
-    # line below stored a key nobody had checked, which is the whole of what this PR fixes.
+    # A VENDOR THAT SAYS YES, because since `put_anthropic` the screen asks one. The key goes in
+    # at its one home, System Settings, which checks it before it is stored.
     with vendor(200):
-        r = c.post("/inbox/drafts", data={"key": KEY})
-    ok("posting a key redirects back to Settings",
-       r.status_code in (301, 302, 303) and "/inbox/settings" in r.headers.get("Location", ""))
+        r = c.post("/settings/ai", data={"do": "key", "key": KEY})
+    ok("posting a key at its home redirects back to Settings",
+       r.status_code in (301, 302, 303) and "/settings" in r.headers.get("Location", ""))
     ok("...and the key is stored", box_secrets.get(box_secrets.ANTHROPIC) == KEY)
     r = c.get("/inbox/drafts?off=1")
     ok("turning off redirects back to Settings", r.status_code in (301, 302, 303))
     ok("...and the key is gone", box_secrets.get(box_secrets.ANTHROPIC) == "")
     # An empty submit is a typo, not a failure: say what to do, store nothing, no lecture.
-    r = c.post("/inbox/drafts", data={"key": "   "})
+    r = c.post("/settings/ai", data={"do": "key", "key": "   "})
     ok("an empty submit stores nothing", box_secrets.get(box_secrets.ANTHROPIC) == "")
-    ok("...and says what to do", "Paste the key" in r.get_data(as_text=True))
+    ok("...and says what to do", "Paste" in r.get_data(as_text=True), r.get_data(as_text=True)[-300:])
+    # AN OLD INBOX PAGE LEFT OPEN still posts here. It stores nothing and sends the owner home.
+    with vendor(200):
+        r = c.post("/inbox/drafts", data={"key": KEY})
+    ok("a post to the inbox's old form stores nothing", box_secrets.get(box_secrets.ANTHROPIC) == "")
+    ok("...and sends the owner to the AI account's home",
+       r.status_code == 303 and r.headers.get("Location", "").endswith("/settings/ai"),
+       f"{r.status_code} {r.headers.get('Location')}")
 
 
 def test_a_stranger_cannot_set_this_boxs_key():
     print("test_a_stranger_cannot_set_this_boxs_key")
     clear()
     anon = flask_app.test_client()
-    r = anon.post("/inbox/drafts", data={"key": "sk-ant-planted-by-a-stranger"})
-    ok("an unauthenticated POST does not store a key",
-       box_secrets.get(box_secrets.ANTHROPIC) == "", "a stranger set this box's AI key")
-    ok("...and is refused or bounced, never accepted", r.status_code != 200 or "sign" in
-       r.get_data(as_text=True).lower(), str(r.status_code))
+    for path, data in (("/inbox/drafts", {"key": "sk-ant-planted-by-a-stranger"}),
+                       ("/settings/ai", {"do": "key", "key": "sk-ant-planted-by-a-stranger"})):
+        r = anon.post(path, data=data)
+        ok(f"{path}: an unauthenticated POST does not store a key",
+           box_secrets.get(box_secrets.ANTHROPIC) == "", "a stranger set this box's AI key")
+        ok(f"{path}: ...and is refused or bounced, never accepted", r.status_code != 200 or "sign"
+           in r.get_data(as_text=True).lower(), str(r.status_code))
+    # NOR CAN A MEMBER, at either door: the account bills the owner's subscription.
+    mem = flask_app.test_client()
+    mem.set_cookie("aios_session", dash.new_session(_member_id()), domain="localhost")
+    for path, data in (("/inbox/drafts", {"key": "sk-ant-planted-by-a-member"}),
+                       ("/settings/ai", {"do": "key", "key": "sk-ant-planted-by-a-member"})):
+        mem.post(path, data=data)
+        ok(f"{path}: a member's POST does not store a key",
+           box_secrets.get(box_secrets.ANTHROPIC) == "")
 
 
 # ── 3. the buyer's key does not leave the box ──────────────────────────────────
@@ -580,12 +632,12 @@ def test_a_refusal_days_later_reaches_both_screens_and_they_agree():
     row = _app._drafts_row()
     ok("a revoked key moves the Settings row off On", "On. Ownbox writes a reply" not in row, row[:120])
     ok("...and says what to do rather than naming a 401",
-       "Paste a new key" in row and "401" not in row, row[:160])
+       "Connect it again" in row and "401" not in row, row[:160])
 
     bs.note_anthropic_status("payment_required", "403 credit balance too low")
     row = _app._drafts_row()
     ok("an account out of credit gets its OWN sentence, not the re-paste one",
-       "credit" in row.lower() and "Paste a new key" not in row, row[:160])
+       "credit" in row.lower() and "Connect it again" not in row, row[:160])
 
     # THE TWO SCREENS READ ONE VALUE. They disagreed by construction before: Settings asked
     # `is_set` and so did the thread, so a refused key made both of them wrong in the same breath
@@ -622,8 +674,11 @@ def test_a_refusal_days_later_reaches_both_screens_and_they_agree():
     # a fix. A key the vendor no longer accepts is replaced in the key form; an account with no
     # credit is fixed in the Anthropic console, and Settings is where that sentence and its link
     # live. Sending the second one to the key form would offer a control that cannot help.
-    ok("...and sends them to the form that replaces the key, not to a menu",
-       'href="/inbox/drafts"' in box and "Paste a new one" in box, box[-260:])
+    # Outside a request nobody is signed in, so this is the member's link: the page that says
+    # whose account it is. The owner's link, straight to /settings/ai, is checked on the thread
+    # itself in test_the_threads_offer_lands_where_the_thing_is_turned_on.
+    ok("...and sends them to where the account is connected again, not to a menu",
+       'href="/inbox/drafts"' in box and "Connect it again" in box, box[-260:])
     bs.note_anthropic_status("payment_required", "403")
     box = _app._compose("c9", conv, msgs)
     ok("an account out of credit is told so on the thread too",
@@ -711,7 +766,8 @@ def test_the_screen_shows_the_stores_own_refusal_not_one_of_its_own():
     # page that does not exist echoes nothing — so it is now asserted after the page has rendered.
     from core import box_secrets as bs
     clear()
-    r = client().post("/inbox/drafts", data={"key": "hello@example.com"})
+    # AT THE KEY'S ONE HOME, /settings/ai, which is the only screen left that takes one.
+    r = client().post("/settings/ai", data={"do": "key", "key": "hello@example.com"})
     html = r.get_data(as_text=True)
     ok("the page came back rather than 404ing", r.status_code in (200, 302, 400),
        str(r.status_code))

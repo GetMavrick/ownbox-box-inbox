@@ -162,6 +162,17 @@ def subscriptions_for(user_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def is_mine(user_id: str, endpoint: str) -> bool:
+    """Is this endpoint stored against this person? The device check (DEVICE_JS) asks it, so the
+    box can say "connected" about the mobile in your hand rather than about the box as a whole."""
+    if not user_id or not endpoint:
+        return False
+    with state.connect() as c:
+        row = c.execute("SELECT 1 FROM push_subscriptions WHERE user_id = ? AND endpoint = ?",
+                        (user_id, endpoint)).fetchone()
+    return row is not None
+
+
 def forget(endpoint: str) -> bool:
     """Delete a subscription the push service has told us is gone. Never retried."""
     with state.connect() as c:
@@ -386,4 +397,115 @@ CLIENT_JS = """  window.ownboxCanNotify = function () {
       })
       .catch(function (e) { return { ok: false, why: String(e && e.message || e) }; });
   };
+"""
+
+
+# ── WALK #9: SAY WHETHER IT WORKED ────────────────────────────────────────────────────────────────
+# docs/JOURNEY_WALK_2026-09-23.md, finding 9: a buyer who followed the install steps saw nothing
+# change and could conclude the box was broken. OSDev1's done-when: "one line on the box saying it's
+# connected, or exactly what's missing."
+#
+# ONLY THE DEVICE CAN ANSWER, SO THE DEVICE ASKS. The server knows which endpoints are stored; it
+# cannot know which of them is the mobile in your hand, or whether that mobile opened the box from
+# its icon, or what it said to the permission question. So this runs on the device, reads those
+# three things, and asks the box one yes/no: is this endpoint stored against me?
+#
+# IT NEVER FIRES THE PERMISSION PROMPT. The owner's ruling (2026-09-20) is that the box asks
+# "after the buyer has seen their first real message, never on first load", and that stays with
+# the offer in Messages. The one time this touches a subscription is when the answer was already
+# yes: then re-subscribing asks nothing and repairs a registration the box lost.
+#
+# IT RUNS IN TWO PLACES, because of scope. The installed app's scope is /inbox/, so on an iPhone
+# /settings/mobile opens outside the app, where Safari cannot see the app's storage. The inbox's
+# own Settings tab runs the same check from inside the app, where the answer is real.
+#
+# Re-registering uses CLIENT_JS, which only the inbox loads: /settings/mobile carries no code that
+# can fire the prompt at all (test_the_box_settings_are_the_boxs_own holds that), and there the
+# check says to open the app instead. Fills #ownbox-device and sets data-state on it.
+DEVICE_JS = """(function () {
+  var el = document.getElementById('ownbox-device');
+  if (!el) { return; }
+  function say(state, text) { el.setAttribute('data-state', state); el.textContent = text; }
+  var standalone = (window.navigator.standalone === true) ||
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  var mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '') ||
+    (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent || ''));
+  function registered() {
+    if (!navigator.serviceWorker || !navigator.serviceWorker.getRegistration) {
+      return Promise.resolve(null);
+    }
+    return navigator.serviceWorker.getRegistration('/inbox/').then(function (reg) {
+      return reg && reg.pushManager ? reg.pushManager.getSubscription() : null;
+    }).then(function (sub) {
+      if (!sub) { return false; }
+      return fetch('/settings/push/mine', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: sub.endpoint })
+      }).then(function (r) { return r.json(); }).then(function (o) { return !!o.mine; });
+    }).catch(function () { return false; });
+  }
+  var CONNECTED = 'Connected. This mobile gets a notification when a customer writes.';
+  // THE BOX FIRST. A mobile cannot be "connected" to a box that cannot send, so if the box has no
+  // push identity, that settles it, whatever this device has done.
+  function boxCanSend() {
+    return fetch('/settings/push/key', { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .catch(function () { return { available: false, why: 'the box did not respond' }; });
+  }
+  boxCanSend().then(function (k) {
+    if (!k.available) {
+      say('box-off', 'This box cannot send notifications yet: ' + (k.why || 'no reason given') +
+          '. Setting up this device is still worth doing.');
+      return null;
+    }
+    return registered();
+  }).then(function (mine) {
+    if (mine === null) { return; }
+    if (mine && 'Notification' in window && Notification.permission === 'granted') {
+      return say('connected', CONNECTED);
+    }
+    if (!standalone) {
+      if (!mobile) {
+        return say('computer', 'This is a computer. Notifications go to a mobile: open this ' +
+                   'page on the mobile you want them on.');
+      }
+      return say('not-installed', 'Not set up on this device yet. Follow the steps below, then ' +
+                 'open the box from its Home Screen icon and look in Settings there.');
+    }
+    if (!('Notification' in window) || !('PushManager' in window)) {
+      return say('unsupported', 'Installed, but this device cannot receive app notifications. ' +
+                 'An iPhone needs iOS 16.4 or later for them.');
+    }
+    if (Notification.permission === 'denied') {
+      return say('blocked', 'Installed, but notifications are switched off for this app in the ' +
+                 'settings of this device. iPhone: Settings, Notifications, then this app. ' +
+                 'Android: hold the app icon, App info, Notifications.');
+    }
+    if (Notification.permission !== 'granted') {
+      return say('waiting', 'Installed. Notifications are not on yet: the box offers them in ' +
+                 'Messages when your first customer message arrives.');
+    }
+    // ALLOWED, BUT THIS BOX HOLDS NO REGISTRATION FOR IT. Asking again fires no prompt when permission is
+    // already granted; it hands the box the endpoint it lost.
+    // ONLY WHERE THE APP'S SERVICE WORKER IS IN CONTROL. Registering waits on it, and it controls
+    // /inbox/ alone, so on any other page the wait would never end and this would read
+    // "registering" forever. There, the true instruction is to open the app once.
+    if (!navigator.serviceWorker || !navigator.serviceWorker.controller ||
+        typeof window.ownboxEnableNotifications !== 'function') {
+      return say('open-app', 'Installed and allowed. Open the box from its Home Screen icon once ' +
+                 'and it finishes connecting this device.');
+    }
+    say('checking', 'Installed and allowed. Registering this device with the box…');
+    // AND NEVER A SPINNER THAT NEVER ENDS: after fifteen seconds it says it did not hear back.
+    var late = new Promise(function (done) {
+      setTimeout(function () { done({ ok: false, why: 'the box did not hear back in time' }); }, 15000);
+    });
+    return Promise.race([window.ownboxEnableNotifications(), late]).then(function (r) {
+      if (r && r.ok) { return say('connected', CONNECTED); }
+      say('failed', 'Installed and allowed, but the box could not register this device: ' +
+          ((r && r.why) || 'no reason given') + '.');
+    });
+  });
+})();
 """

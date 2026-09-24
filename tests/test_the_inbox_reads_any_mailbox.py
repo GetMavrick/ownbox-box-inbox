@@ -222,13 +222,24 @@ if (ROOT / "marketing" / "customer_voice" / "app.py").is_file():
 
 
     bs.clear_email()
-    for path in ("/inbox/setup", "/inbox/mailbox"):
+    # THE MAILBOX HAS ONE HOME NOW, /inbox/mailbox (owner, 2026-09-24: one place per setting);
+    # set-up links to it rather than carrying its own form, which is checked below.
+    for path in ("/inbox/mailbox",):
         page = c.get(path).get_data(as_text=True)
         words = text(page)
         ok(f"{path}: the provider list, Gmail first", '<select name="provider"' in page
            and page.index('value="gmail"') < page.index('value="yahoo"'))
         ok(f"{path}: every preset is offered", all(f'value="{k}"' in page for k in providers.PRESETS))
         ok(f"{path}: the server field for Another provider", 'name="host"' in page)
+        # ONLY WHEN IT MEANS SOMETHING: a Gmail buyer was shown an "IMAP server" box to leave
+        # empty. Hidden by CSS unless "Another provider" is picked (checked in Chromium for the
+        # PR); a browser without :has() still shows it, so nothing becomes unsettable.
+        ok(f"{path}: ...hidden unless Another provider is picked",
+           'class="fld-host"' in page
+           and '.compose:has(select[name="provider"]) .fld-host{display:none' in page
+           and 'option[value="other"]:checked) .fld-host{display:block' in page)
+        ok(f"{path}: the address and password carry labels, not only placeholders",
+           "Your email address" in words and "App password" in words)
         ok(f"{path}: THE APP PASSWORDS LINK, in a new tab",
            'href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer"' in page)
         ok(f"{path}: 'Not on Gmail?' lists the other providers and Microsoft's reason",
@@ -246,6 +257,9 @@ if (ROOT / "marketing" / "customer_voice" / "app.py").is_file():
                                        "password": "abcdabcdabcdabcd"})
     ok("an Outlook address is refused on the screen with Microsoft's reason",
        "Microsoft" in text(r.get_data(as_text=True)))
+    _setup = c.get("/inbox/setup").get_data(as_text=True)
+    ok("/inbox/setup carries no mailbox form, and links to its one home instead",
+       '<select name="provider"' not in _setup and 'href="/inbox/mailbox?from=setup"' in _setup)
     r = c.post("/inbox/mailbox", data={"user": "maria@gmail.com", "password": "abcdabcdabcdabcd"})
     ok("a form from before the provider field posts no provider, and that is Gmail",
        r.status_code in (302, 303) and stored().get("host") == "imap.gmail.com")

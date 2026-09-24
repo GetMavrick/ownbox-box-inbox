@@ -1301,41 +1301,54 @@ def _owner_session():
 
 
 def _people_page(body: str, code: int = 200):
-    return page("People", "narrow", body, title=f"{brand()} · People"), code
+    # THE BOX'S OWN SHELL, NOT THE OPERATOR'S. People is a buyer's screen, so it wears the look every
+    # System Settings page wears and sits in that menu, where an owner looks for it.
+    return _home.chrome("/settings/people", title="People",
+                        lede="Who can sign in to this box, and inviting someone new.",
+                        body=body), code
+
+
+def _note(text: str) -> str:
+    """One notice, at the top, in the words the person needs. Takes plain text; escapes it here."""
+    return f'<div class="card notice"><p>{html.escape(text)}</p></div>'
 
 
 def _people_list(notice: str = "") -> str:
     rows = []
     for u in state.list_users():
-        status = ("owner" if u.get("role") == "owner" else
-                  "removed" if not u.get("active") else
-                  "signed up" if u.get("has_password") else "invited, not joined yet")
+        status = ("Owner" if u.get("role") == "owner" else
+                  "Removed" if not u.get("active") else
+                  "Signed up" if u.get("has_password") else "Invited, not joined yet")
         uid = html.escape(str(u["id"]))
-        actions = ""
+        acts = []
         if u.get("role") != "owner":
+            # ONE INK PILL PER SCREEN, and it is Create invite link below. A person's own actions
+            # are outlines; Remove is the danger outline, and Restore undoes it.
             if u.get("active"):
-                actions = (f'<form method="post" action="/dash/people/{uid}/invite" style="display:inline">'
-                           f'<button class="btn" type="submit">New link</button></form> '
-                           f'<form method="post" action="/dash/people/{uid}/remove" style="display:inline">'
-                           f'<button class="btn" type="submit">Remove</button></form>')
+                acts = [("invite", "ghost", "New link"), ("remove", "danger", "Remove")]
             else:
-                actions = (f'<form method="post" action="/dash/people/{uid}/restore" style="display:inline">'
-                           f'<button class="btn" type="submit">Restore</button></form>')
-        rows.append(f'<tr><td>{html.escape(str(u.get("email") or ""))}</td>'
-                    f'<td>{html.escape(status)}</td><td>{actions}</td></tr>')
+                acts = [("restore", "ghost", "Restore")]
+        forms = "".join(f'<form method="post" action="/dash/people/{uid}/{a}">'
+                        f'<button class="{c}" type="submit">{w}</button></form>'
+                        for a, c, w in acts)
+        rows.append(f'<div class="row person"><div class="what">'
+                    f'<b>{html.escape(str(u.get("email") or ""))}</b>'
+                    f'<span class="quiet">{html.escape(status)}</span></div>'
+                    + (f'<div class="acts">{forms}</div>' if forms else "") + '</div>')
     cap = state.max_users()
-    seats = f"{state.count_active_users()} of {cap} people" if cap else f"{state.count_active_users()} people"
+    n = state.count_active_users()
+    seats = f"{n} of {cap} people" if cap else f"{n} {'person' if n == 1 else 'people'}"
     return f"""{notice}
-<section style="max-width:560px">
-  <label class="lbl mb">People who can sign in · {html.escape(seats)}</label>
-  <table>{''.join(rows)}</table>
-  <label class="lbl mb" style="margin-top:18px">Invite someone</label>
+<div class="card"><h2>People who can sign in</h2><p class="sub">{html.escape(seats)}</p>
+{''.join(rows)}</div>
+<div class="card"><h2>Invite someone</h2>
   <form method="post" action="/dash/people/invite">
-    <input type="email" name="email" placeholder="their email" required style="margin-bottom:10px">
-    <button class="btn-primary" type="submit">Create invite link</button>
+    <label for="invite-email">Their email address</label>
+    <input id="invite-email" type="email" name="email" autocomplete="off" placeholder="name@yourcompany.com" required>
+    <button type="submit">Create invite link</button>
   </form>
-  <p class="val">You send the link yourself. It works once, for {state.INVITE_DAYS} days, and they choose their own password.</p>
-</section>"""
+  <p class="quiet" style="margin-top:14px">You send the link yourself. It works once, for {state.INVITE_DAYS} days, and they choose their own password.</p>
+</div>"""
 
 
 # ── Managed: what the buyer's card is about to do, and how to stop it ────────────────────────────
@@ -1355,15 +1368,17 @@ def _people_list(notice: str = "") -> str:
 
 
 def _managed_page(body: str, code: int = 200):
-    return page("Managed", "narrow", body, title=f"{brand()} · Managed"), code
+    return _home.chrome("/dash/managed", title="Managed",
+                        lede="The service you bought with this box, and how to cancel it.",
+                        body=body), code
 
 
 def _managed_body() -> str:
     until = _claim.provisioned_managed_until()
     if not until:
         # Every box that nobody bought Managed for, which is most of them. Say it plainly and stop.
-        return ('<label class="lbl mb">This box does not have the Managed service.</label>'
-                '<p class="val">Nothing here renews and nothing is charged. The box is yours either way.</p>')
+        return ('<div class="card"><h2>This box does not have the Managed service</h2>'
+                '<p>Nothing here renews and nothing is charged. The box is yours either way.</p></div>')
     try:
         day = datetime.fromisoformat(until).strftime("%-d %B %Y")
     except ValueError:
@@ -1374,17 +1389,20 @@ def _managed_body() -> str:
     # lie told by us to the person who cancelled. Until the box can read subscription state (it cannot: that
     # needs a credential this machine must never hold), the honest move is to name what was BOUGHT and point
     # at who knows what is true now.
-    how = (f'<p><a class="btn-primary" href="{html.escape(portal)}" rel="noopener">Manage or cancel Managed</a></p>'
-           '<p class="val">That is Stripe, where the subscription lives and where its current state is. '
+    # THE ONE INK PILL ON THE SCREEN, because cancelling has to be as easy as it was to tick the
+    # box (owner, 2026-09-15, FTC click-to-cancel). A link drawn as the button, the full width of a
+    # thumb on a mobile device.
+    how = (f'<p><a class="btn" href="{html.escape(portal)}" rel="noopener">Manage or cancel Managed</a></p>'
+           '<p class="quiet">That is Stripe, where the subscription lives and where its current state is. '
            'They will email you a link to sign in. If you have already cancelled, Stripe will say so.</p>'
            if portal.startswith("https://") else
-           '<p class="val">To cancel, reply to your welcome email and we will stop it the same day.</p>')
-    return ('<label class="lbl mb">Managed is on.</label>'
-            f'<p class="val">You bought Managed with this box, with three months free to '
+           '<p>To cancel, reply to your welcome email and we will stop it the same day.</p>')
+    return ('<div class="card"><h2>Managed is on</h2>'
+            f'<p>You bought Managed with this box, with three months free to '
             f'<strong>{html.escape(day)}</strong>. Unless you cancel, it renews after that.</p>'
-            f'{how}'
-            '<p class="val">Cancelling Managed does not touch the box. It keeps running, it keeps your data, '
-            'and it stays yours — you would simply be running it yourself.</p>')
+            f'{how}</div>'
+            '<div class="card"><p>Cancelling Managed does not touch the box. It keeps running, it keeps your data, '
+            'and it stays yours — you would simply be running it yourself.</p></div>')
 
 
 # ── STOP EVERYTHING, AND IT IS THE BOX'S, NOT A MACHINE'S ───────────────────────────────────
@@ -1419,9 +1437,8 @@ def stop_everything():
     who = _owner_session()
     if who is None:
         return redirect("/dash/login") if session_user(request) is None else (
-            page("Stop", "narrow",
-                 '<p class="val">Only the box\'s owner can stop it.</p>',
-                 title=f"{brand()} · Stop"), 403)
+            _home.chrome("/dashboard", title="Stop everything",
+                         lede="Only the box's owner can stop it.", body=""), 403)
     # THE MARKER RECORDS WHO, because "why is nothing running?" is the question this answers and
     # `pause.status()` is where anyone looks for it. An email is the name a person recognises.
     pause.halt(f"dashboard:{who.get('email') or who.get('id') or 'owner'}")
@@ -1434,9 +1451,8 @@ def resume_everything():
     who = _owner_session()
     if who is None:
         return redirect("/dash/login") if session_user(request) is None else (
-            page("Resume", "narrow",
-                 '<p class="val">Only the box\'s owner can start it again.</p>',
-                 title=f"{brand()} · Resume"), 403)
+            _home.chrome("/dashboard", title="Start again",
+                         lede="Only the box's owner can start it again.", body=""), 403)
     pause.resume()
     log.info("dash.resume", user=who.get("id"), email=who.get("email"))
     return _pause_redirect()
@@ -1448,22 +1464,27 @@ def managed():
         return redirect("/dash/login?next=/dash/managed")
     if not _owner_session():
         # Billing is the owner's, but a colleague asking must not meet a blank 403 with no explanation.
-        return _managed_page('<p class="val">Only the box owner can see or change the Managed service.</p>', 403)
+        return _managed_page(_note("Only the box owner can see or change the Managed service."), 403)
     return _managed_page(_managed_body())
 
 
 def _invite_notice(email: str, token: str) -> str:
     link = f"{request.host_url.rstrip('/')}/join?t={quote(token, safe='')}"
-    return (f'<p class="val">Invite link for {html.escape(email)} — shown once, copy it now:<br>'
-            f'<code style="word-break:break-all">{html.escape(link)}</code></p>')
+    return (f'<div class="card notice"><h2>Invite link for {html.escape(email)}</h2>'
+            '<p>Shown once. Copy it now and send it to them yourself.</p>'
+            f'<p class="addr">{html.escape(link)}</p></div>')
 
 
+# TWO ADDRESSES, ONE PAGE. /settings/people is where the System Settings menu points, so the page
+# sits in that menu and its breadcrumb; /dash/people is the older address and keeps working for
+# anyone who saved it. The forms still post to /dash/people/…, unchanged.
+@blueprint.get("/settings/people")
 @blueprint.get("/dash/people")
 def people():
     if not session_ok(request):
-        return redirect("/dash/login?next=/dash/people")
+        return redirect(f"/dash/login?next={request.path}")
     if not _owner_session():
-        return _people_page('<p class="val">Only the box owner manages who can sign in.</p>', 403)
+        return _people_page(_note("Only the box owner manages who can sign in."), 403)
     return _people_page(_people_list())
 
 
@@ -1471,19 +1492,19 @@ def people():
 def people_invite():
     owner = _owner_session()
     if not owner:
-        return _people_page('<p class="val">Only the box owner manages who can sign in.</p>', 403)
+        return _people_page(_note("Only the box owner manages who can sign in."), 403)
     email = str(request.form.get("email", "") or "").strip().lower()
     try:
         person = state.add_user(email, role="member")
     except state.SeatsFull:
-        return _people_page(_people_list(f'<p class="val">This box is set up for {state.max_users()} people. '
-                                         'Remove someone first.</p>'), 409)
+        return _people_page(_people_list(_note(f"This box is set up for {state.max_users()} people. "
+                                               "Remove someone first.")), 409)
     except state.SharedPasswordRefused as e:
-        return _people_page(_people_list(f'<p class="val">{html.escape(str(e))}</p>'), 409)
+        return _people_page(_people_list(_note(str(e))), 409)
     except ValueError:
-        return _people_page(_people_list('<p class="val">Enter the email address of the person to invite.</p>'), 400)
+        return _people_page(_people_list(_note("Enter the email address of the person to invite.")), 400)
     if person.get("role") == "owner":
-        return _people_page(_people_list('<p class="val">That is the owner\'s own address.</p>'), 400)
+        return _people_page(_people_list(_note("That is the owner's own address.")), 400)
     token = state.create_invite(person["id"], created_by=owner["id"])
     log.info("auth.invite_created", user=person["id"], by=owner["id"])
     return _people_page(_people_list(_invite_notice(person["email"], token)))
@@ -1493,24 +1514,24 @@ def people_invite():
 def people_action(uid: str, action: str):
     owner = _owner_session()
     if not owner:
-        return _people_page('<p class="val">Only the box owner manages who can sign in.</p>', 403)
+        return _people_page(_note("Only the box owner manages who can sign in."), 403)
     person = state.get_user(uid)
     if not person or person.get("role") == "owner" or action not in ("invite", "remove", "restore"):
-        return _people_page(_people_list('<p class="val">That person is not on this box.</p>'), 404)
+        return _people_page(_people_list(_note("That person is not on this box.")), 404)
     if action == "remove":
         state.set_user_active(uid, False)        # every session they hold stops at its next request
         log.info("auth.revoked", user=uid, by=owner["id"])
-        return _people_page(_people_list(f'<p class="val">{html.escape(person["email"])} can no longer sign in.</p>'))
+        return _people_page(_people_list(_note(f"{person['email']} can no longer sign in.")))
     if action == "restore":
         try:
             state.add_user(person["email"], role="member")   # reactivation goes through the seat check
         except state.SeatsFull:
-            return _people_page(_people_list(f'<p class="val">This box is set up for {state.max_users()} people. '
-                                             'Remove someone first.</p>'), 409)
+            return _people_page(_people_list(_note(f"This box is set up for {state.max_users()} people. "
+                                                   "Remove someone first.")), 409)
         log.info("auth.restored", user=uid, by=owner["id"])
-        return _people_page(_people_list(f'<p class="val">{html.escape(person["email"])} can sign in again.</p>'))
+        return _people_page(_people_list(_note(f"{person['email']} can sign in again.")))
     if not person.get("active"):
-        return _people_page(_people_list('<p class="val">Restore that person before sending a new link.</p>'), 409)
+        return _people_page(_people_list(_note("Restore that person before sending a new link.")), 409)
     token = state.create_invite(uid, created_by=owner["id"])
     log.info("auth.invite_created", user=uid, by=owner["id"], reissued=True)
     return _people_page(_people_list(_invite_notice(person["email"], token)))

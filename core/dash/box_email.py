@@ -102,7 +102,9 @@ def _smtp_form() -> str:
         'spellcheck="false" autocomplete="username" required>'
         '<label for="s-pass">Password</label>'
         '<input id="s-pass" name="password" type="password" autocomplete="off" required>'
-        '<button type="submit" style="margin-top:16px">Save and send a test</button></form>'
+        # THE SECOND WAY IS THE OUTLINE. Resend, above, is the one ink pill on this screen; two
+        # identical pills for two alternatives read as two things to do (OSDev0, 2026-09-24).
+        '<button class="ghost" type="submit" style="margin-top:16px">Save and send a test</button></form>'
         '</details></div>')
 
 

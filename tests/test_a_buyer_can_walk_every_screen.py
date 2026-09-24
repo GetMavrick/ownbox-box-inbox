@@ -108,6 +108,10 @@ def links_on(html: str) -> set[str]:
 SKIP = {"/dash/logout", "/logout", "/dash/stop"}
 
 
+# EVERY PAGE THE WALK READ, so what a buyer reads on it can be checked too (section 2b).
+READ: dict[str, str] = {}
+
+
 def walk(client, start: str = "/dashboard") -> tuple[dict, dict]:
     """Breadth-first from `start`. Returns (status by path, where each path was found)."""
     seen: dict[str, int] = {}
@@ -137,6 +141,7 @@ def walk(client, start: str = "/dashboard") -> tuple[dict, dict]:
         if "html" not in (r.headers.get("Content-Type") or "").lower():
             continue
         body = r.get_data(as_text=True)
+        READ[path] = body
         for href in links_on(body):
             if href not in seen and href not in queue:
                 found_on.setdefault(href, path)
@@ -193,6 +198,45 @@ report("a connected box", done, done_from)
 new_screens = sorted(set(done) - set(fresh))
 print(f"       (connecting the box opened {len(new_screens)} more screens: "
       f"{', '.join(new_screens[:6])}{'…' if len(new_screens) > 6 else ''})")
+
+
+# ── 2b. what a buyer reads on every one of those screens ─────────────────────────────────
+print("\ntest_every_screen_reads_as_words")
+# FOUND BY LOOKING, 2026-09-24: the inbox's install page told every buyer "that is the
+# phone\\u2019s rule" — an escape printed as six characters, around a noun reserved for the
+# receptionist machine (CLAUDE.md, mobile first). Neither shows in a diff of a Python string, and
+# no suite read the page as a person does. This one now reads every page the two walks reached.
+def _words(html_: str) -> str:
+    html_ = re.sub(r"(?is)<(style|script)\b.*?</\1>", " ", html_)
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html_))
+
+
+_ESCAPE = re.compile(r"\\u[0-9a-fA-F]{4}|\\x[0-9a-fA-F]{2}")
+_RESERVED = re.compile(r"\b(phone|phones|ring|call|calls|dial|line|voice)\b", re.I)
+_esc_on, _noun_on = {}, {}
+for _p, _h in sorted(READ.items()):
+    _t = _words(_h)
+    if _ESCAPE.search(_t):
+        _esc_on[_p] = _ESCAPE.search(_t).group(0)
+    _m = _RESERVED.search(_t)
+    if _m:
+        _noun_on[_p] = _t[max(0, _m.start() - 40):_m.end() + 20]
+ok(f"no screen prints an escape sequence as text ({len(READ)} read)", not _esc_on, str(_esc_on))
+ok("no screen uses a noun reserved for the receptionist machine", not _noun_on, str(_noun_on))
+
+# A PROMISE THE BOX BREAKS IN THE DEMO'S OWN TAP. Found by looking, 2026-09-24: inbox Settings and
+# the mailbox page said "It never sends", while Send on an email thread goes out through the
+# buyer's own mailbox (marketing/customer_voice/inbox/reply.py -> email_channel.send). What holds
+# is narrower: it sends only what the buyer sends. The words "this mobile" went the same way, a
+# noun swapped for a reserved one that no longer read as English; the screens say "this device".
+_PROMISE = re.compile(r"\bnever sends\b|\bonly reads\b|\bthis mobile\b", re.I)
+_promise_on = {}
+for _p, _h in sorted(READ.items()):
+    _t = _words(_h)
+    _m = _PROMISE.search(_t)
+    if _m:
+        _promise_on[_p] = _t[max(0, _m.start() - 40):_m.end() + 20]
+ok("no screen says the box never sends, or 'this mobile'", not _promise_on, str(_promise_on))
 
 
 # ── 3. a member is not shown doors that are not theirs ───────────────────────────────────

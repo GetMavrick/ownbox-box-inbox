@@ -277,12 +277,18 @@ if _app_src:
   ok("...and the set-up route itself claims the set-up row, not Settings",
      'here="/inbox/settings"' not in _r_setup and 'here="/inbox/setup"' in _r_setup,
      "r_setup still tells the shell it is the Settings screen")
-  # DELIBERATELY NOT A SWEEP: `r_drafts` carries the identical line and must KEEP it — it is a
-  # screen of Settings with no row of its own. OSDev5 paid for that revert once already.
+  # DELIBERATELY NOT A SWEEP: the drafts screen belongs to Settings and must keep lighting it.
+  # OSDev5 paid for that revert once already. Since the inbox's Settings became a menu of its own
+  # (owner, 2026-09-24), drafts has a row there ("AI and drafts") and passes its own path; the
+  # section that row sits in is Settings, which is what this line has always protected.
   _r_drafts = _app_src[_app_src.find("def r_drafts("):]
   _r_drafts = _r_drafts[:_r_drafts.find("\ndef ", 10)]
+  _drafts_sec = shell.current("/inbox/drafts")
   ok("...while the drafts screen still lights Settings, which is its true home",
-     'here="/inbox/settings"' in _r_drafts)
+     'here="/inbox/settings"' in _r_drafts
+     or ('here="/inbox/drafts"' in _r_drafts and _drafts_sec is not None
+         and _drafts_sec.title == "Settings"),
+     f"section {getattr(_drafts_sec, 'key', None)!r}")
 
 # ── 7. OSDEV5'S GUARD, ON THE RENDERED PAGE ─────────────────────────────────────────
 # HIS TEST, TAKEN AS HE WROTE IT, because it holds something mine does not. Section 6 asks the

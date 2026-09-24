@@ -1,4 +1,12 @@
-"""The set-up screen — every credential the buyer supplies, on one screen, in the owner's order.
+"""The set-up screen — every step the buyer owns, in the owner's order, as a GUIDE.
+
+SET-UP HOLDS NO SETTINGS (owner, 2026-09-24, relayed by OSDev1): "there's only one place to add a
+key or change a setting", and "I don't think a setup tab should have actual settings on it … set up
+tab should be more like a guide or a wizard." docs/SCOPE_ONE_PLACE_PER_SETTING.md has the research
+behind the guide. So this suite now holds the guide's contract: every machine step as a row, in
+order, each linking to its one home with a return trip, status read from the box; and the forms,
+refusals and redirects it used to check on this screen are checked on those homes instead.
+
 
 Assigned by OSDev1 (2026-09-16): render `box_secrets.setup_state()` as a LOOP — Gmail first,
 Zernio second, the link out drawn disabled until the key is in — rather than three bespoke flows
@@ -149,12 +157,21 @@ def test_it_renders_the_contract_in_the_contract_s_order():
     seen = [words.find(t) for t in titles]
     ok("...in the contract's order, not alphabetical or arbitrary",
        all(i >= 0 for i in seen) and seen == sorted(seen), str(seen))
-    ok("...numbered, so a person knows there are two", "1. " + titles[0] in words)
+    html_ = c.get("/inbox/setup").get_data(as_text=True)
+    ok("...numbered, so a person knows how many there are",
+       re.search(r'class="gn"[^>]*>1<', html_) is not None)
+    from marketing.customer_voice import app as voice
     for s in machine_steps:
-        ok(f"{s['key']}: its reason is shown", s["why"][:40] in words)
-        ok(f"{s['key']}: its instructions are shown",
-           all(step[:30] in words for step in s["steps"]), s["steps"][0][:40])
-        ok(f"{s['key']}: its note is shown", s["note"][:40] in words)
+        href = voice._setup_home(s)[0]
+        ok(f"{s['key']}: its whole row links to its one home, with the way back",
+           re.search(rf'<a class="grow[^"]*" id="{s["key"]}" href="{re.escape(href)}\?from=setup"',
+                     html_) is not None, href)
+        # THE INSTRUCTIONS LIVE ON THE HOME NOW, which is where a person reads them while doing it.
+        home = _text(c.get(href).get_data(as_text=True))
+        ok(f"{s['key']}: its instructions are on its home",
+           all(step[:30] in home for step in s["steps"]), s["steps"][0][:40])
+        ok(f"{s['key']}: ...and its note", s["note"][:40] in home, s["note"][:40])
+    ok("SET-UP CARRIES NO FORM", "<form" not in html_ and 'type="password"' not in html_)
     # AND THE OTHER HALF, WHICH IS THE ASSERTION THE OWNER ACTUALLY ASKED FOR. A box step
     # reappearing here is the wizard growing back the two steps he had removed, and it would do
     # so silently — the page would simply be longer.
@@ -169,7 +186,7 @@ def test_the_renderer_knows_no_step_by_name():
     change here at all — so the render helpers are read and held to it."""
     src = pathlib.Path(__file__).resolve().parents[1] / "marketing/customer_voice/app.py"
     body = src.read_text()
-    for fn in ("_setup_field", "_setup_step"):
+    for fn in ("_setup_field", "_setup_step", "_guide_row"):
         start = body.find(f"def {fn}(")
         ok(f"{fn} exists to be read at all", start >= 0)
         if start < 0:
@@ -213,61 +230,64 @@ def test_every_status_the_stores_can_produce_has_a_sentence():
        str(_SET_STATUS.get("payment_required")))
 
 
-def test_the_link_out_is_dead_until_the_key_is_in_and_says_why():
-    """Sending someone to connect accounts before the box can read them is a step they repeat."""
+def test_the_link_out_is_not_on_set_up():
+    """CONNECTING HAPPENS ON THE STEP'S HOME. The social accounts page connects each platform once
+    the key is in; set-up only says where that is, so it never sends anyone to the vendor early."""
     _reset()
     app, c = _c()
     body = c.get("/inbox/setup").get_data(as_text=True)
     z = [e for e in bs.setup_state() if e.get("link")][0]
-    ok("the link out is drawn", _esc_in(body, z["link"]["label"]), z["link"]["label"])
-    ok("...but not as a link", f'href="{z["link"]["url"]}"' not in body)
-    ok("...marked disabled for anything reading the page aloud",
-       'aria-disabled="true"' in body)
-    ok("...and it says WHY it is waiting",
-       z["link"]["disabled_because"][:30] in _text(body), z["link"]["disabled_because"])
+    ok("set-up sends nobody to the vendor", f'href="{z["link"]["url"]}"' not in body)
+    ok("...and draws no dead vendor button either", 'aria-disabled="true"' not in body)
 
 
-def test_a_refusal_is_shown_against_the_step_it_came_from():
-    """A buyer with two forms open cannot tell which one a message at the top of the page is
-    about. The store's sentence is rendered inside the section that produced it."""
+def test_a_refusal_is_shown_on_the_home_the_guide_sent_him_to():
+    """A refused password is said on the page where it was typed: the mailbox's one home, arrived
+    at from set-up, which keeps the way back."""
     _reset()
     app, c = _c()
-    body = c.post("/inbox/setup",
-                  data={"step": "email", "user": "owner@acme.com",
+    body = c.post("/inbox/mailbox",
+                  data={"from": "setup", "user": "owner@acme.com",
                         "password": "hunter2hunter2hunter2"}).get_data(as_text=True)
     ok("the store's sentence is shown", "not an app password" in _text(body))
-    a, b = body.find('id="email"'), body.find('id="zernio"')
-    ok("both steps are on the page to tell apart", 0 <= a < b, f"{a} vs {b}")
-    if 0 <= a < b:
-        ok("...inside the step that produced it", "not an app password" in body[a:b])
-        ok("...and not against the other one", "not an app password" not in body[b:])
+    ok("...with the way back to set-up still there", 'href="/inbox/setup"' in body)
     ok("THE PASSWORD IS NEVER ECHOED", "hunter2" not in body)
     ok("...but the address they typed is kept", 'value="owner@acme.com"' in body)
     ok("and nothing was stored", not bs.email_credential())
 
 
-def test_saving_redirects_to_the_step_so_a_refresh_does_not_re_post():
+def test_saving_on_the_home_brings_him_back_to_the_guide():
     _reset()
     app, c = _c()
-    r = c.post("/inbox/setup", data={"step": "email", "user": "owner@acme.com",
-                                     "password": GOOD_PW})
+    r = c.post("/inbox/mailbox", data={"from": "setup", "user": "owner@acme.com",
+                                      "password": GOOD_PW})
     ok("a good credential redirects", r.status_code in (302, 303), str(r.status_code))
-    ok("...back to its own step", (r.headers.get("Location") or "").endswith("#email"),
+    ok("...back to the guide, at its own step",
+       (r.headers.get("Location") or "").endswith("/inbox/setup?done=email#email"),
        r.headers.get("Location"))
     ok("...and it is stored", bs.email_credential().get("user") == "owner@acme.com")
-    body = c.get("/inbox/setup").get_data(as_text=True)
+    body = c.get("/inbox/setup?done=email").get_data(as_text=True)
     ok("the step now reads connected, naming the mailbox",
        "Connected" in _text(body) and "owner@acme.com" in _text(body))
+    ok("...and the guide confirms it, read from the box", "is connected" in _text(body))
     ok("THE PASSWORD IS ON NO PAGE", FLAT_PW not in body and GOOD_PW not in body)
+    # A "done" the box does not agree with is not confirmed: the link is not the proof.
+    _reset()
+    ok("a claimed done that the box does not hold is not confirmed",
+       "is connected" not in _text(c.get("/inbox/setup?done=email").get_data(as_text=True)))
 
 
-def test_an_unknown_form_is_refused_rather_than_guessed_at():
-    """The POST is routed by a field the page itself wrote. Anything else is somebody probing."""
+def test_a_post_to_set_up_saves_nothing():
+    """Set-up has no forms. A post (an old page left open, a crafted request) stores nothing and
+    lands back on the guide."""
     _reset()
     app, c = _c()
-    r = c.post("/inbox/setup", data={"step": "../../etc", "user": "a@b.c"})
-    ok("an unknown step does not redirect as though it worked", r.status_code == 200,
-       str(r.status_code))
+    for data in ({"step": "email", "user": "a@b.c", "password": GOOD_PW},
+                 {"step": "../../etc", "user": "a@b.c"}):
+        r = c.post("/inbox/setup", data=data)
+        ok(f"a post ({data['step']}) goes back to the guide",
+           r.status_code == 303 and (r.headers.get("Location") or "").endswith("/inbox/setup"),
+           f"{r.status_code} {r.headers.get('Location')}")
     ok("...and nothing is stored", not bs.email_credential() and not bs.zernio_key())
 
 
@@ -346,10 +366,10 @@ if __name__ == "__main__":
                test_it_renders_the_contract_in_the_contract_s_order,
                test_the_renderer_knows_no_step_by_name,
                test_every_status_the_stores_can_produce_has_a_sentence,
-               test_the_link_out_is_dead_until_the_key_is_in_and_says_why,
-               test_a_refusal_is_shown_against_the_step_it_came_from,
-               test_saving_redirects_to_the_step_so_a_refresh_does_not_re_post,
-               test_an_unknown_form_is_refused_rather_than_guessed_at,
+               test_the_link_out_is_not_on_set_up,
+               test_a_refusal_is_shown_on_the_home_the_guide_sent_him_to,
+               test_saving_on_the_home_brings_him_back_to_the_guide,
+               test_a_post_to_set_up_saves_nothing,
                test_the_contract_never_hands_the_screen_a_secret,
                test_an_unreadable_contract_is_a_page_not_a_500,
                test_the_connect_button_now_reaches_the_set_up_screen,

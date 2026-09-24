@@ -187,7 +187,11 @@ padding:22px 22px;margin-bottom:16px}
 font-size:15px;list-style:none}
 .card summary::-webkit-details-marker{display:none}
 .card summary::after{content:"+";margin-left:6px;font-weight:400}
-.card details[open]>summary::after{content:"\2212"}
+.card details[open]>summary::after{content:"−"}
+details.fold>summary{color:var(--link);font-weight:600;font-size:15px;list-style:none}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary::after{content:"+";margin-left:6px;font-weight:400}
+details.fold[open]>summary::after{content:"−"}
 @media (min-width:720px){.card{padding:28px 32px}.lede{font-size:var(--t-lede)}}
 .row{display:flex;align-items:baseline;gap:10px;padding:8px 0;border-top:1px solid var(--hairline)}
 .row:first-of-type{border-top:0}
@@ -310,6 +314,25 @@ padding:10px 12px;margin:10px 0 0;word-break:break-all;user-select:all}
 .row.setting .act{color:var(--link);font-weight:600;white-space:nowrap;min-height:44px;
 display:flex;align-items:center}
 .row>.quiet{flex:1 1 320px;min-width:0}
+/* A LINK THAT IS THE ACTION wears the ink pill, full width until a pointer exists. */
+.card a.btn{display:flex;align-items:center;justify-content:center;min-height:var(--control);
+padding:12px 26px;border-radius:var(--r-pill);background:var(--accent);color:var(--on-accent);
+font-weight:600;text-decoration:none}
+.card a.btn:hover{opacity:.88;text-decoration:none}
+/* A PERSON: who they are on top, their two outlines under it, side by side. */
+.row.person{display:block;padding:14px 0}
+.row.person .what{display:flex;flex-direction:column;gap:2px;overflow-wrap:anywhere}
+.row.person .what .quiet{font-size:14px}
+.row.person .acts{display:flex;gap:10px;margin-top:10px}
+.row.person .acts form{flex:1}
+.row.person .acts button{margin-top:0}
+@media (min-width:560px){
+ .card a.btn{display:inline-flex}
+ .row.person{display:flex;align-items:center;gap:14px}
+ .row.person .what{flex:1;min-width:0}
+ .row.person .acts{margin-top:0;flex:none}
+ .row.person .acts form{flex:none}
+}
 
 """
 
@@ -1221,7 +1244,9 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                            {"key": "ai", "label": "AI account", "href": "/settings/ai",
                             "owner_only": True},
                            {"key": "mobile", "label": "Mobile app", "href": "/settings/mobile"},
-                           {"key": "email", "label": "Email", "href": "/settings/email",
+                           # OUTBOUND EMAIL, owner 2026-09-24: this is the email the box SENDS
+                           # (Morning Review, alerts), not the inbox it reads.
+                           {"key": "email", "label": "Outbound Email", "href": "/settings/email",
                             "owner_only": True},
                            {"key": "agent", "label": "AI coworkers", "href": "/settings/agent",
                             "owner_only": True},
@@ -1229,5 +1254,9 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                            {"key": "access", "label": "Server access",
                             "href": "/settings/access", "owner_only": True},
                            {"key": "move", "label": "Move your box", "href": "/settings/move",
+                            "owner_only": True},
+                           # PEOPLE HAD NO DOOR. The page existed and nothing on a box linked to
+                           # it, so inviting a colleague meant knowing the address.
+                           {"key": "people", "label": "People", "href": "/settings/people",
                             "owner_only": True},
                        ])

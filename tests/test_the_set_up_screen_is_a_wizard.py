@@ -89,23 +89,20 @@ ok("the bar is hidden from a screen reader, because the sentence already carries
    re.search(r'<div class="wiz-bar" aria-hidden="true">', _page(0)) is not None)
 
 
-# ── a finished step folds shut ────────────────────────────────────────────────────────────────
-print("\ntest_a_connected_step_stops_reciting_instructions")
+# ── a finished step is a done row that still opens its home ────────────────────────────────────
+print("\ntest_a_connected_step_reads_done_and_still_opens")
+# SET-UP IS A GUIDE NOW (owner, 2026-09-24; docs/SCOPE_ONE_PLACE_PER_SETTING.md): no step recites
+# instructions here at all, so nothing needs folding. A connected step is a row marked done; it
+# still links to its one home, and names the way back in.
 for _n in (0, 2, _TOTAL):
     _body = _page(_n).split("</style>", 1)[-1]      # past the inlined stylesheet
-    ok(f"{_n} connected: {_n} folded", _body.count('class="wstep done"') == _n,
-       str(_body.count('class="wstep done"')))
+    ok(f"{_n} connected: {_n} rows marked done", _body.count('class="grow done"') == _n,
+       str(_body.count('class="grow done"')))
     ok(f"{_n} connected: {_TOTAL - _n} still open",
-       _body.count('class="wstep"') == _TOTAL - _n, str(_body.count('class="wstep"')))
-
-# IT FOLDS, IT DOES NOT DELETE. `<details>` keeps the content in the page for find-in-page and
-# for a screen reader; a buyer who wants to change a connected step must still be able to reach
-# the fields, and the summary names the way in rather than leaving it to be discovered.
+       _body.count('class="grow"') == _TOTAL - _n, str(_body.count('class="grow"')))
 _done_page = _page(_TOTAL)
-ok("a folded step is still in the page, not removed", "<details" in _done_page)
+ok("a done row still opens its home", "from=setup" in _done_page)
 ok("...and names the way back into it", "Change" in _done_page)
-ok("...while the instructions it would have recited are behind the fold",
-   _done_page.count('class="wstep done"') == _TOTAL)
 
 
 # ── the class collision that cost a render ────────────────────────────────────────────────────
@@ -117,6 +114,7 @@ print("\ntest_the_wizard_does_not_wear_the_instruction_grids_class")
 ok("the instruction grid still owns .step", ".step{display:grid" in _app.CSS)
 ok("...and the wizard uses its own name", ".wstep" in _app.CSS)
 ok("...so no section is handed the grid", 'class="step"' not in _page(0))
+ok("...and the guide rows use their own name too", ".grow{" in _app.CSS)
 
 
 # ── CI runs this file ─────────────────────────────────────────────────────────────────────────
