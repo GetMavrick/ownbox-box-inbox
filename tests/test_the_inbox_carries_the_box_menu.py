@@ -185,8 +185,16 @@ _asked = set(re.findall(r"var\(--([a-z0-9-]+)\)", _home.RAIL_CSS))
 _light = re.search(r":root\{(.*?)\n\}", _app.CSS, re.S)
 _dark = re.search(r':root\[data-theme="dark"\]\{(.*?)\n\}', _app.CSS, re.S)
 ok("both palette blocks were found to check", bool(_light) and bool(_dark))
+# LIGHT IS THE BOX'S LOOK (docs/SCOPE_DESIGN_LANGUAGE.md step 6): the inbox links box.css, which
+# answers --ink, --line and --scrim under the same names, so light's answer is box.css with this
+# app's block on top. Dark must still answer every name itself: box.css is light-only.
+_box_css = pathlib.Path(_home.__file__).resolve().parent / "static" / "box.css"
+_box_root = re.search(r":root\s*\{([^}]*)\}", _box_css.read_text()) if _box_css.is_file() else None
+_box_names = set(re.findall(r"--([a-z0-9-]+)\s*:", _box_root.group(1))) if _box_root else set()
 for _name, _blk in (("light", _light), ("dark", _dark)):
     _have = set(re.findall(r"--([a-z0-9-]+)\s*:", _blk.group(1)))
+    if _name == "light":
+        _have |= _box_names
     ok(f"...and the {_name} palette answers every name the rail asks for",
        _asked <= _have, str(sorted(_asked - _have)))
 

@@ -185,10 +185,13 @@ def test_the_dot_is_drawn_from_tokens_and_keeps_its_edge_on_a_translucent_bar():
     rule = re.search(r"\.tab \.mark\{([^}]*)\}", CSS)
     ok("the rule exists", bool(rule), CSS[:120])
     body = rule.group(1) if rule else ""
-    ok("...coloured from the accent token, not a literal",
-       "var(--accent)" in body and "#" not in body, body)
-    # THE RING. The bar is translucent over whatever scrolls under it, so an accent dot can land
-    # on accent-coloured content and disappear.
+    # RUST, THE ONE DOT THE BOX'S LOOK ALLOWS (docs/BOX_DESIGN_REFERENCE.md §5: the highlight
+    # colour is for "text links, the notification dot"). The accent is the ink pill now, and an
+    # ink dot on the selected ink tab label would read as a smudge, not as something waiting.
+    ok("...coloured from the link token, not a literal",
+       "var(--href)" in body and "#" not in body, body)
+    # THE RING. The bar is translucent over whatever scrolls under it, so a rust dot can land
+    # on rust-coloured content and disappear.
     ok("...with a ring in the bar's own colour so it never vanishes",
        "box-shadow" in body and "var(--tab-bg)" in body, body)
     ok("...positioned off the centre line, which is stable at any tab count",

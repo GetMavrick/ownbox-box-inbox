@@ -214,17 +214,26 @@ for _n, _fam in (("head", "Archivo"), ("body", "Public Sans")):
     ok(f"...as a real woff2", _r.get_data()[:4] == b"wOF2", str(_r.get_data()[:4]))
     ok(f"...and as font/woff2", _r.headers.get("Content-Type") == "font/woff2",
        str(_r.headers.get("Content-Type")))
-    ok(f"{_fam} is declared against it",
-       f'@font-face{{font-family:"{_fam}"' in _app.CSS.replace("\n", ""))
+    # KEPT, NOT DECLARED: the inbox wears the box's Inter now (D1, docs/SCOPE_DESIGN_LANGUAGE.md),
+    # and these files stay served so a page cached before that release still draws.
 # THE WHOLE POINT: a single-tenant box installed to a home screen must not need a third party
 # to draw its own text, and must not report every open to one.
 ok("no page asks Google for a font",
    "fonts.googleapis.com" not in _b and "fonts.gstatic.com" not in _b)
 ok("...and neither does the stylesheet",
    "googleapis" not in _app.CSS and "gstatic" not in _app.CSS)
-ok("text is never invisible while a face loads", "font-display:swap" in _app.CSS)
+# THE TYPE IS THE BOX'S (owner, 2026-09-24, D1): Inter and Geist Mono, declared once in core's
+# box.css and served from /ui/font/, which the inbox links through look.head_tags().
+_box_css = (_ROOT.parents[1] / "core" / "dash" / "static" / "box.css").read_text()
+ok("the inbox page links the box's stylesheet", "/ui/box.css?v=" in _b)
+ok("...and the box's text face is preloaded, so the first paint is already Inter",
+   'href="/ui/font/sans.woff2"' in _b)
+ok("the inbox's type is the box's sans, never its own family",
+   "font:16px/1.5 var(--sans)" in _app.CSS and "Archivo" not in re.sub(r"(?s)/\*.*?\*/", "", _app.CSS)
+   and "Public Sans" not in re.sub(r"(?s)/\*.*?\*/", "", _app.CSS))
+ok("text is never invisible while a face loads", _box_css.count("font-display: swap") >= 2)
 ok("the fallback stack survives the first family",
-   '"Public Sans",-apple-system' in _app.CSS)
+   '"Inter", -apple-system' in _box_css)
 # A NAME IS A KEY, NEVER A PATH.
 ok("an unknown face is a 404", _c_.get("/inbox/font/nope.woff2").status_code == 404)
 ok("a traversal is a miss, not a file",

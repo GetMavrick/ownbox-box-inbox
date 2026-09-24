@@ -28,6 +28,7 @@ from datetime import date
 from flask import Blueprint, jsonify, redirect, request
 
 from core import dash, shell
+from core.dash import look as _look
 from core.dash.home import RAIL_CSS as _RAIL_CSS
 from core.logging import get_logger
 
@@ -177,26 +178,19 @@ def _scrub_token_from_the_url():
 # `dash.brand()` for the name, per box, exactly as every other surface — nothing here spells
 # anybody's name (owner, 2026-09-06: "Get Mavrick off this app. It's Brian MacDonald at the top.")
 CSS = """
-/* ── THE TWO TYPEFACES, SERVED BY THIS BOX ───────────────────────────────────────────────────
-   Owner, 2026-09-18: "A all the way." Archivo for headings, Public Sans for body.
-
-   SERVED FROM /inbox/font/, NOT FROM GOOGLE. A single-tenant box installed to a home screen
-   must not need a third party to draw its own text, and must not report every open to one.
-   `marketing/customer_voice/fonts/README.md` carries the reasoning and the OFL licences.
-
-   `swap`, SO TEXT IS NEVER INVISIBLE. The fallback stack paints immediately and the real face
-   replaces it; on a box serving its own 30 KB file that is a single frame. `block` would trade
-   a readable inbox for a tidier one, which is the wrong way round on the screen a person opens
-   twenty times a day.
-
-   ONE FILE PER FAMILY, VARIABLE WEIGHT. `font-weight: 400 700` covers the whole range this app
-   uses — 400 body, 500 read rows, 650-700 headings and unread names — out of 35 KB and 27 KB
-   rather than six static cuts. */
-@font-face{font-family:"Archivo";src:url("/inbox/font/head.woff2") format("woff2");
-  font-weight:400 700;font-style:normal;font-display:swap}
-@font-face{font-family:"Public Sans";src:url("/inbox/font/body.woff2") format("woff2");
-  font-weight:400 700;font-style:normal;font-display:swap}
+/* ── THE TYPEFACES ARE THE BOX'S ────────────────────────────────────────────────────────────
+   Inter for everything, Geist Mono for what a person types or copies: the ownbox.io faces,
+   served by core at /ui/font/ and declared once in core/dash/static/box.css, which this page
+   links through look.head_tags(). Owner, 2026-09-24 (D1 in docs/SCOPE_DESIGN_LANGUAGE.md),
+   superseding Archivo + Public Sans from 2026-09-18. The old files and /inbox/font/ stay, so
+   a page cached before this release still draws; nothing here asks for them any more. */
 *{box-sizing:border-box;margin:0;padding:0}
+/* A BARE BUTTON IS NOT A PILL HERE. box.css makes every <button> the full-width ink pill, which
+   is right for a form's one action and wrong for the menu, the search field's button or a chip.
+   `:where()` has no specificity, so every rule in this file still wins; this only undoes the
+   base where this file says nothing. The primary action is `.btn`, below, and it IS the pill. */
+:where(button:not(.btn)){width:auto;min-height:0;padding:0;background:none;color:inherit;
+  border:0;border-radius:0;font-weight:inherit;display:inline}
 
 /* ── DUAL TOKEN SET, WHITE BY DEFAULT ───────────────────────────────────────────────────────
    Owner, 2026-09-16, restating a ruling this file already quoted and did not follow: "we want
@@ -213,34 +207,26 @@ CSS = """
    Every colour on this page resolves through a token. A literal that only works in one theme is
    the classic unreadable-app bug, and tests/test_inbox_design.py refuses one. */
 :root{
-  --bg:#eff2f4; --surface:#ffffff; --raised:#ffffff;
-  /* MEASURED, NOT CHOSEN BY EYE. Every one of these clears WCAG AA (4.5:1) against BOTH grounds
-     this app uses — the white card AND the grey page behind it — because a token that passes on
-     one and fails on the other is a token that fails wherever you forgot to check.
-     --dimmer was #9ba1a6: 2.61:1 on white, 2.32:1 on grey. It carried the timestamp on every
-     conversation, the sender line inside every thread, the counts on the channel chips and the
-     LABELS ON THE TAB BAR. Not a subtle failure — a bit over half the required contrast, on the
-     furniture a person navigates by. tests/test_inbox_contrast.py computes these now. */
-  --ink:#1a1d1f; --dim:#4e5155; --dimmer:#6a6d71;
-  --line:#9da2a9; --hair:rgba(26,29,31,.07);
-  /* THE ACCENT IS DEEPER THAN THE BRAND ORANGE, and this is the one change here a person will
-     SEE rather than merely read more easily. #e05d38 carried white at 3.63:1 — which is the
-     label on every primary button and, worse, every reply this box has sent, because an outgoing
-     bubble is white on the accent. It is also used as link text throughout, at the same 3.63:1.
-     #b03f1c is the same hue, deepened until ONE value fixes all three: white on it 5.88:1, it as
-     text on white 5.88:1, and as the 'New' tag on its own soft ground 5.23:1.
-     (That third pair carried the 'New' pill until 2026-09-17; the avatar monogram uses it now.)
-     THE ALTERNATIVE WAS TO KEEP #e05d38 AND PUT DARK INK ON IT (4.88:1), as dark mode already
-     does. That preserves the exact brand orange for fills but leaves it failing everywhere it is
-     used as text, which is most places. Flagged to the owner; one line to switch back. */
-  --accent:#b03f1c; --accent-ink:#ffffff; --accent-soft:#fdefe9; --accent-line:rgba(176,63,28,.45);
-  /* THE OUTGOING BUBBLE IS ITS OWN TOKEN and so it kept the old orange after the accent moved —
-     which is exactly the drift these tests exist to catch. It is the reply this box sent, i.e.
-     the message the owner most wants to be able to read back. */
-  --bubble-in:#f2f4f6; --bubble-out:#b03f1c; --bubble-out-ink:#ffffff;
-  --bad:#c0392b; --bad-soft:#fdecea;
-  --lift:0 1px 2px rgba(16,24,32,.05), 0 8px 24px -12px rgba(16,24,32,.18);
-  --tab-bg:rgba(255,255,255,.88);
+  /* ── LIGHT IS THE BOX'S LOOK (docs/SCOPE_DESIGN_LANGUAGE.md step 6) ─────────────────────────
+     Every colour here is now a name in core/dash/static/box.css, so the inbox and the Base
+     Machine cannot drift apart: the cream ground, white cards, the site's ink, the ink pill for
+     the one primary action, and rust (--link) for links and a single dot only.
+     NOT DECLARED HERE, ON PURPOSE: --ink, --line, --card, --bad and --scrim. box.css defines them
+     under the same names, and pointing a name at itself is a cycle that resolves to nothing. Dark,
+     below, still sets its own values for all five.
+     tests/test_inbox_contrast.py follows each var() into box.css and measures the real value. */
+  --bg:var(--ground); --surface:var(--card); --raised:var(--card);
+  --dim:var(--ink-2); --dimmer:var(--ink-3);
+  --hair:var(--hairline);
+  /* THE ACCENT IS THE INK PILL. The site has no accent colour: the one action is ink, and rust
+     is only for a link or a dot. So every button, on-chip and step tick goes ink, and the
+     rules that are really links read --href instead. */
+  --accent:var(--ink); --accent-ink:var(--on-ink); --accent-soft:#ecebe6; --accent-line:var(--line);
+  --href:var(--link);
+  --bubble-in:var(--wash); --bubble-out:var(--ink); --bubble-out-ink:var(--on-ink);
+  --bad-soft:#fdecea;
+  --lift:0 1px 2px rgba(17,17,17,.05), 0 8px 24px -12px rgba(17,17,17,.16);
+  --tab-bg:rgba(246,244,239,.9);
   /* ── WHAT THE BOX'S RAIL NEEDS, ANSWERED IN THIS APP'S OWN COLOURS ────────────────────────
      `core.dash.home.RAIL_CSS` draws the menu and asks for these eleven names. Every one is an
      ALIAS onto a token already measured above rather than a new colour, which is the whole point
@@ -249,7 +235,7 @@ CSS = """
      scrim, and it is declared in this block so it counts as palette rather than a stray literal.
      --nav-ink IS WHY THIS COULD NOT BE A COPY. That rule shipped as `#333940`, a light-only
      literal on a rail the dashboard never renders dark; pointed at --dim it reads in both. */
-  --card:var(--surface); --rail:var(--surface); --hover:var(--bubble-in);
+  --rail:var(--surface); --hover:var(--bubble-in);
   --sel:var(--accent-soft); --nav-ink:var(--dim); --faint:var(--dimmer); --danger:var(--bad);
   /* THE CREST IS CORE'S COMPONENT AND WEARS CORE'S COLOUR, in both themes deliberately.
      Pointed at this machine's accent it came out pink here and amber on the dashboard — the
@@ -264,7 +250,6 @@ CSS = """
      and it caught the two earlier shapes of this change. */
   --av-ink:#7a5a14; --av-a:#ffe4a3; --av-b:#f7c7a8;
   --drawer-flat:none; --drawer-lift:var(--lift);
-  --scrim:rgba(26,29,31,.42);
   /* ── THE ORB'S GLASS ──────────────────────────────────────────────────────────────────────
      Owner, 2026-09-18: "make it look really cool like glass".
 
@@ -300,6 +285,7 @@ CSS = """
   --line:#262523; --hair:rgba(255,255,255,.08);
   --accent:#f08a5d; --accent-ink:#1a1008; --accent-soft:#2a1a12; --accent-line:rgba(240,138,93,.5);
   --bubble-in:#1f1f1f; --bubble-out:#f08a5d; --bubble-out-ink:#1a1008;
+  --href:#f08a5d;
   --bad:#f0857a; --bad-soft:#2a1613;
   --lift:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
   --tab-bg:rgba(13,13,13,.88);
@@ -332,7 +318,7 @@ body{background:var(--bg);color:var(--ink);
   /* PUBLIC SANS FIRST, THE OLD STACK BEHIND IT. The fallback is not decoration:
      it is what paints during `swap`, and what a box whose font file 404s keeps
      rendering in. */
-  font:16px/1.5 "Public Sans",-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  font:16px/1.5 var(--sans);
   -webkit-font-smoothing:antialiased;
   /* THE TAB BAR IS FIXED, so the last row of every screen would sit under it without this —
      AND THE ORB RISES 16px ABOVE THE BAR, which 64px did not account for. Measured on a box
@@ -376,9 +362,9 @@ h1 .daystamp{font-weight:500;font-size:13px;color:var(--dimmer);letter-spacing:0
 /* HEADINGS ARE THE ONLY PLACE THE DISPLAY FACE SPEAKS, and there is not much of it: every
    heading in this app is one word — Inbox, Search, Today, Settings. That is precisely why the
    greeting on Today was worth building; it is the one heading long enough to have a shape. */
-h1{font-family:"Archivo",-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+h1{font-family:var(--sans);
   font-size:22px;font-weight:670;letter-spacing:-.022em;margin:18px 0 2px;color:var(--ink)}
-.head .v,.hello h1{font-family:"Archivo",-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+.head .v,.hello h1{font-family:var(--sans)}
 h1 .chan{vertical-align:middle}
 .sub{color:var(--dim);font-size:15px;margin:0 0 14px}
 
@@ -429,7 +415,7 @@ a.row:active{background:var(--hair);border-radius:10px}
 .fig .l{margin-top:3px;color:var(--dim);font-size:13px;line-height:1.35}
 .quiet{color:var(--dim);font-size:15px;padding:18px 2px;line-height:1.55}
 .foot{margin-top:26px;color:var(--dimmer);font-size:13px}
-.foot a{color:var(--accent)}
+.foot a{color:var(--href)}
 
 /* ── a conversation row, copied from Kinso ─────────────────────────────────────────────────
    Their structure exactly: avatar, name with the time right beside it, one grey line of preview
@@ -613,7 +599,7 @@ a.row:active{background:var(--hair);border-radius:10px}
    the rows underneath it. */
 .found{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:11px 2px 0;
   color:var(--dim);font-size:13.5px;font-variant-numeric:tabular-nums}
-.found a{color:var(--accent);font-weight:540}
+.found a{color:var(--href);font-weight:540}
 
 /* ── Older and Newer ───────────────────────────────────────────────────────────────────────
    AT THE BOTTOM, WHERE HE RUNS OUT OF ROWS, because that is where a person is when they want
@@ -628,7 +614,7 @@ a.row:active{background:var(--hair);border-radius:10px}
    how many siblings there happen to be. */
 .pager .pg.next:only-child{margin-left:auto}
 .pg{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:12px;
-  background:var(--surface);box-shadow:var(--lift);color:var(--accent);font-size:15px;
+  background:var(--surface);box-shadow:var(--lift);color:var(--href);font-size:15px;
   font-weight:580}
 .pg:focus-visible{outline:2px solid var(--accent-line);outline-offset:2px}
 
@@ -806,7 +792,7 @@ iframe.mail{display:block;width:100%;border:0}
    a stack of fragments. */
 .dr{display:block;padding:3px 0;font-size:13px;line-height:1.35}
 .dk{display:block;color:var(--dimmer)}
-.dv{display:block;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.dv{display:block;overflow-wrap:anywhere;font-family:var(--mono)}
 @media (min-width:560px){
   .dr{display:flex;gap:10px}
   .dk{flex:0 0 88px;text-align:right}
@@ -823,8 +809,11 @@ iframe.mail{display:block;width:100%;border:0}
 .compose textarea:focus{outline:2px solid var(--accent-line);outline-offset:1px;
   border-color:transparent}
 .compose .btn{align-self:flex-end}
-.btn{font:inherit;font-size:15px;font-weight:570;border:0;border-radius:999px;padding:11px 22px;
-  background:var(--accent);color:var(--accent-ink);cursor:pointer;min-height:44px}
+.btn{font:inherit;font-size:var(--t-body-2);font-weight:var(--w-strong);border:0;
+  border-radius:var(--r-pill);padding:12px 26px;background:var(--accent);color:var(--accent-ink);
+  cursor:pointer;min-height:var(--control);width:100%}
+/* FULL WIDTH ON A MOBILE, ITS LABEL'S WIDTH ONCE A POINTER EXISTS (walk #12, mobile first). */
+@media (min-width:720px){.btn{width:auto}}
 .drafted{color:var(--dim);font-size:13px;display:flex;align-items:center;gap:7px}
 .drafted::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);
   flex:none}
@@ -887,7 +876,7 @@ iframe.mail{display:block;width:100%;border:0}
 
 .tab{position:relative}
 .tab .mark{position:absolute;top:3px;left:50%;margin-left:9px;width:8px;height:8px;
-  border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--tab-bg)}
+  border-radius:50%;background:var(--href);box-shadow:0 0 0 2px var(--tab-bg)}
 
 /* ── settings ──────────────────────────────────────────────────────────────────────────────
    Where the light/dark switch lives. Server-rendered like everything else: the switch is a LINK
@@ -1363,7 +1352,7 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
      Both cost one line and the failure they prevent is silent. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>{_esc(brand)} · Unified Inbox</title><style>{CSS}</style></head>
+<title>{_esc(brand)} · Unified Inbox</title>{_look.head_tags()}<style>{CSS}</style></head>
 <body{' class="ib"' if wide else ''}>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
 <div class="bar"><div class="bar-in">{_menu_button()}
@@ -1794,8 +1783,8 @@ def _drafts_row() -> str:
             '<span>On. Ownbox writes a reply for every message that arrives. You read it and '
             'you send it — nothing goes out on its own.</span>'
             '<span style="margin-top:8px">Writing with your own AI account. '
-            '<a href="/inbox/drafts" style="color:var(--accent)">Change</a> · '
-            '<a href="/inbox/drafts?off=1" style="color:var(--accent)">Turn off</a></span>'
+            '<a href="/inbox/drafts" style="color:var(--href)">Change</a> · '
+            '<a href="/inbox/drafts?off=1" style="color:var(--href)">Turn off</a></span>'
             '</div>')
 
 
@@ -1841,7 +1830,7 @@ def _channels_row() -> str:
     return ('<div class="setrow"><b>Your channels</b>'
             '<span>Connected. New messages arrive on their own.</span>'
             '<span style="margin-top:8px">'
-            '<a href="/inbox/connect" style="color:var(--accent)">Add or remove a channel</a>'
+            '<a href="/inbox/connect" style="color:var(--href)">Add or remove a channel</a>'
             '</span></div>')
 
 
@@ -2409,7 +2398,7 @@ def _stopped_note() -> str:
         return ""
     return ('<div class="quiet" style="margin-bottom:12px">Your box is stopped, so no new '
             'messages are arriving. You can still reply to the ones here. '
-            '<a href="/dashboard" style="color:var(--accent)">Start it again</a>.</div>')
+            '<a href="/dashboard" style="color:var(--href)">Start it again</a>.</div>')
 
 
 # ── THE ASK: the one thing that was never wired, and without it none of push exists ─────────────
@@ -2588,7 +2577,7 @@ def r_inbox():
                     + (f' of conversations matching <b>{_esc(q)}</b>' if q else "")
                     + '. Nothing has been lost — the list simply ends before here. '
                     f'<a href="{_esc(_url(q=q, channel=channel, waiting=waiting, from_ad=from_ad))}" '
-                    'style="color:var(--accent)">Back to the top</a></div>')
+                    'style="color:var(--href)">Back to the top</a></div>')
         elif q:
             body = (f'{top}{rail}'
                     f'<div class="quiet">Nothing matches <b>{_esc(q)}</b>'
@@ -2597,13 +2586,13 @@ def r_inbox():
                     + (f' on {_esc(_channel(channel))}' if channel else "")
                     + '. This searches what people wrote, not just their names. '
                     f'<a href="{_esc(_clear(channel, waiting, from_ad))}" '
-                    'style="color:var(--accent)">Show everything</a></div>')
+                    'style="color:var(--href)">Show everything</a></div>')
         elif waiting:
             body = (f'{top}{rail}'
                     '<div class="quiet">You have answered everyone'
                     + (f' on {_esc(_channel(channel))}' if channel else "")
                     + '. Nothing here is waiting on you. '
-                    f'<a href="{_esc(_url(channel=channel))}" style="color:var(--accent)">'
+                    f'<a href="{_esc(_url(channel=channel))}" style="color:var(--href)">'
                     'Show every conversation</a></div>')
         elif from_ad:
             # NOT "you have no leads". Nobody has clicked an ad INTO this box, which is a fact
@@ -2614,7 +2603,7 @@ def r_inbox():
                     + (f' on {_esc(_channel(channel))}' if channel else "")
                     + '. When somebody messages you by tapping an ad, they land here with the '
                     'ad they came from on the row. '
-                    f'<a href="{_esc(_url(channel=channel))}" style="color:var(--accent)">'
+                    f'<a href="{_esc(_url(channel=channel))}" style="color:var(--href)">'
                     'Show every conversation</a></div>')
         elif channel:
             body = (f'{top}{rail}'
@@ -3071,7 +3060,7 @@ def _compose(zcid: str, conv: dict, msgs: list[dict]) -> str:
             # that page: it is titled "Add your AI key", it carries the only `name="key"` input in
             # the app, and its button says "Turn drafts on".
             off_note = ('<div class="quiet" style="margin-top:8px">Drafts are off. '
-                        '<a href="/inbox/drafts" style="color:var(--accent)">'
+                        '<a href="/inbox/drafts" style="color:var(--href)">'
                         'Turn them on</a>.</div>')
         elif _ai == "needs_reauth":
             # SAME RULE AS THE LINE ABOVE, APPLIED TO THE OTHER STATE THAT HAS A FIELD BEHIND IT.
@@ -3079,14 +3068,14 @@ def _compose(zcid: str, conv: dict, msgs: list[dict]) -> str:
             # same page — so this goes straight there rather than through Settings.
             off_note = ('<div class="quiet" style="margin-top:8px">Drafts are paused — your AI '
                         'account no longer accepts this key. <a href="/inbox/drafts" '
-                        'style="color:var(--accent)">Paste a new one</a>.</div>')
+                        'style="color:var(--href)">Paste a new one</a>.</div>')
         elif _ai == "payment_required":
             # AND THIS ONE GOES TO SETTINGS, deliberately, because the fix is NOT a field on this
             # box — it is a card in the Anthropic console. Settings is where that sentence and its
             # link live; sending them to the key form would offer a control that cannot help.
             off_note = ('<div class="quiet" style="margin-top:8px">Drafts are paused — your AI '
                         'account needs credit. <a href="/inbox/settings" '
-                        'style="color:var(--accent)">See why</a>.</div>')
+                        'style="color:var(--href)">See why</a>.</div>')
     # `note` sits ABOVE the box because it introduces the draft inside it. `off_note` sits BELOW,
     # because §2.6 puts it there and the reason is the difference between the two: one labels
     # what is in the box, the other is an aside about what is not. Only one is ever present.
@@ -3308,7 +3297,7 @@ def _mailbox_row() -> str:
                 'connected yet.')
         verb = "Connect your inbox"
     return (f'<div class="setrow"><b>Your inbox</b><span>{said} '
-            f'<a href="{go}" style="color:var(--accent)">{verb}</a>.</span></div>')
+            f'<a href="{go}" style="color:var(--href)">{verb}</a>.</span></div>')
 
 
 @blueprint.get("/inbox/settings")
@@ -3355,7 +3344,7 @@ def r_settings():
       f'{switch}</div>'
       '<div class="setrow"><b>On your home screen</b>'
       '<span>Installed, this opens without a browser around it and can notify you. '
-      '<a href="/inbox/install" style="color:var(--accent)">Show me how</a>.</span></div>'
+      '<a href="/inbox/install" style="color:var(--href)">Show me how</a>.</span></div>'
       '<div class="setrow"><b>How this stays current</b>'
       '<span>The box checks for new messages on a schedule rather than holding a connection '
       'open. Pull down to check now.</span></div>'
@@ -3657,7 +3646,7 @@ def r_drafts():
       '<span>Ownbox writes replies in your voice using your own AI account. The words never '
       'pass through us, and you pay the provider directly instead of a markup on our bill.</span>'
       '<p style="margin:10px 0 0"><a href="https://console.anthropic.com/settings/keys" '
-      'target="_blank" rel="noopener" style="color:var(--accent)">How to get a key →</a></p>'
+      'target="_blank" rel="noopener" style="color:var(--href)">How to get a key →</a></p>'
       '</div></div>'
       + note +
       '<form class="compose" method="post" action="/inbox/drafts">'
@@ -3682,7 +3671,7 @@ def r_drafts():
       'so you find out here if it is wrong — not tomorrow, from an empty draft box.</p>'
       '<p class="quiet" style="margin-top:8px">You can change or remove this key any day. '
       'Nothing about it reaches us.</p>'
-      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--accent)">'
+      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--href)">'
       '← Settings</a></p>')
     return _shell(body, here="/inbox/settings"), 200
 
@@ -3973,7 +3962,7 @@ def _setup_consent(e: dict) -> str:
     warn = e.get("terms_warning") or ""
     links = "".join(
         f'<a href="{_esc(u)}" target="_blank" rel="noopener noreferrer" '
-        f'style="color:var(--accent)">{_esc(t)}</a>'
+        f'style="color:var(--href)">{_esc(t)}</a>'
         + ('<span class="quiet"> · </span>' if i < len(e.get("terms_links") or ()) - 1 else "")
         for i, (t, u) in enumerate(e.get("terms_links") or ()))
     return (
@@ -4061,7 +4050,7 @@ def _step_extras(e: dict) -> str:
     help_ = e.get("help") or {}
     if help_.get("url"):
         out += (f'<p style="margin:10px 0 0"><a href="{_esc(help_["url"])}" target="_blank" '
-                f'rel="noopener noreferrer" style="color:var(--accent);font-weight:600">'
+                f'rel="noopener noreferrer" style="color:var(--href);font-weight:600">'
                 f'{_esc(help_.get("label") or "")} &rarr;</a></p>')
     if e.get("alternatives"):
         out += ('<details style="margin-top:12px"><summary><b>'
@@ -4261,7 +4250,7 @@ def r_setup():
     # so `serviceWorker.ready` resolves on these screens and on no others.
     body += f'<script>{_push_client_js()}</script>'
     body += ('<p style="margin-top:22px"><a href="/inbox/settings" '
-             'style="color:var(--accent)">← Settings</a></p>')
+             'style="color:var(--href)">← Settings</a></p>')
     # THIS SCREEN LIGHTS ITS OWN ROW. Until #1374 there was no Set up row, so pointing `here` at
     # Settings was the honest answer — set-up had no seat in the rail and Settings was the nearest
     # true thing. Adding the row without moving this left the bar lighting Settings on the one
@@ -4348,7 +4337,7 @@ def r_mailbox():
                 + _mailbox_no_password_yet()
                 + _mailbox_steps()
                 + '<p style="margin-top:14px"><a href="/inbox/settings" '
-                  'style="color:var(--accent)">← Settings</a></p>')
+                  'style="color:var(--href)">← Settings</a></p>')
     elif status == "admin_disabled":
         body = ('<h1>Your administrator has switched this off.</h1>'
                 '<p class="quiet">App passwords are turned off for your Google organisation, so '
@@ -4357,7 +4346,7 @@ def r_mailbox():
                 'your box is affected.</p>'
                 + (f'<p class="quiet">Google said: {_esc(detail)}</p>' if detail else "")
                 + '<p style="margin-top:14px"><a href="/inbox/settings" '
-                  'style="color:var(--accent)">← Settings</a></p>')
+                  'style="color:var(--href)">← Settings</a></p>')
     elif who:
         saved = request.args.get("saved")
         body = ('<h1>Your inbox is set.</h1>'
@@ -4374,9 +4363,9 @@ def r_mailbox():
                 'the same unless you change it too.</span></div></div>'
                 + _mailbox_form(user=who, note=note, verb="Save this password")
                 + '<p style="margin-top:16px"><a href="/inbox/mailbox?off=1" '
-                  'style="color:var(--accent)">Stop reading this inbox</a></p>'
+                  'style="color:var(--href)">Stop reading this inbox</a></p>'
                 '<p style="margin-top:14px"><a href="/inbox/settings" '
-                'style="color:var(--accent)">← Settings</a></p>')
+                'style="color:var(--href)">← Settings</a></p>')
     else:
         body = ('<h1>Connect your inbox.</h1>'
                 '<p class="quiet">Ownbox reads the mail your customers send you, and drafts '
@@ -4400,7 +4389,7 @@ def r_mailbox():
                 + _mailbox_no_password_yet()
                 + _mailbox_steps()
                 + '<p style="margin-top:14px"><a href="/inbox/settings" '
-                  'style="color:var(--accent)">← Settings</a></p>')
+                  'style="color:var(--href)">← Settings</a></p>')
     return _shell(body, here="/inbox/settings"), 200
 
 
@@ -4583,7 +4572,7 @@ def _connect_key_form(note: str) -> str:
       # front of a buyer at the exact moment they are trying to find something is worse than one
       # extra click.
       '<p style="margin:10px 0 0"><a href="https://zernio.com" target="_blank" '
-      'rel="noopener" style="color:var(--accent)">Where to find your key &rarr;</a></p>'
+      'rel="noopener" style="color:var(--href)">Where to find your key &rarr;</a></p>'
       '</div></div>'
       + note +
       '<form class="compose" method="post" action="/inbox/connect">'
@@ -4595,7 +4584,7 @@ def _connect_key_form(note: str) -> str:
       '</form>'
       '<p class="quiet" style="margin-top:12px">Checked with your provider before it is saved, '
       'so you find out here if it is wrong — not tomorrow, from an empty inbox.</p>'
-      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--accent)">'
+      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--href)">'
       '&larr; Settings</a></p>')
 
 
@@ -4611,7 +4600,7 @@ def _connect_profile_chooser(choices: list) -> str:
       '<span>Your social account keeps more than one workspace. Pick the one this box is for — '
       'Ownbox will only ever read the channels inside it.</span>'
       f'{rows}</div></div>'
-      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--accent)">'
+      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--href)">'
       '&larr; Settings</a></p>')
 
 
@@ -4646,9 +4635,9 @@ def _connect_page(live: dict, just: str) -> str:
       + done +
       '<div class="card">' + "".join(rows) + '</div>'
       '<p class="quiet" style="margin-top:12px">Connected with your own social account. '
-      '<a href="/inbox/connect?off=1" style="color:var(--accent)">Disconnect it</a> and Ownbox '
+      '<a href="/inbox/connect?off=1" style="color:var(--href)">Disconnect it</a> and Ownbox '
       'stops reading immediately — nothing you have already received is deleted.</p>'
-      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--accent)">'
+      '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--href)">'
       '&larr; Settings</a></p>')
 
 
@@ -4656,8 +4645,8 @@ def _connect_trouble(sentence: str) -> str:
     """One sentence a person can act on, and a way back. Never a stack trace, never a code."""
     return ('<h1>Your channels.</h1>'
             f'<div class="card"><div class="setrow"><span>{_esc(sentence)}</span></div></div>'
-            '<p style="margin-top:14px"><a href="/inbox/connect" style="color:var(--accent)">'
-            'Try again</a> · <a href="/inbox/settings" style="color:var(--accent)">Settings</a>'
+            '<p style="margin-top:14px"><a href="/inbox/connect" style="color:var(--href)">'
+            'Try again</a> · <a href="/inbox/settings" style="color:var(--href)">Settings</a>'
             '</p>')
 
 
@@ -4805,7 +4794,7 @@ def _coworkers_row(owner: bool) -> str:
     if owner:
         return ('<div class="setrow"><b>AI coworkers</b>'
                 '<span>Let Claude, ChatGPT or Grok read this inbox and draft replies for you. '
-                '<a href="/settings/agent" style="color:var(--accent)">Connect one</a>.'
+                '<a href="/settings/agent" style="color:var(--href)">Connect one</a>.'
                 '</span></div>')
     return ('<div class="setrow"><b>AI coworkers</b>'
             '<span>This box can be connected to Claude, ChatGPT or Grok. The owner of the box '
@@ -4844,7 +4833,7 @@ def _draft_card(d: dict, n: int) -> str:
         + f'<span style="display:block;margin:10px 0 0;white-space:pre-wrap">'
           f'{_readable(str(d.get("body") or ""))}</span>'
         f'<span class="quiet" style="display:block;margin-top:8px">'
-        f'<a href="/inbox/inbox/{_esc(str(d["zcid"]))}" style="color:var(--accent)">'
+        f'<a href="/inbox/inbox/{_esc(str(d["zcid"]))}" style="color:var(--href)">'
         f'Open the conversation to edit it</a></span>'
         f'</span></label></div>')
 

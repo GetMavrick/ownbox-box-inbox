@@ -179,7 +179,7 @@ BASELINE = {
     "core/dash/__init__.py": 27,        # the front door moved onto the tokens (OSDev1, 2026-09-24)
     "core/dash/review.py": 19,
     "core/dash/box_settings.py": 4,
-    "marketing/customer_voice/app.py": 47,
+    "marketing/customer_voice/app.py": 31,   # step 6: the inbox on box.css (OSDev4)
     "marketing/customer_voice/inbox/render.py": 3,
     "marketing/lead_machine/machine_app.py": 9,
 }

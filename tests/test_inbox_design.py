@@ -12,6 +12,7 @@ absent rather than disabled, whether an empty state reads as calm or as broken. 
 Run: python tests/test_inbox_design.py
 """
 import os
+import pathlib
 import re
 import sys
 
@@ -99,6 +100,16 @@ LIGHT = _tokens(LIGHT_M.group(1)) if LIGHT_M else {}
 STAMP = _tokens(STAMP_M.group(1)) if STAMP_M else {}
 ok(f"the light palette has tokens to check ({len(LIGHT)})", len(LIGHT) >= 10, str(sorted(LIGHT)))
 
+# LIGHT IS THE BOX'S LOOK NOW (docs/SCOPE_DESIGN_LANGUAGE.md step 6): the page links
+# core/dash/static/box.css, and its light tokens lean on the names defined there. So the light BASE
+# a var() resolves against is box.css's :root with this page's :root on top, which is exactly the
+# cascade in the browser. box.css ships with core, so it is on every box that ships this suite.
+_BOX_CSS = pathlib.Path(APP).resolve().parents[2] / "core" / "dash" / "static" / "box.css"
+_box_m = re.search(r":root\s*\{([^}]*)\}", _BOX_CSS.read_text()) if _BOX_CSS.is_file() else None
+BOX = _tokens(_box_m.group(1)) if _box_m else {}
+ok(f"box.css gives the inbox its base tokens ({len(BOX)})", len(BOX) >= 20, str(_BOX_CSS))
+LIGHT_BASE = {**BOX, **LIGHT}
+
 
 # ── the rot guard ───────────────────────────────────────────────────────────────────────────
 print("\ntest_no_token_exists_in_only_one_theme")
@@ -108,15 +119,23 @@ print("\ntest_no_token_exists_in_only_one_theme")
 missing_stamp = sorted(set(LIGHT) - set(STAMP))
 ok("every light token is redefined for the explicit dark stamp"
    + (f" — MISSING: {missing_stamp}" if missing_stamp else ""), not missing_stamp)
-stray = sorted(set(STAMP) - set(LIGHT))
+stray = sorted(set(STAMP) - set(LIGHT_BASE))
 ok("dark introduces no token light has never heard of"
    + (f" — ONLY IN DARK: {stray}" if stray else ""), not stray)
 
 print("\ntest_every_token_used_is_actually_defined")
 used = set(re.findall(r"var\(\s*--([a-z][a-z0-9-]*)", CSS))
-undefined = sorted(used - set(LIGHT))
+undefined = sorted(used - set(LIGHT_BASE))
 ok("every var(--x) resolves to a token in the light base"
    + (f" — UNDEFINED: {undefined}" if undefined else ""), not undefined)
+# A BOX COLOUR A RULE USES DIRECTLY MUST BE REDEFINED FOR DARK. box.css is light-only, so a rule
+# reading var(--ink) straight from it would paint the site's black text on the dark ground.
+_rules_only = re.sub(r"(?s)(?<!\])\n:root\{[^}]*\}|:root\[data-theme=\"dark\"\]\{[^}]*\}", " ", CSS)
+_direct = set(re.findall(r"var\(\s*--([a-z][a-z0-9-]*)", _rules_only))
+_box_colours = {k for k, v in BOX.items() if v.startswith(("#", "rgb", "hsl"))}
+_unpaired = sorted((_direct & _box_colours) - set(LIGHT) - set(STAMP))
+ok("every box colour a rule reads directly is redefined for dark"
+   + (f" — LIGHT-ONLY IN DARK: {_unpaired}" if _unpaired else ""), not _unpaired)
 
 
 # ── the palette is closed ───────────────────────────────────────────────────────────────────

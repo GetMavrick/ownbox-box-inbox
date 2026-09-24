@@ -58,12 +58,54 @@ def ratio(fg: str, bg: str) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
-def _tokens(selector: str) -> dict:
+def _declared(selector: str) -> dict:
+    """Every custom property a block declares, whatever its value (a hex, a var(), an rgba)."""
     from marketing.customer_voice.app import CSS
     m = re.search(re.escape(selector) + r"\s*\{(.*?)\n\}", CSS, re.S)
     if not m:
         return {}
-    return dict(re.findall(r"--([\w-]+)\s*:\s*(#[0-9a-fA-F]{3,8})", m.group(1)))
+    body = re.sub(r"(?s)/\*.*?\*/", " ", m.group(1))
+    return {k: v.strip() for k, v in re.findall(r"--([\w-]+)\s*:\s*([^;]+);", body)}
+
+
+def _box() -> dict:
+    """core/dash/static/box.css's :root. LIGHT IS THE BOX'S LOOK (docs/SCOPE_DESIGN_LANGUAGE.md
+    step 6): the inbox's light tokens are var()s onto these names, so the value a person sees is
+    this file's. box.css ships with core, so it is present on every box that ships this suite."""
+    css = pathlib.Path(__file__).resolve().parents[1] / "core" / "dash" / "static" / "box.css"
+    m = re.search(r":root\s*\{([^}]*)\}", css.read_text()) if css.is_file() else None
+    if not m:
+        return {}
+    body = re.sub(r"(?s)/\*.*?\*/", " ", m.group(1))
+    return {k: v.strip() for k, v in re.findall(r"--([\w-]+)\s*:\s*([^;]+);", body)}
+
+
+def _cascade(selector: str) -> dict:
+    """What a name resolves against in this theme, lowest first: box.css, then the light block,
+    then (for dark) the dark block. The same order the browser applies them in."""
+    layers = [_box(), _declared(":root")]
+    if selector != ":root":
+        layers.append(_declared(selector))
+    out: dict = {}
+    for layer in layers:
+        out.update(layer)
+    return out
+
+
+def _tokens(selector: str) -> dict:
+    """name -> hex, FOLLOWING var() through the cascade. A value that is not a plain hex once
+    resolved (an rgba wash, a gradient) is left out: it cannot be scored against WCAG here, and
+    none of the PAIRS below uses one."""
+    names = _cascade(selector)
+    out = {}
+    for name in names:
+        v, seen = names[name], set()
+        while (m := re.fullmatch(r"var\(\s*--([\w-]+)\s*\)", v)) and m.group(1) not in seen:
+            seen.add(m.group(1))
+            v = names.get(m.group(1), "")
+        if re.fullmatch(r"#[0-9a-fA-F]{3,8}", v):
+            out[name] = v
+    return out
 
 
 # WHAT SITS ON WHAT. Read off the rules that use them, not imagined — the comment on each line is
@@ -80,6 +122,8 @@ PAIRS = (
     ("accent",          "accent_soft", AA,   "the 'New' tag"),
     ("accent_ink",      "accent",  AA,       "the label on every primary button"),
     ("bubble_out_ink",  "bubble_out", AA,    "a reply this box sent, in the thread"),
+    ("href",            "surface", AA,       "a link on a card: Change, Settings, See why"),
+    ("href",            "bg",      AA,       "a link on the page ground"),
 )
 
 
@@ -108,10 +152,16 @@ def test_dark_passes_aa():
 def test_the_two_themes_have_the_same_tokens():
     """A token that exists in one theme and not the other renders as `inherit` or as nothing at
     all in the theme that lacks it — which is the classic unreadable-in-dark-mode bug, and it is
-    invisible to anyone developing in the other one."""
-    light, dark = set(_tokens(":root")), set(_tokens(':root[data-theme="dark"]'))
+    invisible to anyone developing in the other one.
+
+    Light is box.css with this page's block on top, so a name box.css supplies counts as light's.
+    Dark must still redefine every name this page's light block declares."""
+    light = set(_declared(":root"))
+    base = light | set(_box())
+    dark = set(_declared(':root[data-theme="dark"]'))
     ok("dark defines every token light does", not (light - dark), str(sorted(light - dark)))
-    ok("...and light defines every token dark does", not (dark - light), str(sorted(dark - light)))
+    ok("...and dark defines nothing light has never heard of", not (dark - base),
+       str(sorted(dark - base)))
 
 
 def test_no_colour_is_written_straight_into_a_rule():
