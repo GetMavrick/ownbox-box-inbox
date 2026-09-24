@@ -27,25 +27,20 @@ import html as _html
 from flask import request
 
 from core import pause, report, shell
-from core.dash import blueprint, brand
+from core.dash import blueprint, brand, look
 
 _BASE = """
-:root{--bg:#f4f5f7;--card:#fff;--ink:#14171a;--dim:#6b7480;--faint:#98a1ac;--line:#9da2a9;
---hover:#f0f2f4;--sel:#eaedf1;--accent:#1a6ef5;--good:#0f8a4d;--warn:#9a6400;--danger:#c62828;
---accent-dark:#1559cc;--on-accent:#ffffff;
-/* `--danger` WAS #e0392b AND IT FAILED AA — 4.38:1 on a white card, 4.02:1 on the page,
-   against the 4.5:1 body text needs. It was already carrying the rail's own danger link
-   at that ratio; the outlined Stop button just put it somewhere nobody could miss. This
-   value measures 5.62:1 on the card and 5.15:1 on the page, and white on it for the
-   hover fill is 5.62:1. Contrast is the one design property that can be computed, so it
-   is computed rather than eyeballed — same rule as `tests/test_inbox_contrast.py`. */
---rail:#fbfbfc;--scrim:rgba(16,20,26,.42);
---nav-ink:#333940;--av-ink:#7a5a14;--av-a:#ffe4a3;--av-b:#f7c7a8;
---drawer-flat:0 0 0 rgba(0,0,0,0);--drawer-lift:0 12px 40px rgba(16,20,26,.18)}
+:root{--bg:var(--ground);--dim:var(--ink-3);--faint:var(--ink-3);--hover:var(--wash);
+--sel:var(--card);--accent:var(--ink);--accent-dark:var(--ink-2);--on-accent:var(--on-ink);
+--good:var(--ok);--danger:var(--bad);--rail:var(--ground);--nav-ink:var(--ink-2);
+--av-ink:var(--ink);--av-a:var(--card);--av-b:var(--wash);
+--drawer-flat:none;--drawer-lift:var(--shadow-lift)}
+/* the box's tokens come from its one stylesheet; these names are the older ones this page's rules
+   still read, each pointed at the token that replaced it */
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,
-"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;
+line-height:1.5;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
 svg{flex:none}
 
@@ -95,9 +90,9 @@ pointer-events:none;transition:opacity .2s ease}
    (2026-09-22): *"The name of the box needs to be just like the dashboard. I don't know why
    this one is different font"*. Core's rail is core's, so it names the stack it wants and stops
    depending on the room it is standing in. A machine's own content keeps its own font. */
-.rail{width:272px;flex:0 0 272px;background:var(--rail);border-right:1px solid var(--line);
+.rail{width:272px;flex:0 0 272px;background:var(--rail);border-right:1px solid var(--hairline,var(--line));
 padding:0 10px 14px;display:flex;flex-direction:column;
-font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+font:15px/1.5 var(--sans,-apple-system),-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 .who{display:flex;align-items:center;gap:11px;padding:15px 8px 13px}
 .who .av{width:38px;height:38px;border-radius:11px;flex:none;display:flex;align-items:center;
 justify-content:center;font-weight:700;font-size:16px;color:var(--av-ink);
@@ -119,18 +114,21 @@ border-radius:9px;color:var(--ink)}
 text-overflow:ellipsis}
 
 .nav{display:flex;flex-direction:column;gap:1px}
-.nav a{display:flex;align-items:center;gap:11px;min-height:42px;padding:8px 10px;
-border-radius:9px;color:var(--nav-ink);font-size:15px}
+.nav a{display:flex;align-items:center;gap:11px;min-height:44px;padding:8px 10px;
+border-radius:var(--r-sm,9px);color:var(--nav-ink);font-size:15px}
 .nav a:hover{background:var(--hover)}
-.nav a[aria-current]{background:var(--sel);color:var(--ink);font-weight:600}
+.nav a[aria-current]{background:var(--sel);color:var(--ink);font-weight:600;
+box-shadow:inset 0 0 0 1px var(--hairline,transparent)}
 .nav a.danger{color:var(--danger)}
+/* a new group starts: a little more room above it, and nothing else */
+.nav a.grp{margin-top:16px}
 .nav a .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nav a .out{color:var(--faint);margin-left:2px}
 .nav a .fwd{color:var(--faint);flex:none}
 .nav a .ic{color:var(--faint)}
 .nav a[aria-current] .ic{color:var(--ink)}
 
-.railfoot{margin-top:auto;padding:12px 10px 2px;border-top:1px solid var(--line);
+.railfoot{margin-top:auto;padding:12px 10px 2px;border-top:1px solid var(--hairline,var(--line));
 color:var(--faint);font-size:12.5px;line-height:1.4}
 .railfoot b{display:block;color:var(--dim);font-weight:600;font-size:12.5px}
 
@@ -160,10 +158,10 @@ color:var(--faint);font-size:12.5px;line-height:1.4}
 
 # ── THIS PAGE'S OWN CHROME: the bar that holds the hamburger, and the cards under it ─────────
 _PAGE = """.topbar{display:none;position:sticky;top:env(safe-area-inset-top,0px);z-index:30;
-align-items:center;gap:12px;height:52px;padding:0 6px 0 4px;background:var(--card);
-border-bottom:1px solid var(--line)}
+align-items:center;gap:12px;height:52px;padding:0 6px 0 4px;background:var(--ground);
+border-bottom:1px solid var(--hairline)}
 .navtoggle:focus-visible~.topbar .ham{outline:2px solid var(--accent);outline-offset:-2px}
-.mark{font-weight:650;letter-spacing:-.01em}
+.mark{font-weight:600;letter-spacing:-.01em}
 .grow{flex:1}
 
 @media (max-width:820px){
@@ -171,25 +169,40 @@ border-bottom:1px solid var(--line)}
 }
 .crumb{color:var(--dim);font-size:13px;margin-bottom:10px}
 .crumb b{color:var(--ink);font-weight:600}
-h1{margin:0 0 4px;font-size:26px;letter-spacing:-.01em}
-.lede{margin:0 0 22px;color:var(--dim)}
-.card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:16px 18px;
-margin-bottom:14px}
-.card h2{margin:0 0 2px;font-size:15px}
-.card .sub{color:var(--dim);font-size:13px;margin:0 0 12px}
-.row{display:flex;align-items:baseline;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+h1{margin:0 0 6px;font-size:var(--t-title);font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.lede{margin:0 0 24px;color:var(--ink-2);font-size:16px}
+.card{background:var(--card);border:1px solid var(--card-edge);border-radius:var(--r-md);
+padding:22px 22px;margin-bottom:16px}
+.card h2{margin:0 0 4px;font-size:17px;font-weight:600;letter-spacing:-.01em}
+.card .sub{color:var(--ink-2);font-size:15px;margin:0 0 12px}
+.card p,.card ul,.card ol{margin:0 0 12px}
+.card>:last-child,.card p:last-child{margin-bottom:0}
+.card ul,.card ol{padding-left:22px}
+.card li+li{margin-top:6px}
+.card h3{margin:22px 0 6px;font-size:16px;font-weight:600;letter-spacing:-.01em}
+.card h2+h3,.card h3:first-child{margin-top:8px}
+.card.notice{border-left:3px solid var(--warn)}
+.card details{margin:0 0 12px}
+.card summary{cursor:pointer;display:block;padding:11px 0;color:var(--link);font-weight:600;
+font-size:15px;list-style:none}
+.card summary::-webkit-details-marker{display:none}
+.card summary::after{content:"+";margin-left:6px;font-weight:400}
+.card details[open]>summary::after{content:"\2212"}
+@media (min-width:720px){.card{padding:28px 32px}.lede{font-size:var(--t-lede)}}
+.row{display:flex;align-items:baseline;gap:10px;padding:8px 0;border-top:1px solid var(--hairline)}
 .row:first-of-type{border-top:0}
 .card ol.steps{margin:4px 0 12px;padding-left:22px}
 .card ol.steps li{margin:8px 0;line-height:1.5}
-.card code{font-size:.92em;background:var(--hover);padding:1px 5px;border-radius:5px;
-overflow-wrap:anywhere}
+.card code{font-family:var(--mono);font-variant-ligatures:none;font-size:.9em;
+background:var(--wash);padding:1px 5px;border-radius:6px;overflow-wrap:anywhere}
 .card a.step{align-items:center;flex-wrap:nowrap;min-height:48px;color:var(--ink)}
 .card a.step b{flex:1;min-width:0;font-weight:600}
+.card a.step b small{display:block;font-size:13px;font-weight:400;color:var(--ink-3)}
 .card a.step .go{color:var(--dim);flex:none;font-size:14px}
 .card a.step .fwd{color:var(--faint);flex:none}
 a.row:hover{color:var(--accent)}
-.n{font-variant-numeric:tabular-nums;font-weight:650;min-width:2.2em}
-.big{font-size:32px;font-weight:680;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.n{font-variant-numeric:tabular-nums;font-weight:600;min-width:2.2em}
+.big{font-size:32px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .quiet{color:var(--dim)}
 .stale{color:var(--warn)}
 
@@ -202,10 +215,11 @@ a.row:hover{color:var(--accent)}
    styled out with the buttons"*.
    A CARD IS NOT A DESIGN SYSTEM. The rule that keeps this honest is that a control takes its
    colour from the same tokens the surface behind it does — no literal anywhere below. */
-label{display:block;font-size:13.5px;font-weight:600;margin:16px 0 6px}
+label{display:block;font-size:var(--t-label);font-weight:600;margin:16px 0 8px}
 input[type=text],input[type=password],input[type=email],input[type=url],input:not([type]),
-select,textarea{width:100%;font:inherit;font-size:16px;padding:11px 13px;
-border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
+select,textarea{width:100%;font:inherit;font-size:16px;font-weight:400;min-height:var(--control);
+padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);
+color:var(--ink)}
 input::placeholder{color:var(--faint)}
 select{appearance:auto;cursor:pointer}
 /* A DISABLED OPTION IS THE POINT OF THE PICKER, not a defect in it — see `_choice_picker`. */
@@ -229,14 +243,14 @@ select option:disabled{color:var(--faint)}
    into every page the box serves, so a quotation in it is a quotation a buyer receives — and his
    phrasing that morning used the very noun the naming ruling below now reserves. The doctrine
    file is read by developers and served to nobody, which is where a verbatim quote belongs. */
-button{display:block;width:100%;min-height:48px;font:inherit;font-size:16px;font-weight:600;
-padding:12px 24px;margin-top:16px;border:1px solid var(--accent);border-radius:9999px;
-background:var(--accent);color:var(--on-accent);cursor:pointer}
-button:hover{background:var(--accent-dark);border-color:var(--accent-dark)}
+button{display:block;width:100%;min-height:var(--control);font:inherit;font-size:16px;
+font-weight:600;padding:12px 26px;margin-top:16px;border:1px solid var(--accent);
+border-radius:var(--r-pill);background:var(--accent);color:var(--on-accent);cursor:pointer}
+button:hover{opacity:.88}
 /* THE SECOND BUTTON ON A SCREEN IS NEVER THE ONE WE WANT PRESSED — Cancel beside Finish, and the
    pair read identically while both were the browser's default grey. */
-button.ghost{background:var(--card);color:var(--ink);border-color:var(--line);font-weight:500}
-button.ghost:hover{background:var(--hover);border-color:var(--line)}
+button.ghost{background:var(--card);color:var(--ink);border-color:var(--line);font-weight:600}
+button.ghost:hover{background:var(--wash);border-color:var(--line);opacity:1}
 /* THE HALT IS NOT THE FRIENDLY BLUE ONE. Making every button accent-filled turned the control
    that stops the box into the most inviting thing on the dashboard — worse than the anonymous
    grey default it replaced, because grey at least did not ask to be pressed. Outlined rather
@@ -248,27 +262,27 @@ button.ghost:hover{background:var(--hover);border-color:var(--line)}
    theoretical — `test_the_box_shows_a_buyer_the_way_in` went red on the first draft of this very
    block, an hour after the same mistake with a route went red one rule further down. */
 button.danger{background:var(--card);color:var(--danger);border-color:var(--danger)}
-button.danger:hover{background:var(--danger);color:var(--on-accent);border-color:var(--danger)}
+button.danger:hover{background:var(--danger);color:var(--card);border-color:var(--danger);opacity:1}
 
 @media (min-width:560px){
  /* A POINTER CAN HIT A SMALL TARGET, so a desktop button is the width of what it says. */
- button{display:inline-block;width:auto;min-height:0;font-size:14px;padding:10px 22px}
+ button{display:inline-block;width:auto}
 }
 input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{
-outline:2px solid var(--accent);outline-offset:2px}
+outline:2px solid var(--ink);outline-offset:2px}
 /* THE TICK IS NOT A FIELD AND MUST NOT WEAR A FIELD'S LABEL. Bold, block and 16px above a
    checkbox makes a consent line shout; it is a sentence somebody reads, beside a box. */
 label.consent{display:flex;gap:10px;align-items:flex-start;margin:16px 0 0;
 font-size:14px;font-weight:400;line-height:1.45;cursor:pointer}
-label.consent input{width:22px;height:22px;flex:none;margin:0;accent-color:var(--accent)}
+label.consent input{width:22px;height:22px;flex:none;margin:0;accent-color:var(--ink)}
 /* `a{color:inherit}` IS RIGHT FOR THE RAIL AND WRONG FOR PROSE. Every terms link, console link
    and "Sign in to Claude" on the settings screens rendered as plain text — unfindable unless you
    happened to drag the pointer over it. Scoped to paragraphs so rows and the rail keep theirs. */
-.card p a{color:var(--accent)}
+.card p a{color:var(--link)}
 .card p a:hover{text-decoration:underline}
 .foot{margin-top:18px;font-size:14px}
-.foot a{color:var(--dim)}
-.foot a:hover{color:var(--accent)}
+.foot a{color:var(--link)}
+.foot a:hover{color:var(--link)}
 /* AN ADDRESS SOMEBODY HAS TO COPY BY HAND. It was unstyled prose; on a narrow screen it ran off
    the card. Monospace, a ground it can sit on, and it wraps rather than overflows.
 
@@ -280,8 +294,8 @@ label.consent input{width:22px;height:22px;flex:none;margin:0;accent-color:var(-
    ruling of 2026-09-22, relayed by OSDev4 in #1426.
    `tests/test_core_css_keeps_the_vocabulary.py` measures this rather than trusting this comment,
    and it caught this very paragraph naming a reserved route while explaining the rule. */
-.addr{font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-background:var(--bg);border:1px solid var(--line);border-radius:9px;
+.addr{font:15px/1.5 var(--mono);font-variant-ligatures:none;
+background:var(--bg);border:1px solid var(--hairline);border-radius:var(--r-xs);
 padding:10px 12px;margin:10px 0 0;word-break:break-all;user-select:all}
 /* A ROW WHOSE TRAILING TEXT IS A SENTENCE, not a number. The coworkers screen puts four of
    these under `Works with` and each one drove its instruction hard against the right edge.
@@ -290,6 +304,11 @@ padding:10px 12px;margin:10px 0 0;word-break:break-all;user-select:all}
    a member who is refused at it — which is exactly what
    `test_the_box_settings_are_the_boxs_own` measures, and exactly how it caught this block. */
 .row{flex-wrap:wrap}
+.row.setting{flex-wrap:nowrap;align-items:center;padding:12px 0}
+.row.setting .what{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.row.setting .what>span{font-size:15px}
+.row.setting .act{color:var(--link);font-weight:600;white-space:nowrap;min-height:44px;
+display:flex;align-items:center}
 .row>.quiet{flex:1 1 320px;min-width:0}
 
 """
@@ -414,7 +433,11 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
     except Exception:                            # noqa: BLE001 — no request, no owner
         _owner = False
     rows = []
+    # THE GAP BEFORE A NEW GROUP IS CARRIED, not dropped with its row: if the first row of the
+    # add-on group is one this person is not shown, the gap moves to the next row that is.
+    gap = False
     for it in got.items:
+        gap = gap or it.group_start
         if it.owner_only and not _owner:
             continue
         # OFF-BOX IS READ FROM THE HREF, never declared beside it. `away` still works for a row
@@ -429,7 +452,8 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
             # not a path this box routes. Without the exemption the Add a Machine row would be
             # dropped from every rail as unserved — measured, not reasoned.
             continue
-        cls = " ".join(c for c in (it.tone,) if c)
+        cls = " ".join(c for c in (it.tone, "grp" if gap and rows else "") if c)
+        gap = False
         cur = ' aria-current="page"' if shell.is_current(it, path) else ""
         # A LINK THAT LEAVES OPENS AWAY FROM THE BOX and carries `noopener`: the destination is
         # outside this box's control, and a menu row is not a reason to hand it this window.
@@ -488,8 +512,8 @@ def chrome(path: str, *, title: str, lede: str, body: str,
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
-<meta name="theme-color" content="#ffffff">
-<title>{_esc(name)} · {_esc(title)}</title><style>{CSS}</style></head><body>
+<meta name="theme-color" content="#f6f4ef">
+<title>{_esc(name)} · {_esc(title)}</title>{look.head_tags()}<style>{CSS}</style></head><body>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
 <div class="topbar">
 <label class="ham" for="navtoggle" role="button" aria-label="Menu">{_HAM}</label>
@@ -763,13 +787,19 @@ def _steps_left() -> str:
     for key, href in _SETUP_FIRST:
         e = steps.get(key)
         if e is not None and (key, e) in open_:
-            rows.append((str(e.get("title") or ""), href, _SETUP_VERB.get(key, "Set up")))
+            rows.append((str(e.get("title") or ""), href, _SETUP_VERB.get(key, "Set up"),
+                         bool(e.get("optional"))))
     for key, e in open_:
         if e.get("surface") == "machine" and not e.get("optional") and where:
-            rows.append((str(e.get("title") or ""), f"{where}#{key}", "Set up"))
+            rows.append((str(e.get("title") or ""), f"{where}#{key}", "Set up", False))
+    # AN OPTIONAL ROW SAYS SO, because the sentence above counts only what is required. Walk #6
+    # (OSDev4, #1483): the card read "3 things to connect" over FOUR rows. The mobile app is shown
+    # on purpose and not counted on purpose (see above); the word under it is what makes the
+    # number and the rows agree.
     return "".join(
-        f'<a class="row step" href="{_esc(h)}"><b>{_esc(t)}</b>'
-        f'<span class="go">{v}</span>{_FWD_CHEVRON}</a>' for t, h, v in rows if t)
+        f'<a class="row step" href="{_esc(h)}"><b>{_esc(t)}'
+        + ('<small>Optional</small>' if opt else '') + '</b>'
+        f'<span class="go">{v}</span>{_FWD_CHEVRON}</a>' for t, h, v, opt in rows if t)
 
 
 def _managed_card() -> str:
@@ -824,8 +854,15 @@ def _home() -> str:
     if not view.get("exists"):
         # NOT ZEROS. `view()` draws this line itself precisely so a page cannot invent a number
         # for a day nothing has been written for yet.
+        # ONE SENTENCE, NOT THE HEADING SAID TWICE. `empty_line` opens "No report yet —", which under
+        # a heading reading "Nothing to report yet" was the same news twice, and "the machine
+        # starting" named the builder's noun. The morning review keeps its own wording; this is
+        # the home screen's.
+        line = ("Your box writes its first report within fifteen minutes of starting, then one "
+                "every day. They are all kept here." if view.get("live") else
+                view.get("empty_line") or "")
         body = (f'<div class="card"><h2>Nothing to report yet</h2>'
-                f'<p class="sub">{_esc(view.get("empty_line") or "")}</p></div>')
+                f'<p class="sub">{_esc(line)}</p></div>')
     else:
         stale = view.get("stale")
         note = (f'<div class="card"><span class="stale">No report since {_esc(stale)} — '
@@ -843,7 +880,7 @@ def _home() -> str:
     # one button on this page that changes what the box is doing.
     body += _managed_card()
     body += _stop_card()
-    return chrome("/dashboard", title="Dashboard",
+    return chrome("/dashboard", title="Base Machine",
                   lede=f"What your box did — {view.get('label') or 'today'}.",
                   body=body)
 
@@ -996,11 +1033,11 @@ def _box_rows(*, owner: bool) -> str:
         # whole difference a person needs, and it saves the row a second sentence explaining it.
         press = ("Change" if e.get("status") == "connected" else "Set up")
         rows.append(
-            '<div class="row">'
-            f'<b style="flex:1;min-width:0">{_esc(e.get("title"))}</b>'
+            '<div class="row setting">'
+            f'<span class="what"><b>{_esc(e.get("title"))}</b>'
             f'<span class="{tone}">{_esc(said)}'
-            + (f' — {_esc(detail)}' if detail else '') + '</span>'
-            + (f'<a href="{_esc(href)}">{press}</a>' if href else '')
+            + (f' — {_esc(detail)}' if detail else '') + '</span></span>'
+            + (f'<a class="act" href="{_esc(href)}">{press}</a>' if href else '')
             + '</div>')
     if not rows:
         return '<p class="quiet">This box carries no box-level settings yet.</p>'
@@ -1062,8 +1099,12 @@ def settings():
                  '<div class="foot"><a href="/settings/access">Server access &rarr;</a></div>'
                  '<div class="foot"><a href="/settings/move">Move your box to your own '
                  'DigitalOcean account &rarr;</a></div></div>')
-    return chrome("/settings", title="Settings",
-                  lede="The parts of this box that belong to the box, not to one machine.",
+    # SYSTEM SETTINGS, THE NAME ON THE MENU ROW THAT OPENED IT. The page said "Settings" under a
+    # breadcrumb and a menu that both say System Settings; three names for one place. The lede said
+    # what it holds in the builder's words ("belong to the box, not to one machine"); it now names
+    # the things a person came here for.
+    return chrome("/settings", title="System Settings",
+                  lede="Your AI account, the mobile app, email and the server itself.",
                   body=body), 200
 
 
@@ -1144,22 +1185,27 @@ def add_machine():
                   body=body), 200
 
 
-# THE BOX'S HOME IS A CORE SECTION, and it is the only one core registers. Everything else in the
-# rail is a machine's to declare, which is what keeps this file from becoming the list of every
-# product we sell.
-shell.register_section("dashboard", order=0, machine="core", title="Dashboard",
+# THE BOX'S HOME IS A CORE SECTION. Everything else in the rail past the base group is a machine's
+# to declare, which is what keeps this file from becoming the list of every product we sell.
+# BASE MACHINE, NOT DASHBOARD. Owner, 2026-09-24: *"Dashboard should be re-named to: Base Machine.
+# This way people will know which machine they are working with."* Every other row in the menu is
+# a machine by name; this one said what kind of screen it was. The address stays /dashboard,
+# because installed apps and bookmarks open it.
+shell.register_section("dashboard", order=0, machine="core", title="Base Machine",
                        href="/dashboard", home=True, icon=_HOME_ICON)
 
-# SETTINGS IS THE SECOND, AND THE LAST. `order=90` leaves the whole middle of the rail to the
-# machines: a box with five of them still ends with Settings, which is where a person looks for
-# it. Owner, 2026-09-22, on where these belong: the system drawer.
+# ADD A MACHINE CLOSES THE ADD-ON GROUP. Owner, 2026-09-24: the add-on machines are *"unified inbox
+# and then add a machine"* — the machines a box has, then the way to add one more. `order=1000`
+# keeps it below any machine a box gains later, including one its owner builds.
 # ADD A MACHINE STAYS ON THE BOX. It left for ownbox.io/machines from 2026-09-22 — the owner's
 # destination then, before that page existed — and a buyer read it as leaving their own machine.
 # Owner, 2026-09-23, asked for a page on the box that explains building your own and links to the
 # shop from there; that page is `add_machine()` above, and the shop link rides on it once it exists.
-shell.register_section("add_machine", order=80, machine="core", title="Add a Machine",
-                       href="/add-machine", icon=_ADD_ICON)
+shell.register_section("add_machine", order=1000, machine="core", title="Add a Machine",
+                       href="/add-machine", icon=_ADD_ICON, group="addons")
 
+# SYSTEM SETTINGS SITS RIGHT BELOW BASE MACHINE. Owner, 2026-09-24: *"you can put System Settings
+# right below it."* Both are the box's own, so they are the base group; the machines follow.
 # SYSTEM SETTINGS, NOT SETTINGS. Owner, 2026-09-22. The box now has two settings screens by his
 # own ruling — this one for what the box shares, and each machine's own for what only it has —
 # and two rows both reading "Settings" is the menu telling somebody they are in the same place
@@ -1169,7 +1215,7 @@ shell.register_section("add_machine", order=80, machine="core", title="Add a Mac
 # 2026-09-17 (see `core/shell.py`). The AI account and the mobile app lead because they are the
 # two things he wants a new buyer to reach first. The five rows whose screens refuse a member are
 # `owner_only`, so a member is shown a shorter menu rather than doors that refuse them.
-shell.register_section("settings", order=90, machine="core", title="System Settings",
+shell.register_section("settings", order=10, machine="core", title="System Settings",
                        href="/settings", icon=_GEAR_ICON, items=[
                            {"key": "overview", "label": "Overview", "href": "/settings"},
                            {"key": "ai", "label": "AI account", "href": "/settings/ai",

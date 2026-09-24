@@ -202,7 +202,11 @@ def box_ai():
             '<p><b>1.</b> Open this link and sign in to Claude, then approve access.</p>'
             f'<p style="margin:12px 0"><a href="{_esc(url)}" target="_blank" '
             'rel="noopener noreferrer">Sign in to Claude &rarr;</a></p>'
-            f'<p class="quiet" style="word-break:break-all">{_esc(url)}</p>'
+            # THE LINK IS ENOUGH (#1483, finding 5). The raw URL is about 400 characters of query
+            # string, and printed under the button it was the loudest thing on the screen. It stays
+            # one tap away, folded, for the phone whose app will not open links in a browser.
+            '<details class="quiet"><summary>Link not opening? Copy it instead</summary>'
+            f'<p style="word-break:break-all;margin:8px 0 0">{_esc(url)}</p></details>'
             '<p><b>2.</b> Claude will show you a short code. Paste it here.</p>'
             '<form method="post" action="/settings/ai">'
             '<input type="hidden" name="do" value="code">'
@@ -227,8 +231,10 @@ def box_ai():
             # on this screen a subscription is not what you are connecting.
             + _consent(e) +
             '<button type="submit">Connect</button></form>'
-            '<p class="quiet" style="margin-top:12px">This box never sees your password. You sign '
-            'in at claude.com and paste back a short code.</p></div>')
+            # SAID ONCE. The line above already says the box never sees the password; this one
+            # used to say it again, two sentences apart, in the same card.
+            '<p class="quiet" style="margin-top:12px">You sign in at claude.com and paste back a '
+            'short code.</p></div>')
 
     # THE SECOND DOOR, under the first, only when the step declares one (a box mid-update may not).
     if e.get("alt_action_href"):
@@ -572,6 +578,29 @@ def box_phone_print_moved():
     return redirect("/settings/mobile/print", code=308)
 
 
+def _email_line() -> str:
+    """What email does alongside the app, said only as far as it is true on THIS box.
+
+    WALK #7 (OSDev4, docs/JOURNEY_WALK_2026-09-23.md): this page said "Email keeps arriving either
+    way" on a box that could not send email at all. A sold box ships with no way to send it until
+    its owner adds one (/settings/email, #1473), so the promise was false on every new box. Now it
+    reads the box: with email set up, the app is the faster of two ways; without, it is the way,
+    and the owner is shown where to add the other.
+    """
+    try:
+        from core import box_mail
+        sending = box_mail.is_configured()
+    except Exception:                            # noqa: BLE001 — unknown is not "yes"
+        sending = False
+    if sending:
+        return ('<p class="quiet">Your Morning Review and inbox alerts also arrive by email. This '
+                'is the faster way to hear about them, never the only way.</p>')
+    return ('<p class="quiet">This box has no email set up yet, so for now the app is how it '
+            'reaches you.'
+            + (' <a href="/settings/email">Set up email &rarr;</a>' if _is_owner() else '')
+            + '</p>')
+
+
 @blueprint.route("/settings/mobile")
 def box_mobile():
     """How to install this box as an app so it can notify you. It has never had a screen of its own.
@@ -599,39 +628,41 @@ def box_mobile():
 
     e = _step("mobile")
     ok, why = push.available()
-    body = ['<div class="card"><p>' + _esc(e.get("why") or "") + '</p></div>',
-            '<div class="card">' + _platform_cards() + '</div>']
+    body = []
+    # THE ORDER A PERSON NEEDS IT IN (walk, 2026-09-24): anything wrong first, then where this box
+    # stands, then how to install. It used to open with a card repeating the page's own lede and
+    # close on a card that began "One thing first" — the first thing, drawn last.
+    if not ok:
+        # AN HONEST EMPTY ANSWER BEATS FOUR STEPS THAT CANNOT SUCCEED. `why` is a sentence written
+        # for this screen, never an exception class (#1483 finding 8) — the class is in the log.
+        body.append('<div class="card notice"><p>One thing first: this box cannot send '
+                    f'notifications yet — {_esc(why)}. The steps below still work and are worth '
+                    'doing. The box tries again every time it updates; if this is still here after '
+                    'an update, tell us.</p></div>')
 
     # THE STATE, SAID AS NARROWLY AS THE SERVER CAN HONESTLY SAY IT. A subscription row proves SOME
     # device on this box is set up; it can never prove the one in your hand is, because the same
     # person reading this on a laptop has a mobile the box cannot see. So it reports the box, and
     # says out loud that the box is what it is reporting.
     detail = str(e.get("detail") or "").strip()
-    body.append('<div class="card"><p><b>Where this box stands</b></p>'
+    body.append('<div class="card"><h2>Where this box stands</h2>'
                 + (f'<p>{_esc(detail)}.</p>' if detail else
                    '<p>No device on this box has notifications switched on yet.</p>')
                 + '<p class="quiet">This is what the box can see across everybody who uses it. It '
                   'cannot tell whether the device you are holding is one of them — open the box '
                   'from its Home Screen icon and it will know.</p></div>')
 
+    body.append('<div class="card">' + _platform_cards() + '</div>')
+
     # WHEN THE ASKING HAPPENS, said plainly, because a set-up step that ends with nothing switched
     # on reads as a step that failed. It did not: the box is waiting on purpose.
-    body.append('<div class="card"><p><b>Turning them on</b></p>'
+    body.append('<div class="card"><h2>Turning them on</h2>'
                 '<p>The box asks you once, on the screen where you read your messages, the first '
                 'time something real arrives. It waits on purpose: a mobile only lets you answer '
                 'that question once, and saying no is hard to undo.</p>'
-                '<p class="quiet">Email keeps arriving either way. This is the faster way to hear '
-                'about it, never the only way.</p></div>')
+                + _email_line() + '</div>')
 
-    if not ok:
-        # AN HONEST EMPTY ANSWER BEATS FOUR STEPS THAT CANNOT SUCCEED. `why` is a sentence written
-        # for this screen, never an exception class (#1483 finding 8) — the class is in the log.
-        body.append('<div class="card"><p>One thing first: this box cannot send notifications yet '
-                    f'— {_esc(why)}. The steps above still work and are worth doing. The box tries '
-                    'again every time it updates; if this is still here after an update, tell us.'
-                    '</p></div>')
-
-    body.append('<div class="card"><p><b>For somebody else on this box</b></p>'
+    body.append('<div class="card"><h2>For somebody else on this box</h2>'
                 '<p>Whoever watches the inbox is often not whoever bought the box. This page '
                 'prints onto one sheet you can hand over or leave by the till — it carries no '
                 'password and nothing private, just these instructions and the address.</p>'
@@ -954,7 +985,9 @@ def box_agent():
             # still exists for an assistant that cannot sign in; it is a fallback, not the route.
             '<div class="card"><p><b>This box\'s address</b> — paste this into whichever '
             'assistant you use. It will send you here to sign in; there is no key to copy.</p>'
-            f'<p class="addr">{_esc(root)}/mcp'
+            # A PLACE TO BREAK AT EACH SLASH, so a long address wraps between its parts on a
+            # mobile screen rather than mid-word ("…/mc" then "p"). <wbr> copies as nothing.
+            f'<p class="addr">{_esc(root).replace("/", "/<wbr>")}/<wbr>mcp'
             '</p></div>'
             # EVERY ONE OF THESE IS LIVE. They connect TO the box over MCP; the box never calls
             # them and holds nothing of theirs, which is why this list needs nothing greyed out.
@@ -1056,7 +1089,7 @@ def _connect_card(where: dict, has_keys: bool, host_fp: str) -> str:
     else:
         first += '</p>'
     out.append(first)
-    out.append('<h2 style="margin-top:18px">If it refuses you</h2>'
+    out.append('<details><summary>If it refuses you</summary>'
                '<p><b>Permission denied (publickey)</b> — this box does not hold the key your '
                'computer offered. Either none has been added yet, or a different one was. On your '
                'computer run <b>ssh-keygen -lf ~/.ssh/id_ed25519.pub</b> and compare what it prints '
@@ -1067,7 +1100,7 @@ def _connect_card(where: dict, has_keys: bool, host_fp: str) -> str:
     if ip_cmd and cmd != ip_cmd:
         out.append('<p><b>Could not resolve hostname</b> — the name has not reached your network '
                    f'yet. Use <b>{_esc(ip_cmd)}</b> instead.</p>')
-    return "".join(out) + "</div>"
+    return "".join(out) + "</details></div>"
 
 
 @blueprint.route("/settings/access", methods=["GET", "POST"])
@@ -1151,24 +1184,30 @@ def box_access_screen():
         '<h3>Step 2 &mdash; Get your key</h3>'
         '<p>Type this and press Enter:</p>'
         '<p class="addr">cat ~/.ssh/id_ed25519.pub</p>'
+        '<p>A long row of text starting with <b>ssh-ed25519</b> appears. That is your key: select '
+        'all of it and copy it.</p>'
+        # THE STEPS STAY OPEN AND THE EXCEPTIONS FOLD. The page was seven mobile screens because
+        # every "if it says..." sat in line with the one thing most people will see. The words are
+        # unchanged; they sit one tap away, under the question a person would actually ask.
+        '<details><summary>It says "No such file", or asks to overwrite</summary>'
         '<ul>'
-        '<li><b>If a long row of text appears</b> starting with <b>ssh-ed25519</b> \u2014 that is your key. '
-        'Select all of it and copy it. Go to step 3.</li>'
         '<li><b>If it says "No such file or directory"</b> \u2014 you do not have a key yet. Type '
         '<b>ssh-keygen -t ed25519</b> and press Enter. It asks three questions: press <b>Enter</b> '
         'at each one without typing anything. Then run the <b>cat</b> command above again, and copy '
         'all of what it prints.</li>'
         '<li><b>If it asks to overwrite an existing key</b> \u2014 type <b>n</b> and press Enter. You '
         'already have one; run the <b>cat</b> command above to see it.</li>'
-        '</ul>'
+        '</ul></details>'
+        '<details><summary>Is it safe to paste?</summary>'
         '<p class="quiet">What you copy is the <b>public</b> half. It is safe to share and it '
         'is the only half you ever paste anywhere. The file without <b>.pub</b> on the end is your '
         '<b>private key</b> and must <b>never leave your computer</b> \u2014 not to us, not to '
-        'anyone. Nobody legitimate will ever ask you for it.</p>'
+        'anyone. Nobody legitimate will ever ask you for it.</p></details>'
 
         '<h3>Step 3 &mdash; Paste it below, then connect</h3>'
         '<p class="quiet">Paste it into the box below and press <b>Add this key</b>. Then go '
         'back to your terminal window and type the connect command shown further down this page.</p>'
+        '<details><summary>What you will see when you connect</summary>'
         '<ul>'
         '<li><b>If it asks "The authenticity of host ... can\u2019t be established"</b> and whether '
         'you are sure \u2014 that is normal, not an error. Type <b>yes</b> and press Enter. It only '
@@ -1178,7 +1217,7 @@ def box_access_screen():
         '<li><b>If it still says "Permission denied (publickey)"</b> \u2014 the key did not save. '
         'Check it appears in the list on this page, and that you pasted all of it including '
         'the <b>ssh-ed25519</b> at the front.</li>'
-        '</ul>'
+        '</ul></details>'
         '<form method="post" action="/settings/access">'
         '<label for="pubkey">Your public key</label>'
         '<textarea id="pubkey" name="key" rows="4" required '
@@ -1468,7 +1507,7 @@ def _move_form() -> str:
             '<label for="do-email">Your DigitalOcean account email</label>'
             '<input id="do-email" name="email" type="email" autocomplete="email" required '
             'placeholder="you@yourcompany.com">'
-            '<label><input type="checkbox" name="confirm" value="yes"> Send a full copy of this '
+            '<label class="consent"><input type="checkbox" name="confirm" value="yes"> Send a full copy of this '
             'box, and everything on it, to that account</label>'
             '<button type="submit">Send a copy to my account</button></form>')
 

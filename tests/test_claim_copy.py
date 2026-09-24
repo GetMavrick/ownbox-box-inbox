@@ -239,6 +239,21 @@ def test_the_claimed_state_offers_both_paths():
        page(f"/claim?c={ORDER}") == page("/claim?c=cs_live_wrong"))
 
 
+def test_the_password_rule_is_said_before_the_first_try():
+    print("test_the_password_rule_is_said_before_the_first_try")
+    # #1483, FINDING 10: nothing said how long the password had to be until a try failed, and the
+    # field came back empty, so it was typed again from nothing. The rule is now on the label,
+    # built from MIN_PASSWORD, and `minlength` lets the browser refuse a short one BEFORE it is
+    # sent — so the field keeps what was typed, and the box still never echoes a password.
+    unclaim()
+    provision()
+    html = page(f"/claim?c={ORDER}")
+    n = str(claim.MIN_PASSWORD)
+    ok("the claim form states the length before anyone types", f"at least {n} characters" in html)
+    ok("...and the browser enforces the same number the box does",
+       re.search(r'id="claim-pw"[^>]*minlength="' + n + '"', html) is not None)
+
+
 def test_a_short_password_is_a_typo_not_a_failed_claim():
     print("test_a_short_password_is_a_typo_not_a_failed_claim")
     # §2.7, written by OSDev4 after I flagged this as the one state §1 did not cover. Its ruling
@@ -405,16 +420,19 @@ def test_the_front_door_wears_the_product_not_the_operator_dashboard():
     ok("...and neither is the dashboard's footer", "powered by" not in html.lower())
     ok("...nor its breadcrumb", "crumb" not in html.lower())
 
-    # ASSERTED ON THE BUTTON, not on the stylesheet. The first version looked for the accent
-    # anywhere in the page and passed with the button turned dashboard-purple — the accent was
-    # still present in the focus ring and the link colour. The one element a buyer reads as "this
-    # is the product" is the thing they are about to press.
+    # THE LOOK IS THE BOX'S ONE STYLESHEET, not a copy of it (owner, 2026-09-24: one design
+    # language and token set, the ownbox.io one — docs/BOX_DESIGN_REFERENCE.md). Until then this
+    # screen carried its own Kinso-derived accent (owner, 2026-09-15), and this test pinned that
+    # hex on the button. What is pinned now is that the screen links the shared file by its hash,
+    # and that its own CSS names no colour, so the look cannot drift into a second copy.
     import re as _re
-    btn = _re.search(r"button\{[^}]*\}", html)
-    ok("the button carries the product's accent, not the dashboard's",
-       bool(btn) and "#e05d38" in btn.group(0), btn.group(0)[:90] if btn else "no button rule")
-    ok("it paints its own background rather than borrowing a host's",
-       "background:#eff2f4" in html.replace(" ", ""))
+    from core.dash import look as _look
+    ok("the buyer's first screen wears the box's one stylesheet, linked by its hash",
+       f"/ui/box.css?v={_look.version()}" in html)
+    own = "".join(_re.findall(r"<style>(.*?)</style>", html, _re.S))
+    ok("...and its own CSS names no colour, so the look lives in one file",
+       not _re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(", own), own[:120])
+    ok("it paints the box's ground, not a host's", "ui-card" in html and "--ground" not in own)
     ok("it is a page in its own right", html.lstrip().startswith("<!doctype html"))
     ok("...that fits a phone", "width=device-width" in html)
     ok("...and is never indexed — a claim link is not a public page",
@@ -436,6 +454,7 @@ if __name__ == "__main__":
     test_the_wrong_code_state_never_accuses_the_buyer()
     test_the_throttle_reads_as_protection_not_as_a_fault()
     test_the_claimed_state_offers_both_paths()
+    test_the_password_rule_is_said_before_the_first_try()
     test_a_short_password_is_a_typo_not_a_failed_claim()
     test_a_mistyped_address_never_shows_the_buyer_an_internal_name()
     test_no_refusal_kind_is_ever_visible_text()

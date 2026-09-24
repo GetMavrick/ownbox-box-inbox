@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -124,6 +125,13 @@ _card = _card[:_card.find("</div></div>") if "</div></div>" in _card else 4000]
 ok("the card's headline link goes to System Settings",
    '<a href="/settings">Set up your box' in h, _card[:400])
 ok("...and says how many things are waiting", "3 things to connect" in h, h[h.find("Finish"):][:160])
+# ONE HONEST COUNT. Walk #6: "3 things" sat over four rows. The fourth is the optional mobile app,
+# shown on purpose and not counted on purpose, and it now says so under its name.
+_rows = re.findall(r'<a class="row step"[^>]*>(.*?)</a>', _card, re.S)
+_counted = [r for r in _rows if "<small>Optional</small>" not in r]
+ok("...and the rows it counts are exactly that many, the rest marked Optional",
+   len(_counted) == 3 and len(_rows) == 4 and "Your mobile app<small>Optional</small>" in _card,
+   f"{len(_counted)} counted of {len(_rows)} rows")
 # THE AI ACCOUNT FIRST, THE MOBILE APP SECOND, THEN THE CHANNELS — the order he named them in.
 _order = [_card.find(x) for x in ('href="/settings/ai"', 'href="/settings/mobile"', f'href="{href}#')]
 ok("...then straight to the AI account, the mobile app, and the machine's channels, in that order",

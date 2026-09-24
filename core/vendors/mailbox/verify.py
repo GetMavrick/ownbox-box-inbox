@@ -138,9 +138,50 @@ def smtp_host_for(imap_host: str) -> str:
     nobody can answer.
     """
     host = str(imap_host or "").strip().lower() or IMAP_HOST_DEFAULT
+    from .providers import SUBMISSION
+    if host in SUBMISSION:
+        return SUBMISSION[host][0]                  # a preset: the provider's documented server
     if host.startswith("imap."):
         return "smtp." + host[len("imap."):]
     return SMTP_HOST_DEFAULT if host == IMAP_HOST_DEFAULT else host
+
+
+def smtp_port_for(imap_host: str) -> int:
+    """587 unless the provider documents only 465 (AOL). A typed-in server gets 587."""
+    from .providers import SUBMISSION
+    host = str(imap_host or "").strip().lower() or IMAP_HOST_DEFAULT
+    return SUBMISSION[host][1] if host in SUBMISSION else SMTP_PORT
+
+
+def open_submission(imap_host: str, timeout: float):
+    """A connection to this mailbox's sending server, encrypted and greeted, ready for LOGIN.
+
+    ONE PLACE FOR BOTH PORTS, so the checker and the real send can never disagree about how to
+    reach a server. 587: EHLO, STARTTLS, then EHLO AGAIN, because the capabilities (AUTH among
+    them) are re-sent on the encrypted channel and the list read in the clear is not trusted.
+    465: TLS from the first byte, then EHLO. There is no unencrypted path for a password.
+    Raises whatever smtplib raises; the callers already sort those into refused and unknown.
+    """
+    import smtplib
+    import ssl
+
+    host, port = smtp_host_for(imap_host), smtp_port_for(imap_host)
+    if port == 465:
+        conn = smtplib.SMTP_SSL(host, port, timeout=timeout, context=ssl.create_default_context())
+        conn.ehlo()
+        return conn
+    conn = smtplib.SMTP(host, port, timeout=timeout)
+    try:
+        conn.ehlo()
+        conn.starttls()
+        conn.ehlo()
+    except BaseException:
+        try:
+            conn.close()
+        except Exception:                           # noqa: BLE001 — the first error is the one
+            pass
+        raise
+    return conn
 
 
 def _may_ask(env=None) -> bool:
@@ -188,16 +229,11 @@ def verify_send(host: str, user: str, password: str) -> tuple[bool, str, str]:
 
     if not _may_ask():
         return False, "unknown", ""
-    host = smtp_host_for(host)
     conn = None
     try:
-        conn = smtplib.SMTP(host, SMTP_PORT, timeout=_SEND_TIMEOUT_S)
-        conn.ehlo()
-        conn.starttls()
-        # EHLO AGAIN AFTER STARTTLS, and it is not a formality: the server's advertised
-        # capabilities — AUTH among them — are re-sent on the encrypted channel, and a client that
-        # reuses the pre-TLS list is trusting something it read in the clear.
-        conn.ehlo()
+        # THE SAME DOOR THE REAL SEND USES (`open_submission`): the documented server and port for
+        # a preset, STARTTLS on 587 or TLS from the first byte on 465, EHLO re-read after STARTTLS.
+        conn = open_submission(host, _SEND_TIMEOUT_S)
         conn.login(user, password)
     except smtplib.SMTPAuthenticationError as e:
         return False, "refused", _smtp_refusal(str(e))

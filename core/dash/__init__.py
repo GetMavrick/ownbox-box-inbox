@@ -942,44 +942,28 @@ def login_form():
 # into a core door would also invert the dependency — core would depend on a department. So the
 # tokens are declared here.
 #
-# WHERE THE TOKENS COME FROM, because a copied hex with no lineage is how a design language
-# drifts: they are the INBOX's, which are Kinso's, taken under the owner's ruling (2026-09-15)
-# to start from the competitor's design exactly and put our own touches on it as a later pass.
-# Kinso is the reference for tokens and design language — owner, 2026-09-15 — and OUR MARKETING
-# SITE IS NOT: it is being re-skinned, so anything matched to it today is matched to something
-# that is about to change. The buyer meets this screen and then the inbox; those two agreeing is
-# the whole point, and the site is not in that path.
+# WHERE THE LOOK COMES FROM NOW: the box's ONE stylesheet (`core/dash/look.py`, `static/box.css`),
+# which carries the ownbox.io design language as OSDev0 measured it on the live site
+# (docs/BOX_DESIGN_REFERENCE.md). Owner, 2026-09-24: one design language and token set tonight,
+# before the investor recording, so the buyer meets one product from the site to the box.
+# Until then this screen carried its own copy of the inbox's Kinso-derived tokens (owner,
+# 2026-09-15); that ruling is the history here, not the current source. The CSS below is LAYOUT
+# ONLY — centring the card — and names no colour of its own, so the look lives in one file.
 #
 # LIGHT ONLY, DELIBERATELY. Every other screen in the product carries a dark toggle; this one is
 # seen once, before any preference exists to read, and a front door that guesses wrong in a dark
 # room is worse than one that simply looks like itself. It still paints its own background, so it
 # never borrows a host ground.
 _CLAIM_CSS = """
-*{box-sizing:border-box}
-html,body{margin:0;padding:0}
-body{background:#eff2f4;color:#1a1d1f;min-height:100dvh;display:flex;align-items:center;
-  justify-content:center;padding:24px 20px;
-  font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  -webkit-font-smoothing:antialiased}
-.wrap{width:100%;max-width:420px}
-.card{background:#fff;border-radius:18px;padding:26px 24px 24px;
-  box-shadow:0 1px 2px rgba(16,24,32,.05),0 8px 24px -12px rgba(16,24,32,.18)}
-h1{font-size:25px;line-height:1.2;font-weight:640;letter-spacing:-.015em;margin:0 0 8px;
-  text-wrap:balance}
-p{margin:0 0 16px;color:#6e7478}
-p.tight{margin-bottom:18px}
-label{display:block;font-size:13px;font-weight:560;color:#6e7478;margin:0 0 6px}
-input{width:100%;font:inherit;font-size:16px;padding:12px 14px;border:1px solid #e5eaed;
-  border-radius:12px;background:#fff;color:#1a1d1f;margin-bottom:14px}
-input:focus{outline:2px solid rgba(224,93,56,.45);outline-offset:1px;border-color:#e05d38}
-button{width:100%;font:inherit;font-size:16px;font-weight:600;padding:13px 16px;border:0;
-  border-radius:999px;background:#e05d38;color:#fff;cursor:pointer;min-height:48px}
-button:hover{background:#cf5330}
-button:focus-visible{outline:2px solid #1a1d1f;outline-offset:2px}
-.small{font-size:13.5px;color:#9ba1a6;margin:16px 0 0}
-.bad{color:#c0392b;background:#fdecea;border-radius:10px;padding:10px 12px;margin:0 0 14px;
-  font-size:14.5px}
-a{color:#e05d38}
+body{min-height:100dvh;display:flex;align-items:center;justify-content:center;
+  padding:var(--s-5) var(--s-4)}
+.wrap{width:100%;max-width:440px}
+.ui-card h1+p{color:var(--ink-2)}
+form>input:not([type=hidden])+label{margin-top:var(--s-4)}
+form>button{margin-top:var(--s-5)}
+label .small{font-weight:var(--w-regular);color:var(--ink-3)}
+.small{font-size:var(--t-small);color:var(--ink-3)}
+.bad{color:var(--bad);font-weight:var(--w-strong);font-size:var(--t-body-2)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 """
 
@@ -991,14 +975,18 @@ def _claim_page(body: str, code: int = 200, title: str = "Set up your box"):
     reason is the one already written above `_CLAIM_CSS`: the operator shell is the wrong dress
     for a screen a paying customer meets. Claim and sign-in are the same moment in a buyer's
     week — one sets the password, the other uses it — and they wore two different designs.
+
+    /join WEARS IT TOO (2026-09-24). An invited teammate's first screen was the operator shell —
+    the same "why is this page so weird looking" the owner asked of sign-in.
     """
+    from core.dash import look as _look       # here, not at import: look.py imports this module
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1,'
             f'viewport-fit=cover">'
-            f'<meta name="theme-color" content="#eff2f4">'
+            f'<meta name="theme-color" content="#f6f4ef">'
             f'<meta name="robots" content="noindex,nofollow">'
-            f'<title>{html.escape(title)}</title><style>{_CLAIM_CSS}</style></head>'
-            f'<body><div class="wrap"><div class="card">{body}</div></div></body></html>'), code
+            f'<title>{html.escape(title)}</title>{_look.head_tags()}<style>{_CLAIM_CSS}</style>'
+            f'</head><body><div class="wrap"><div class="ui-card">{body}</div></div></body></html>'), code
 
 
 def _claim_states():
@@ -1140,8 +1128,12 @@ def _claim_form_body(code: str, *, email: str = "", problem: str = "") -> str:
     <label for="claim-email">Your email address</label>
     <input id="claim-email" type="email" name="email" autocomplete="username"
            value="{html.escape(email)}" required>
-    <label for="claim-pw">Choose a password</label>
-    <input id="claim-pw" type="password" name="password"
+    <!-- THE RULE BEFORE THE FIRST TRY, NOT AFTER IT (#1483, finding 10). The number comes from
+         MIN_PASSWORD, like the refusal does, so the two cannot disagree. `minlength` lets the
+         browser refuse one under that length before it is sent, so what was typed stays in the field;
+         the box still checks, and still never sends a password back into the page. -->
+    <label for="claim-pw">Choose a password <span class="small">— at least {_claim.MIN_PASSWORD} characters</span></label>
+    <input id="claim-pw" type="password" name="password" minlength="{_claim.MIN_PASSWORD}"
            autocomplete="new-password" required>
     <button type="submit">Create my login</button>
   </form>
@@ -1525,27 +1517,26 @@ def people_action(uid: str, action: str):
 
 
 # ── joining from an invite link: the invited person chooses their own password ────────────────
-_JOIN_REFUSED = ('<p class="val">This invite link can\'t be used. It may have been used already, or it '
+_JOIN_REFUSED = ('<h1>This invite can\'t be used.</h1><p>It may have been used already, or it '
                  'expired. Ask the person who invited you for a new one.</p>')
 
 
 def _join_page(body: str, code: int = 200):
-    return page("Join", "narrow", body, title=f"{brand()} · Join"), code
+    return _claim_page(body, code, title=f"{brand()} · Join")
 
 
 def _join_form(token: str, email: str, problem: str = "") -> str:
-    note = f'<p class="val">{html.escape(problem)}</p>' if problem else ""
-    return f"""{note}
-<section style="max-width:380px">
-  <label class="lbl mb">Choose your password</label>
-  <p class="val">You'll sign in as {html.escape(email)}.</p>
+    note = f'<p class="bad">{html.escape(problem)}</p>' if problem else ""
+    return f"""<h1>Join the box.</h1>
+  <p>You'll sign in as {html.escape(email)}.</p>
+  {note}
   <form method="post" action="/join">
     <input type="hidden" name="t" value="{html.escape(token)}">
-    <input type="password" name="password" placeholder="a password ({_claim.MIN_PASSWORD}+ characters)"
-           autocomplete="new-password" required style="margin-bottom:10px">
-    <button class="btn-primary" type="submit">Join</button>
-  </form>
-</section>"""
+    <label for="join-pw">Choose a password <span class="small">— at least {_claim.MIN_PASSWORD} characters</span></label>
+    <input id="join-pw" type="password" name="password" minlength="{_claim.MIN_PASSWORD}"
+           autocomplete="new-password" required>
+    <button type="submit">Join</button>
+  </form>"""
 
 
 @blueprint.get("/join")
@@ -1562,7 +1553,7 @@ def join_submit():
     ip = _client_ip()
     wait = _block_seconds(ip)
     if wait:
-        resp = make_response(_join_page(f'<p class="val">Too many attempts. Try again in {wait}s.</p>', 429))
+        resp = make_response(_join_page(f'<h1>Too many tries.</h1><p>Try again in {wait}s.</p>', 429))
         resp.headers["Retry-After"] = str(wait)
         return resp
     token = str(request.form.get("t", "") or "")[:200]
@@ -1661,3 +1652,7 @@ from core.dash import home as _home  # noqa: E402,F401
 # is registered on an app.
 from core.dash import box_settings as _box_settings  # noqa: E402,F401
 from core.dash import box_email as _box_email  # noqa: E402,F401 — its own file, same drawer
+
+# THE BOX'S ONE LOOK: the stylesheet and fonts every screen links (`look.head_tags()`), served from
+# the box itself. Imported HERE for the same reason as the two above.
+from core.dash import look as _look  # noqa: E402,F401

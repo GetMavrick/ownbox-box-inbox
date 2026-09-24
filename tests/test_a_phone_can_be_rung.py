@@ -87,6 +87,43 @@ else:
        len(raw) == 65 and raw[0] == 4, f"{len(raw)} bytes, first byte {raw[0] if raw else None}")
 
 
+
+print("\ntest_a_broken_crypto_library_is_a_sentence_in_ci_too")
+# THE CASE ABOVE ONLY RUNS WHERE CRYPTO IS MISSING, AND CI HAS CRYPTO — so on its own it never runs
+# where it would catch anything (OSDev1, 2026-09-23). This one breaks the import on purpose, the
+# way it broke for real: a native wheel that panics raises a BaseException subclass, not an
+# ImportError. It must come back as a sentence, and the class name must stay in the log.
+import builtins  # noqa: E402
+
+
+class PanicException(BaseException):
+    """Stands in for pyo3_runtime.PanicException, which inherits from BaseException."""
+
+
+_real_import = builtins.__import__
+
+
+def _panicking_import(name, *args, **kwargs):
+    if name == "cryptography" or name.startswith("cryptography."):
+        raise PanicException("Python API call failed")
+    return _real_import(name, *args, **kwargs)
+
+
+builtins.__import__ = _panicking_import
+try:
+    have_broken, why_broken = push.available()
+    raised = ""
+except BaseException as e:  # noqa: BLE001 — the test is whether anything escapes
+    have_broken, why_broken, raised = None, "", type(e).__name__
+finally:
+    builtins.__import__ = _real_import
+ok("a panicking crypto import is answered, not raised", not raised, raised)
+ok("...the box says it cannot send notifications", have_broken is False and "notifications" in why_broken,
+   repr((have_broken, why_broken)))
+ok("...and the buyer's sentence carries no exception class",
+   "PanicException" not in why_broken and not re.search(r"[A-Z][a-z]+(Exception|Error)\b|\(", why_broken),
+   why_broken)
+
 print("\ntest_a_laptop_never_evicts_a_phone")
 phone = dict(user_id="u1", endpoint="https://push.example/phone", p256dh="p1", auth="a1")
 laptop = dict(user_id="u1", endpoint="https://push.example/laptop", p256dh="p2", auth="a2")

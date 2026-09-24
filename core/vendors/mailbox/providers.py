@@ -7,8 +7,13 @@ whole journey for a real buyer to stop.
 
 EVERY PRESET HERE IS PLAIN IMAP WITH A PASSWORD, and that is a real restriction, not a shortcut. The
 reader (`email_channel`) and the verifier speak IMAP over TLS on 993 with a login; each provider
-below still accepts that, with an app password where it has them. The submission host follows the
-`imap.` -> `smtp.` convention in `verify.smtp_host_for`, which holds for every preset listed.
+below still accepts that, with an app password where it has them.
+
+EVERY PRESET'S SENDING SERVER IS WRITTEN DOWN, NOT GUESSED (`SUBMISSION` below, OSDev1 on
+2026-09-23). `imap.` -> `smtp.` is only a convention, and two presets break it: GoDaddy sends
+through `smtpout.secureserver.net`, and paid Zoho domains use `smtppro.zoho.com`. The port can
+differ too: AOL documents 465 and nothing else. Each row cites the provider's own help page. The
+convention in `verify.smtp_host_for` is now only for a server the buyer typed in.
 
 MICROSOFT IS THE EXCEPTION, AND IT IS SAID UP FRONT RATHER THAN DISCOVERED AFTER A TIMEOUT.
 Microsoft turned off password sign-in for IMAP in Microsoft 365 (all tenants, 2022–23 — "Basic
@@ -33,8 +38,12 @@ PRESETS: dict[str, tuple[str, str, str]] = {
                "Make an app-specific password in your Apple Account under Sign-In and Security."),
     "aol": ("AOL Mail", "imap.aol.com",
             "In your AOL account's security settings, generate an app password and paste it."),
-    "zoho": ("Zoho Mail", "imap.zoho.com",
+    "zoho": ("Zoho Mail (free, or an @zohomail.com address)", "imap.zoho.com",
              "Use your Zoho password, or an app-specific password if you have two-factor sign-in on."),
+    # A SEPARATE ROW, NOT A DETAIL: a paid Zoho plan on the buyer's own domain reads from
+    # imappro.zoho.com, and the free host above is the wrong server for it (Zoho, cited below).
+    "zoho_pro": ("Zoho Mail on your own domain (paid plan)", "imappro.zoho.com",
+                 "Use your Zoho password, or an app-specific password if you have two-factor sign-in on."),
     "fastmail": ("Fastmail", "imap.fastmail.com",
                  "Fastmail needs an app password: Settings, then Privacy & Security."),
     "godaddy": ("GoDaddy email (not Microsoft 365)", "imap.secureserver.net",
@@ -43,6 +52,27 @@ PRESETS: dict[str, tuple[str, str, str]] = {
               "Your provider's help pages list an IMAP server — put that in, with your password."),
 }
 DEFAULT = "gmail"
+
+# IMAP host -> (the provider's documented sending server, its port, where that is written).
+# 587 means STARTTLS and 465 means TLS from the first byte; `verify.open_submission` speaks both.
+# 587 is chosen wherever the provider documents it, so one path carries nearly every send; AOL
+# documents 465 alone, so AOL gets 465. Read 2026-09-24.
+SUBMISSION: dict[str, tuple[str, int, str]] = {
+    "imap.gmail.com": ("smtp.gmail.com", 587,
+                       "https://developers.google.com/workspace/gmail/imap/imap-smtp"),
+    "imap.mail.yahoo.com": ("smtp.mail.yahoo.com", 587, "https://help.yahoo.com/kb/SLN4075.html"),
+    "imap.mail.me.com": ("smtp.mail.me.com", 587, "https://support.apple.com/en-us/102525"),
+    "imap.aol.com": ("smtp.aol.com", 465,
+                     "https://help.aol.com/articles/how-do-i-use-other-email-applications-to-send-and-receive-my-aol-mail"),
+    "imap.zoho.com": ("smtp.zoho.com", 587, "https://www.zoho.com/mail/help/zoho-smtp.html"),
+    "imappro.zoho.com": ("smtppro.zoho.com", 587, "https://www.zoho.com/mail/help/imap-access.html"),
+    "imap.fastmail.com": ("smtp.fastmail.com", 587,
+                          "https://www.fastmail.help/hc/en-us/articles/1500000278342-Server-names-and-ports"),
+    # GoDaddy's live page 404s from outside the US; this is GoDaddy's own page as archived
+    # 2024-04-26: "Outgoing server (SMTP): smtpout.secureserver.net SSL Port: 465 or 587".
+    "imap.secureserver.net": ("smtpout.secureserver.net", 587,
+                              "https://www.godaddy.com/help/server-and-port-settings-for-workspace-email-6949"),
+}
 
 # Microsoft's IMAP hosts, and the address domains that are always Microsoft's. A business address
 # on its own domain can live at Microsoft too; that is caught by the host, since the buyer picks it.

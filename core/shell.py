@@ -108,6 +108,9 @@ class Item:
     # when a menu item has sub menu items."* Set by `rail()` from the section's own items, never by
     # a caller, so a row cannot promise a sub-menu it does not have.
     submenu: bool = False
+    # THIS ROW OPENS A NEW GROUP, so the renderer leaves a little more room above it. Set by
+    # `rail()` where the sections cross from one `GROUPS` entry to the next, never by a caller.
+    group_start: bool = False
 
 
 @dataclass(frozen=True)
@@ -121,6 +124,7 @@ class Section:
     items: tuple[Item, ...] = ()
     home: bool = False
     icon: str = ""
+    group: str = "base"
 
 
 @dataclass(frozen=True)
@@ -147,9 +151,18 @@ class Rail:
 
 _SECTIONS: dict[str, Section] = {}
 
+# THE MENU HAS TWO GROUPS, in this order. Owner, 2026-09-24: *"Let's rename that to base machine.
+# And then you can put System Settings right below it. And then almost in another section. We
+# should have the add-on machines. Which would be unified inbox and then add a machine."* — and
+# of the second group: *"very subtle. Almost just like an extra space."* So the box's own rows come
+# first, every machine added to it comes after, and the gap between is space, not a heading.
+# `order` still sorts rows WITHIN a group; it can no longer lift a machine above the box's own.
+GROUPS = ("base", "addons")
+
 
 def register_section(key: str, *, order: int, machine: str, title: str, href: str,
-                     items: Iterable = (), home: bool = False, icon: str = "") -> None:
+                     items: Iterable = (), home: bool = False, icon: str = "",
+                     group: str = "") -> None:
     """Declare one rail section. Called at import, like every other seam in this box.
 
     CHECKED HERE, AT IMPORT, where a mistake is a failed boot line — not on the screen, where it
@@ -175,6 +188,12 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
     _bad = _href_problem(href)
     if _bad:
         raise ValueError(f"rail section {key!r} href {_bad}")
+    # A MACHINE IS AN ADD-ON UNLESS IT IS THE BOX ITSELF. Only core's own rows default to "base";
+    # a machine has to be added to a box to be on it, so it lands in the add-on group without
+    # having to know the group exists.
+    group = group or ("base" if machine == "core" else "addons")
+    if group not in GROUPS:
+        raise ValueError(f"rail section {key!r} has group {group!r}; expected one of {list(GROUPS)}")
 
     built = []
     seen = set()
@@ -211,14 +230,16 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
             raise ValueError(f"rail section {key!r} claims home, but {other.key!r} already does")
 
     _SECTIONS[key] = Section(key=key, order=order, machine=machine, title=title.strip(),
-                             href=href, items=tuple(built), home=bool(home), icon=str(icon or ""))
+                             href=href, items=tuple(built), home=bool(home), icon=str(icon or ""),
+                             group=group)
     log.info("shell.section_registered", key=key, machine=machine, items=len(built))
 
 
 def sections() -> tuple[Section, ...]:
     """Every registered section, in rail order. Ties break on key so the rail cannot reshuffle
     itself between two renders of the same box — a menu whose items move is a menu nobody learns."""
-    return tuple(sorted(_SECTIONS.values(), key=lambda s: (s.order, s.key)))
+    return tuple(sorted(_SECTIONS.values(),
+                        key=lambda s: (GROUPS.index(s.group), s.order, s.key)))
 
 
 # THE KEY A MACHINE USES TO SAY "MY SET-UP SCREEN IS HERE". One string, named once, because the
@@ -324,8 +345,11 @@ def rail(path: str) -> Rail:
                     back_label=home_title())
     # LEVEL 1 — the sections themselves, rendered through the same `Item` the second level uses so
     # a template has one row to draw and not two.
+    got = sections()
     top = tuple(Item(key=s.key, label=s.title, href=s.href, icon=s.icon,
-                     submenu=bool(s.items) and not s.home) for s in sections())
+                     submenu=bool(s.items) and not s.home,
+                     group_start=i > 0 and s.group != got[i - 1].group)
+                for i, s in enumerate(got))
     return Rail(level=1, title="", back="", items=top, here=path)
 
 

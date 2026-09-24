@@ -389,6 +389,30 @@ else:
 print("\n— and this file cannot silently fall out of CI —")
 import pathlib  # noqa: E402
 
+# ── the link is enough ───────────────────────────────────────────────────────────────────
+print("\ntest_the_long_sign_in_url_is_folded_not_printed")
+# #1483, FINDING 5: the authorize URL is ~400 characters of query string, and printed in full
+# under the button it was the loudest thing on the screen — on camera, at 390px. The button
+# carries it; a fold keeps a copyable fallback for a phone app that will not open links.
+LONG = ("https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88"
+        "&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode"
+        "%2Fcallback&scope=user%3Ainference&code_challenge=" + "x" * 200 + "&state=" + "y" * 43)
+_real_pending = claude_login.pending_url
+claude_login.pending_url = lambda: LONG
+try:
+    fb = owner_client().get("/settings/ai").get_data(as_text=True)
+finally:
+    claude_login.pending_url = _real_pending
+_esc_long = LONG.replace("&", "&amp;")
+ok("the sign-in button still carries the whole link", f'href="{_esc_long}"' in fb)
+_outside = re.sub(r"<details.*?</details>", "", fb, flags=re.S)
+_outside = re.sub(r"<[^>]+>", " ", _outside)
+ok("...and the raw URL is NOT printed on the screen outside the fold",
+   "claude.com/cai/oauth" not in _outside, "the 400-character URL is back on the screen")
+ok("...while a copyable fallback is one tap away inside it",
+   re.search(r"<details[^>]*>.*?claude\.com/cai/oauth.*?</details>", fb, re.S) is not None)
+
+
 _wf = pathlib.Path(__file__).resolve().parents[1] / ".github/workflows/tests.yml"
 if _wf.is_file():
     ok("test_you_sign_in_to_claude_from_the_box is in the workflow's suite list",

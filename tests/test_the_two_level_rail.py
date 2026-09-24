@@ -82,8 +82,14 @@ def test_the_dashboard_shows_the_main_choices_and_no_way_back():
     _box()
     r = shell.rail("/dashboard")
     ok("the dashboard is level 1", r.level == 1)
-    ok("...showing every section", [i.label for i in r.items] == ["Dashboard", "Inbox", "Settings"],
+    # THE BOX'S OWN ROWS FIRST, THEN THE MACHINES. Owner, 2026-09-24: System Settings *"right
+    # below"* the home row, then the add-on machines, with a gap before them and nothing more.
+    ok("...showing every section, the box's own first",
+       [i.label for i in r.items] == ["Dashboard", "Settings", "Inbox"],
        str([i.label for i in r.items]))
+    ok("...and the first machine opens a new group, the only row that does",
+       [i.label for i in r.items if i.group_start] == ["Inbox"],
+       str([(i.label, i.group_start) for i in r.items]))
     ok("...with no back arrow at all", r.back == "", r.back)
     ok("...and no breadcrumb reading its own name back", shell.crumb("/dashboard") == ())
 

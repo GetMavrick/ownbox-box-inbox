@@ -252,13 +252,17 @@ def test_it_is_white_first():
     # turned this red while the page was still white — a failure that taught nobody anything. The
     # owner's instruction is that the page is light unless someone asks otherwise, not that it is
     # one particular grey.
-    root = re.search(r":root\{([^}]*)\}", html_)
-    ok(":root declares both the ground and the ink",
-       bool(root) and "--bg:" in root.group(1) and "--ink:" in root.group(1),
-       root.group(1)[:80] if root else "no :root")
-    bg = re.search(r"--bg:#([0-9a-fA-F]{6})", html_)
+    # THE GROUND AND THE INK NOW LIVE IN THE BOX'S ONE STYLESHEET (core/dash/static/box.css, the
+    # ownbox.io tokens, 2026-09-24), which this page links; `--bg` here points at `--ground` there.
+    # So the rule is read where the value is: the page links it, and its ground is light.
+    ok("the page links the box's stylesheet", '/ui/box.css?v=' in html_)
+    ok("...and names its ground from it", "--bg:var(--ground)" in html_)
+    box = (pathlib.Path(__file__).resolve().parents[1] / "core" / "dash" / "static" / "box.css").read_text()
+    ok(":root declares both the ground and the ink", "--ground:" in box and "--ink:" in box)
+    bg = re.search(r"--ground:\s*#([0-9a-fA-F]{6})", box)
     ok("...and the ground is a light one", bool(bg) and int(bg.group(1)[:2], 16) > 0xE0,
-       bg.group(0) if bg else "no --bg")
+       bg.group(0) if bg else "no --ground")
+    ok("...and the stylesheet flips nobody to dark either", "prefers-color-scheme" not in box)
     ok("the body paints it rather than inheriting the host's",
        "background:var(--bg)" in html_)
     ok("nothing flips a reader to dark who never asked",

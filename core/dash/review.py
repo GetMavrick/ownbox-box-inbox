@@ -28,35 +28,51 @@ from flask import redirect, request
 
 from core import dash as _dash
 from core import report
-from core.dash import blueprint, page
+from core.dash import blueprint
 
 TITLES = {"customer_voice": "Unified Inbox", "content_machine": "Content", "lead_machine": "Lead"}
 _PILL = {"ok": "green", "warn": "amber", "fail": "red", "connect": "blue"}
 
 CSS = """
+.rv{--rv-bg:#15181C;--rv-ink:#e6e6e6;--rv-strong:#C2F3F4;--rv-accent:#C2F3F4;--rv-spark:#7fd1d3;
+--rv-edge:#23282f;--rv-rule:#1f242b;--rv-field:#2a2f36;--rv-dim:#9aa3ad;--rv-faint:#6f7883;
+--rv-text:#cfd5db;--rv-bad:#e05b5b;--rv-warn-edge:#6b4a1a;--rv-warn-bg:#241b0e;--rv-warn-ink:#f0c674;
+--rv-pill:rgba(255,255,255,.06);--rv-pill-ink:rgba(255,255,255,.5);
+--rv-green:rgba(20,83,45,.4);--rv-green-ink:#86efac;--rv-blue:rgba(30,58,138,.4);--rv-blue-ink:#93c5fd;
+--rv-red:rgba(127,29,29,.4);--rv-red-ink:#fca5a5;--rv-amber:rgba(120,53,15,.4);--rv-amber-ink:#fcd34d;
+--rv-radius:12px;--rv-mono:ui-monospace,Menlo,monospace}
+.rv.on-box{--rv-bg:var(--card);--rv-ink:var(--ink);--rv-strong:var(--ink);--rv-accent:var(--link);
+--rv-spark:var(--ink-3);--rv-edge:var(--card-edge);--rv-rule:var(--hairline);--rv-field:var(--line);
+--rv-dim:var(--ink-2);--rv-faint:var(--ink-3);--rv-text:var(--ink-2);--rv-bad:var(--bad);
+--rv-warn-edge:var(--warn);--rv-warn-bg:var(--card);--rv-warn-ink:var(--ink);
+--rv-pill:var(--wash);--rv-pill-ink:var(--ink-2);--rv-green:var(--wash);--rv-green-ink:var(--ok);
+--rv-blue:var(--wash);--rv-blue-ink:var(--ink-2);--rv-red:var(--wash);--rv-red-ink:var(--bad);
+--rv-amber:var(--wash);--rv-amber-ink:var(--warn);--rv-radius:var(--r-md);--rv-mono:var(--mono)}
+.rv.on-box .seg{padding:22px}
+.rv.on-box .rv-warn{border-left-width:3px}
 .rv-top{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:6px 0 14px}
 .rv-top h1{margin:0}
 .rv-top form{margin:0}
-.rv-top select{background:#15181C;color:#e6e6e6;border:1px solid #2a2f36;border-radius:8px;padding:8px 12px;font-size:14px}
-.rv-lede{color:#9aa3ad;margin:0 0 18px;font-size:14px}
-.rv-lede b{color:#C2F3F4}
-.seg{border:1px solid #23282f;border-radius:12px;padding:16px 18px;margin:0 0 14px;background:#15181C}
+.rv-top select{background:var(--rv-bg);color:var(--rv-ink);border:1px solid var(--rv-field);border-radius:8px;padding:8px 12px;font-size:14px}
+.rv-lede{color:var(--rv-dim);margin:0 0 18px;font-size:14px}
+.rv-lede b{color:var(--rv-strong)}
+.seg{border:1px solid var(--rv-edge);border-radius:var(--rv-radius);padding:16px 18px;margin:0 0 14px;background:var(--rv-bg)}
 .seg .hd{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
-.seg .hd h2{margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#9aa3ad}
-.seg .hd .big{font-size:22px;font-weight:600;color:#e6e6e6;font-variant-numeric:tabular-nums}
-.seg .hd .big small{font-size:13px;color:#9aa3ad;font-weight:400;margin-left:6px}
-.seg .hd .delta{font-size:12px;color:#9aa3ad;margin-left:8px}
-.rail{display:grid;grid-template-columns:110px 1fr;gap:6px 14px;align-items:baseline;padding:6px 0;border-top:1px solid #1f242b}
-.rail .k{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#6f7883}
-.rail ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px}
-.rail li{font-size:14px;color:#cfd5db}
-.rail li b{color:#e6e6e6;font-variant-numeric:tabular-nums}
-.rail li b.zero{color:#e05b5b}
-.rail li.need a{color:#C2F3F4}
-.rail .pill{margin-right:6px}
-.rv-note{font-size:12px;color:#6f7883;margin-top:8px}
-.rv-warn{border:1px solid #6b4a1a;background:#241b0e;color:#f0c674;border-radius:10px;padding:12px 16px;margin:0 0 14px}
-.rv-empty{color:#9aa3ad;font-size:14px}
+.seg .hd h2{margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--rv-faint)}
+.seg .hd .big{font-size:22px;font-weight:600;color:var(--rv-ink);font-variant-numeric:tabular-nums}
+.seg .hd .big small{font-size:13px;color:var(--rv-dim);font-weight:400;margin-left:6px}
+.seg .hd .delta{font-size:12px;color:var(--rv-dim);margin-left:8px}
+.rv-rail{display:grid;grid-template-columns:110px 1fr;gap:6px 14px;align-items:baseline;padding:6px 0;border-top:1px solid var(--rv-rule)}
+.rv-rail .k{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--rv-faint)}
+.rv-rail ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px}
+.rv-rail li{font-size:14px;color:var(--rv-text)}
+.rv-rail li b{color:var(--rv-ink);font-variant-numeric:tabular-nums}
+.rv-rail li b.zero{color:var(--rv-bad)}
+.rv-rail li.need a{color:var(--rv-accent)}
+.rv-rail .pill{margin-right:6px}
+.rv-note{font-size:12px;color:var(--rv-faint);margin-top:8px}
+.rv-warn{border:1px solid var(--rv-warn-edge);background:var(--rv-warn-bg);color:var(--rv-warn-ink);border-radius:10px;padding:12px 16px;margin:0 0 14px}
+.rv-empty{color:var(--rv-dim);font-size:14px}
 
 /* THE BODY BRINGS ITS OWN PRIMITIVES, because it is rendered in two different shells. `.pill`
    and `.dlink` are defined in core.dash's stylesheet and the lead app's chrome has neither, so
@@ -64,23 +80,23 @@ CSS = """
    ok and fail looking identical is the exact opposite of what a status pill is for. Scoped
    under .seg/.rv-top so this cannot reach out and restyle a host page that has its own. */
 .seg .pill,.rv-top .pill{display:inline-block;font-size:11px;padding:4px 10px;border-radius:9999px;
-flex:none;font-family:ui-monospace,Menlo,monospace;background:rgba(255,255,255,.06);color:rgba(255,255,255,.5)}
-.seg .pill.green{background:rgba(20,83,45,.4);color:#86efac}
-.seg .pill.blue{background:rgba(30,58,138,.4);color:#93c5fd}
-.seg .pill.red{background:rgba(127,29,29,.4);color:#fca5a5}
-.seg .pill.amber{background:rgba(120,53,15,.4);color:#fcd34d}
-.seg .dlink{color:#C2F3F4;font-weight:500;text-decoration:none}
+flex:none;font-family:var(--rv-mono);background:var(--rv-pill);color:var(--rv-pill-ink)}
+.seg .pill.green{background:var(--rv-green);color:var(--rv-green-ink)}
+.seg .pill.blue{background:var(--rv-blue);color:var(--rv-blue-ink)}
+.seg .pill.red{background:var(--rv-red);color:var(--rv-red-ink)}
+.seg .pill.amber{background:var(--rv-amber);color:var(--rv-amber-ink)}
+.seg .dlink{color:var(--rv-accent);font-weight:500;text-decoration:none}
 .seg .dlink:hover{text-decoration:underline}
 /* THE SPARKLINE. currentColor so it inherits whichever shell it is drawn in — the app's
    chrome and the dash chrome have different palettes and the chart must not pick one.
    preserveAspectRatio=none lets it stretch to the column width, which is fine for a
    sparkline (the shape carries the trend, the printed range carries the scale) and would
    not be for an axis chart. */
-.seg .spark{display:flex;align-items:center;gap:10px;margin:2px 0 12px;color:#7fd1d3}
+.seg .spark{display:flex;align-items:center;gap:10px;margin:2px 0 12px;color:var(--rv-spark)}
 .seg .spark svg{flex:1;min-width:0;height:34px;overflow:visible}
 .seg .spark circle{fill:currentColor}
-.seg .spark circle.tip{fill:#C2F3F4}
-.seg .spark .sk{flex:none;font-size:11px;letter-spacing:.04em;color:#6f7883;font-variant-numeric:tabular-nums}
+.seg .spark circle.tip{fill:var(--rv-strong)}
+.seg .spark .sk{flex:none;font-size:11px;letter-spacing:.04em;color:var(--rv-faint);font-variant-numeric:tabular-nums}
 
 /* THE PHONE. Owner, 2026-09-07, about this app: "From my mobile phone this is virtually
    unusable... the buttons are not visible." This is the page he opens at breakfast, so it gets
@@ -100,9 +116,9 @@ flex:none;font-family:ui-monospace,Menlo,monospace;background:rgba(255,255,255,.
   .seg .hd{display:block}
   .seg .hd .big{display:block;margin-top:6px}
   .seg .hd .delta{display:block;margin:4px 0 0}
-  .rail{grid-template-columns:1fr;gap:4px;padding:10px 0}
-  .rail ul{gap:6px 14px}
-  .rail li{line-height:1.5}
+  .rv-rail{grid-template-columns:1fr;gap:4px;padding:10px 0}
+  .rv-rail ul{gap:6px 14px}
+  .rv-rail li{line-height:1.5}
   /* 390px: the legend under the line, not beside it — at that width a flex row leaves
      the chart about 120px, which is not enough shape to read. */
   .seg .spark{display:block}
@@ -261,14 +277,14 @@ def _segment(r: dict, back: int = 30, day: str = "") -> str:
             for n in needs)
     else:
         items = '<li>Nothing.</li>'
-    rails = [f'<div class="rail"><span class="k">Needs you</span><ul>{items}</ul></div>']
+    rails = [f'<div class="rv-rail"><span class="k">Needs you</span><ul>{items}</ul></div>']
     happened = r.get("happened") or []
     if happened:
         items = "".join(
             f'<li><b class="{"zero" if x.get("value") in (0, 0.0) else ""}">{_esc(_fmt(x.get("value", "")))}</b> {_esc(x.get("text"))}</li>'
             if x.get("value") not in (None, "") else f'<li>{_esc(x.get("text"))}</li>'
             for x in happened)
-        rails.append(f'<div class="rail"><span class="k">Happened</span><ul>{items}</ul></div>')
+        rails.append(f'<div class="rv-rail"><span class="k">Happened</span><ul>{items}</ul></div>')
     watch = r.get("watch") or []
     if watch:
         items = "".join(
@@ -276,13 +292,13 @@ def _segment(r: dict, back: int = 30, day: str = "") -> str:
             + (f'<a class="dlink" href="{_esc(w.get("href"))}">{_esc(w.get("text"))}</a>' if w.get("href") else _esc(w.get("text")))
             + "</li>"
             for w in watch)
-        rails.append(f'<div class="rail"><span class="k">Watch</span><ul>{items}</ul></div>')
+        rails.append(f'<div class="rv-rail"><span class="k">Watch</span><ul>{items}</ul></div>')
     figures = r.get("figures") or {}
     if figures:
         items = "".join(
             f'<li><b>{_esc(_fmt(f.get("value", "")))}</b> {_esc(f.get("label") or k)}</li>'
             for k, f in figures.items())
-        rails.append(f'<div class="rail"><span class="k">Numbers</span><ul>{items}</ul></div>')
+        rails.append(f'<div class="rv-rail"><span class="k">Numbers</span><ul>{items}</ul></div>')
     notes = "".join(f'<div class="rv-note">{_esc(n)}</div>' for n in (r.get("notes") or []))
     return f'<section class="seg">{head}{"".join(rails)}{notes}</section>'
 
@@ -296,8 +312,8 @@ def _meters(r: dict | None) -> str:
                    for w in r.get("watch") or [])
     return (f'<section class="seg"><div class="hd"><h2>Meters</h2><div class="big">{_esc(h.get("value", ""))}'
             f'<small>{_esc(h.get("label", ""))}</small></div></div>'
-            f'<div class="rail"><span class="k">This cycle</span><ul>{items or "<li>No metered vendor on this box.</li>"}</ul></div>'
-            + (f'<div class="rail"><span class="k">Watch</span><ul>{warn}</ul></div>' if warn else "")
+            f'<div class="rv-rail"><span class="k">This cycle</span><ul>{items or "<li>No metered vendor on this box.</li>"}</ul></div>'
+            + (f'<div class="rv-rail"><span class="k">Watch</span><ul>{warn}</ul></div>' if warn else "")
             + "</section>")
 
 
@@ -357,7 +373,8 @@ def _admit(*, owner_only: bool = True):
 
 
 def body(v: dict, *, action: str = "/app/review", heading: str = "Morning Review",
-         show_money: bool = False) -> tuple[str, int]:
+         show_money: bool = False,
+         box: bool = False) -> tuple[str, int]:
     """The review itself — everything inside the chrome, and the status it should be served with.
 
     ONE BUILDER, TWO SURFACES. The same review is drawn on the app's first tab and on
@@ -378,11 +395,16 @@ def body(v: dict, *, action: str = "/app/review", heading: str = "Morning Review
     Returns (html, status): 404 for a stored day with nothing behind it, so a link to a day that
     never existed says so rather than rendering a blank.
     """
-    head = f'<div class="rv-top"><h1>{_esc(heading)}</h1>{_picker(v, action)}</div>'
+    # INSIDE THE BOX, THE BOX'S SHELL SAYS THE TITLE. `chrome()` draws one h1 and the menu; the
+    # review keeps only its day picker, and its colours come from the box's tokens (`on-box`). In
+    # the lead app's tab it keeps its own heading and its own dark defaults, unchanged.
+    head = (f'<div class="rv-top">{_picker(v, action)}</div>' if box else
+            f'<div class="rv-top"><h1>{_esc(heading)}</h1>{_picker(v, action)}</div>')
+    open_ = f'<style>{CSS}</style><div class="rv{" on-box" if box else ""}">'
 
     if not v["exists"]:
         lede = f'<p class="rv-lede">{_esc(v["empty_line"])}</p>'
-        return f"<style>{CSS}</style>{head}{lede}", (200 if v["live"] else 404)
+        return f"{open_}{head}{lede}</div>", (200 if v["live"] else 404)
 
     n = v["needs"]
     if v["stale"]:
@@ -409,15 +431,20 @@ def body(v: dict, *, action: str = "/app/review", heading: str = "Morning Review
              '<section class="seg"><div class="hd"><h2>Meters</h2></div>'
              '<p class="rv-empty">What this box spends is not shown without a key. '
              'Sign in, or open this page with yours.</p></section>')
-    return f"<style>{CSS}</style>{head}{lede}{segs}{money}", 200
+    return f"{open_}{head}{lede}{segs}{money}</div>", 200
 
 
 def render(day: str, now: datetime | None = None) -> tuple[str, int]:
     """The page for one day, in the dash chrome. ONE read — `report.view` — which has already
     decided live/final/stale, built the picker and counted what needs him."""
     v = report.view(day, now)
-    inner, status = body(v, show_money=_dash.privileged())
-    return page("Morning Review", "wide", inner, title="Morning Review"), status
+    inner, status = body(v, show_money=_dash.privileged(), box=True)
+    # THE BOX'S SHELL, NOT THE OPERATOR CONSOLE. This is the page the 8 AM notification opens on a
+    # buyer's box; it wore `page()`, the dark console, while every other buyer screen wears the box's
+    # look (owner's order, 2026-09-24, relayed by OSDev1). Now it has the menu and the tokens.
+    from core.dash.home import chrome
+    return chrome("/app/review", title="Morning Review",
+                  lede="What your box did, and what needs you.", body=inner), status
 
 
 @blueprint.get("/app/review")

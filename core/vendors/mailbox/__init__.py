@@ -10,7 +10,9 @@ storing it and core imports no machine — a Lead box has no `marketing/customer
 """
 from . import providers
 from .verify import (IMAP_HOST_DEFAULT, SMTP_HOST_DEFAULT, SMTP_PORT, MailboxAuthError,
-                     classify_auth_failure, smtp_host_for, verify_credential, verify_send)
+                     classify_auth_failure, open_submission, smtp_host_for, smtp_port_for,
+                     verify_credential, verify_send)
 
 __all__ = ["verify_credential", "verify_send", "classify_auth_failure", "MailboxAuthError",
-           "IMAP_HOST_DEFAULT", "SMTP_HOST_DEFAULT", "SMTP_PORT", "smtp_host_for", "providers"]
+           "IMAP_HOST_DEFAULT", "SMTP_HOST_DEFAULT", "SMTP_PORT", "smtp_host_for", "smtp_port_for",
+           "open_submission", "providers"]

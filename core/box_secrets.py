@@ -1039,14 +1039,14 @@ DRAFTING_MODELS = (
 # is a row here, not a feature.
 AGENT_CLIENTS = (
     {"id": "claude", "name": "Claude",
-     "how": "Settings -> Connectors -> Add custom connector. Paste the address, choose "
+     "how": "Settings \u2192 Connectors \u2192 Add custom connector. Paste the address, choose "
             "\u201cSign in now\u201d, then Connect."},
     {"id": "chatgpt", "name": "ChatGPT",
-     "how": "Settings -> Connectors -> Add. Paste the address and let it sign in."},
+     "how": "Settings \u2192 Connectors \u2192 Add. Paste the address and let it sign in."},
     {"id": "gemini", "name": "Gemini",
-     "how": "Add it as an MCP server with the address below and let it sign in."},
+     "how": "Add the address as an MCP server and let it sign in."},
     {"id": "grok", "name": "Grok",
-     "how": "grok.com/connectors -> New Connector -> Custom. Paste the address and let it "
+     "how": "grok.com/connectors \u2192 New Connector \u2192 Custom. Paste the address and let it "
             "sign in."},
 )
 
@@ -1054,7 +1054,7 @@ AGENT_CLIENTS = (
 # watching the owner do it on 2026-09-22 — he got through it, and then asked for the
 # instructions to be changed, which is the most useful kind of pass.
 AGENT_STEPS = (
-    "Copy the address below.",
+    "Copy the address of this box.",
     "In your assistant, add a connector or MCP server and paste it. Pick the option that says "
     "it will SIGN IN \u2014 not \u201cno sign-in\u201d, and not an API key.",
     "It sends you here to approve. Press Allow, then allow the tools your assistant asks about.",

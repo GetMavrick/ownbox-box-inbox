@@ -118,7 +118,7 @@ def box_email_screen():
     if refuse is not None:
         return refuse
     if not _is_owner():
-        return chrome("/settings", title=_TITLE, lede="This one is the owner's.",
+        return chrome(DOOR, title=_TITLE, lede="This one is the owner's.",
                       body='<div class="card"><p>Only the owner of this box can choose how it '
                            'sends email, because that email goes out in the business\'s name.'
                            '</p></div>' + _back()), 403
@@ -164,6 +164,6 @@ def box_email_screen():
     body = note + _status_card(d)
     if not d.get("operator"):
         body += _resend_form() + _smtp_form()
-    return chrome("/settings", title=_TITLE,
+    return chrome(DOOR, title=_TITLE,
                   lede="Get your Morning Review and alerts by email as well as in the mobile app.",
                   body=body + _back()), 200

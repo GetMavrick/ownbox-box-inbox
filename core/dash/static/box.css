@@ -1,0 +1,339 @@
+/* Ownbox box stylesheet. One file for every screen on the box, in the ownbox.io design language.
+   Plain CSS, no build step. Screens use the tokens below and never a raw colour or size of their own.
+   Values measured on ownbox.io; see docs/BOX_DESIGN_REFERENCE.md. Mobile first: the base rule is
+   the small screen, and min-width queries add the wide one. */
+
+@layer box.tokens, box.base, box.components;
+
+@font-face {
+  font-family: "Inter";
+  src: url("/ui/font/sans.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/ui/font/mono.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+/* ── tokens ─────────────────────────────────────────────────────────────────────────────────── */
+@layer box.tokens {
+  :root {
+    /* colour: the site's cream and ink, and nothing louder */
+    --ground: #f6f4ef;
+    --card: #ffffff;
+    --ink: #111111;
+    --ink-2: #3c3c3c;
+    --ink-3: #6b6b6b;
+    --line: hsla(0, 0%, 7%, 0.32);
+    --hairline: rgba(17, 17, 17, 0.08);
+    --card-edge: rgba(17, 17, 17, 0.10);
+    --wash: rgba(17, 17, 17, 0.05);
+    --on-ink: #f6f4ef;
+
+    /* the one highlight colour: text links and a single dot, never buttons or headings */
+    --link: #b5401a;
+
+    /* status, each at least 4.5:1 on the cream and on white */
+    --ok: #1d7a44;
+    --ok-dot: #28c840;
+    --warn: #8a5a00;
+    --bad: #b3261e;
+
+    /* type */
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: "Geist Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --t-title: clamp(24px, 2.4vw, 32px);
+    --t-lede: 19px;
+    --t-body: 17px;
+    --t-body-2: 16px;
+    --t-label: 14px;
+    --t-small: 13px;
+    --t-eyebrow: 12px;
+    --w-regular: 400;
+    --w-strong: 600;
+
+    /* space, on a 4px step */
+    --s-1: 4px;
+    --s-2: 8px;
+    --s-3: 12px;
+    --s-4: 16px;
+    --s-5: 24px;
+    --s-6: 32px;
+    --s-7: 48px;
+    --s-8: 64px;
+
+    /* shape */
+    --r-xs: 8px;
+    --r-sm: 16px;
+    --r-md: 22px;
+    --r-lg: 28px;
+    --r-pill: 999px;
+    --shadow-lift: 0 12px 40px rgba(17, 17, 17, 0.14);
+    --scrim: rgba(17, 17, 17, 0.36);
+
+    /* size */
+    --tap: 48px;
+    --control: 50px;
+    --measure: 640px;
+    --rail-w: 272px;
+
+    /* motion */
+    --ease: cubic-bezier(0.2, 0, 0, 1);
+    --fast: 150ms;
+    --slow: 220ms;
+  }
+}
+
+/* ── base: plain elements look right with no class ──────────────────────────────────────────── */
+@layer box.base {
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: var(--t-body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  h1, h2, h3 {
+    margin: 0;
+    font-weight: var(--w-strong);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    text-wrap: balance;
+  }
+  h1 { font-size: var(--t-title); }
+  h2 { font-size: var(--t-body); letter-spacing: -0.01em; line-height: 1.3; }
+  h3 { font-size: var(--t-body-2); letter-spacing: 0; line-height: 1.3; }
+  p { margin: 0; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  img, svg { max-width: 100%; }
+  svg { flex: none; }
+  code, kbd, pre, samp {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    font-variant-ligatures: none;
+  }
+  :not(pre) > code {
+    background: var(--wash);
+    border-radius: 6px;
+    padding: 1px 5px;
+  }
+  hr { border: 0; border-top: 1px solid var(--hairline); margin: var(--s-5) 0; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 4px; }
+  ::placeholder { color: var(--ink-3); opacity: 1; }
+
+  label { display: block; font-size: var(--t-label); font-weight: var(--w-strong); color: var(--ink); }
+  input:not([type=checkbox]):not([type=radio]), select, textarea {
+    display: block;
+    width: 100%;
+    min-height: var(--control);
+    margin-top: var(--s-2);
+    padding: 12px 14px;
+    font: inherit;
+    font-size: 16px;
+    font-weight: var(--w-regular);
+    color: var(--ink);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+  }
+  textarea { min-height: 120px; resize: vertical; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 1px; }
+  input[type=checkbox], input[type=radio] { width: 20px; height: 20px; accent-color: var(--ink); }
+
+  button, .ui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--s-2);
+    width: 100%;
+    min-height: var(--control);
+    padding: 12px 26px;
+    font: inherit;
+    font-size: var(--t-body-2);
+    font-weight: var(--w-strong);
+    line-height: 1.5;
+    color: var(--on-ink);
+    background: var(--ink);
+    border: 1px solid transparent;
+    border-radius: var(--r-pill);
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity var(--fast) var(--ease);
+  }
+  button:hover, .ui-btn:hover { opacity: 0.88; text-decoration: none; }
+  button:disabled, .ui-btn[aria-disabled=true] { opacity: 0.4; cursor: not-allowed; }
+
+  details > summary { cursor: pointer; min-height: var(--tap); display: flex; align-items: center; }
+
+  @media (min-width: 720px) {
+    button, .ui-btn { width: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; animation: none !important; }
+  }
+}
+
+/* ── components: a few classes, each with one job ───────────────────────────────────────────── */
+@layer box.components {
+  /* page: the column a screen's content sits in */
+  .ui-page { padding: var(--s-5) var(--s-4) var(--s-7); max-width: calc(var(--measure) + 2 * var(--s-4)); }
+  .ui-page > * + * { margin-top: var(--s-4); }
+  .ui-head { margin-bottom: var(--s-5); }
+  .ui-head .ui-lede { margin-top: var(--s-2); font-size: var(--t-body-2); color: var(--ink-2); }
+  @media (min-width: 720px) {
+    .ui-page { padding: var(--s-7) var(--s-6); }
+    .ui-head .ui-lede { font-size: var(--t-lede); }
+  }
+
+  .ui-eyebrow {
+    font-size: var(--t-eyebrow);
+    font-weight: var(--w-strong);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .ui-muted { color: var(--ink-2); }
+  .ui-small { font-size: var(--t-small); color: var(--ink-3); }
+
+  /* card: groups rows or a form under one title */
+  .ui-card {
+    background: var(--card);
+    border: 1px solid var(--card-edge);
+    border-radius: var(--r-md);
+    padding: var(--s-5) var(--s-5);
+  }
+  .ui-card > * + * { margin-top: var(--s-3); }
+  .ui-card > h2 + p { margin-top: var(--s-1); color: var(--ink-2); font-size: var(--t-body-2); }
+  @media (min-width: 720px) { .ui-card { padding: var(--s-6); } }
+
+  /* buttons: one primary per screen; ghost for the rest; small for inline actions only */
+  .ui-ghost { color: var(--ink); background: transparent; border-color: var(--line); }
+  .ui-card .ui-ghost { background: var(--card); }
+  .ui-compact {
+    width: auto;
+    min-height: 44px;
+    padding: 8px 22px;
+    font-size: var(--t-label);
+  }
+  .ui-danger { color: var(--bad); background: transparent; border-color: currentColor; }
+  .ui-actions { display: flex; flex-direction: column; gap: var(--s-3); margin-top: var(--s-5); }
+  @media (min-width: 720px) { .ui-actions { flex-direction: row; flex-wrap: wrap; } }
+
+  /* field: label, control, then hint or error; the value is never cleared on error */
+  .ui-field + .ui-field { margin-top: var(--s-4); }
+  .ui-field .ui-hint { margin-top: var(--s-2); font-size: var(--t-small); color: var(--ink-3); }
+  .ui-field .ui-error { margin-top: var(--s-2); font-size: var(--t-small); color: var(--bad); font-weight: var(--w-strong); }
+  .ui-field:has(.ui-error) input, .ui-field:has(.ui-error) select, .ui-field:has(.ui-error) textarea { border-color: var(--bad); }
+  .ui-check { display: flex; gap: var(--s-3); align-items: flex-start; font-weight: var(--w-regular); font-size: var(--t-body-2); }
+  .ui-check input { margin-top: 2px; flex: none; }
+
+  /* rows: a list where the whole row is the tap target */
+  .ui-rows { list-style: none; margin: 0; padding: 0; }
+  .ui-row {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    min-height: 56px;
+    padding: 14px 0;
+    color: var(--ink);
+    border-bottom: 1px solid var(--hairline);
+    text-decoration: none;
+  }
+  .ui-rows > :last-child .ui-row, .ui-rows > .ui-row:last-child { border-bottom: 0; }
+  a.ui-row:hover { text-decoration: none; background: linear-gradient(var(--wash), var(--wash)); }
+  .ui-row .ui-row-label { flex: 1; min-width: 0; font-weight: var(--w-strong); }
+  .ui-row .ui-row-label small { display: block; font-weight: var(--w-regular); font-size: var(--t-small); color: var(--ink-3); }
+  .ui-row .ui-row-value { color: var(--ink-3); font-size: var(--t-body-2); white-space: nowrap; }
+  .ui-row .ui-chev { color: var(--ink-3); width: 18px; height: 18px; }
+
+  /* chip and dot: status in a word, never a control */
+  .ui-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px;
+    font-size: 11px;
+    font-weight: var(--w-strong);
+    line-height: 1.4;
+    color: var(--ink-2);
+    background: var(--card);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-pill);
+  }
+  .ui-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); flex: none; }
+  .ui-dot.ok { background: var(--ok-dot); }
+  .ui-dot.warn { background: var(--warn); }
+  .ui-dot.bad { background: var(--bad); }
+  .ui-dot.new { background: var(--link); }
+
+  /* status: one sentence that says where this stands */
+  .ui-status { font-size: var(--t-body-2); color: var(--ink-2); }
+  .ui-status > .ui-dot { display: inline-block; vertical-align: 0.15em; margin-right: var(--s-2); }
+  .ui-status b { color: var(--ink); font-weight: var(--w-strong); }
+
+  /* notice: one per screen, at the top, for something that needs the reader */
+  .ui-notice {
+    padding: var(--s-4);
+    border-radius: var(--r-sm);
+    background: var(--card);
+    border: 1px solid var(--card-edge);
+    border-left: 3px solid var(--warn);
+    font-size: var(--t-body-2);
+  }
+  .ui-notice.bad { border-left-color: var(--bad); }
+  .ui-notice.ok { border-left-color: var(--ok); }
+
+  /* steps: numbered instructions */
+  ol.ui-steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  ol.ui-steps > li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: var(--s-3);
+    padding: var(--s-3) 0;
+    border-bottom: 1px solid var(--hairline);
+    font-size: var(--t-body-2);
+    color: var(--ink-2);
+  }
+  ol.ui-steps > li:last-child { border-bottom: 0; }
+  ol.ui-steps > li::before {
+    content: counter(step);
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--wash);
+    color: var(--ink);
+    font-size: var(--t-small);
+    font-weight: var(--w-strong);
+  }
+
+  /* copy box: something to type or copy, in the mono face */
+  .ui-copy {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    padding: 10px 12px;
+    background: var(--ground);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-xs);
+    font-family: var(--mono);
+    font-size: 15px;
+    font-variant-ligatures: none;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* empty: what will appear here, and nothing pretending to be data */
+  .ui-empty { color: var(--ink-3); font-size: var(--t-body-2); }
+}

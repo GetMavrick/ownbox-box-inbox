@@ -36,7 +36,8 @@ for _k in [k for k in list(os.environ) if k.startswith("ZERNIO_API_KEY")] + ["AN
     os.environ.pop(_k, None)
 
 from core import box_secrets as bs, state  # noqa: E402
-from core.vendors.mailbox import classify_auth_failure, providers, smtp_host_for  # noqa: E402
+from core.vendors.mailbox import (classify_auth_failure, providers, smtp_host_for,  # noqa: E402
+                                  smtp_port_for)
 
 _failed = 0
 
@@ -72,13 +73,28 @@ def refused(label, needle, **kw):
 
 # ── 1. presets and the server field ──────────────────────────────────────────────────────────────
 print("— presets and the server field —")
-expect = {"gmail": "imap.gmail.com", "yahoo": "imap.mail.yahoo.com", "icloud": "imap.mail.me.com",
-          "aol": "imap.aol.com", "zoho": "imap.zoho.com", "fastmail": "imap.fastmail.com",
-          "godaddy": "imap.secureserver.net"}
-for key, host in expect.items():
+# IMAP host, then the sending server and port each provider's own help page gives (#1485 review,
+# OSDev1: "every preset's SMTP host is checked against the provider's own help page").
+expect = {"gmail": ("imap.gmail.com", "smtp.gmail.com", 587),
+          "yahoo": ("imap.mail.yahoo.com", "smtp.mail.yahoo.com", 587),
+          "icloud": ("imap.mail.me.com", "smtp.mail.me.com", 587),
+          "aol": ("imap.aol.com", "smtp.aol.com", 465),
+          "zoho": ("imap.zoho.com", "smtp.zoho.com", 587),
+          "zoho_pro": ("imappro.zoho.com", "smtppro.zoho.com", 587),
+          "fastmail": ("imap.fastmail.com", "smtp.fastmail.com", 587),
+          "godaddy": ("imap.secureserver.net", "smtpout.secureserver.net", 587)}
+for key, (host, smtp, port) in expect.items():
     ok(f"{key} reads from {host}", providers.host_for(key) == host)
-    ok(f"...and its sending host follows the same name ({smtp_host_for(host)})",
-       smtp_host_for(host) == "smtp." + host[len("imap."):])
+    ok(f"...and sends through {smtp}:{port}, the server its provider documents",
+       (smtp_host_for(host), smtp_port_for(host)) == (smtp, port),
+       f"{smtp_host_for(host)}:{smtp_port_for(host)}")
+ok("every preset with a server has its sending server written down, with a source",
+   all(p[1] in providers.SUBMISSION and providers.SUBMISSION[p[1]][2].startswith("https://")
+       for p in providers.PRESETS.values() if p[1]),
+   str([k for k, p in providers.PRESETS.items() if p[1] and p[1] not in providers.SUBMISSION]))
+ok("a server the buyer typed still follows the imap. -> smtp. convention on 587",
+   (smtp_host_for("imap.lopezplumbing.com"), smtp_port_for("imap.lopezplumbing.com"))
+   == ("smtp.lopezplumbing.com", 587))
 ok("Another provider takes the typed server", providers.host_for("other", "mail.lopezplumbing.com")
    == "mail.lopezplumbing.com")
 ok("...a pasted URL or port is cut to the host",
@@ -94,6 +110,58 @@ try:
     ok("an unknown provider is refused", False)
 except ValueError:
     ok("an unknown provider is refused", True)
+
+# ── 1b. the connection each port needs ──────────────────────────────────────────────────────────
+print("\n— 587 is STARTTLS, 465 is TLS from the first byte, and both paths use one door —")
+import smtplib as _smtplib  # noqa: E402
+
+from core.vendors.mailbox import open_submission  # noqa: E402
+
+
+class _FakeConn:
+    def __init__(self, kind, host, port, **kw):
+        self.kind, self.host, self.port, self.steps = kind, host, port, []
+        self.tls_context = kw.get("context")
+
+    def ehlo(self):
+        self.steps.append("EHLO")
+
+    def starttls(self):
+        self.steps.append("STARTTLS")
+
+    def close(self):
+        pass
+
+
+_real = (_smtplib.SMTP, _smtplib.SMTP_SSL)
+_smtplib.SMTP = lambda host, port, **kw: _FakeConn("plain", host, port, **kw)      # type: ignore
+_smtplib.SMTP_SSL = lambda host, port, **kw: _FakeConn("tls", host, port, **kw)    # type: ignore
+try:
+    aol = open_submission("imap.aol.com", 5)
+    gmail = open_submission("imap.gmail.com", 5)
+finally:
+    _smtplib.SMTP, _smtplib.SMTP_SSL = _real
+ok("AOL opens smtp.aol.com:465 with TLS from the first byte, verified against the system CAs",
+   (aol.kind, aol.host, aol.port, aol.steps) == ("tls", "smtp.aol.com", 465, ["EHLO"])
+   and aol.tls_context is not None, f"{aol.kind} {aol.host}:{aol.port} {aol.steps}")
+ok("Gmail opens smtp.gmail.com:587, STARTTLS, and EHLO again on the encrypted channel",
+   (gmail.kind, gmail.host, gmail.port, gmail.steps)
+   == ("plain", "smtp.gmail.com", 587, ["EHLO", "STARTTLS", "EHLO"]),
+   f"{gmail.kind} {gmail.host}:{gmail.port} {gmail.steps}")
+# ONE DOOR: a check that passes on the set-up screen must mean the real send reaches the same
+# server the same way. Two hand-rolled connections are how the send drifted to 587-only before.
+_verify_src = (ROOT / "core/vendors/mailbox/verify.py").read_text()
+_send_fn = _verify_src.split("def verify_send", 1)[1].split("\ndef ", 1)[0]
+ok("the set-up check connects through open_submission, not its own smtplib.SMTP",
+   "open_submission(" in _send_fn and "smtplib.SMTP(" not in _send_fn)
+_ec = ROOT / "marketing/customer_voice/inbox/email_channel.py"
+if _ec.is_file():
+    _ec_src = _ec.read_text()
+    ok("the real reply send connects through open_submission, not its own smtplib.SMTP",
+       "open_submission(" in _ec_src and "smtplib.SMTP(" not in _ec_src)
+else:
+    print("  --   no inbox machine ships on this box, so there is no reply send to check here")
+
 
 # ── 2. Microsoft, up front ───────────────────────────────────────────────────────────────────────
 print("\n— Microsoft is refused before a password goes anywhere —")

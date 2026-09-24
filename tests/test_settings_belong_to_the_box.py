@@ -76,15 +76,17 @@ def _rows(owner: bool = True) -> str:
     return home._box_rows(owner=owner)
 
 
-def test_settings_is_a_core_section_and_it_is_last():
-    print("test_settings_is_a_core_section_and_it_is_last")
+def test_settings_is_a_core_section_right_below_home():
+    print("test_settings_is_a_core_section_right_below_home")
     _box()
     secs = shell.sections()
     got = [(s.key, s.machine) for s in secs]
     ok("core registers Settings itself", ("settings", "core") in got, str(got))
-    # LAST, NOT SECOND. The rail's middle belongs to the machines, however many a box carries;
-    # Settings is where a person looks when they want to change a thing, and that is the bottom.
-    ok("Settings is the last row in the rail", secs[-1].key == "settings", str([s.key for s in secs]))
+    # SECOND, RIGHT BELOW HOME, AND ABOVE EVERY MACHINE. Owner, 2026-09-24: *"you can put System
+    # Settings right below it"* — the box's own rows first, then the machines added to it. This
+    # reversed "last" (2026-09-22); a machine's order can no longer lift it above the box's own.
+    ok("Settings sits right below home, above every machine",
+       [s.key for s in secs] == ["dashboard", "settings", "widgets"], str([s.key for s in secs]))
     ok("core's home is still first", secs[0].key == "dashboard", str([s.key for s in secs]))
 
 
@@ -233,7 +235,7 @@ def test_the_whole_page_renders():
        or ('aria-current' in html and '/settings' in html), "")
 
 
-for _fn in (test_settings_is_a_core_section_and_it_is_last,
+for _fn in (test_settings_is_a_core_section_right_below_home,
             test_it_carries_the_box_level_steps_and_leaves_the_machines_theirs,
             test_core_does_not_know_where_set_up_lives,
             test_a_member_is_never_offered_a_door_they_are_refused_at,

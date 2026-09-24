@@ -777,11 +777,12 @@ def send(cred: dict, *, to: str, subject: str, body: str,
 
     conn = None
     try:
-        conn = smtplib.SMTP(_smtp_host(cred), 587, timeout=_SEND_TIMEOUT_S)
-        conn.ehlo()
-        conn.starttls()
-        conn.ehlo()                                      # capabilities, re-read on the encrypted
-        conn.login(cred["user"], cred["password"])       # channel — never the list read in clear
+        # The provider's documented server and port (core/vendors/mailbox/providers.py
+        # SUBMISSION), STARTTLS with EHLO re-read on 587 or TLS from the first byte on 465 — the
+        # same door the set-up check used, so a check that passed means this path works too.
+        from core.vendors.mailbox import open_submission
+        conn = open_submission(cred.get("host") or "", _SEND_TIMEOUT_S)
+        conn.login(cred["user"], cred["password"])
         conn.send_message(msg)
     except smtplib.SMTPAuthenticationError as e:
         raise _classify_auth_failure(str(e), cred.get("host") or "") from e

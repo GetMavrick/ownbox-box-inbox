@@ -133,7 +133,7 @@ ok("the rail is on the page", 'id="railnav"' in _b)
 ok("...and it lists this machine's screens", all(w in _rail for w in ("Messages", "Today")))
 ok("...and marks the one you are standing on",
    _rail.count('aria-current="page"') == 1, _rail.count('aria-current="page"'))
-ok("...and the way out names where it goes", "Dashboard" in _rail)
+ok("...and the way out names where it goes", "Base Machine" in _rail)
 # REGISTRY, NOT A LITERAL. This is the claim that makes the menu worth sharing: a machine that
 # registers a section appears here on the day it ships, with no edit to the inbox.
 from core import shell                               # noqa: E402
