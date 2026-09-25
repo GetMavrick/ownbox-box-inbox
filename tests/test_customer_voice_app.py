@@ -596,6 +596,9 @@ def test_an_inbox_nothing_can_reach_says_so_instead_of_promising():
         box_secrets.email_credential = lambda: {}                    # no connector, no mailbox
         body = c.get("/inbox/inbox").get_data(as_text=True)
         ok("a box nothing can reach says exactly that", "Nothing can reach you yet" in body)
+        ok("...names the step, not 'a channel' or 'one'",
+           "Connect your inbox" in body and "Connect one" not in body
+           and "no channel is connected" not in body)
         ok("...and does not promise someone is coming",
            "The first person who messages you appears here" not in body)
         ok("...and gives him the one thing he can do", 'class="btn"' in body)

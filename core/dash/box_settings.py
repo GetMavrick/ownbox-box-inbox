@@ -42,6 +42,9 @@ from flask import jsonify, redirect, request
 
 from core.dash import blueprint
 from core.dash.home import chrome
+from core.logging import get_logger
+
+log = get_logger(__name__)
 
 
 def _esc(v) -> str:
@@ -581,6 +584,50 @@ def _key_form(e: dict) -> str:
 # them, because TWO screens render these words — this page and the sheet a colleague is handed —
 # and a second copy laid out for paper is a second copy that drifts. The one that drifts is the
 # printed one: nobody re-reads a page they already pinned to a wall.
+def home_screen_apps() -> list[dict]:
+    """Every app this box can put on a home screen: the Base Machine first, then each add-on.
+
+    AN APP IS WHATEVER SERVES A WEB MANIFEST, read off the box's own routes. Core never names a
+    machine's address (tests/test_core_boundary.py), so it asks the router which manifests exist
+    and reads each one the way a browser would. A box sold with two machines shows three icons,
+    and a Lead box shows what a Lead box has, with no list here to keep in step.
+    """
+    from flask import current_app
+    import json
+    found = []
+    for rule in current_app.url_map.iter_rules():
+        if not rule.rule.endswith("manifest.webmanifest") or "GET" not in (rule.methods or ()):
+            continue
+        try:
+            resp = current_app.view_functions[rule.endpoint]()
+            m = json.loads(resp.get_data(as_text=True) if hasattr(resp, "get_data") else resp)
+        except Exception as e:                   # noqa: BLE001 — one broken app hides only itself
+            log.warning("box_settings.manifest_unreadable", rule=rule.rule, error=type(e).__name__)
+            continue
+        icons = [i for i in (m.get("icons") or ()) if str(i.get("src") or "").startswith("/")]
+        found.append({"name": str(m.get("short_name") or m.get("name") or "").strip(),
+                      "start": str(m.get("start_url") or "/"),
+                      "icon": str(icons[0]["src"]) if icons else "",
+                      "base": rule.rule.startswith("/ui/")})
+    found = [a for a in found if a["name"] and a["icon"]]
+    return sorted(found, key=lambda a: (not a["base"], a["name"].lower()))
+
+
+def _apps_card() -> str:
+    """The home screen this page is about to give you, drawn from the apps the box really has."""
+    apps = home_screen_apps()
+    if not apps:
+        return ""
+    tiles = "".join(f'<a href="{_esc(a["start"])}"><img src="{_esc(a["icon"])}" alt="" '
+                    f'width="64" height="64"><span>{_esc(a["name"])}</span></a>' for a in apps)
+    many = len(apps) > 1
+    return ('<div class="card"><h2>On your Home Screen</h2>'
+            + ('<p class="sub">The Base Machine and each add-on machine are apps of their own. '
+               'Add each one: tap it here to open it, then follow the steps below.</p>' if many else
+               '<p class="sub">Tap it here to open it, then follow the steps below.</p>')
+            + f'<div class="apps">{tiles}</div></div>')
+
+
 def _platform_cards() -> str:
     """iPhone on the left, Android on the right — because whoever prints this does not know which
     device the next person has. Drawn from the step; this file names no platform of its own."""
@@ -697,6 +744,7 @@ def box_mobile():
                 + '<p class="quiet">This is what the box can see across everybody who uses it. '
                   'The card above is about the device you are holding.</p></div>')
 
+    body.append(_apps_card())
     body.append('<div class="card">' + _platform_cards() + '</div>')
 
     # WHEN THE ASKING HAPPENS, said plainly, because a set-up step that ends with nothing switched

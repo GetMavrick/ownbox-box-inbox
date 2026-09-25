@@ -62,8 +62,9 @@ def menu(path):
 print("\ntest_the_rows_read_in_the_owners_order")
 html, nav = menu("/dashboard")
 rows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', nav, re.S)
-ok("Base Machine, System Settings, then Unified Inbox and Add a Machine",
-   rows == ["Base Machine", "System Settings", "Unified Inbox", "Add a Machine"], str(rows))
+# THE ADD-ON MACHINES SIT BETWEEN THE BOX'S OWN ROWS AND ADD A MACHINE, in their registered order.
+ok("Base Machine, System Settings, then the add-on machines and Add a Machine",
+   rows == ["Base Machine", "System Settings", "Unified Inbox", "SEO", "Add a Machine"], str(rows))
 ok("the page itself is titled Base Machine", "<h1>Base Machine</h1>" in html)
 ok("...and no row or heading on it still says Dashboard",
    ">Dashboard<" not in html and '"lbl">Dashboard' not in html)

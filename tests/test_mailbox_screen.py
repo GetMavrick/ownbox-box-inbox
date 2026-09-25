@@ -276,7 +276,10 @@ def test_stopping_takes_the_reason_with_the_credential():
     bs.put_email(host="imap.gmail.com", user="owner@acme.com", password=GOOD)
     bs.note_email_status("needs_reauth", "AUTHENTICATIONFAILED Invalid credentials")
     app, c = _c()
-    r = c.get("/inbox/mailbox?off=1")
+    # A POST, NEVER A LINK: a GET that changes state fires for a link preview or another site.
+    c.get("/inbox/mailbox?off=1")
+    ok("the old ?off=1 link changes nothing", bool(bs.email_credential()))
+    r = c.post("/inbox/mailbox", data={"off": "1"})
     ok("it redirects rather than answering in place", r.status_code in (302, 303))
     ok("the credential is gone", not bs.email_credential())
     st = bs.email_state()
@@ -432,7 +435,7 @@ def test_the_button_says_what_the_screen_it_reaches_actually_offers():
     # helper what it says and then checks it said that proves nothing. So a new destination is a
     # deliberate line in this file — which is how the set-up screen's arrival was caught.
     pairs = {"/inbox/setup": "Set up your box",
-             "/inbox/connect": "Connect a channel",
+             "/inbox/connect": "Connect your social accounts",
              "/inbox/mailbox": "Connect your inbox"}
     for go, said in pairs.items():
         ok(f"{go} is offered as {said!r}", verb(go) == said, verb(go))

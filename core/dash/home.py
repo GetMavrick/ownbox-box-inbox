@@ -314,6 +314,14 @@ padding:10px 12px;margin:10px 0 0;word-break:break-all;user-select:all}
 .row.setting .act{color:var(--link);font-weight:600;white-space:nowrap;min-height:44px;
 display:flex;align-items:center}
 .row>.quiet{flex:1 1 320px;min-width:0}
+/* THE APPS AS THEY WILL SIT ON A HOME SCREEN: the real icons and names on a warm ground, so a
+   person knows what they are adding before they add it. */
+.apps{display:flex;flex-wrap:wrap;gap:22px 26px;justify-content:center;padding:26px 16px 22px;
+margin:4px 0 14px;border-radius:var(--r-md);
+background:linear-gradient(170deg,var(--ground),color-mix(in srgb,var(--link) 22%,var(--ground)))}
+.apps a{display:flex;flex-direction:column;align-items:center;gap:8px;width:84px;min-height:48px;
+color:var(--ink);font-size:13px;font-weight:600;text-align:center;line-height:1.2}
+.apps img{width:64px;height:64px;border-radius:15px;box-shadow:0 1px 3px rgba(17,17,17,.18)}
 /* A LINK THAT IS THE ACTION wears the ink pill, full width until a pointer exists. */
 .card a.btn{display:flex;align-items:center;justify-content:center;min-height:var(--control);
 padding:12px 26px;border-radius:var(--r-pill);background:var(--accent);color:var(--on-accent);
@@ -536,7 +544,7 @@ def chrome(path: str, *, title: str, lede: str, body: str,
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <meta name="theme-color" content="#f6f4ef">
-<title>{_esc(name)} · {_esc(title)}</title>{look.head_tags()}<style>{CSS}</style></head><body>
+<title>{_esc(name)} · {_esc(title)}</title>{look.head_tags()}{look.app_tags()}<style>{CSS}</style></head><body>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
 <div class="topbar">
 <label class="ham" for="navtoggle" role="button" aria-label="Menu">{_HAM}</label>
@@ -1113,7 +1121,7 @@ def settings():
                 "get them in your inbox too.")
         body += ('<div class="card"><h2>Email</h2>'
                  f'<p class="sub">{said}</p>'
-                 '<div class="foot"><a href="/settings/email">Email from your box &rarr;</a>'
+                 '<div class="foot"><a href="/settings/email">Outbound Email &rarr;</a>'
                  '</div></div>')
         body += ('<div class="card"><h2>The machine itself</h2>'
                  '<p class="sub">This box is a server you own outright. Put your own key on it '

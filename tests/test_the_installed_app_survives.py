@@ -168,6 +168,25 @@ def test_the_install_files_are_still_served():
        f"{m.get('start_url')} {m.get('scope')}")
 
 
+def test_the_installed_app_wears_the_box_ground():
+    print("test_the_installed_app_wears_the_box_ground")
+    # FOUND 2026-09-24 (OSDev5's pointer, the launch sweep): the manifest still carried #0b0d10,
+    # so the installed app opened on a near-black splash under a black status bar, and the light
+    # page's own theme-color was #eff2f4, the grey-blue of the inbox before box.css. The page is
+    # the box's cream now; all three read the one value box.css paints the ground with.
+    css = (pathlib.Path(__file__).resolve().parents[1] / "core" / "dash" / "static"
+           / "box.css").read_text()
+    mt = re.search(r"--ground:\s*(#[0-9a-fA-F]{6})", css)
+    ground = mt.group(1).lower() if mt else "(no --ground in box.css)"
+    m = json.loads(_client().get("/inbox/manifest.webmanifest").get_data(as_text=True))
+    ok("the manifest's theme_color is the box's ground", str(m.get("theme_color")).lower() == ground,
+       f"{m.get('theme_color')} vs {ground}")
+    ok("...and so is its splash background", str(m.get("background_color")).lower() == ground,
+       f"{m.get('background_color')} vs {ground}")
+    ok("...and the light page's status bar", _app._THEME_BG["light"].lower() == ground,
+       f"{_app._THEME_BG['light']} vs {ground}")
+
+
 def test_the_suite_is_named_in_ci():
     print("test_the_suite_is_named_in_ci")
     here = pathlib.Path(__file__).resolve().parents[1]

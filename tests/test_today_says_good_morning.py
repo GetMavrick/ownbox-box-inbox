@@ -363,6 +363,47 @@ ok("...and clears it, so the box lands on white",
    "Max-Age=0" in " ".join(v for k, v in _old.headers if k == "Set-Cookie"))
 
 
+# ── the greeting reads the reader's clock ─────────────────────────────────────────────────────
+print("\ntest_the_greeting_is_the_readers_time_of_day")
+# OWNER, 2026-09-24: "that thing says good afternoon when it's morning here. It should be on the
+# local time not UTC." A sold box runs on UTC; the reader's zone is `notify.buyer_timezone()`
+# (the settings override, then the zone the browser gave at claim). Each case below picks a
+# zone whose time of day DIFFERS from the box's own, so reading the box's clock fails it.
+from zoneinfo import ZoneInfo as _Z                                        # noqa: E402
+from core import notify as _notify, report as _report                      # noqa: E402
+from marketing.customer_voice import app as _cv                            # noqa: E402
+
+def _word(h):
+    return "Good morning" if h < 12 else ("Good afternoon" if h < 17 else "Good evening")
+
+_box_word = _word(datetime.now(_report.tz()).hour)
+_real_bt = _notify.buyer_timezone
+try:
+    _seen = set()
+    for _off in range(-12, 15):
+        _zone = f"Etc/GMT{'+' if _off <= 0 else '-'}{abs(_off)}" if _off else "UTC"
+        _w = _word(datetime.now(_Z(_zone)).hour)
+        if _w == _box_word or _w in _seen:
+            continue
+        _seen.add(_w)
+        _notify.buyer_timezone = (lambda z=_zone: z)
+        _got = _cv._hello({})
+        ok(f"a reader in {_zone} is told '{_w}', not the box's '{_box_word}'",
+           f"<h1>{_w}.</h1>" in _got, _got[:80])
+    ok("...checked against at least one other time of day", len(_seen) >= 1)
+    # THE TIMES IN A THREAD READ THE SAME CLOCK: 17:00 UTC is 19:00 two hours east.
+    _notify.buyer_timezone = lambda: "Etc/GMT-2"
+    ok("a message's time is printed on the reader's clock",
+       _cv._when("2026-09-24T17:00:00+00:00") == "Thu 24 Sep, 19:00",
+       _cv._when("2026-09-24T17:00:00+00:00"))
+    # A ZONE THE BOX CANNOT READ FALLS BACK TO THE BOX'S CLOCK, never a 500.
+    _notify.buyer_timezone = lambda: "Not/AZone"
+    ok("an unreadable zone still greets, on the box's clock",
+       f"<h1>{_box_word}.</h1>" in _cv._hello({}))
+finally:
+    _notify.buyer_timezone = _real_bt
+
+
 # ── CI runs this file ─────────────────────────────────────────────────────────────────────────
 print("\ntest_ci_actually_runs_this_file")
 # GUARDED: this suite ships with the machine, and a buyer's box is not a repository.

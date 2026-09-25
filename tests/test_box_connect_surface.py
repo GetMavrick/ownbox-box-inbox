@@ -351,8 +351,11 @@ ok("A PLATFORM THE POLLER NEVER READS IS REFUSED — a grant that collects nothi
    r.status_code == 303 and "/inbox/connect" in str(r.headers.get("Location", "")),
    f"{r.status_code} {r.headers.get('Location')}")
 
-r = _c.get("/inbox/connect?off=1", follow_redirects=False)
-ok("disconnect returns to settings", r.status_code == 303, str(r.status_code))
+_c.get("/inbox/connect?off=1", follow_redirects=False)
+ok("the old ?off=1 link disconnects nothing (a GET must not change the box)",
+   bs.zernio_key() != "", repr(bs.zernio_key()))
+r = _c.post("/inbox/connect", data={"off": "1"}, follow_redirects=False)
+ok("disconnect is a POST that returns to settings", r.status_code == 303, str(r.status_code))
 ok("...and the whole binding is gone",
    bs.zernio_key() == "" and bs.zernio_profile() == "",
    f"{bs.zernio_key()!r} {bs.zernio_profile()!r}")

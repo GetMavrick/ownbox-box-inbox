@@ -631,6 +631,7 @@ def sweep(space: str) -> tuple[int, int]:
             store.record_message(space=space, zcid=zcid, zmid=mid,
                                  direction="in" if inbound else "out",
                                  sent_by=(addr or frm)[:200], body=_body_text(msg),
+                                 sent_at=_sent_at(msg),
                                  detail={"body_html": html_part, "body_text": text,
                                          "headers": _kept_headers(msg)})
             # JUDGED HERE, WHERE THE HEADERS STILL EXIST, and only on INBOUND: whether a machine

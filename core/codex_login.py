@@ -81,11 +81,29 @@ class LoginError(RuntimeError):
 
 
 # ── session directory ───────────────────────────────────────────────────────────────────────
-def _dir() -> pathlib.Path:
+def _dir(machine: str | None = None) -> pathlib.Path:
     """Beside the box's database — the one writable place every worker agrees on. Config is read
-    INSIDE the function, as claude_login does, so a test that points the box elsewhere is obeyed."""
+    INSIDE the function, as claude_login does, so a test that points the box elsewhere is obeyed.
+
+    ONE DIRECTORY PER MACHINE (docs/SCOPE_ONE_PLACE_PER_SETTING.md §4.3), so a machine's sign-in
+    never replaces the box's, or another machine's, while it is in flight."""
     from core.config import settings
-    return pathlib.Path(settings.db_path).resolve().parent / _DIRNAME
+    name = _DIRNAME
+    if machine:
+        from core import machine_accounts
+        name = f"{_DIRNAME}-{machine_accounts._key(machine)}"
+    return pathlib.Path(settings.db_path).resolve().parent / name
+
+
+def _home(machine: str | None = None) -> str:
+    """Where this sign-in's CLI keeps its account: the box's CODEX_HOME, or the machine's own.
+
+    The Codex CLI holds exactly one sign-in per CODEX_HOME, so a machine signing in to its own
+    ChatGPT account must never run in the box's directory: it would sign the box out."""
+    if machine:
+        from core import machine_accounts
+        return machine_accounts.codex_home(machine)
+    return box_secrets.codex_home()
 
 
 def _read(d: pathlib.Path, name: str) -> str:
@@ -114,8 +132,8 @@ def _alive(pid: int) -> bool:
     return True
 
 
-def _live_dir() -> pathlib.Path | None:
-    d = _dir()
+def _live_dir(machine: str | None = None) -> pathlib.Path | None:
+    d = _dir(machine)
     if not d.is_dir():
         return None
     try:
@@ -128,8 +146,8 @@ def _live_dir() -> pathlib.Path | None:
     return None
 
 
-def _reap(why: str) -> None:
-    d = _dir()
+def _reap(why: str, machine: str | None = None) -> None:
+    d = _dir(machine)
     if not d.is_dir():
         return
     try:
@@ -157,8 +175,8 @@ def _sayable(text: str) -> str:
     return " ".join(lines)[-200:]
 
 
-def _env() -> dict:
-    env = {**os.environ, "TERM": "dumb", "NO_COLOR": "1", "CODEX_HOME": box_secrets.codex_home()}
+def _env(machine: str | None = None) -> dict:
+    env = {**os.environ, "TERM": "dumb", "NO_COLOR": "1", "CODEX_HOME": _home(machine)}
     # A key in the environment would make the CLI use it and never ask anyone to sign in — the
     # sign-in "succeeds" for a subscription nobody connected. The box drafts on the account the
     # person signed in with, and only that.
@@ -172,16 +190,17 @@ def cli_present() -> bool:
     return bool(shutil.which("codex"))
 
 
-def pending() -> dict:
+def pending(machine: str | None = None) -> dict:
     """{url, code, status} for a login already in flight, so a reloaded page is not a dead end."""
-    d = _live_dir()
+    d = _live_dir(machine)
     if d is None:
         return {}
     return {"url": _read(d, "url"), "code": _read(d, "code"), "status": _read(d, "status"),
             "error": _read(d, "error")}
 
 
-def start(*, consented: bool = False, user_id: str | None = None) -> dict:
+def start(*, consented: bool = False, user_id: str | None = None,
+          machine: str | None = None) -> dict:
     """Begin a sign-in. Returns {url, code} the buyer uses on their own device. Raises LoginError.
 
     `consented` IS CARRIED, NOT ASSUMED — the same arrangement `core/claude_login.py` uses, and
@@ -198,8 +217,8 @@ def start(*, consented: bool = False, user_id: str | None = None) -> dict:
     if not cli_present():
         raise LoginError("This box cannot sign in to ChatGPT yet — the Codex CLI is not installed "
                          "on it. Ask support@ownbox.io and we will put it on.")
-    _reap("a new login replaces the old one")
-    d = _dir()
+    _reap("a new login replaces the old one", machine)
+    d = _dir(machine)
     d.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(d, 0o700)
     _write(d, "status", "starting")
@@ -209,6 +228,7 @@ def start(*, consented: bool = False, user_id: str | None = None) -> dict:
     # half-written. Written every time, empty when untricked, so a stale "1" from an earlier
     # session directory can never be read as this person's answer.
     _write(d, "consent", "1" if consented else "")
+    _write(d, "machine", machine or "")      # whose account: the helper reads it at the end
     root = pathlib.Path(__file__).resolve().parents[1]
     try:
         logf = open(d / "log", "wb")                     # noqa: SIM115 — handed to the child
@@ -218,7 +238,7 @@ def start(*, consented: bool = False, user_id: str | None = None) -> dict:
             close_fds=True, start_new_session=True,
             env={**os.environ, "PYTHONPATH": str(root)})
     except Exception as e:                               # noqa: BLE001
-        _reap("helper would not start")
+        _reap("helper would not start", machine)
         raise LoginError(f"This box could not start the ChatGPT sign-in ({type(e).__name__}).") from e
     finally:
         try:
@@ -234,47 +254,51 @@ def start(*, consented: bool = False, user_id: str | None = None) -> dict:
             return {"url": url, "code": code}
         if _read(d, "status") == "error":
             why = _read(d, "error")
-            _reap("the login could not start")
+            _reap("the login could not start", machine)
             raise LoginError(why or "ChatGPT did not return a sign-in link. Try again in a minute.")
         if proc.poll() is not None:
             break
         time.sleep(0.2)
-    _reap("no link")
+    _reap("no link", machine)
     raise LoginError("ChatGPT did not return a sign-in link. Try again in a minute.")
 
 
-def status() -> str:
-    d = _live_dir()
+def status(machine: str | None = None) -> str:
+    d = _live_dir(machine)
     return _read(d, "status") if d is not None else ""
 
 
-def cancel() -> None:
-    _reap("cancelled")
+def cancel(machine: str | None = None) -> None:
+    _reap("cancelled", machine)
 
 
-def disconnect(*, user_id: str | None = None) -> None:
-    """Sign the box out of ChatGPT: the CLI forgets its file, and the status row goes with it."""
-    _reap("disconnecting")
+def disconnect(*, user_id: str | None = None, machine: str | None = None) -> None:
+    """Sign the box (or one machine) out of ChatGPT: the CLI forgets its file, and the row goes."""
+    _reap("disconnecting", machine)
     if cli_present():
         try:
-            subprocess.run(["codex", "logout"], env=_env(), capture_output=True, text=True,
+            subprocess.run(["codex", "logout"], env=_env(machine), capture_output=True, text=True,
                            timeout=20, stdin=subprocess.DEVNULL)
         except Exception as e:                           # noqa: BLE001
             log.warning("codex_login.logout_failed", error=type(e).__name__)
     try:
-        (pathlib.Path(box_secrets.codex_home()) / "auth.json").unlink()
+        (pathlib.Path(_home(machine)) / "auth.json").unlink()
     except OSError:
         pass
-    box_secrets.clear_codex(user_id=user_id)
+    if machine:
+        from core import machine_accounts
+        machine_accounts.forget(machine, user_id=user_id)
+    else:
+        box_secrets.clear_codex(user_id=user_id)
     log.info("codex_login.disconnected", user=user_id)
 
 
-def logged_in() -> bool:
+def logged_in(machine: str | None = None) -> bool:
     """Ask the CLI, which is the only party that can say. No spend."""
     if not cli_present():
         return False
     try:
-        r = subprocess.run(["codex", "login", "status"], env=_env(), capture_output=True,
+        r = subprocess.run(["codex", "login", "status"], env=_env(machine), capture_output=True,
                            text=True, timeout=20, stdin=subprocess.DEVNULL)
     except Exception:                                    # noqa: BLE001
         return False
@@ -289,10 +313,11 @@ def _serve(d: pathlib.Path) -> int:
         _write(d, "status", "error")
         return 1
 
-    pathlib.Path(box_secrets.codex_home()).mkdir(mode=0o700, parents=True, exist_ok=True)
+    machine = _read(d, "machine") or None
+    pathlib.Path(_home(machine)).mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
         proc = subprocess.Popen(["codex", "login", "--device-auth"], stdin=subprocess.DEVNULL,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=_env(),
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=_env(machine),
                                 close_fds=True)
     except Exception as e:                               # noqa: BLE001
         return fail(f"This box could not start the ChatGPT sign-in ({type(e).__name__}).")
@@ -378,10 +403,18 @@ def _serve(d: pathlib.Path) -> int:
                     + ". Press Connect to try again.")
 
     # ── 3. the CLI says it worked; ask it, do not assume ───────────────────────────────────
-    if not logged_in():
+    if not logged_in(machine):
         return fail("ChatGPT finished, but this box is still not signed in. Press Connect to try "
                     "again — and if it keeps happening, tell support@ownbox.io.")
     _user = _read(d, "user") or None
+    if machine:
+        # A MACHINE'S OWN SIGN-IN: the account is this machine's directory, recorded as its row.
+        # The box's ChatGPT status, and the box's consent, are the Base Machine's and untouched.
+        from core import machine_accounts
+        machine_accounts.put(machine, "codex", user_id=_user)
+        _write(d, "status", "done")
+        log.info("codex_login.connected", machine=machine)
+        return 0
     box_secrets.note_codex_status("connected", user_id=_user)
     # ONLY NOW, AND ONLY IF IT WAS GIVEN. The tick answers "did this person agree to run their box
     # on their own subscription", so it is recorded at the moment there IS a box running on one —

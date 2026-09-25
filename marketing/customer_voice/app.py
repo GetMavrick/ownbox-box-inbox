@@ -235,8 +235,11 @@ CSS = """
      scrim, and it is declared in this block so it counts as palette rather than a stray literal.
      --nav-ink IS WHY THIS COULD NOT BE A COPY. That rule shipped as `#333940`, a light-only
      literal on a rail the dashboard never renders dark; pointed at --dim it reads in both. */
-  --rail:var(--surface); --hover:var(--bubble-in);
-  --sel:var(--accent-soft); --nav-ink:var(--dim); --faint:var(--dimmer); --danger:var(--bad);
+  /* THE RAIL IS CORE'S, SO IT WEARS CORE'S TWO VALUES: the page's ground, and the current row
+     lifted on a card (core/dash/home.py _BASE). It was white with a grey pill here and cream
+     with a white row one click away on System Settings, the same menu in two colours. */
+  --rail:var(--ground); --hover:var(--bubble-in);
+  --sel:var(--card); --nav-ink:var(--dim); --faint:var(--dimmer); --danger:var(--bad);
   /* THE CREST IS CORE'S COMPONENT AND WEARS CORE'S COLOUR, in both themes deliberately.
      Pointed at this machine's accent it came out pink here and amber on the dashboard — the
      same box, the same initial, two different badges one click apart, which is what the owner
@@ -683,12 +686,23 @@ a.row:active{background:var(--hair);border-radius:10px}
      And with a rail on the left, a column centred in what is left has a gutter on both sides and
      reads as floating; aligned to the rail it reads as the second pane of an app, which is what
      it is. 780px is the widest this list gets before the preview stops wrapping at 15px. */
+  /* EVERY SCREEN TAKES THE RAIL'S EDGE, NOT ONLY THE LIST. The list was aligned for the reason
+     above, and the other screens were left centred in the space beside the rail: at 1280 the
+     list, Drafts and a fresh Today began at 296px, while Today, a thread, Settings, set-up and
+     both connect pages began at 482px, so the page jumped sideways between two tabs of one app.
+     They keep their 620px reading width; only the left edge moves to the one core uses. */
+  .wrap{margin:0;padding-left:24px;padding-right:24px}
   .ib .wrap{max-width:780px;margin:0;padding:0 24px}
   nav.tabs{display:none}
   /* THE TAB BAR'S HEIGHT WAS PADDING AT THE FOOT OF THE PAGE, and with the bar gone that padding
      is a blank strip. A phone's bottom bar pinned to the foot of a desktop window is the single
      thing that made this screen read as unfinished. */
   .wrap{padding-bottom:28px}
+  /* ...AND THE SAME PADDING ON THE BODY SHORTENED THE RAIL. `.lay` is min-height:100% of the body's
+     content box, so the bar's 81px, kept on a desktop that has no bar, left the white rail
+     ending 81px above the foot of the window over a strip of page. Measured at 1280x900: rail
+     819px tall, System Settings' 900. */
+  body{padding-bottom:0}
   /* AND THE BAR STOPS REPEATING THE BOX'S NAME. With core's `.who` block restored to the top of
      the rail, the name sits eleven pixels from the bar that also carries it — the same name,
      twice, one above the other. The rail is the box's identity on a desktop; the bar keeps the
@@ -846,6 +860,10 @@ iframe.mail{display:block;width:100%;border:0}
 /* THE SECOND WAY IS THE OUTLINE (OSDev0's drift check, 2026-09-24): one ink pill per screen, the
    thing to do next; every other action on it wears this. */
 .btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+/* A SWITCH THAT CHANGES THE BOX IS A POSTED FORM DRAWN AS A LINK (`_post_button`): it sits in a
+   sentence, reads in the link colour, and never becomes the screen's ink pill. */
+form.inline{display:inline}
+button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
 .drafted{color:var(--dim);font-size:13px;display:flex;align-items:center;gap:7px}
 .drafted::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);
   flex:none}
@@ -923,6 +941,10 @@ iframe.mail{display:block;width:100%;border:0}
 .setrow:last-child{border-bottom:0}
 .setrow b{font-weight:var(--w-regular);font-size:15.5px}
 .setrow span{color:var(--dim);font-size:13.5px;line-height:1.45}
+/* A <b> INSIDE THE SENTENCE IS EMPHASIS, NOT A SECOND TITLE. `.setrow b` above sizes each row's
+   title, and it also caught the address in "Ownbox is reading owner@…", which came out 15.5px
+   in a 13.5px sentence and not bold. Seen at 390 and 1280 in the launch sweep, 2026-09-24. */
+.setrow span b{font-size:inherit;font-weight:var(--w-strong);color:var(--ink)}
 
 /* ── the install steps ─────────────────────────────────────────────────────────────────────*/
 .flow{margin-top:16px}
@@ -1312,7 +1334,10 @@ def _tabbar(here: str) -> str:
 
 
 THEME_COOKIE = "aios_voice_theme"
-_THEME_BG = {"light": "#eff2f4", "dark": "#0d0d0d"}
+# THE BAR BEHIND THE CLOCK IS THE PAGE'S GROUND. Light was the grey-blue of the inbox
+# before it took box.css; the page is the box's cream now (core/dash/static/box.css --ground,
+# the value core's own screens send), so an installed app showed a blue-grey band over cream.
+_THEME_BG = {"light": "#f6f4ef", "dark": "#0d0d0d"}
 
 
 def _theme() -> str:
@@ -1465,7 +1490,7 @@ def _first_run(day: str = "") -> str:
     return (f'<h1>Today{_daystamp(day)}</h1><div class="head">'
             '<div class="v">Your box is running.</div>'
             '<div class="l">Nothing is connected to it yet, so there is nothing here to report. '
-            'Connect one and this screen fills itself.</div></div>'
+            'Connect your inbox and this screen fills itself.</div></div>'
             + (f'<div class="card"><div class="setrow">'
                '<b>What lands here once you do</b>'
                '<span>Every message anyone sends you, in one list — and each morning, what came '
@@ -1494,17 +1519,36 @@ def _first_run(day: str = "") -> str:
 # name — `dash.brand()` is the BUSINESS, and greeting a plumber by his company name reads like a
 # utility bill. A greeting with no name is better than a greeting with the wrong one, and better
 # than one invented for a mock.
+def _reader_zone():
+    """THE CLOCK OF THE PERSON READING, not the box's. -> a tzinfo, or None for the host's clock.
+
+    A SOLD BOX RUNS ON UTC (`cost.timezone`), so the box's clock said "Good afternoon" to the owner
+    over his morning coffee (owner, 2026-09-24: "It should be on the local time not UTC").
+    `notify.buyer_timezone()` is the one answer the Morning Review and every notice already use:
+    the settings override, then the zone the buyer's own browser gave when the box was claimed,
+    then the box's. The greeting and every time this app prints read it, so the screen and the 8am
+    message agree on when morning is. Never raises: a clock never 500s a page.
+    """
+    from zoneinfo import ZoneInfo
+    try:
+        from core import notify
+        return ZoneInfo(notify.buyer_timezone())
+    except Exception as e:                       # noqa: BLE001 — unknown zone, no tzdata
+        log.warning("voice.reader_zone_unavailable",
+                    extra={"error": f"{type(e).__name__}: {e}"[:120]})
+    try:
+        from core.report import tz
+        return tz()
+    except Exception:                            # noqa: BLE001
+        return None
+
+
 def _hello(figs: dict) -> str:
     """Time of day, then one true sentence built from the report's own figures."""
     from datetime import datetime
-    # THE BOX'S OWN TIMEZONE, and the helper is `tz`. #1081 asked for `zone`, got an ImportError
-    # a bare except swallowed, and every timestamp in the lead app read UTC for days. A greeting
-    # that says "Good evening" over somebody's breakfast is the same class of wrong.
-    try:
-        from core.report import tz
-        hour = datetime.now(tz()).hour
-    except Exception:                            # noqa: BLE001 — a greeting, never a 500
-        hour = datetime.now().hour
+    # THE READER'S CLOCK, NOT THE BOX'S — see `_reader_zone`. Three words only, and only these:
+    # "Just good morning, good afternoon and good evening" (owner, 2026-09-24).
+    hour = datetime.now(_reader_zone()).hour
     word = "Good morning" if hour < 12 else ("Good afternoon" if hour < 17 else "Good evening")
 
     # NO INBOX SEGMENT, NO SENTENCE. The report stays silent about the inbox on a box that has
@@ -1692,12 +1736,9 @@ def _when(v) -> str:
     except ValueError:
         return s                                 # unparseable passes through, never guessed at
     if d.tzinfo is not None:
-        try:
-            from core.report import tz
-            d = d.astimezone(tz())
-        except Exception as e:                   # noqa: BLE001 — a clock never 500s a page
-            log.warning("voice.local_time_unavailable",
-                        extra={"error": f"{type(e).__name__}: {e}"[:120]})
+        z = _reader_zone()                       # the reader's clock, not the box's UTC
+        if z is not None:
+            d = d.astimezone(z)
     return d.strftime("%a %-d %b, %-H:%M")
 
 
@@ -1733,11 +1774,9 @@ def _ago(v) -> str:
         return f"{int(secs // 3600)}h"
     if secs < 7 * 86400:
         return f"{int(secs // 86400)}d"
-    try:
-        from core.report import tz
-        d = d.astimezone(tz())
-    except Exception:                            # noqa: BLE001 — a clock never 500s a page
-        pass
+    z = _reader_zone()                           # the reader's date, not the box's
+    if z is not None:
+        d = d.astimezone(z)
     return d.strftime("%-d %b")
 
 
@@ -1841,6 +1880,18 @@ def _drafts_row(*, primary: bool = True) -> str:
                 'send. It needs an AI account to write with — yours, on your own bill, so '
                 'nothing you receive passes through us.</span>'
                 + _door("Connect an AI account") + '</div>')
+    # TURNED OFF BY THE OWNER, AND THE AI ACCOUNT UNTOUCHED. "Turn off" used to delete the box's
+    # AI key from this machine's screen: every machine on the box lost its account, a box on a
+    # Claude subscription kept drafting anyway, and turning it back on meant signing in again.
+    # It is a switch now, and the account stays exactly as it was.
+    if not _drafting_on():
+        return ('<div class="setrow"><b>Writing your drafts</b>'
+                '<span>Off. Ownbox is not writing replies for you. Every message still arrives, '
+                'and you can answer it by hand.</span>'
+                + ('<span style="margin-top:8px">'
+                   + _post_button("/inbox/drafts", "drafting", "on", "Turn on") + '</span>'
+                   if _is_owner() else _OWNER_ONLY)
+                + '</div>')
     # STOPPED, AND WHY, IN THE WORDS OF THE FIX. The key was checked when it was pasted, so a box
     # that lands here has had something CHANGE at the vendor — and the buyer's only clue used to
     # be drafts that stopped appearing. The two reasons take different actions, so they get
@@ -1866,10 +1917,11 @@ def _drafts_row(*, primary: bool = True) -> str:
             'you send it — nothing goes out on its own.</span>'
             '<span style="margin-top:8px">Writing with your own AI account. '
             + ('<a href="/settings/ai" style="color:var(--href)">Change</a> · '
+               + _post_button("/inbox/drafts", "drafting", "off", "Turn off")
                if _is_owner() else '')
-            + 
-            '<a href="/inbox/drafts?off=1" style="color:var(--href)">Turn off</a></span>'
-            '</div>')
+            + '</span>'
+            + ('' if _is_owner() else _OWNER_ONLY)
+            + '</div>')
 
 
 def _channels_row(*, primary: bool = True) -> str:
@@ -1891,6 +1943,8 @@ def _channels_row(*, primary: bool = True) -> str:
     # ONE INK PILL PER SCREEN: the inbox row above owns it while the mailbox is undone, and this
     # optional step's door is a link until then.
     def _door(label: str) -> str:
+        if not _is_owner():
+            return _OWNER_ONLY
         if primary:
             return (f'<p style="margin:10px 0 0"><a class="btn" href="/inbox/connect">'
                     f'{_esc(label)}</a></p>')
@@ -1909,7 +1963,7 @@ def _channels_row(*, primary: bool = True) -> str:
         # word the API uses. Told "authentication failed" they re-paste a perfectly good key.
         return ('<div class="setrow"><b>Your social accounts</b>'
                 '<span>Your social account needs a payment method before it will connect any '
-                'more channels. Add one there, then come back — nothing here needs changing.'
+                'more accounts. Add one there, then come back — nothing here needs changing.'
                 '</span>'
                 + _door("Check your social accounts") + '</div>')
     if status == "needs_reauth":
@@ -1919,9 +1973,10 @@ def _channels_row(*, primary: bool = True) -> str:
                 + _door("Re-connect") + '</div>')
     return ('<div class="setrow"><b>Your social accounts</b>'
             '<span>Connected. New messages arrive on their own.</span>'
-            '<span style="margin-top:8px">'
-            '<a href="/inbox/connect" style="color:var(--href)">Add or remove a channel</a>'
-            '</span></div>')
+            + ('<span style="margin-top:8px">'
+               '<a href="/inbox/connect" style="color:var(--href)">Add or remove a social account'
+               '</a></span>' if _is_owner() else _OWNER_ONLY)
+            + '</div>')
 
 
 # ── what a row can tell you before you open it ──────────────────────────────────────────────
@@ -2166,7 +2221,7 @@ def _connect_verb(go: str) -> str:
     nothing breaks, and he simply believes the product is not what he was shown.
     """
     return {"/inbox/setup": "Set up your box",
-            "/inbox/connect": "Connect a channel",
+            "/inbox/connect": "Connect your social accounts",
             "/inbox/mailbox": "Connect your inbox"}.get(go, "Finish setting up")
 
 
@@ -2705,9 +2760,9 @@ def r_inbox():
             # state with something for him to DO, so it is the only one carrying a button — and
             # the button appears only on a box that serves somewhere to send him.
             go = _connect_href()
-            body = ('<h1>Inbox</h1><div class="quiet">Nothing can reach you yet, because no '
-                    'channel is connected. Connect one and everything people send you lands '
-                    'here.</div>'
+            body = ('<h1>Inbox</h1><div class="quiet">Nothing can reach you yet, because '
+                    'nothing is connected. Connect your inbox and everything people send you '
+                    'lands here.</div>'
                     # THE TITLE SAYS WHAT HE GETS, THE BUTTON SAYS WHAT HE DOES. Both read
                     # "Connect a channel" until this was rendered — the same three words twice
                     # inside one small card, which reads as a template that was never finished.
@@ -2904,7 +2959,8 @@ def r_thread(zcid):
         # one minute rendered the same "Wed 16 Sep, 20:02" four times — the reader learns nothing
         # from the repeats and the thread turns into a column of dates. A run at the same stamp
         # keeps it once, on the first of the run, which is also where a person looks for it.
-        stamp = _when(m.get("created_at"))
+        # WHEN THEY SENT IT, where the channel said; when the box stored it otherwise.
+        stamp = _when(m.get("sent_at") or m.get("created_at"))
         show = stamp != last_stamp
         last_stamp = stamp
         # AN EMAIL-LENGTH MESSAGE GETS THE FULL COLUMN. Measured off the owner's own morning
@@ -3346,7 +3402,11 @@ PUBLIC_PATHS = frozenset({
     "/voice/sw.js",   # THE TOMBSTONE, not an install file — see TOMBSTONE_SW_JS. Remove with it.
 })
 
-THEME = "#0b0d10"
+# THE INSTALLED APP'S SPLASH AND BAR, before any page has loaded. It was near black,
+# from before white became the default (owner, 2026-09-16: white first): a cream app opened on
+# a black splash under a black status bar. A manifest carries one value, so it is the light
+# one, the look every box opens in.
+THEME = _THEME_BG["light"]
 
 
 # ── settings, and the light/dark switch ─────────────────────────────────────────────────────
@@ -3388,6 +3448,8 @@ def _mailbox_row() -> str:
     # THE REQUIRED STEP OWNS THE SCREEN'S ONE INK PILL while it is undone or refused: reading the
     # mail is what the box is. It was a small link while the optional social accounts row below
     # carried the pill, so a fresh box pointed its buyer at the step that can wait.
+    if not _is_owner():
+        return f'<div class="setrow"><b>Your inbox</b><span>{said}</span>{_OWNER_ONLY}</div>'
     if status == "needs_reauth" or not who:
         return (f'<div class="setrow"><b>Your inbox</b><span>{said}</span>'
                 f'<p style="margin:10px 0 0"><a class="btn" href="{go}">{verb}</a></p></div>')
@@ -3700,16 +3762,17 @@ def r_drafts():
     except Exception:                            # noqa: BLE001 — an unreadable session is not
         _u = {}                                  # a reason to refuse the buyer their own key
     whoami = _u.get("id")
-    if request.args.get("off"):
-        # "Turn off" — §2.6's second state offers it, so it has to actually work. Removing the
-        # key is the whole of turning drafting off: the drafter skips with no key, and every
-        # message still arrives and is still answerable by hand.
-        # `clear_anthropic`, NOT `clear` — the key AND what the vendor last said about it. A
-        # status left behind is the NEXT key's problem: turn drafting off while the row reads
-        # `needs_reauth`, paste a fresh working key, and the screen greets it with the old
-        # refusal. Same contract as `clear_zernio`.
-        box_secrets.clear_anthropic(user_id=whoami)
-        return redirect("/inbox/settings")
+    # TURN OFF AND TURN ON ARE A SWITCH, POSTED, AND THE OWNER'S. The switch is the box's
+    # `inbox.drafts.enabled`, which the drafter already reads; the AI account is not touched, so
+    # every other machine keeps drafting and turning it back on needs no sign-in. A GET with
+    # ?off=1, the old link, changes nothing now (see `_post_button`).
+    choice = request.form.get("drafting") if request.method == "POST" else None
+    if choice in ("on", "off"):
+        if not _is_owner():
+            return _owner_refusal()
+        from core import box_settings
+        box_settings.put("inbox", "drafts.enabled", choice == "on", set_by=whoami)
+        return redirect("/inbox/drafts", code=303)
     # THE AI ACCOUNT HAS ONE HOME, and it is System Settings → AI account (owner, 2026-09-24:
     # "there's only one place to add a key or change a setting"; docs/SCOPE_ONE_PLACE_PER_SETTING.md).
     # This page used to carry a second paste form for the same credential. Now it says which account
@@ -4101,7 +4164,11 @@ def _step_extras(e: dict) -> str:
     out = ""
     help_ = e.get("help") or {}
     if help_.get("url"):
-        out += (f'<p style="margin:10px 0 0"><a href="{_esc(help_["url"])}" target="_blank" '
+        # THE LINK IS THE CARD'S LAST LINE WHEN NOTHING FOLLOWS IT, and the card is padded 2px top
+        # and bottom because its rows carry their own. On the social accounts page it sat 2px from
+        # the card's rounded edge (measured at 390, 2026-09-24), so it gets the row's own room.
+        _end = "0" if e.get("alternatives") else "14px"
+        out += (f'<p style="margin:10px 0 {_end}"><a href="{_esc(help_["url"])}" target="_blank" '
                 f'rel="noopener noreferrer" style="color:var(--href);font-weight:var(--w-strong)">'
                 f'{_esc(help_.get("label") or "")} &rarr;</a></p>')
     if e.get("alternatives"):
@@ -4409,6 +4476,24 @@ def r_setup():
 
 # NOT `@blueprint.post`. tests/test_customer_voice.py scans this department for a CALL named
 # `post`, and a decorator is a call — the same two extra characters r_drafts spends.
+def _mailbox_for_member(st: dict) -> str:
+    """The mailbox screen as a member sees it: what the box is reading, and whose it is to change."""
+    status, who = st.get("status"), st.get("user") or ""
+    if status == "needs_reauth":
+        said = (f'Google is refusing the app password for <b>{_esc(who)}</b>, so nothing new '
+                'from this inbox is arriving until the owner replaces it.')
+    elif status == "admin_disabled":
+        said = ('App passwords are switched off for this Google organisation, so this inbox '
+                'cannot be read.')
+    elif who:
+        said = (f'Ownbox is reading <b>{_esc(who)}</b>. It sends only the replies you send, and '
+                'never marks a message read.')
+    else:
+        said = 'No inbox is connected to this box yet.'
+    return (f'<h1>Your inbox</h1><div class="card"><div class="setrow"><span>{said}</span>'
+            + _OWNER_ONLY + '</div></div>' + _back_link())
+
+
 @blueprint.route("/inbox/mailbox", methods=["GET", "POST"])
 def r_mailbox():
     """WHERE A BUYER CONNECTS THEIR INBOX, and until now there was nowhere.
@@ -4439,7 +4524,16 @@ def r_mailbox():
         _u = {}                                  # only whose name the audit line carries
     whoami = _u.get("id")
 
-    if request.args.get("off"):
+    # THE MAILBOX IS THE OWNER'S TO CHANGE (owner, 2026-09-24: "Owner only"). A member reads its
+    # state and nothing else; a member's POST changes nothing.
+    owner = _is_owner()
+    if request.method == "POST" and not owner:
+        return _owner_refusal()
+    if not owner:
+        return _shell(_mailbox_for_member(box_secrets.email_state()), here="/inbox/mailbox"), 200
+
+    if request.method == "POST" and request.form.get("off"):
+        # A POST, never the old ?off=1 link (see `_post_button`).
         # STOPPING IS AS REAL A CONTROL AS STARTING. The status rows go with the credential: a
         # left-behind "connected" would have this screen reporting on a mailbox it no longer reads.
         #
@@ -4448,7 +4542,7 @@ def r_mailbox():
         # too — and the store is where that list belongs, beside `clear_zernio`, which has always
         # worked this way.
         box_secrets.clear_email(user_id=whoami)
-        return redirect("/inbox/mailbox")
+        return redirect("/inbox/mailbox", code=303)
 
     note, typed = "", ""
     if request.method == "POST":
@@ -4508,8 +4602,8 @@ def r_mailbox():
                 '<span>Make a new app password in Google and paste it here. The address stays '
                 'the same unless you change it too.</span></div></div>'
                 + _mailbox_form(user=who, note=note, verb="Save this password")
-                + '<p style="margin-top:16px"><a href="/inbox/mailbox?off=1" '
-                  'style="color:var(--href)">Stop reading this inbox</a></p>'
+                + '<p style="margin-top:16px">'
+                + _post_button("/inbox/mailbox", "off", "1", "Stop reading this inbox") + '</p>'
                 + _back_link())
     else:
         body = ('<h1>Connect your inbox.</h1>'
@@ -4614,7 +4708,15 @@ def r_connect():
         _u = {}                                  # reason to refuse a buyer their own account
     whoami = _u.get("id")
 
-    if request.args.get("off"):
+    # THE SOCIAL ACCOUNTS ARE THE OWNER'S TO CHANGE (owner, 2026-09-24: "Owner only"). A member
+    # reads the stored state, with no call to Zernio, and a member's POST changes nothing.
+    if not _is_owner():
+        if request.method == "POST":
+            return _owner_refusal()
+        return _shell(_connect_for_member(box_secrets.zernio_state()), here="/inbox/connect"), 200
+
+    if request.method == "POST" and request.form.get("off"):
+        # A POST, never the old ?off=1 link (see `_post_button`).
         # Disconnect. The key AND the profile resolved with it — `clear_zernio` is one call for
         # exactly that reason: a profile id left behind would be handed to the NEXT key pasted in.
         box_secrets.clear_zernio(user_id=whoami)
@@ -4672,6 +4774,18 @@ def r_connect():
     return _shell(_connect_page(live, just) + _setup_way_back(), here="/inbox/connect"), 200
 
 
+def _connect_for_member(st: dict) -> str:
+    """The social accounts screen as a member sees it: the stored state, and whose it is."""
+    said = {"not_connected": "No social accounts are connected to this box yet.",
+            "payment_required": "The owner's social account needs a payment method before it "
+                                "connects any more accounts.",
+            "needs_reauth": "Ownbox can no longer reach the owner's social account, so nothing "
+                            "new is arriving until they connect it again."}.get(
+        st.get("status"), "Connected. New messages arrive on their own.")
+    return (f'<h1>Your social accounts</h1><div class="card"><div class="setrow"><span>{said}'
+            '</span>' + _OWNER_ONLY + '</div></div>' + _back_link())
+
+
 @blueprint.get("/inbox/connect/<platform>")
 def r_connect_start(platform: str):
     """Send the person to the vendor's consent screen for ONE platform.
@@ -4684,6 +4798,8 @@ def r_connect_start(platform: str):
     gate = _gate()
     if gate is not None:
         return gate
+    if not _is_owner():                          # the social accounts are the owner's
+        return _owner_refusal()
     if platform not in {p for p, _ in _CONNECTABLE}:
         # An unknown platform is never passed through to the vendor. The allow-list is the
         # channels the poller reads; anything else would grant access nothing ever collects.
@@ -4803,7 +4919,7 @@ def _connect_page(live: dict, just: str) -> str:
       + done +
       '<div class="card">' + "".join(rows) + '</div>'
       '<p class="quiet" style="margin-top:12px">Connected with your own social account. '
-      '<a href="/inbox/connect?off=1" style="color:var(--href)">Disconnect it</a> and Ownbox '
+      + _post_button("/inbox/connect", "off", "1", "Disconnect it") + ' and Ownbox '
       'stops reading immediately — nothing you have already received is deleted.</p>'
       '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--href)">'
       '&larr; Settings</a></p>')
@@ -4944,6 +5060,47 @@ def _is_owner() -> bool:
         return (( dash.session_user(request) or {}).get("role") or "") == "owner"
     except Exception:                                    # noqa: BLE001 — an unreadable session is
         return False                                     # not the owner, and never a 500
+
+
+# THE BOX'S CONNECTIONS ARE THE OWNER'S TO CHANGE. Owner, 2026-09-24, asked who on a team box may
+# change or switch off the mailbox, the social accounts and drafting: "Owner only". A member still
+# reads, replies and sends, and sees each connection's state; the controls are the owner's, the
+# same rule the AI account's page has had since it moved to System Settings.
+_OWNER_ONLY = ('<span style="margin-top:8px;color:var(--dim)">Only the owner of this box can '
+               'change this.</span>')
+
+
+def _owner_refusal():
+    """A member's POST to a control that is the owner's: a sentence and a 403, never a change."""
+    return _shell('<h1>Only the owner can change this.</h1>'
+                  '<p class="quiet">This box\'s connections belong to its owner. Ask them, or '
+                  'read and answer messages as usual.</p>' + _back_link()), 403
+
+
+def _post_button(action: str, name: str, value: str, label: str) -> str:
+    """A switch that changes the box, drawn as a line of text but sent as a POST.
+
+    NEVER A LINK. Each of these was an `<a href="...?off=1">`, and a GET that changes state fires
+    for anything that merely loads the URL: an iPhone long-press preview, a link prefetch, or a
+    link on another site, which the Lax session cookie still rides on a top-level GET. A POST
+    from another site carries no cookie, and nothing previews a form.
+    """
+    return (f'<form method="post" action="{_esc(action)}" class="inline">'
+            f'<button type="submit" class="ghost txt" name="{_esc(name)}" value="{_esc(value)}">'
+            f'{_esc(label)}</button></form>')
+
+
+def _drafting_on() -> bool:
+    """Whether this box writes drafts: the owner's switch, then what the box shipped with.
+
+    `box_settings` under ("inbox", "drafts.enabled") falls back to `inbox.drafts.enabled` in the
+    config, the one switch the drafter already reads (`drafter/draft.enabled`).
+    """
+    try:
+        from marketing.customer_voice.drafter import draft as _draft
+        return _draft.enabled()
+    except Exception:                                    # noqa: BLE001 — a row, never a 500
+        return True
 
 
 def _ai_home() -> str:

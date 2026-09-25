@@ -249,14 +249,22 @@ class LoginError(RuntimeError):
 
 # ── the session on disk, which is what makes this work across workers ────────────────────────────
 
-def _dir() -> pathlib.Path:
+def _dir(machine: str | None = None) -> pathlib.Path:
     """Beside the box's database, which is the one writable place every worker agrees on.
 
     IMPORTED INSIDE THE FUNCTION on purpose: a module-scope read of config freezes it at import and
     defeats every test that points the box somewhere else (`reference_config_bound_at_import`).
+
+    ONE DIRECTORY PER MACHINE (docs/SCOPE_ONE_PLACE_PER_SETTING.md §4.3). A machine signing in to
+    its own account runs its own login beside the box's, so starting one never reaps the other.
+    No machine is the box's own login, in the directory it has always used.
     """
     from core.config import settings
-    return pathlib.Path(settings.db_path).resolve().parent / _DIRNAME
+    name = _DIRNAME
+    if machine:
+        from core import machine_accounts
+        name = f"{_DIRNAME}-{machine_accounts._key(machine)}"
+    return pathlib.Path(settings.db_path).resolve().parent / name
 
 
 def _read(d: pathlib.Path, name: str) -> str:
@@ -286,8 +294,9 @@ def _alive(pid: int) -> bool:
 _LAST_DIRNAME = ".claude-login-last"
 
 
-def _last_dir() -> pathlib.Path:
-    return _dir().parent / _LAST_DIRNAME
+def _last_dir(machine: str | None = None) -> pathlib.Path:
+    d = _dir(machine)
+    return d.parent / (_LAST_DIRNAME + d.name[len(_DIRNAME):])
 
 
 def _keep_last_failure(d: pathlib.Path, why: str) -> None:
@@ -296,7 +305,7 @@ def _keep_last_failure(d: pathlib.Path, why: str) -> None:
     NEVER RAISES. This runs inside `_reap`, whose whole contract is that cleanup does not fail.
     """
     try:
-        keep = _last_dir()
+        keep = d.parent / (_LAST_DIRNAME + d.name[len(_DIRNAME):])
         keep.mkdir(parents=True, exist_ok=True)
         (keep / "when").write_text(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                                    encoding="utf-8")
@@ -312,9 +321,9 @@ def _keep_last_failure(d: pathlib.Path, why: str) -> None:
         log.warning("claude_login.keep_failed", error=f"{type(e).__name__}: {e}")
 
 
-def last_failure() -> dict:
+def last_failure(machine: str | None = None) -> dict:
     """What the last failed sign-in left behind, for an operator — never for a buyer's screen."""
-    keep = _last_dir()
+    keep = _last_dir(machine)
     out: dict = {}
     for f in ("when", "why", "error", "status", "transcript"):
         try:
@@ -324,9 +333,9 @@ def last_failure() -> dict:
     return out
 
 
-def _reap(why: str) -> None:
+def _reap(why: str, machine: str | None = None) -> None:
     """End any live login and remove its session. Never raises: cleanup is not a place to fail."""
-    d = _dir()
+    d = _dir(machine)
     if not d.exists():
         return
     try:
@@ -358,7 +367,8 @@ def _reap(why: str) -> None:
     # support artefact, never shown to a buyer: it is the CLI's own words, and `_sayable` exists
     # precisely because those words are not fit to put in front of somebody.
     _keep_last_failure(d, why)
-    for f in ("pid", "url", "status", "error", "code", "user", "log", "transcript"):
+    for f in ("pid", "url", "status", "error", "code", "user", "log", "transcript", "consent",
+              "machine"):
         try:
             (d / f).unlink()
         except OSError:
@@ -375,9 +385,9 @@ def cli_present() -> bool:
     return bool(shutil.which("claude"))
 
 
-def _live_dir() -> pathlib.Path | None:
+def _live_dir(machine: str | None = None) -> pathlib.Path | None:
     """The session directory IF a login is genuinely still running in it."""
-    d = _dir()
+    d = _dir(machine)
     if not d.is_dir():
         return None
     try:
@@ -395,17 +405,17 @@ def _live_dir() -> pathlib.Path | None:
     return d if _read(d, "status") in ("starting", "awaiting_code") else None
 
 
-def in_progress() -> bool:
-    return _live_dir() is not None
+def in_progress(machine: str | None = None) -> bool:
+    return _live_dir(machine) is not None
 
 
-def pending_url() -> str:
+def pending_url(machine: str | None = None) -> str:
     """The link a login already in flight is waiting on, so a reloaded page is not a dead end."""
-    d = _live_dir()
+    d = _live_dir(machine)
     return _read(d, "url") if d is not None else ""
 
 
-def start(*, consented: bool = False) -> str:
+def start(*, consented: bool = False, machine: str | None = None) -> str:
     """Begin a login and return the URL the buyer must open. Raises LoginError with a sentence.
 
     `consented` IS CARRIED, NOT ASSUMED. This path used to store the token with `consented=True`
@@ -424,9 +434,9 @@ def start(*, consented: bool = False) -> str:
     # STARTING A SECOND ONE ENDS THE FIRST rather than refusing — the common case is a person who
     # closed the tab and pressed the button again, and telling them "a login is already in
     # progress" when they cannot see it is a dead end.
-    _reap("a new login replaces the old one")
+    _reap("a new login replaces the old one", machine)
 
-    d = _dir()
+    d = _dir(machine)
     d.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(d, 0o700)
     fifo = d / "code"
@@ -438,6 +448,9 @@ def start(*, consented: bool = False) -> str:
     # BEFORE THE CHILD IS SPAWNED, because the child reads it at the moment the token appears and
     # there is no second chance to tell it. Same file-in-the-live-dir shape as `user`.
     _write(d, "consent", "1" if consented else "")
+    # WHOSE ACCOUNT THIS LOGIN IS FOR. The helper reads it when the token arrives: a machine's
+    # goes to `machine_accounts`, the box's to `box_secrets`, exactly as before.
+    _write(d, "machine", machine or "")
 
     root = pathlib.Path(__file__).resolve().parents[1]
     try:
@@ -452,7 +465,7 @@ def start(*, consented: bool = False) -> str:
             env={**os.environ, "PYTHONPATH": str(root)})
     except Exception as e:                               # noqa: BLE001
         logf.close()
-        _reap("helper would not start")
+        _reap("helper would not start", machine)
         raise LoginError(f"This box could not start the Claude sign-in ({type(e).__name__}).") from e
     finally:
         try:
@@ -469,7 +482,7 @@ def start(*, consented: bool = False) -> str:
             return url
         if _read(d, "status") == "error":
             why = _read(d, "error")
-            _reap("the login could not start")
+            _reap("the login could not start", machine)
             raise LoginError(why or "Claude did not return a sign-in link. Try again, or paste a "
                                     "token instead.")
         if not _alive(proc.pid):
@@ -477,18 +490,18 @@ def start(*, consented: bool = False) -> str:
         time.sleep(0.4)
 
     tail = _sayable(_clean(_read(d, "log").encode()))
-    _reap("no url")
+    _reap("no url", machine)
     raise LoginError("Claude did not return a sign-in link"
                      + (f" — it said: {tail}" if tail else " and said nothing.")
                      + " Try again, or paste a token instead.")
 
 
-def finish(code: str, *, user_id: str | None = None) -> None:
+def finish(code: str, *, user_id: str | None = None, machine: str | None = None) -> None:
     """Hand Claude's code to the waiting login. Stores the token, or raises LoginError."""
     code = (code or "").strip()
     if not code:
         raise LoginError("Paste the code Claude showed you after you signed in.")
-    d = _live_dir()
+    d = _live_dir(machine)
     if d is None or _read(d, "status") != "awaiting_code":
         raise LoginError("That sign-in has expired. Press Connect again to start a new one.")
 
@@ -499,12 +512,12 @@ def finish(code: str, *, user_id: str | None = None) -> None:
     try:
         fd = os.open(str(d / "code"), os.O_WRONLY | os.O_NONBLOCK)
     except OSError as e:
-        _reap("the login was not listening")
+        _reap("the login was not listening", machine)
         raise LoginError("The sign-in stopped before the code reached it. Please try again.") from e
     try:
         os.write(fd, (code + "\n").encode())
     except OSError as e:
-        _reap("write failed")
+        _reap("write failed", machine)
         raise LoginError("The sign-in stopped before the code reached it. Please try again.") from e
     finally:
         try:
@@ -516,12 +529,12 @@ def finish(code: str, *, user_id: str | None = None) -> None:
     while time.time() < deadline:
         status = _read(d, "status")
         if status == "done":
-            _reap("signed in")
+            _reap("signed in", machine)
             log.info("claude_login.connected", user=user_id)
             return
         if status == "error":
             why = _read(d, "error")
-            _reap("the cli refused it")
+            _reap("the cli refused it", machine)
             raise LoginError(why or "Claude did not accept that code. Press Connect to start "
                                     "again, and paste the new code as soon as Claude shows it.")
         try:
@@ -537,14 +550,14 @@ def finish(code: str, *, user_id: str | None = None) -> None:
     # sanitiser to recognise — two attempts at quoting it put `scope user 3Ainference
     # code_challenge …` in front of the buyer as the reason their sign-in failed. A person cannot
     # act on a CLI transcript. They can act on a sentence that tells them what to do next.
-    _reap("no token")
+    _reap("no token", machine)
     raise LoginError("The sign-in did not complete — Claude did not return a token. This usually "
                      "means the code was wrong or had already expired. Press Connect to start "
                      "again, and paste the new code as soon as Claude shows it.")
 
 
-def cancel() -> None:
-    _reap("cancelled by the buyer")
+def cancel(machine: str | None = None) -> None:
+    _reap("cancelled by the buyer", machine)
 
 
 # ── the helper: one process, one pty, one login, for as long as the buyer needs ──────────────────
@@ -753,8 +766,13 @@ def _serve(d: pathlib.Path) -> int:
             # #1422's — the token captured whole and nothing that came after it. The consent is
             # this branch's — read from the login's own directory rather than asserted, because
             # the tick a buyer is shown now sits beside Connect and has to survive the round trip.
-            box_secrets.put_claude_oauth(found, consented=_read(d, "consent") == "1",
-                                         user_id=user)
+            machine = _read(d, "machine")
+            if machine:
+                from core import machine_accounts
+                machine_accounts.put(machine, "claude_oauth", found, user_id=user)
+            else:
+                box_secrets.put_claude_oauth(found, consented=_read(d, "consent") == "1",
+                                             user_id=user)
             keep_transcript()
             _write(d, "status", "done")
             if proc.poll() is None:

@@ -237,5 +237,26 @@ for banned in ("setInterval", "setTimeout", "fetch(", "XMLHttpRequest", "EventSo
     ok(f"the client script does not use {banned}", banned not in JS)
 ok("no meta refresh anywhere", 'http-equiv="refresh"' not in SRC.lower())
 
+print("\ntest_the_rail_is_the_box_rail")
+# FOUND AT 1280px ON 2026-09-24, in the launch sweep. The rail is core's component, and the inbox
+# painted it white with a grey current row while System Settings, one click away, painted it
+# cream with a white one. And the tab bar's 81px of body padding, kept on a desktop that has no
+# tab bar, stopped the rail 81px above the foot of the window. Both are core's values, read here
+# from core so a change there cannot leave this app behind.
+_core = open(os.path.join(ROOT, "core", "dash", "home.py")).read()
+_core_t = _tokens(_core.split('_BASE = """', 1)[1].split("}", 1)[0])
+_light_t = _tokens(LIGHT_M.group(1)) if LIGHT_M else {}
+for _k in ("rail", "sel"):
+    ok(f"light --{_k} is core's ({_core_t.get(_k)})", _light_t.get(_k) == _core_t.get(_k),
+       f"inbox {_light_t.get(_k)!r}")
+_desk = CSS.split("@media (min-width:821px){", 1)[-1]
+ok("a desktop drops the tab bar's padding from <body>, so the rail reaches the foot",
+   re.search(r"(?<![\w-])body\{padding-bottom:0\}", _desk) is not None)
+
+ok("every screen on a desktop starts at the rail's edge, not centred beside it",
+   re.search(r"(?<![\w.-])\.wrap\{margin:0;padding-left:24px;padding-right:24px\}", _desk) is not None)
+ok("bold words inside a settings row's sentence keep the sentence's size",
+   re.search(r"\.setrow span b\{[^}]*font-size:inherit", CSS) is not None)
+
 print(("FAILED " + str(_failed)) if _failed else "all ok")
 sys.exit(1 if _failed else 0)

@@ -141,6 +141,7 @@ def ui_font(name: str):
 #   A tab (`tile=True`): the tile keeps its own rounded corners, transparent outside, as on the site.
 _INK = (17, 17, 17)            # --ink, the tile
 _GROUND = (246, 244, 239)      # --ground, the cream square
+_GROUND_HEX = "#%02x%02x%02x" % _GROUND   # the same cream, for a manifest's colour fields
 _TILE_R = 64 / 240             # the tile's corner radius, as a fraction of the side
 _SQUARE = 120 / 240            # the cream square's side
 _SQUARE_R = 30 / 240           # ...and its corner radius
@@ -227,6 +228,43 @@ def favicon():
 def apple_touch_icon():
     """180 pixels, the size an iPhone asks for."""
     return Response(mark_png(180), mimetype="image/png", headers={"Cache-Control": _ICON_CACHE})
+
+
+# THE BASE MACHINE IS AN APP OF ITS OWN. Owner, 2026-09-24, with a screenshot of two home-screen
+# icons side by side, Ownbox and Unified Inbox: "put this on the Mobile app screen showing the PWA add
+# to homescreen for the base machine and add on machines". Until now only the inbox declared a
+# manifest, so adding the Base Machine offered the page title as its name and opened it in the
+# browser. This is its manifest: the product's name on the icon, standalone like the inbox, and the
+# same mark the tab and touch icon already use.
+APP_NAME = "Ownbox"
+_APP_SIZES = (192, 512)
+
+
+@blueprint.get("/ui/manifest.webmanifest")
+def ui_manifest():
+    """Public, as every manifest must be: a home screen fetches it without a session."""
+    import json
+    m = {"name": APP_NAME, "short_name": APP_NAME, "start_url": "/", "scope": "/",
+         "display": "standalone", "background_color": _GROUND_HEX, "theme_color": _GROUND_HEX,
+         "icons": [{"src": f"/ui/icon-{n}.png", "sizes": f"{n}x{n}", "type": "image/png",
+                    "purpose": "any"} for n in _APP_SIZES]}
+    return Response(json.dumps(m), mimetype="application/manifest+json",
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
+@blueprint.get("/ui/icon-<int:size>.png")
+def ui_icon_png(size: int):
+    """Exactly the two sizes the manifest names, and a 404 for any other: a size is a key."""
+    if size not in _APP_SIZES:
+        return ("", 404)
+    return Response(mark_png(size), mimetype="image/png", headers={"Cache-Control": _ICON_CACHE})
+
+
+def app_tags() -> str:
+    """What makes a core screen installable as the Base Machine's app. Core screens only: a
+    machine that is an app of its own links its own manifest instead, and a page carries one."""
+    return ('<link rel="manifest" href="/ui/manifest.webmanifest">'
+            f'<meta name="apple-mobile-web-app-title" content="{APP_NAME}">')
 
 
 @blueprint.get("/ui/icon.svg")

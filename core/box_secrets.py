@@ -910,12 +910,12 @@ SETUP_STEPS = (
               # "connected accounts appear here" — they never could. This step binds to
               # `zernio_state()`, which reads the KEY and its status and nothing else; it has no
               # idea what accounts exist and makes no network call. The screen that lists them is
-              # Settings -> Add or remove a channel, which calls `accounts.discover()`.
+              # Settings -> Add or remove a social account, which calls `accounts.discover()`.
               #
               # SAY WHERE, NOT "HERE". A buyer who comes back and sees nothing concludes the
               # connection failed and re-does work that already worked.
               "after": "When you are done, your connected accounts show up under Settings, on "
-                       "'Add or remove a channel' — not on this page."},
+                       "'Add or remove a social account' — not on this page."},
      "note": "No card is needed for the key or for your first two connected accounts. Zernio "
              "asks for one after that, and for X from the start, because X charges for every "
              "request. Leaving this step alone costs you nothing and breaks nothing — email keeps "

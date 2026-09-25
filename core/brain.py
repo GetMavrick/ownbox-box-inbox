@@ -21,6 +21,7 @@ subscription). Spend rows are written either way — with cost 0 on claude_code 
 so per-job attribution and the watchdog's task counts keep working.
 """
 from core.config import ROOT
+import contextvars
 import json
 import os
 import re
@@ -39,6 +40,14 @@ log = get_logger(__name__)
 
 _client = None
 _client_key = ""          # the key `_client` was built with; a change rebuilds it
+
+# THE ACCOUNT THIS ONE CALL THINKS ON, when a machine chose its own (core/machine_accounts.py).
+# None, the default, is the Base Machine's account, read from box_secrets exactly as before. A
+# context variable rather than a parameter threaded through every backend: `think()` sets it for
+# the length of one call and resets it, so the four readers below (the backend choice, the API
+# client, the Claude CLI's token, the ChatGPT CLI's home) each ask one question in one place.
+_CALL: contextvars.ContextVar = contextvars.ContextVar("brain_call_account", default=None)
+_KIND_BACKEND = {"claude_oauth": "claude_code", "anthropic_key": "api", "codex": "codex"}
 
 # Anthropic exception class names that mean "transient — retry later", matched by
 # name so the spine never imports the SDK at module load. Covers overloaded (529),
@@ -66,7 +75,8 @@ def _client_():
     # the buyer changes or removes it, the next call rebuilds instead of holding a stale client
     # for the life of the worker. `.env` still wins, so every box running today is untouched.
     from core import box_secrets
-    key = box_secrets.anthropic_key()
+    own = _CALL.get()
+    key = own["value"] if own and own.get("kind") == "anthropic_key" else box_secrets.anthropic_key()
     if _client is not None and key != _client_key:
         _client = None
     if _client is None:
@@ -195,6 +205,11 @@ def _backend() -> str:
     A box that has connected NEITHER lands on `api` and `can_think()` says so in a sentence —
     the same honest "not set up yet" it has always given, never a silent failure.
     """
+    # A MACHINE'S OWN ACCOUNT, WHEN THIS CALL HAS ONE, DECIDES: the machine chose it on purpose,
+    # so it outranks the box's config as well as the box's connections.
+    own = _CALL.get()
+    if own:
+        return _KIND_BACKEND[own["kind"]]
     configured = (get_config().get("brain") or {}).get("backend", "api")
     if configured in ("claude_code", "codex"):
         return configured
@@ -320,7 +335,9 @@ def _run_claude(cmd: list[str], *, timeout: float) -> tuple[int, str, str]:
         env = dict(os.environ)
         try:
             from core import box_secrets
-            tok = box_secrets.claude_oauth_token()
+            own = _CALL.get()
+            tok = (own["value"] if own and own.get("kind") == "claude_oauth"
+                   else box_secrets.claude_oauth_token())
             if tok:
                 env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
         except Exception as e:                       # noqa: BLE001
@@ -360,7 +377,9 @@ def _think_codex(task: str, prompt: str, *, system, cached_context, job_id,
         raise RuntimeError("this box drafts on ChatGPT but the `codex` CLI is not installed — "
                            "run scripts/install_codex.sh")
     from core import box_secrets
-    home = pathlib.Path(box_secrets.codex_home())
+    own = _CALL.get()
+    home = pathlib.Path(own["home"] if own and own.get("kind") == "codex"
+                        else box_secrets.codex_home())
     workdir = home / "empty"
     try:
         workdir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -397,10 +416,14 @@ def _think_codex(task: str, prompt: str, *, system, cached_context, job_id,
     if proc.returncode != 0 or not out.strip():
         blob = (err or out)[-600:]
         if _CLI_AUTH_RE.search(blob):
-            try:
-                box_secrets.note_codex_status("needs_reauth", blob[:200])
-            except Exception as e:                       # noqa: BLE001
-                log.warning("brain.codex_status_unwritable", error=type(e).__name__)
+            # THE VERDICT BELONGS TO THE ACCOUNT THAT FAILED. On a machine's own sign-in this
+            # is recorded by `think()` against that machine; writing it to the box's status here
+            # would tell the owner the Base Machine is signed out when it is not.
+            if not (own and own.get("kind") == "codex"):
+                try:
+                    box_secrets.note_codex_status("needs_reauth", blob[:200])
+                except Exception as e:                   # noqa: BLE001
+                    log.warning("brain.codex_status_unwritable", error=type(e).__name__)
             raise RuntimeError(f"codex not signed in (rc={proc.returncode}): {blob[:200]}")
         if _CLI_LIMIT_RE.search(blob):
             raise BudgetExceeded(f"chatgpt subscription limit: {blob[:200]}")
@@ -597,8 +620,111 @@ def can_think() -> tuple[bool, str]:
 def think(task: str, prompt: str, *, system: str | None = None,
           cached_context: str | None = None, max_tokens: int = 1024,
           job_id: str | None = None, timeout: float | None = None,
-          isolated: bool = False) -> str:
-    """Run one reasoning call and return the text.
+          isolated: bool = False, machine: str | None = None) -> str:
+    """Run one reasoning call and return the text, on the calling machine's account if it has one.
+
+    machine  the calling machine's key (core names none; the caller passes its own). When that
+             machine chose its own AI account and it is usable, this call thinks on it. Otherwise,
+             and always when `machine` is None, it thinks on the Base Machine's account exactly as
+             before (docs/SCOPE_ONE_PLACE_PER_SETTING.md §4.2).
+
+    DRAFTING NEVER STOPS FOR A MACHINE'S OWN ACCOUNT (owner, 2026-09-24, §7 question 1: "I don't
+    want any lost functionality for any period of time"). If that account is refused, out of
+    credit or at its limit, this same call is made again on the Base Machine's account, and the
+    fallback is recorded against the machine so its AI page can say so. A transient failure is
+    not a reason to switch: it raises RetryableError as it always has, and the retry comes back
+    to the machine's own account.
+
+    The $90 guard is box-wide (§7 question 2): an api call on any account is checked against it.
+    """
+    kw = dict(system=system, cached_context=cached_context, max_tokens=max_tokens,
+              job_id=job_id, timeout=timeout, isolated=isolated)
+    own = _machine_account(machine)
+    if own is None:
+        return _think_now(task, prompt, **kw)
+    token = _CALL.set(own)
+    try:
+        return _think_now(task, prompt, **kw)
+    except Exception as e:
+        verdict = _own_account_verdict(e)
+        if verdict is None:
+            raise
+        _own_account_failed(machine, verdict, e)
+    finally:
+        _CALL.reset(token)
+    return _think_now(task, prompt, **kw)
+
+
+def _machine_account(machine: str | None) -> dict | None:
+    """The machine's own account if it chose one and it can be used; None means the box's.
+
+    A machine that chose its own account but cannot use it right now (signed out, out of credit)
+    thinks on the box's, and that is recorded, so the page tells the owner rather than drafting
+    silently stopping or silently changing account.
+    """
+    if not machine:
+        return None
+    try:
+        from core import machine_accounts
+        own = machine_accounts.account(machine)
+        if own is None and machine_accounts.choice(machine) == "own":
+            machine_accounts.note_fallback(machine)
+            log.warning("brain.machine_account_unusable", machine=machine,
+                        status=machine_accounts.state_of(machine).get("status"))
+        return own
+    except Exception as e:                       # noqa: BLE001 — the box's account is always there
+        log.warning("brain.machine_account_unreadable", machine=str(machine)[:40],
+                    error=f"{type(e).__name__}: {e}"[:160])
+        return None
+
+
+_CREDIT_RE = re.compile(r"credit balance|billing|payment required|\b402\b", re.I)
+# WIDER THAN `_CLI_AUTH_RE`, and only ever asked about a machine's own account: an expired Claude
+# sign-in answers "Invalid API key · Please run /login", which the box's pattern never needed.
+_OWN_AUTH_RE = re.compile(r"invalid (?:api key|x-api-key|bearer)|please run /login"
+                          r"|oauth token|authentication[_ ]error|not signed in", re.I)
+
+
+def _own_account_verdict(e: Exception) -> str | None:
+    """Why a machine's own account just failed, as a status, or None when it did not fail ON ITS
+    OWN ACCOUNT'S ACCOUNT (a transient error, or anything not about who is paying)."""
+    if isinstance(e, RetryableError):
+        return None
+    if isinstance(e, BudgetExceeded):
+        # A subscription window closing, or the box-wide $90 guard. Either way, not a verdict on
+        # the account: fall back for this call and leave its status alone.
+        return "limit"
+    status = getattr(e, "status_code", None)
+    name = type(e).__name__
+    text = str(e)
+    if status in (401, 403) or name in ("AuthenticationError", "PermissionDeniedError") \
+            or _CLI_AUTH_RE.search(text) or _OWN_AUTH_RE.search(text):
+        return "needs_reauth"
+    if status == 402 or _CREDIT_RE.search(text):
+        return "payment_required"
+    return None
+
+
+def _own_account_failed(machine: str, verdict: str, e: Exception) -> None:
+    """Record what the machine's own account said, and that this call fell back to the box's."""
+    try:
+        from core import machine_accounts
+        if verdict in ("needs_reauth", "payment_required"):
+            machine_accounts.note_status(machine, verdict, str(e)[:200])
+        machine_accounts.note_fallback(machine)
+    except Exception as err:                     # noqa: BLE001 — bookkeeping never stops a draft
+        log.warning("brain.machine_account_unrecorded", machine=machine,
+                    error=f"{type(err).__name__}: {err}"[:160])
+    log.warning("brain.machine_account_fell_back", machine=machine, verdict=verdict,
+                error=f"{type(e).__name__}: {e}"[:200])
+
+
+def _think_now(task: str, prompt: str, *, system: str | None = None,
+               cached_context: str | None = None, max_tokens: int = 1024,
+               job_id: str | None = None, timeout: float | None = None,
+               isolated: bool = False) -> str:
+    """One reasoning call on the account `_CALL` names, or the box's. Everything `think()` did
+    before per-machine accounts is here unchanged.
 
     timeout  per-call override (seconds). A tiny router call (max_tokens=8) should
              not inherit the client's 120s default — pass e.g. timeout=20.

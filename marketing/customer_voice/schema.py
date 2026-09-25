@@ -217,6 +217,19 @@ CREATE TABLE IF NOT EXISTS inbox_message_detail (
   created_at  TEXT NOT NULL
 );
 
+-- WHEN IT WAS SENT, beside when the box stored it. `record_message` has always been handed the
+-- vendor's time (Zernio's sentAt, the mail's Date header, a comment's time) and kept it only
+-- inside a dedupe key, so a thread printed `inbox_messages.created_at`: the minute the box READ
+-- the message. A mailbox connected today showed its whole history at today's connect minute
+-- (found 2026-09-24). `created_at` keeps meaning "arrived at the box", because the report's
+-- counts, the thread's order and waiting-on-reply all read it; this table only answers "when did
+-- they send it", for the screen. A SEPARATE TABLE for the same reasons as the one above: a new
+-- table needs no migration number, and a message stored before it existed simply has no row.
+CREATE TABLE IF NOT EXISTS inbox_message_sent (
+  message_id  TEXT PRIMARY KEY,       -- inbox_messages.id, one to one
+  sent_at     TEXT NOT NULL           -- ISO-8601 UTC, as the sender's side stamped it
+);
+
 -- Poll watermark: the newest vendor message id seen per conversation (+ the raw
 -- activity marker so an unchanged conversation costs zero message fetches).
 CREATE TABLE IF NOT EXISTS inbox_state (

@@ -238,6 +238,15 @@ for _p, _h in sorted(READ.items()):
         _promise_on[_p] = _t[max(0, _m.start() - 40):_m.end() + 20]
 ok("no screen says the box never sends, or 'this mobile'", not _promise_on, str(_promise_on))
 
+# "SOCIAL ACCOUNTS", NOT "A CHANNEL", for the thing a buyer connects (#1515). Two labels survived
+# it, found in the launch sweep: the connected row's "Add or remove a channel" link, which the
+# Zernio step also quoted by name, and the connect button's fallback, "Connect a channel". The
+# list's "Every channel" filter is a filter over channels and stays.
+_CHANNEL = re.compile(r"\b(?:Connect a channel|Add or remove a channel)\b", re.I)
+_channel_on = {_p: _CHANNEL.search(_words(_h)).group(0) for _p, _h in sorted(READ.items())
+               if _CHANNEL.search(_words(_h))}
+ok("no screen asks a buyer to connect 'a channel'", not _channel_on, str(_channel_on))
+
 
 # ── 3. a member is not shown doors that are not theirs ───────────────────────────────────
 print("\ntest_a_second_person_on_the_box_meets_no_dead_ends")

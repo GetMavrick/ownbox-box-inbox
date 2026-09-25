@@ -71,7 +71,19 @@ def _cfg() -> dict:
 
 def enabled() -> bool:
     """Drafting is on unless a box turns it off. It cannot send, so the failure mode of it being
-    on is a suggestion nobody wanted — which is recoverable, unlike a message nobody approved."""
+    on is a suggestion nobody wanted — which is recoverable, unlike a message nobody approved.
+
+    THE OWNER'S SWITCH FIRST, THEN WHAT THE BOX SHIPPED WITH. "Turn off" on inbox Settings writes
+    ("inbox", "drafts.enabled") to `core.box_settings`; with no row there this reads the config's
+    `inbox.drafts.enabled` exactly as it always has.
+    """
+    try:
+        from core import box_settings
+        said = box_settings.describe("inbox", "drafts.enabled")
+        if said.get("source") == "box":          # a row the owner wrote; never the config echo
+            return bool(said.get("value"))
+    except Exception:                            # noqa: BLE001 — a settings read never stops a sweep
+        pass
     return bool(_cfg().get("enabled", True))
 
 

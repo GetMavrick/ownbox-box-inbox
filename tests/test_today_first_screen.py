@@ -96,6 +96,10 @@ def test_a_box_nothing_can_reach_opens_on_the_set_up_not_a_report():
        "Your box is running." in words)
     ok("...and says plainly that nothing is connected",
        "Nothing is connected to it yet" in words)
+    # "CONNECT ONE" NAMED NOTHING (launch sweep, 2026-09-24): one of what? The step the box needs
+    # is the inbox, and the sentence says so.
+    ok("...and names the one thing to connect", "Connect your inbox" in words
+       and "Connect one" not in words)
     # NOT A SCORE. The old screen's headline was the rails count — which rendered as an em-dash,
     # because `0 or "—"` is an em-dash, so his first screen led with a shrug and a caption.
     ok("...and never opens on a rails score", "rails set up" not in words, words[:160])

@@ -31,7 +31,7 @@ from core.dash.box_settings import _admit, _back, _esc, _is_owner, _who
 from core.dash.home import chrome
 
 DOOR = "/settings/email"
-_TITLE = "Email from your box"
+_TITLE = "Outbound Email"         # owner 2026-09-24: the menu row's name, so the page and its row agree
 
 
 def _status_card(d: dict) -> str:

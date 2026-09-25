@@ -392,8 +392,8 @@ ok("a save whose test sends is kept, and says to look for it",
 ok("THE KEY IS NEVER ECHOED BACK onto the page", "re_GoodKey12345" not in page)
 ok("the page now says email is set up, from which address", "Email is set up" in text and "hello@acme.co" in text)
 settings_page = visible(owner.get("/settings").get_data(as_text=True))
-ok("System Settings lists it for the owner", "Email from your box" in settings_page and "hello@acme.co" in settings_page)
-ok("...and not for a member", "Email from your box" not in visible(member.get("/settings").get_data(as_text=True)))
+ok("System Settings lists it for the owner", "Outbound Email" in settings_page and "hello@acme.co" in settings_page)
+ok("...and not for a member", "Outbound Email" not in visible(member.get("/settings").get_data(as_text=True)))
 
 text = visible(owner.post("/settings/email", data={"do": "remove"}).get_data(as_text=True))
 ok("the owner can stop it, and the page says the app carries on",

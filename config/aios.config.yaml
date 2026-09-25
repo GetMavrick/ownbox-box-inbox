@@ -124,6 +124,7 @@ worker:
 modules:
   - marketing.customer_voice
   - marketing.customer_voice.inbox
+  - marketing.seo_machine
 
 # Vendor meter — monthly caps in each vendor's NATIVE units (renders, credits).
 # Same billing cycle as `cost:`. Omit a vendor (or its cap) to leave it unmetered.
@@ -427,6 +428,7 @@ dash:
 
 web_modules:
   - marketing.customer_voice.app
+  - marketing.seo_machine.app
 
 # Spaces = one client per Airtable base (docs/SPACES.md). Per-Space BINDINGS:
 # airtable base/table, Slack channel, and Zernio key. SHARED across every Space (one

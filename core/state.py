@@ -342,6 +342,25 @@ CREATE TABLE IF NOT EXISTS box_settings (
   PRIMARY KEY (machine, key, user_id)
 );
 
+-- ── A MACHINE'S OWN AI ACCOUNT (docs/SCOPE_ONE_PLACE_PER_SETTING.md §4.2) ────────────────────────
+-- SCHEMA, not MIGRATIONS: a brand-new table needs no version number (the rule above).
+--
+-- Owner, 2026-09-24: "The base machine should have an LLM account. And each machine should have
+-- the choice to use the base machine or another account." The box's account stays in box_secrets;
+-- a row here is a machine that chose its own. NO ROW IS THE DEFAULT, "use the Base Machine's
+-- account", and switching back deletes the row (§7 question 3: the machine signs in again later).
+-- `core/machine_accounts.py` is the only reader and writer.
+CREATE TABLE IF NOT EXISTS machine_accounts (
+  machine      TEXT PRIMARY KEY,      -- the key the machine passes to brain.think(machine=...)
+  kind         TEXT NOT NULL,         -- claude_oauth | anthropic_key | codex
+  value        TEXT NOT NULL DEFAULT '',  -- the token or key; '' for codex, whose sign-in is a directory
+  status       TEXT NOT NULL DEFAULT 'connected',  -- connected | needs_reauth | payment_required
+  detail       TEXT,                  -- what the vendor last said, never the credential
+  fell_back_at TEXT,                  -- the last time think() used the box's account instead
+  set_at       TEXT NOT NULL,
+  set_by       TEXT
+);
+
 -- ── CONNECTOR SEATS (docs/PLAN_AIOS_CONNECTOR.md section 6 step 2) ────────────────────────
 -- SCHEMA, not MIGRATIONS: a brand-new table needs no version number (the rule above).
 --

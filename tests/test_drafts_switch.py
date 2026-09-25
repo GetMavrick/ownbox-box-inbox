@@ -355,12 +355,28 @@ def test_the_buyer_can_turn_it_on_and_off():
     ok("posting a key at its home redirects back to Settings",
        r.status_code in (301, 302, 303) and "/settings" in r.headers.get("Location", ""))
     ok("...and the key is stored", box_secrets.get(box_secrets.ANTHROPIC) == KEY)
+    # TURN OFF IS A SWITCH, NOT A DELETE (owner, 2026-09-24: one place per setting; the AI
+    # account's one home is System Settings). It used to clear the box's key from this screen,
+    # which took the account from every machine and left a Claude-subscription box drafting.
+    from marketing.customer_voice.drafter import draft as _draft
     r = c.get("/inbox/drafts?off=1")
-    ok("turning off redirects back to Settings", r.status_code in (301, 302, 303))
-    ok("...and the key is gone", box_secrets.get(box_secrets.ANTHROPIC) == "")
-    # An empty submit is a typo, not a failure: say what to do, store nothing, no lecture.
+    ok("the old ?off=1 link changes nothing", _draft.enabled()
+       and box_secrets.get(box_secrets.ANTHROPIC) == KEY)
+    r = c.post("/inbox/drafts", data={"drafting": "off"})
+    ok("turning off is a POST that lands back on the drafts page",
+       r.status_code == 303 and r.headers.get("Location", "").endswith("/inbox/drafts"),
+       f"{r.status_code} {r.headers.get('Location')}")
+    ok("...drafting is off", not _draft.enabled())
+    ok("...and the AI account is exactly as it was", box_secrets.get(box_secrets.ANTHROPIC) == KEY)
+    ok("...and the row says Off, with a way back on",
+       "Off. Ownbox is not writing replies" in c.get("/inbox/drafts").get_data(as_text=True))
+    c.post("/inbox/drafts", data={"drafting": "on"})
+    ok("turning it on again needs no sign-in", _draft.enabled()
+       and box_secrets.get(box_secrets.ANTHROPIC) == KEY)
+    # An empty submit is a typo, not a failure: say what to do, change nothing, no lecture.
     r = c.post("/settings/ai", data={"do": "key", "key": "   "})
-    ok("an empty submit stores nothing", box_secrets.get(box_secrets.ANTHROPIC) == "")
+    ok("an empty submit changes nothing", box_secrets.get(box_secrets.ANTHROPIC) == KEY)
+    box_secrets.clear_anthropic()
     ok("...and says what to do", "Paste" in r.get_data(as_text=True), r.get_data(as_text=True)[-300:])
     # AN OLD INBOX PAGE LEFT OPEN still posts here. It stores nothing and sends the owner home.
     with vendor(200):

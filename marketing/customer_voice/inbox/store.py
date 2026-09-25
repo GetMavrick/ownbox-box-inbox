@@ -352,12 +352,14 @@ def messages_for(space: str, zcid: str, *, limit: int = 200) -> list[dict]:
         rows = c.execute(
             "SELECT m.*, l.user_id AS sender_user_id, u.name AS sender_name, "
             "       u.email AS sender_email, "
-            "       d.body_text AS full_text, d.headers AS raw_headers "
+            "       d.body_text AS full_text, d.headers AS raw_headers, "
+            "       s.sent_at AS sent_at "
             "  FROM inbox_messages m "
             "  LEFT JOIN inbox_send_ledger l "
             "         ON l.space = m.space AND l.zernio_message_id = m.zernio_message_id "
             "  LEFT JOIN users u ON u.id = l.user_id "
             "  LEFT JOIN inbox_message_detail d ON d.message_id = m.id "
+            "  LEFT JOIN inbox_message_sent s ON s.message_id = m.id "
             " WHERE m.space = ? AND m.zernio_conversation_id = ? "
             " ORDER BY m.created_at ASC, m.id ASC LIMIT ?",
             (space, zcid, int(limit))).fetchall()
@@ -595,6 +597,33 @@ def _mirror_key(space: str, zcid: str, direction: str, sent_by: str,
     return "syn:" + hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:40]
 
 
+def _sent_utc(v) -> str | None:
+    """A vendor's send time as ISO-8601 UTC, or None when it cannot be trusted to print.
+
+    NONE RATHER THAN A GUESS. A value with no zone would be read as the box's clock and could be
+    hours out; one more than a few minutes in the future is a sender's broken clock. Either way
+    the thread falls back to when the box stored the message, which is at least true.
+    """
+    from datetime import datetime, timedelta, timezone
+    s = str(v or "").strip()
+    if not s:
+        return None
+    try:
+        if s.isdigit():                                  # epoch seconds, or milliseconds
+            n = int(s)
+            d = datetime.fromtimestamp(n / 1000 if n > 10**11 else n, timezone.utc)
+        else:
+            d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except (ValueError, OverflowError, OSError):
+        return None
+    if d.tzinfo is None:
+        return None
+    d = d.astimezone(timezone.utc)
+    if d > datetime.now(timezone.utc) + timedelta(minutes=10):
+        return None
+    return d.isoformat()
+
+
 def record_message(*, space: str, zcid: str, zmid: str | None, direction: str,
                    sent_by: str, body: str | None, sent_at: str | None = None,
                    detail: dict | None = None) -> None:
@@ -624,11 +653,18 @@ def record_message(*, space: str, zcid: str, zmid: str | None, direction: str,
             "created_at) VALUES (?,?,?,?,?,?,?,?)",
             (str(uuid.uuid4()), space, zcid, key, direction, sent_by,
              (body or "")[:2000], state._now()))
-        if not detail:
+        sent = _sent_utc(sent_at)
+        if not detail and not sent:
             return
         row = c.execute("SELECT id FROM inbox_messages WHERE zernio_message_id = ?",
                         (key,)).fetchone()
         if not row:                                      # cannot happen; costs one branch to say so
+            return
+        if sent:
+            # FIRST WRITE WINS, like the message row: a re-read never moves a message in time.
+            c.execute("INSERT OR IGNORE INTO inbox_message_sent (message_id, sent_at) "
+                      "VALUES (?,?)", (str(row["id"]), sent))
+        if not detail:
             return
         c.execute(
             "INSERT OR IGNORE INTO inbox_message_detail "
