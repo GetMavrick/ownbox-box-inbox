@@ -29,6 +29,7 @@ not even carry an `seo` section (tests/test_seo_settings.py measures both).
 """
 from __future__ import annotations
 
+import datetime as _dt
 import html as _html
 import importlib.util
 import re
@@ -40,7 +41,7 @@ from flask import Blueprint, redirect, request
 from core import box_secrets, box_settings, dash, shell
 from core.logging import get_logger
 
-from . import plan, posthog, settings, sources
+from . import plan, posthog, searches, settings, sources
 
 log = get_logger(__name__)
 
@@ -67,7 +68,7 @@ _ICON = "M10.5 17a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13ZM15.5 15.5 20 20"
 # under its own address and none outside it, so a section at /seo/topics would leave /seo/settings
 # with no menu and no breadcrumb. /seo itself only redirects to Topics.
 shell.register_section(
-    "seo", order=20, machine="seo_machine", title="SEO", href=HOME, icon=_ICON,
+    "seo", order=20, machine="seo_machine", title="AEO", href=HOME, icon=_ICON,
     # ONLY ROWS THAT WORK TODAY (OSDev1, 2026-09-25, on the owner's delegation: "a basic working
     # system by today"). Today, Search and AI answers join when their sources are live
     # (docs/SCOPE_SEO_APP.md); an empty row would be a menu promising a page that says nothing.
@@ -120,7 +121,7 @@ def _is_owner() -> bool:
 
 
 def _owner_refusal(path: str, title: str):
-    body = ('<div class="card"><p>Only the owner of this box can change what the SEO machine '
+    body = ('<div class="card"><p>Only the owner of this box can change what the AEO Machine '
             'writes and where it publishes.</p></div>')
     return _page(path, title, "This one is the owner's.", body), 403
 
@@ -259,16 +260,16 @@ def _save(form, *, user_id: str) -> None:
 # ── the screens ───────────────────────────────────────────────────────────────────────────────
 
 _SAID = {
-    "saved": ("Saved", "The SEO machine uses these from its next article.", True),
+    "saved": ("Saved", "The AEO Machine uses these from its next article.", True),
     "added": ("Topic added", "It is in the plan below.", True),
     "now": ("Next up", "Writing starts within a minute or so. It takes a few minutes, then this "
                        "page shows whether it went live.", True),
     "full": ("First in line", "This week's articles are already out, so it goes live once the "
                               "oldest of them is a week old.", True),
-    "paused": ("First in line", "Publishing is paused: articles a week is set to 0 in SEO "
+    "paused": ("First in line", "Publishing is paused: articles a week is set to 0 in AEO "
                                 "settings.", True),
     "gone": ("That topic cannot go now", "It is already being written or is live.", False),
-    "connected": ("Connected", "Checked and saved. The SEO machine uses it from its next article.",
+    "connected": ("Connected", "Checked and saved. The AEO Machine uses it from its next article.",
                   True),
     # PostHog feeds Performance, not the articles, so its own sentence (OSDev1's review of #1584).
     "posthog_connected": ("Connected", "Checked and saved. Your numbers are on Performance.", True),
@@ -299,9 +300,9 @@ def _setup_card() -> str:
     if not sources.sanity_state()["connected"]:
         links.append(f'<a href="{SANITY}">Connect Sanity &rarr;</a>')
     if not settings.get().get("site_url"):
-        links.append(f'<a href="{SETTINGS}">Open SEO settings &rarr;</a>')
+        links.append(f'<a href="{SETTINGS}">Open AEO settings &rarr;</a>')
     return ('<div class="card"><h2>Not set up yet</h2>'
-            f'<p>Before it can publish, the SEO machine needs {_esc(_and(need))}.</p>'
+            f'<p>Before it can publish, the AEO Machine needs {_esc(_and(need))}.</p>'
             f'<div class="foot">{"".join(links)}</div></div>')
 
 
@@ -412,7 +413,7 @@ def seo_topics():
     refuse = _admit()
     if refuse is not None:
         return refuse
-    title, lede = "Articles", "What the SEO machine writes, and what became of each one."
+    title, lede = "Articles", "What the AEO Machine writes, and what became of each one."
     if request.method == "POST":
         if not _is_owner():
             return _owner_refusal(TOPICS, title)
@@ -469,7 +470,7 @@ def _topics_page(title: str, lede: str, *, note: str = "", typed=("", "")) -> st
                   'that answers a question your customers search for.</p></div>')
     if ready and writer and weekly_cap() == 0:
         listed += ('<p class="quiet ar-cap">Publishing is paused: articles a week is set to 0. '
-                   f'Change it in <a href="{SETTINGS}">SEO settings</a> to start again.</p>')
+                   f'Change it in <a href="{SETTINGS}">AEO settings</a> to start again.</p>')
     elif ready and writer:
         cap = weekly_cap()
         full = (' This week\'s are out. The next goes live once the oldest of them is a week '
@@ -559,7 +560,7 @@ def seo_settings():
     refuse = _admit()
     if refuse is not None:
         return refuse
-    title = "SEO settings"
+    title = "AEO settings"
     lede = "Your website, and what the writer may and may not say."
     if request.method == "POST":
         if not _is_owner():
@@ -635,13 +636,13 @@ def seo_sources():
     san, air = sources.sanity_state(), sources.airtable_state()
     body = ""
     if not (san["connected"] and air["connected"]):
-        body += ('<div class="card"><p>The SEO machine needs both: Airtable, where you plan your '
+        body += ('<div class="card"><p>The AEO Machine needs both: Airtable, where you plan your '
                  'articles, and Sanity, where your website reads them.</p></div>')
     body += _source_card(
         "Airtable", "Where you plan your articles.",
         "Connected." if air["connected"] else "Not connected.", air["connected"], AIRTABLE)
     body += _source_card(
-        "Sanity", "Where your website reads your articles. The SEO machine publishes them here.",
+        "Sanity", "Where your website reads your articles. The AEO Machine publishes them here.",
         (f"Connected to project {san['project']}, dataset {san['dataset']}."
          if san["connected"] else "Not connected."), san["connected"], SANITY)
     # Recommended, not required, so after the two the machine cannot run without.
@@ -651,6 +652,11 @@ def seo_sources():
         "from AI answer engines.",
         "Connected." if ph["connected"] else "Not connected.", ph["connected"], POSTHOG,
         required=False)
+    # GOOGLE ANALYTICS IS THE SECOND CHOICE, NOT BUILT YET (owner, 2026-09-25: "we can list Google
+    # analytics as coming soon"). Named, with no door: docs/SCOPE_AEO_PERFORMANCE.md §5 is the plan.
+    body += ('<div class="card"><h2>Google Analytics</h2><p>Another way to see your visits, for '
+             'businesses already on it. PostHog is the one we recommend.</p>'
+             '<p><b>Coming soon.</b></p></div>')
     # CORE'S GOOGLE SCREEN IS THE OWNER'S ALONE, so a member is not shown a door they are refused at
     # (tests/test_a_buyer_can_walk_every_screen.py walks every link as a member).
     if _is_owner():
@@ -693,7 +699,7 @@ def _sanity_form(typed=None) -> str:
                      "Open API, then Tokens, and choose Add API token.",
                      "Name it after this box, choose Editor, and save.",
                      "Copy the token and paste it above. Sanity shows it only once.")
-            + '<p class="sub">It needs Editor, not Viewer: the SEO machine writes your articles. '
+            + '<p class="sub">It needs Editor, not Viewer: the AEO Machine writes your articles. '
               'The token is stored on this box and never shown again.</p></div>')
 
 
@@ -702,7 +708,7 @@ def seo_sanity():
     refuse = _admit()
     if refuse is not None:
         return refuse
-    title, lede = "Sanity", "Where your website reads your articles. The SEO machine publishes them here."
+    title, lede = "Sanity", "Where your website reads your articles. The AEO Machine publishes them here."
     if request.method == "POST":
         if not _is_owner():
             return _owner_refusal(SANITY, title)
@@ -758,7 +764,7 @@ def _airtable_form(typed=None) -> str:
     return (f'<form method="post" action="{AIRTABLE}"><div class="card">'
             + _text_input("table_url", "Table address", url,
                           "https://airtable.com/app.../tbl.../viw...", kind="url")
-            + '<p class="sub">Open the table in Airtable, and the view you want the SEO machine to '
+            + '<p class="sub">Open the table in Airtable, and the view you want the AEO Machine to '
               'follow, then copy the address from your browser.</p>'
             + _secret_input("api_key", "Personal access token", st["key_saved"], "pat...")
             + '<button type="submit">Check and save</button></div></form>'
@@ -779,7 +785,7 @@ def seo_airtable():
     refuse = _admit()
     if refuse is not None:
         return refuse
-    title, lede = "Airtable", "Where you plan your articles. The SEO machine works from this table."
+    title, lede = "Airtable", "Where you plan your articles. The AEO Machine works from this table."
     if request.method == "POST":
         if not _is_owner():
             return _owner_refusal(AIRTABLE, title)
@@ -876,7 +882,7 @@ _PH_CSS = """<style>
 .pf-c{font-size:13px;color:var(--ink-3)}.pf-c.up{color:var(--ok)}.pf-c.down{color:var(--bad)}
 .card .pf-l{list-style:none;margin:0;padding:0}.pf-l li{display:flex;justify-content:space-between;gap:10px;
 padding:10px 0;border-bottom:1px solid var(--hairline);font-size:15px}.pf-l li:last-child{border-bottom:0}
-.pf-l span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pf-l b{white-space:nowrap}
+.pf-l span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pf-l b{white-space:nowrap}.pf-w span{white-space:normal}
 @media (min-width:760px){.pf-g{grid-template-columns:repeat(4,1fr)}}
 </style>"""
 
@@ -960,33 +966,25 @@ def _list(title: str, rows, empty: str) -> str:
     return f'<div class="card"><h2>{_esc(title)}</h2><ul class="pf-l">{items}</ul></div>'
 
 
-@blueprint.route(PERFORMANCE, methods=["GET"])
-def seo_performance():
-    refuse = _admit()
-    if refuse is not None:
-        return refuse
-    title = "Performance"
-    lede = "How your website did over the last 7 days, against the 7 before."
+def _visits() -> str:
+    """The PostHog half: the week's tiles, the most read articles, and where visitors came from."""
     p = posthog.performance()
     if not p.get("ok"):
         if p.get("why") == "not_connected":
             link = (f'<div class="foot"><a href="{POSTHOG}">Connect PostHog &rarr;</a></div>'
                     if _is_owner() else '<p class="sub">The owner of this box can connect it.</p>')
-            body = ('<div class="card"><h2>Connect PostHog to see your numbers</h2><p>Visitors, '
+            return ('<div class="card"><h2>Connect PostHog to see your visits</h2><p>Visitors, '
                     'article views, visits from AI answer engines, and the sites that send them. '
                     f'From your own PostHog, the minute it is connected.</p>{link}</div>')
-        else:
-            body = ('<div class="card" style="border-color:var(--warn)"><h2>No numbers right now'
-                    f'</h2><p>{_esc(p.get("why"))}</p></div>')
-        return _page(PERFORMANCE, title, lede, body), 200
+        return ('<div class="card" style="border-color:var(--warn)"><h2>No visit numbers right '
+                f'now</h2><p>{_esc(p.get("why"))}</p></div>')
     site = f" for {p['site']}" if p.get("site") else ""
     if p.get("empty"):
-        body = ('<div class="card" style="border-color:var(--warn)"><h2>No visits recorded yet</h2>'
+        return ('<div class="card" style="border-color:var(--warn)"><h2>No visits recorded yet</h2>'
                 '<p>PostHog is connected, and has no page views from your website in the last 14 '
                 'days. Check that the PostHog snippet is on every page of your website.</p></div>'
                 f'<p class="quiet ar-cap">From PostHog{_esc(site)}.</p>')
-        return _page(PERFORMANCE, title, lede, _PH_CSS + body), 200
-    body = ('<div class="pf-g">'
+    return ('<div class="pf-g">'
             + _tile("Visitors", p["visitors"], p["visitors_change"])
             + _tile("Page views", p["views"], p["views_change"])
             + _tile("Article views", p["article_views"], p["article_views_change"])
@@ -997,6 +995,65 @@ def seo_performance():
                     "No article views this week yet.")
             + _list("Where visitors came from", p["top_sources"],
                     "Every visit this week came direct, with no referring site.")
-            + f'<p class="quiet ar-cap">From PostHog{_esc(site)}. Numbers refresh every '
-              f'{posthog.CACHE_S // 60} minutes.</p>')
-    return _page(PERFORMANCE, title, lede, _PH_CSS + body), 200
+            + f'<p class="quiet ar-cap">Visits from PostHog{_esc(site)}, the last 7 days against '
+              f'the 7 before. They refresh every {posthog.CACHE_S // 60} minutes.</p>')
+
+
+def _day(iso: str) -> str:
+    """"2026-09-22" as "Sep 22", the way the page says a date."""
+    try:
+        d = _dt.date.fromisoformat(iso)
+    except ValueError:
+        return iso
+    return f"{d:%b} {d.day}"
+
+
+def _search_list(title: str, sub: str, rows: list, value, empty: str) -> str:
+    if not rows:
+        return f'<div class="card"><h2>{_esc(title)}</h2><p>{_esc(empty)}</p></div>'
+    items = "".join(f'<li><span>{_esc(r["query"])}</span><b>{_esc(value(r))}</b></li>' for r in rows)
+    return (f'<div class="card"><h2>{_esc(title)}</h2><p class="sub">{_esc(sub)}</p>'
+            f'<ul class="pf-l pf-w">{items}</ul></div>')
+
+
+def _searches() -> str:
+    """The Search Console half: top searches, and the opportunities one article could win.
+
+    GOOGLE NOT CONNECTED IS A NEXT STEP, NEVER A ROW OF ZEROS (OSDev1's approval of this plan).
+    Google's screen is the owner's alone, so a member is told who can connect it, not given a link.
+    """
+    s = searches.searches()
+    if not s.get("ok"):
+        why = s.get("why")
+        if why in ("not_connected", "no_property"):
+            head = ("Connect Google Search Console to see your searches" if why == "not_connected"
+                    else "Choose your site in Google Search Console")
+            act = "Connect Google Search Console" if why == "not_connected" else "Choose your site"
+            link = (f'<div class="foot"><a href="{GOOGLE}">{act} &rarr;</a></div>'
+                    if _is_owner() else '<p class="sub">The owner of this box can connect it.</p>')
+            return (f'<div class="card"><h2>{head}</h2><p>What people search for when your website '
+                    'shows up, and the searches one good article could move onto the first '
+                    f'screen.</p>{link}</div>')
+        return ('<div class="card" style="border-color:var(--warn)"><h2>No searches right now</h2>'
+                f'<p>{_esc(why)}</p></div>')
+    lo, hi = searches.OPPORTUNITY
+    return (_search_list("Top searches", "What people searched for, then clicked through to you.",
+                         s["top"], lambda r: f'{r["clicks"]:,} clicks',
+                         "No clicks from Google search in these 28 days yet.")
+            + _search_list("Opportunities",
+                           f"You already show up at position {lo:.0f} to {hi:.0f} for these, most "
+                           "seen first. One good article can move each onto the first screen.",
+                           s["opportunities"], lambda r: f'position {r["position"]:.0f}',
+                           "Nothing just short of the first screen right now.")
+            + f'<p class="quiet ar-cap">Searches from Google Search Console, {_day(s["start"])} '
+              f'to {_day(s["end"])}. Google reports about {searches.LAG_DAYS} days late.</p>')
+
+
+@blueprint.route(PERFORMANCE, methods=["GET"])
+def seo_performance():
+    refuse = _admit()
+    if refuse is not None:
+        return refuse
+    title = "Performance"
+    lede = "How your website is doing: its visits from PostHog, its searches from Google."
+    return _page(PERFORMANCE, title, lede, _PH_CSS + _visits() + _searches()), 200

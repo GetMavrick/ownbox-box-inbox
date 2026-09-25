@@ -8,7 +8,7 @@ And: *"Customers are going to demand current performance numbers immediately."*
 WHY POSTHOG CONNECTS IN ONE STEP AND GOOGLE ANALYTICS DOES NOT. A PostHog personal API key and a
 project ID are all it takes, so a buyer is looking at numbers the minute they save. Google Analytics
 needs a Google sign-in with the Analytics permission on the shared Ownbox Google app, which has to
-be switched on on Google's side first (docs/SCOPE_SEO_PERFORMANCE.md §5).
+be switched on on Google's side first (docs/SCOPE_AEO_PERFORMANCE.md §5).
 
 READ-ONLY, AND IT NEVER REASONS. Every number here is a HogQL query against PostHog's query API. No
 model is asked anything (CLAUDE.md non-negotiable 3), and nothing is ever written to PostHog.

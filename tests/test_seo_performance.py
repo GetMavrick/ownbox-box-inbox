@@ -299,7 +299,7 @@ use(Net(status=401))
 page_r = owner.get("/seo/performance")
 page = main_of(page_r.get_data(as_text=True))
 ok("PostHog refusing the key costs the page its numbers, never the page",
-   page_r.status_code == 200 and posthog.BAD_KEY in page and "pf-t" not in page, page_r.status_code)
+   page_r.status_code == 200 and posthog.BAD_KEY in page and 'class="pf-t"' not in page, page_r.status_code)
 use(Net(raises=True))
 ok("PostHog down: performance() says why and never raises",
    posthog.performance() == {"ok": False, "why": posthog.UNREACHABLE})

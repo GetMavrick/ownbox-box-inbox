@@ -30,7 +30,7 @@ _LEDE = "See what your website is found for on Google. Sign in with Google and p
 # (headline, sentence, good?) for each outcome the screen can report.
 _SAID = {
     "connected": ("Google is connected", "Now pick which site this box works on.", True),
-    "chosen": ("Primary site saved", "The SEO machine reads Search Console for this site.", True),
+    "chosen": ("Primary site saved", "The AEO Machine reads Search Console for this site.", True),
     "disconnected": ("Google is disconnected", "This box no longer reads your Search Console.", True),
     "not_ours": ("That sign-in was not started here", "Press Connect again from this page.", False),
     "too_slow": ("That sign-in took too long", "Press Connect again and finish it within ten minutes.", False),

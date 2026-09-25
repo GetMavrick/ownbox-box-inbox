@@ -43,6 +43,9 @@ BROKER = "https://orders.ownbox.app/google"      # where the code is redeemed (h
 AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth"
 REVOKE = "https://oauth2.googleapis.com/revoke"
 SITES = "https://www.googleapis.com/webmasters/v3/sites"
+# What a site was searched for, per property. The property goes in URL-encoded, whole, so both a
+# URL-prefix property (https://example.com/) and a domain property (sc-domain:example.com) work.
+SEARCH_ANALYTICS = SITES + "/{site}/searchAnalytics/query"
 SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
 SCOPES = ("openid", "email", SCOPE)
 
@@ -207,6 +210,31 @@ def sites() -> list[dict]:
     out = [{"url": str(r.get("siteUrl") or ""), "level": str(r.get("permissionLevel") or "")}
            for r in rows if isinstance(r, dict) and r.get("permissionLevel") in _READABLE]
     return sorted((r for r in out if r["url"]), key=lambda r: r["url"])
+
+
+def search_analytics(start: str, end: str, dimensions=("query",), limit: int = 250) -> list[dict]:
+    """What the chosen site was searched for between two dates (YYYY-MM-DD, inclusive).
+
+    Rows as Google gives them: [{"keys": [...one per dimension], "clicks", "impressions", "ctr",
+    "position"}], most clicks first. Read-only, like everything here. Raises Refused: `not_connected`
+    or `no_property` when there is nothing to read yet, `google_down` or `google_said_no` otherwise.
+    A machine that shows these rows decides how to say each one; this module only fetches them.
+    """
+    site = box_secrets.get(PROPERTY)
+    if not site:
+        raise Refused("no_property")
+    url = SEARCH_ANALYTICS.format(site=urllib.parse.quote(site, safe=""))
+    body = {"startDate": str(start), "endDate": str(end), "dimensions": list(dimensions),
+            "rowLimit": max(1, min(int(limit), 25000))}
+    try:
+        code_status, text = net.post_public(
+            url, json=body, headers={"Authorization": f"Bearer {_access_token()}"})
+    except net.PostRefused as e:
+        raise Refused("google_down", str(e)) from None
+    if code_status != 200:
+        raise Refused("google_said_no", f"searchAnalytics HTTP {code_status}")
+    rows = _json(text).get("rows")
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
 
 
 def choose(site_url: str, *, user_id: str | None = None) -> str:
