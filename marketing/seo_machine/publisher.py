@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json as _json
 import re
+from datetime import datetime, timezone
 from urllib.parse import urlencode, urlparse
 
 from core import box_secrets, net
@@ -212,26 +213,45 @@ def _readable(doc: dict) -> str:
 _DIGITS = re.compile(r"\d")
 
 
-def _markup_text(doc: dict) -> str:
-    """The public text that is not prose: the slug, link targets, the author's link, code, and
-    `sourceMarkdown` (which the site does not render but sits in a publicly readable dataset).
+# A Markdown link's target, and a bare web address, anywhere in the Markdown source.
+_MD_TARGET = re.compile(r"\]\(([^)\s]*)[^)]*\)|(https?://[^\s)\]>\"']+)")
+
+
+def _as_markup(text: str) -> str:
+    # A slug and a URL path join words with hyphens and slashes. Read them as spaces, so a banned
+    # word inside "/never-miss-a-call" is the word it is. Digits are blanked: see _markup_parts.
+    return _DIGITS.sub(" ", re.sub(r"[-_/.]+", " ", text))
+
+
+def _markup_parts(doc: dict) -> tuple[str, str]:
+    """(addresses, markdown): the public text that is not prose, in the two shapes the rules need.
 
     WORDS ARE GUARDED, DIGITS ARE NOT. A banned word or a competitor in a URL or a code block is as
     public as one in a sentence. A digit in a URL, a version string or the Markdown's list syntax
-    is not a claim anyone reads as a fact, and the prose check above already reads every number a
-    reader sees. So digits are blanked here and every other rule applies in full.
+    is not a claim anyone reads as a fact, and the prose check already reads every number a reader
+    sees. So digits are blanked here and every other rule applies in full.
+
+    TWO PARTS, BECAUSE CASE MEANS SOMETHING IN ONE AND NOTHING IN THE OTHER (REVIEW F-A):
+      · addresses: the slug, link targets, the author's link and code. These carry no case a
+        reader sees ("salesforce.com", "why-salesforce"), so they go to the guard as
+        `markup=True`, where even a name the buyer marked as an everyday word ("Front") is
+        matched whatever its case (OSDev1's #1577).
+      · markdown: `sourceMarkdown` with its link targets and web addresses taken out. It repeats
+        the prose, which is not rendered but sits in a publicly readable dataset, so it is read
+        with the prose's rules, case and all: a box that marks "Front" as an everyday word still
+        publishes "the front end".
     """
     _, markup = _body_parts(doc.get("body"))
-    parts = [(doc.get("slug") or {}).get("current") or "", doc.get("sourceMarkdown") or ""]
+    addresses = [(doc.get("slug") or {}).get("current") or ""]
     author = doc.get("author")
     if isinstance(author, dict):
-        parts.append(str(author.get("url") or ""))
-    parts += markup
-    text = "\n".join(p for p in parts if p)
-    # A slug and a URL path join words with hyphens and slashes. Read them as spaces, so a banned
-    # word inside "/never-miss-a-call" is the word it is.
-    text = re.sub(r"[-_/]+", " ", text)
-    return _DIGITS.sub(" ", text)
+        addresses.append(str(author.get("url") or ""))
+    addresses += markup
+    md = str(doc.get("sourceMarkdown") or "")
+    addresses += [m.group(1) or m.group(2) or "" for m in _MD_TARGET.finditer(md)]
+    rest = _MD_TARGET.sub(" ", md)
+    return (_as_markup("\n".join(a for a in addresses if a)),
+            _DIGITS.sub(" ", re.sub(r"[-_/]+", " ", rest)))
 
 
 def refusals(*, lists=None, **fields) -> list:
@@ -243,16 +263,48 @@ def refusals(*, lists=None, **fields) -> list:
     `lists` defaults to the box's own, never to nothing (review item 10).
     """
     lists = lists if lists is not None else _box_lists()
-    doc = _document(**fields)
-    return guard.check(_readable(doc), **lists) + guard.check(_markup_text(doc), **lists)
+    return _found(_document(**fields), lists)
+
+
+def _dedupe(found: list) -> list:
+    """One refusal per thing found. REVIEW F-E: `sourceMarkdown` repeats the body's prose, so one
+    banned word came back twice, and the repeat crowded the useful half out of the row's refusal,
+    which `plan.mark` cuts at 500 characters."""
+    seen, out = set(), []
+    for r in found:
+        key = (r.rule, str(r.found).lower())
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
+def _found(doc: dict, lists: dict) -> list:
+    addresses, markdown = _markup_parts(doc)
+    return _dedupe(guard.check(_readable(doc), **lists)
+                   + guard.check(markdown, **lists)
+                   + guard.check(addresses, **lists, markup=True))
 
 
 def _check_all(doc: dict, lists: dict) -> None:
     """One refusal list for the whole article: prose with every rule, markup with every rule but
     the number one. Raises `GuardRefused` with all of it at once."""
-    found = guard.check(_readable(doc), **lists) + guard.check(_markup_text(doc), **lists)
+    found = _found(doc, lists)
     if found:
         raise guard.GuardRefused(found)
+
+
+def address_refusals(slug: str, *, lists=None) -> list:
+    """What in this web address alone would stop an article being published.
+
+    REVIEW F-B (OSDev9, 2026-09-25). The job mints an article's slug from the owner's QUESTION and
+    pins it, so a banned word in the question is in the address of every draft, whatever the model
+    writes. Checked on its own, before any spend, it is one plain sentence instead of an article
+    paid for and refused on every retry.
+    """
+    lists = lists if lists is not None else _box_lists()
+    addresses, _ = _markup_parts({"slug": {"current": slug}})
+    return _dedupe(guard.check(addresses, **lists, markup=True))
 
 
 def _box_lists() -> dict:
@@ -357,8 +409,14 @@ def publish(*, lists=None, **fields) -> dict:
     # REVIEW ITEM 11 (OSDev1, #1554): without returnIds Sanity answers a create with no id, and
     # the row recorded `doc_id: None`. Ask for it; and if it still is not there, look the slug up
     # rather than hand back a None that looks like an answer.
+    # REVIEW F-D (OSDev9, 2026-09-25): the publish date is set ON CREATE ONLY. The site prints
+    # `publishedAt` and uses it as `datePublished`; without it the site falls back to `_updatedAt`,
+    # which every later patch moves. A patch never sends it (the doc above has it only if the
+    # caller gave one), so the date an article first went live stays its date.
+    created = dict(doc)
+    created.setdefault("publishedAt", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
     status, body = net.post_public(_endpoint("mutate") + "?returnIds=true", headers=_headers(),
-                                   json={"mutations": [{"create": doc}]})
+                                   json={"mutations": [{"create": created}]})
     r = _json_or_raise(status, body, "create")
     doc_id = (((r.get("results") or [{}])[0]) or {}).get("id")
     if not doc_id:

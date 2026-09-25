@@ -116,6 +116,32 @@ def _parse(raw: str) -> dict:
     raise ValueError(f"the model's reply held no JSON object: {text[:200]}")
 
 
+def _text(value) -> str:
+    """Words, from a string or a list of strings. Anything else is not text, and publishing its
+    Python repr would put "{'text': ...}" on a live page (OSDev1's review of #1578), so it is a
+    ValueError, which spends the repair round rather than the article."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)) and all(isinstance(v, str) for v in value):
+        return " ".join(v.strip() for v in value if v.strip())
+    if value is None:
+        return ""
+    raise ValueError(f"an FAQ must be text, not {type(value).__name__}")
+
+
+def _faqs(raw) -> list | None:
+    """Each FAQ as exactly {question, answer}, both strings. REVIEW F-C (OSDev9, 2026-09-25): models
+    add `id`, `source` or `category` unprompted, and the publisher's contract accepts only the two
+    keys, so one extra key failed an article that had already been paid for."""
+    out = []
+    for f in raw if isinstance(raw, list) else []:
+        if isinstance(f, dict):
+            q, a = _text(f.get("question")), _text(f.get("answer"))
+            if q and a:
+                out.append({"question": q, "answer": a})
+    return out or None
+
+
 def _fields(drafted: dict, *, category=None, content_type=None) -> dict:
     title = (drafted.get("title") or "").strip()
     if not title:
@@ -128,19 +154,22 @@ def _fields(drafted: dict, *, category=None, content_type=None) -> dict:
         "meta_description": (drafted.get("meta_description") or "").strip() or None,
         "body_blocks": portable_text.portable_text(body_md) if body_md else None,
         "source_markdown": body_md or None,
-        "faqs": [f for f in (drafted.get("faqs") or [])
-                 if isinstance(f, dict) and f.get("question") and f.get("answer")] or None,
+        "faqs": _faqs(drafted.get("faqs")),
         "category": category,
         "content_type": content_type,
     }
 
 
 def write(question: str, *, facts=None, lists=None, category=None, content_type=None,
-          job_id=None) -> dict:
+          job_id=None, slug=None) -> dict:
     """Draft one article and return the fields `publisher.publish()` takes.
 
     Raises `guard.GuardRefused` if the draft still breaks the box's rules after the repair round —
     the caller records that on the row, with `e.refusals` naming every reason.
+
+    `slug` is the address the caller has already pinned for this article. When given, the draft is
+    checked WITH IT, so the writer and the publisher read the same article (REVIEW F-B: they used
+    to read two different slugs, the writer its title's and the publisher the row's).
     """
     # REVIEW ITEM 10 (OSDev1, #1557): a writer called without lists used to check against NOTHING,
     # so it would pass a draft the publisher then refused, paying for a publish that could not
@@ -156,6 +185,11 @@ def write(question: str, *, facts=None, lists=None, category=None, content_type=
                           system=_SYSTEM, max_tokens=_MAX_TOKENS, job_id=job_id, machine="seo")
         try:
             fields = _fields(_parse(raw), category=category, content_type=content_type)
+            if slug:
+                fields["slug"] = slug
+            # The publisher's contract, checked HERE, so a shape it would refuse spends the repair
+            # round rather than the whole article (REVIEW F-C). InvalidArticle is a ValueError.
+            publisher.validate(**fields)
         except ValueError as e:
             # Unreadable, or no title. That is a draft to redo, not a reason to skip the repair
             # round, which is what it is for.

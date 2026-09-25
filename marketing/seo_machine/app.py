@@ -1,4 +1,5 @@
-"""The SEO machine's two screens: Topics (what to write) and Settings (where, and what it may say).
+"""The SEO machine's screens: Topics (what to write), Data sources (Sanity and Airtable) and Settings
+(the website, and what the writer may say).
 
 MOUNTED THROUGH CONFIG `web_modules:`, like every machine's pages, so core never imports this file.
 It draws with core's `chrome()` — the same frame, rail and controls as System Settings — rather than
@@ -8,15 +9,19 @@ step with the first.
 EVERY SETTING IS WRITTEN THROUGH `settings.py`'S NAMES, into `core.box_settings` under machine
 `seo`, and read back through `settings.get()` — the one accessor the publisher and the writer read.
 There is no second settings module and no key name that exists only here (OSDev6, 2026-09-25). The
-Sanity token is the one exception, and only because it is a credential: it goes to `box_secrets` as
-`SANITY_API_TOKEN_OWNBOX`, the name the publisher reads, and is never shown again.
+two credentials are the exception, only because they are credentials: the Sanity token and the
+Airtable key go to `box_secrets` under the names `sources.py` defines, and are never shown again.
+
+ONE HOME PER SETTING. The Sanity project, dataset and token live on Data sources > Sanity and
+nowhere else; SEO Settings no longer carries them (owner, 2026-09-25, via OSDev1: "The Sanity fields
+move OFF SEO Settings onto it"). A connection is saved only after `sources.py` has proved it.
 
 OWNER ONLY TO CHANGE, ANYONE SIGNED IN TO READ. This screen decides what gets published on the
 business's own website under its name, which is the same kind of decision as the inbox's
 connections, and those are the owner's (owner, 2026-09-24: "Owner only"). Extending that ruling to
 this machine is a proposal, not yet owner-approved.
 
-DARK UNTIL SET UP. Until the box has a website, a Sanity project and a token, Topics says what is
+DARK UNTIL SET UP. Until the box has a website and a proved Sanity connection, Topics says what is
 missing and offers no button that could not work.
 
 NO `get_config()` ANYWHERE IN THIS PACKAGE. A buyer cannot edit YAML, and a sold box's config does
@@ -35,7 +40,7 @@ from flask import Blueprint, redirect, request
 from core import box_secrets, box_settings, dash, shell
 from core.logging import get_logger
 
-from . import plan, settings
+from . import plan, settings, sources
 
 log = get_logger(__name__)
 
@@ -44,11 +49,14 @@ blueprint = Blueprint("seo_machine_app", __name__)
 HOME = "/seo"
 TOPICS = "/seo/topics"
 SETTINGS = "/seo/settings"
+SOURCES = "/seo/sources"
+SANITY = "/seo/sources/sanity"
+AIRTABLE = "/seo/sources/airtable"
 GOOGLE = "/settings/seo/google"          # core's own screen (core/dash/google_search.py)
 
 # THE PUBLISHER READS THIS NAME. It is the owner's (OSDev6, 2026-09-25: "Token name stays the
 # owner's SANITY_API_TOKEN_OWNBOX"), and tests/test_seo_machine_shell.py holds the two together.
-TOKEN = "SANITY_API_TOKEN_OWNBOX"
+TOKEN = sources.SANITY_TOKEN
 
 # A MAGNIFIER, drawn as one path like every other rail icon (core/shell.py draws exactly one).
 _ICON = "M10.5 17a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13ZM15.5 15.5 20 20"
@@ -58,9 +66,30 @@ _ICON = "M10.5 17a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13ZM15.5 15.5 20 20"
 # with no menu and no breadcrumb. /seo itself only redirects to Topics.
 shell.register_section(
     "seo", order=20, machine="seo_machine", title="SEO", href=HOME, icon=_ICON,
+    # ONLY ROWS THAT WORK TODAY (OSDev1, 2026-09-25, on the owner's delegation: "a basic working
+    # system by today"). Today, Search and AI answers join when their sources are live
+    # (docs/SCOPE_SEO_APP.md); an empty row would be a menu promising a page that says nothing.
+    # Articles keeps the /seo/topics address its forms, links and tests already use. Data sources
+    # is OSDev6's (#1572): it adds its row here with the menu and screens behind it.
     items=[
-        {"key": "topics", "label": "Topics", "href": TOPICS},
+        {"key": "topics", "label": "Articles", "href": TOPICS},
+        {"key": "sources", "label": "Data sources", "href": SOURCES},
         {"key": "settings", "label": "Settings", "href": SETTINGS},
+    ])
+
+# DATA SOURCES IS A MENU INSIDE SEO (owner, 2026-09-25: "a data sources menu item that has a sub menu
+# with things that are connected"), nested the way the Unified Inbox's Settings is, so its back
+# arrow returns to SEO and nothing is added to the top-level menu.
+shell.register_section(
+    "seo_sources", order=10, machine="seo_machine", title="Data sources", href=SOURCES,
+    parent="seo", icon=_ICON,
+    items=[
+        {"key": "overview", "label": "Overview", "href": SOURCES},
+        {"key": "sanity", "label": "Sanity", "href": SANITY},
+        {"key": "airtable", "label": "Airtable", "href": AIRTABLE},
+        # CORE'S SCREEN, THE OWNER'S ALONE (OSDev1, 2026-09-25: "Data sources > Google opens
+        # /settings/seo/google"). Owner-only, so a member is never shown a row they are refused at.
+        {"key": "google", "label": "Google Search Console", "href": GOOGLE, "owner_only": True},
     ])
 
 
@@ -106,10 +135,8 @@ def missing() -> list[str]:
     out = []
     if not s.get("site_url"):
         out.append("your website's address")
-    if not s.get("project_id"):
-        out.append("your Sanity project ID")
-    if not box_secrets.get(TOKEN):
-        out.append("your Sanity API token")
+    if not sources.sanity_state()["connected"]:
+        out.append("a Sanity connection")
     return out
 
 
@@ -130,10 +157,6 @@ def writer_installed() -> bool:
 _FIELDS = (
     ("site_url", "Your website", "url", "https://example.com",
      "Articles go live at this address, under /articles."),
-    ("project_id", "Sanity project ID", "text", "abc123xy",
-     "In Sanity, open your project. The ID is under its name."),
-    ("dataset", "Sanity dataset", "text", "production",
-     "Leave it as production unless your site reads a different one."),
     ("indexnow_key", "IndexNow key", "text", "",
      "Optional. Lets Bing and others know the minute an article is live. Your website serves "
      "the same key."),
@@ -149,9 +172,11 @@ _LISTS = (
     ("competitors", "Competitors it must never name", "Each on its own row."),
 )
 _LIST_MAX, _ITEM_MAX = 200, 200
+# ARTICLES A WEEK, folded in from OSDev4's #1565 (OSDev1, 2026-09-25). The number is the owner's: the
+# screen only bounds it. 0 is a real answer, "stop publishing", and the job honours it by finding
+# no room this week.
+_CAP_MAX = 21
 
-_PROJECT_RE = re.compile(r"^[a-z0-9]{4,32}$")
-_DATASET_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _INDEXNOW_RE = re.compile(r"^[A-Za-z0-9-]{8,128}$")
 
 
@@ -189,29 +214,28 @@ def _lines(text: str) -> list[str]:
     return out
 
 
+def _cap(value: str):
+    """The weekly number from the form: "" (back to the default) or an int in range."""
+    v = str(value or "").strip()
+    if not v:
+        return ""
+    if not v.isdecimal() or not v.isascii() or int(v) > _CAP_MAX:
+        raise _Refused(f"Articles a week is a whole number from 0 to {_CAP_MAX}.")
+    return int(v)
+
+
 def _save(form, *, user_id: str) -> None:
     """Check everything first, then write. A form that fails half way writes nothing."""
     writes: dict = {}
     site, host = _site(form.get("site_url") or "")
     writes["site_url"], writes["host"] = site, host
-    project = (form.get("project_id") or "").strip().lower()
-    if project and not _PROJECT_RE.match(project):
-        raise _Refused("A Sanity project ID is letters and numbers only, like abc123xy.")
-    writes["project_id"] = project
-    dataset = (form.get("dataset") or "").strip().lower()
-    if dataset and not _DATASET_RE.match(dataset):
-        raise _Refused("A dataset name is lowercase letters, numbers, dashes and underscores.")
-    writes["dataset"] = dataset
     key = (form.get("indexnow_key") or "").strip()
     if key and not _INDEXNOW_RE.match(key):
         raise _Refused("An IndexNow key is 8 to 128 letters, numbers and dashes.")
     writes["indexnow_key"] = key
     for name, _label, _help in _LISTS:
         writes[name] = _lines(form.get(name) or "")
-    token = (form.get("token") or "").strip()
-    if token:
-        if any(ch.isspace() for ch in token) or len(token) < 20:
-            raise _Refused("That does not look like a Sanity token. Copy it again from Sanity.")
+    writes["weekly_cap"] = _cap(form.get("weekly_cap"))
 
     # EMPTY MEANS "BACK TO THE DEFAULT", so an empty field clears the box's row rather than pinning
     # "" over a default that may change (core/box_settings.py `clear`).
@@ -222,9 +246,7 @@ def _save(form, *, user_id: str) -> None:
             box_settings.clear(settings.MACHINE, name)
         else:
             box_settings.put(settings.MACHINE, name, value, set_by=user_id)
-    if token:
-        box_secrets.put(TOKEN, token, user_id=user_id)
-    log.info("seo.settings_saved", user=user_id, token_changed=bool(token))
+    log.info("seo.settings_saved", user=user_id)
 
 
 # ── the screens ───────────────────────────────────────────────────────────────────────────────
@@ -234,7 +256,13 @@ _SAID = {
     "added": ("Topic added", "It is in the plan below.", True),
     "now": ("Next up", "Writing starts within a minute or so. It takes a few minutes, then this "
                        "page shows whether it went live.", True),
+    "full": ("First in line", "This week's articles are already out, so it goes live once the "
+                              "oldest of them is a week old.", True),
+    "paused": ("First in line", "Publishing is paused: articles a week is set to 0 in SEO "
+                                "settings.", True),
     "gone": ("That topic cannot go now", "It is already being written or is live.", False),
+    "connected": ("Connected", "Checked and saved. The SEO machine uses it from its next article.",
+                  True),
 }
 
 
@@ -256,9 +284,16 @@ def _setup_card() -> str:
     need = missing()
     if not need:
         return ""
+    # EACH MISSING PIECE LINKS TO ITS ONE HOME, so the card never sends the owner to a screen
+    # that does not have the field they were told is missing.
+    links = []
+    if not sources.sanity_state()["connected"]:
+        links.append(f'<a href="{SANITY}">Connect Sanity &rarr;</a>')
+    if not settings.get().get("site_url"):
+        links.append(f'<a href="{SETTINGS}">Open SEO settings &rarr;</a>')
     return ('<div class="card"><h2>Not set up yet</h2>'
             f'<p>Before it can publish, the SEO machine needs {_esc(_and(need))}.</p>'
-            f'<div class="foot"><a href="{SETTINGS}">Open SEO settings &rarr;</a></div></div>')
+            f'<div class="foot">{"".join(links)}</div></div>')
 
 
 def _and(items: list[str]) -> str:
@@ -291,27 +326,68 @@ def _status(row: dict) -> str:
     return "Planned."
 
 
+# THE LIST IS AS DENSE AS THE INBOX'S (owner, 2026-09-25: "much tighter spacing where there's twice
+# as much information on the page as far as titles and First couple lines of each post. Similar to
+# the inbox."). One row per article: a dot, the title, a one-word state, two lines of what it
+# answers, and one line of detail with the one thing to do. No card per row.
+DENSE_CSS = """<style>
+.ar-list{padding:4px 16px}
+.ar{display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;padding:10px 0;align-items:start;
+border-bottom:1px solid var(--hairline)}
+.ar:last-child{border-bottom:0}
+.ar-d{grid-row:1/4;width:9px;height:9px;border-radius:99px;margin-top:7px;background:var(--faint)}
+.ar-d.ok{background:var(--ok)}.ar-d.warn{background:var(--warn)}.ar-d.bad{background:var(--bad)}
+.ar-d.ink{background:var(--ink)}
+.ar-t{grid-row:1;grid-column:2;font:600 15.5px/1.3 var(--sans);min-width:0;
+overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ar-w{grid-row:1;grid-column:3;font-size:13px;color:var(--ink-3);white-space:nowrap;padding-top:2px}
+.card .ar-p{grid-row:2;grid-column:2/4;margin:0;font:400 15px/1.4 var(--sans);color:var(--ink-2);
+max-height:2.8em;overflow:hidden}
+.ar-s{grid-row:3;grid-column:2/4;display:flex;flex-wrap:wrap;align-items:center;gap:0 14px;
+font-size:14px;color:var(--ink-3)}
+.ar-s b{color:var(--ink-2);font-weight:600}
+.ar-s form{display:inline}
+button.ar-go{display:inline-flex;align-items:center;width:auto;min-height:44px;margin:0;padding:0;
+border:0;background:none;color:var(--link);font-size:14px;font-weight:600}
+button.ar-go:hover{background:none;text-decoration:underline}
+.ar-cap{margin:-8px 2px 16px;font-size:14px}
+.ar-add details{margin:6px 0 0}
+</style>"""
+
+_STATE = {"published": ("ok", "Live"), "writing": ("ink", "Writing"), "refused": ("warn", "Held"),
+          "failed": ("bad", "Failed")}
+
+
 def _topic_row(row: dict, *, can_go: bool) -> str:
-    q = f'<p class="sub">{_esc(row["question"])}</p>' if row.get("question") else ""
+    st = row.get("status")
+    tone, word = _STATE.get(st, ("ink", "Next") if row.get("requested_at") else ("", "Planned"))
+    q = f'<p class="ar-p">{_esc(row["question"])}</p>' if row.get("question") else ""
     btn = ""
-    if can_go and row.get("status") in ("planned", "refused", "failed") and not (
-            row.get("status") == "planned" and row.get("requested_at")):
-        label = "Write and publish now" if row["status"] == "planned" else "Try again now"
-        btn = _post(TOPICS, "now", label, cls="ghost",
+    if can_go and st in ("planned", "refused", "failed") and not (
+            st == "planned" and row.get("requested_at")):
+        label = "Write and publish now" if st == "planned" else "Try again now"
+        btn = _post(TOPICS, "now", label, cls="ghost ar-go",
                     extra=f'<input type="hidden" name="id" value="{int(row["id"])}">')
-    return (f'<div class="card"><h2>{_esc(row["topic"])}</h2>{q}'
-            f'<p>{_status(row)}</p>{btn}</div>')
+    # THE DETAIL ROW ONLY SAYS WHAT THE STATE WORD CANNOT: when it went live and where, or why it
+    # was held. "Planned." under "Planned" is a row's worth of nothing.
+    detail = f"<span>{_status(row)}</span>" if st in ("published", "refused", "failed") else ""
+    return (f'<div class="ar"><span class="ar-d {tone}"></span>'
+            f'<span class="ar-t">{_esc(row["topic"])}</span><span class="ar-w">{word}</span>{q}'
+            + (f'<div class="ar-s">{detail}{btn}</div>' if detail or btn else "") + '</div>')
+
+
+def weekly_cap() -> int:
+    try:
+        return max(0, int(settings.get().get("weekly_cap") or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _week_full() -> bool:
-    """Has this box published its weekly number in the last seven days?"""
+    """Has this box published its weekly number in the last seven days? (Always, at 0.)"""
     from datetime import timedelta, timezone
-    try:
-        cap = int(settings.get().get("weekly_cap") or 0)
-    except (TypeError, ValueError):
-        cap = 0
     since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-    return plan.published_since(since) >= cap
+    return plan.published_since(since) >= weekly_cap()
 
 
 @blueprint.route(HOME, methods=["GET"])
@@ -327,7 +403,7 @@ def seo_topics():
     refuse = _admit()
     if refuse is not None:
         return refuse
-    title, lede = "Topics", "What the SEO machine writes about, and what became of each article."
+    title, lede = "Articles", "What the SEO machine writes, and what became of each one."
     if request.method == "POST":
         if not _is_owner():
             return _owner_refusal(TOPICS, title)
@@ -352,7 +428,11 @@ def seo_topics():
                 ok = plan.request_now(int(request.form.get("id") or 0)) is not None
             except ValueError:
                 ok = False
-            return redirect(f"{TOPICS}?said={'now' if ok else 'gone'}", code=303)
+            # STILL MARKED WHEN THE WEEK IS FULL, so it goes first once there is room. What changes
+            # is the sentence: "within a minute" would be false (OSDev1, 2026-09-25).
+            said = "gone" if not ok else ("paused" if weekly_cap() == 0
+                                          else "full" if _week_full() else "now")
+            return redirect(f"{TOPICS}?said={said}", code=303)
         return redirect(TOPICS, code=303)
     said = request.args.get("said") or ""
     return _topics_page(title, lede, note=_note(said) if said in _SAID else ""), 200
@@ -367,33 +447,45 @@ def _topics_page(title: str, lede: str, *, note: str = "", typed=("", "")) -> st
         body += ('<div class="card"><h2>Writing is not switched on yet</h2>'
                  '<p>Your topics are saved. Articles start once this box\'s writer is '
                  'switched on in an update.</p></div>')
-    elif ready:
-        cap = settings.get().get("weekly_cap") or 0
-        full = (' This week\'s are out. The next goes live once the oldest of them is a week '
-                'old.') if _week_full() else ""
-        body += ('<div class="card"><p>Up to '
-                 f'{_esc(cap)} articles a week are written from this list, oldest first, and each '
-                 f'is checked against your settings before it goes live.{_esc(full)}</p></div>')
-    if owner:
-        body += ('<div class="card"><h2>Add a topic</h2>'
-                 f'<form method="post" action="{TOPICS}"><input type="hidden" name="do" value="add">'
-                 '<label for="topic">Topic</label>'
-                 f'<input id="topic" name="topic" maxlength="{plan.TOPIC_MAX}" required '
-                 f'placeholder="How often to service a boiler" value="{_esc(typed[0])}">'
-                 '<label for="question">The question it answers (optional)</label>'
-                 f'<input id="question" name="question" maxlength="{plan.QUESTION_MAX}" '
-                 f'placeholder="How often should I service my boiler?" value="{_esc(typed[1])}">'
-                 '<button type="submit">Add topic</button></form></div>')
-    else:
-        body += ('<div class="card"><p>Only the owner of this box can add topics or publish.'
-                 '</p></div>')
+    # THE LIST HAS THE FIRST SCREEN, the inbox's order: articles, then how many a week, then the
+    # compact add form. The form comes first only when there is nothing to list yet, or when a
+    # refused add comes back with what was typed, so the fix is where the eye already is.
     rows = plan.rows()
     if rows:
-        body += "".join(_topic_row(r, can_go=owner and ready and writer) for r in rows)
+        listed = ('<div class="card ar-list">'
+                  + "".join(_topic_row(r, can_go=owner and ready and writer) for r in rows)
+                  + '</div>')
     else:
-        body += ('<div class="card"><h2>No topics yet</h2><p>Each topic becomes one article that '
-                 'answers a question your customers search for.</p></div>')
-    return _page(TOPICS, title, lede, body)
+        listed = ('<div class="card"><h2>No topics yet</h2><p>Each topic becomes one article '
+                  'that answers a question your customers search for.</p></div>')
+    if ready and writer and weekly_cap() == 0:
+        listed += ('<p class="quiet ar-cap">Publishing is paused: articles a week is set to 0. '
+                   f'Change it in <a href="{SETTINGS}">SEO settings</a> to start again.</p>')
+    elif ready and writer:
+        cap = weekly_cap()
+        full = (' This week\'s are out. The next goes live once the oldest of them is a week '
+                'old.') if _week_full() else ""
+        listed += ('<p class="quiet ar-cap">Up to '
+                   f'{_esc(cap)} a week are written from this list, oldest first, and each '
+                   f'is checked against your settings before it goes live.{_esc(full)}</p>')
+    if owner:
+        # The question is optional and folds away, and opens again when a refused form comes
+        # back with one typed in it.
+        form = ('<div class="card"><form class="ar-add" method="post" action="' + TOPICS + '">'
+                '<input type="hidden" name="do" value="add">'
+                '<label for="topic" style="margin-top:0">Add a topic</label>'
+                f'<input id="topic" name="topic" maxlength="{plan.TOPIC_MAX}" required '
+                f'placeholder="Microneedling aftercare" value="{_esc(typed[0])}">'
+                f'<details{" open" if typed[1] else ""}><summary>Add the question it answers'
+                '</summary><label for="question">The question it answers</label>'
+                f'<input id="question" name="question" maxlength="{plan.QUESTION_MAX}" '
+                f'placeholder="What should I do after microneedling?" value="{_esc(typed[1])}">'
+                '</details><button type="submit">Add topic</button></form></div>')
+    else:
+        form = ('<div class="card"><p>Only the owner of this box can add topics or publish.'
+                '</p></div>')
+    body += (form + listed) if (not rows or any(typed)) else (listed + form)
+    return _page(TOPICS, title, lede, DENSE_CSS + body)
 
 
 def _settings_form(typed=None) -> str:
@@ -404,7 +496,7 @@ def _settings_form(typed=None) -> str:
             s[name] = typed.get(name) or ""
         for name, *_rest in _LISTS:
             s[name] = (typed.get(name) or "").splitlines()
-    token_set = box_secrets.is_set(TOKEN)
+        s["weekly_cap"] = typed.get("weekly_cap") or ""
     out = [f'<form method="post" action="{SETTINGS}">']
 
     def field(name, label, kind, ph, help_):
@@ -421,14 +513,15 @@ def _settings_form(typed=None) -> str:
 
     f = {k: (k, lab, kind, ph, h) for k, lab, kind, ph, h in _FIELDS}
     out.append('<div class="card">' + field(*f["site_url"]) + '</div>')
-    out.append('<div class="card"><h2>Where articles are published</h2>'
-               '<p class="sub">Your website reads its articles from Sanity. The SEO machine writes '
-               'them there.</p>' + field(*f["project_id"]) + field(*f["dataset"])
-               + '<label for="token">Sanity API token</label>'
-               '<input id="token" name="token" type="password" autocomplete="off" '
-               f'placeholder="{"Saved. Leave blank to keep it" if token_set else "sk..."}">'
-               '<p class="sub">In Sanity, open API, then Tokens, and add one with Editor '
-               'access. It is stored on this box and never shown again.</p></div>')
+    out.append('<div class="card"><h2>Sanity and Airtable</h2>'
+               '<p class="sub">Where articles are planned and where they are published are '
+               'connected under Data sources.</p>'
+               f'<div class="foot"><a href="{SOURCES}">Open Data sources &rarr;</a></div></div>')
+    out.append('<div class="card"><h2>How often</h2><label for="weekly_cap">Articles a week</label>'
+               f'<input id="weekly_cap" name="weekly_cap" type="number" inputmode="numeric" min="0" '
+               f'max="{_CAP_MAX}" step="1" value="{_esc(s.get("weekly_cap"))}">'
+               '<p class="sub">Up to this many go live in any seven days, oldest topic first. '
+               '0 pauses publishing.</p></div>')
     out.append('<div class="card"><h2>Search engines</h2>' + field(*f["indexnow_key"])
                + f'<div class="foot"><a href="{GOOGLE}">Google Search Console &rarr;</a></div>'
                '</div>')
@@ -443,8 +536,9 @@ def _settings_form(typed=None) -> str:
 def _settings_readonly() -> str:
     s = settings.get()
     rows = [("Website", s.get("site_url") or "Not set"),
-            ("Sanity project", s.get("project_id") or "Not set"),
-            ("Sanity token", "Saved" if box_secrets.is_set(TOKEN) else "Not set")]
+            ("Sanity", "Connected" if sources.sanity_state()["connected"] else "Not connected"),
+            ("Airtable", "Connected" if sources.airtable_state()["connected"] else "Not connected"),
+            ("Articles a week", str(weekly_cap()))]
     rows += [(lab, f"{len(s.get(k) or [])} entries") for k, lab, _h in _LISTS]
     items = "".join(f"<p><b>{_esc(a)}:</b> {_esc(b)}</p>" for a, b in rows)
     return (f'<div class="card">{items}<p class="sub">Only the owner of this box can change '
@@ -457,7 +551,7 @@ def seo_settings():
     if refuse is not None:
         return refuse
     title = "SEO settings"
-    lede = "Where articles are published, and what the writer may and may not say."
+    lede = "Your website, and what the writer may and may not say."
     if request.method == "POST":
         if not _is_owner():
             return _owner_refusal(SETTINGS, title)
@@ -471,3 +565,236 @@ def seo_settings():
     body += _setup_card()
     body += _settings_form() if _is_owner() else _settings_readonly()
     return _page(SETTINGS, title, lede, body), 200
+
+
+# ── data sources: Sanity and Airtable ─────────────────────────────────────────────────────────
+# BOTH ARE REQUIRED (owner, 2026-09-25, see sources.py). Each screen proves its connection with the
+# vendor before it saves a thing, and says in one sentence what to fix when the proof fails.
+
+_TOKEN_MIN = 20
+
+
+def _secret(form_value: str, saved_name: str, what: str) -> tuple[str, bool]:
+    """(the credential to check, whether it was typed now). Blank keeps the saved one, so an owner
+    changing the dataset does not have to find the token again."""
+    typed = (form_value or "").strip()
+    if typed:
+        if any(ch.isspace() for ch in typed) or len(typed) < _TOKEN_MIN:
+            raise _Refused(f"That does not look like {what}. Copy it again and paste it on its own.")
+        return typed, True
+    saved = box_secrets.get(saved_name) or ""
+    if not saved:
+        raise _Refused(f"Paste {what}.")
+    return saved, False
+
+
+def _secret_input(name: str, label: str, saved: bool, placeholder: str) -> str:
+    hint = "Saved. Leave blank to keep it" if saved else placeholder
+    return (f'<label for="{name}">{_esc(label)}</label>'
+            f'<input id="{name}" name="{name}" type="password" autocomplete="off" '
+            f'autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="{_esc(hint)}">')
+
+
+def _text_input(name: str, label: str, value: str, placeholder: str, *, kind: str = "text") -> str:
+    return (f'<label for="{name}">{_esc(label)}</label>'
+            f'<input id="{name}" name="{name}" type="{kind}" value="{_esc(value)}" '
+            f'placeholder="{_esc(placeholder)}" autocapitalize="off" autocorrect="off" '
+            'spellcheck="false">')
+
+
+def _steps(*items: str) -> str:
+    return "<ol>" + "".join(f"<li>{_esc(i)}</li>" for i in items) + "</ol>"
+
+
+def _source_card(title: str, what: str, state_text: str, connected: bool, href: str) -> str:
+    tone = "" if connected else ' style="border-color:var(--danger)"'
+    # A MEMBER IS OFFERED ONLY WHAT THEY CAN DO: the page reads, it does not connect, for them.
+    act = ("Change" if connected else "Connect") if _is_owner() else "See"
+    return (f'<div class="card"{tone}><h2>{_esc(title)}</h2><p>{_esc(what)}</p>'
+            f'<p><b>{_esc(state_text)}</b></p>'
+            f'<div class="foot"><a href="{href}">{act} {_esc(title)} &rarr;</a></div></div>')
+
+
+@blueprint.route(SOURCES, methods=["GET"])
+def seo_sources():
+    refuse = _admit()
+    if refuse is not None:
+        return refuse
+    san, air = sources.sanity_state(), sources.airtable_state()
+    body = ""
+    if not (san["connected"] and air["connected"]):
+        body += ('<div class="card"><p>The SEO machine needs both: Airtable, where you plan your '
+                 'articles, and Sanity, where your website reads them.</p></div>')
+    body += _source_card(
+        "Airtable", "Where you plan your articles.",
+        "Connected." if air["connected"] else "Not connected.", air["connected"], AIRTABLE)
+    body += _source_card(
+        "Sanity", "Where your website reads your articles. The SEO machine publishes them here.",
+        (f"Connected to project {san['project']}, dataset {san['dataset']}."
+         if san["connected"] else "Not connected."), san["connected"], SANITY)
+    # CORE'S GOOGLE SCREEN IS THE OWNER'S ALONE, so a member is not shown a door they are refused at
+    # (tests/test_a_buyer_can_walk_every_screen.py walks every link as a member).
+    if _is_owner():
+        body += ('<div class="card"><h2>Google Search Console</h2>'
+                 '<p>How your articles do in Google search.</p>'
+                 f'<div class="foot"><a href="{GOOGLE}">Open Google Search Console &rarr;</a></div>'
+                 '</div>')
+    return _page(SOURCES, "Data sources", "Where your articles are planned and published.", body), 200
+
+
+def _shaped(value, pattern) -> str:
+    """What was typed, ONLY IF it has the field's shape, else "".
+
+    A REFUSED FORM NEVER ECHOES A VALUE THAT FAILED ITS SHAPE (OSDev1's review of #1572). The usual
+    reason a Project ID or a table address fails is a token pasted into the wrong box, and a 400
+    page that re-renders it puts the secret on screen and in the browser's history.
+    """
+    v = str(value or "").strip().lower()
+    return v if pattern.match(v) else ""
+
+
+def _sanity_form(typed=None) -> str:
+    st = sources.sanity_state()
+    if typed is not None:
+        project = _shaped(typed.get("project_id"), sources.PROJECT_RE)
+        dataset = _shaped(typed.get("dataset"), sources.DATASET_RE) or "production"
+    else:
+        project, dataset = st["project"], st["dataset"] or "production"
+    return (f'<form method="post" action="{SANITY}"><div class="card">'
+            + _text_input("project_id", "Project ID", project, "abc123xy")
+            + '<p class="sub">In sanity.io/manage, open the project your website reads. The ID is '
+              'under its name.</p>'
+            + _text_input("dataset", "Dataset", dataset, "production")
+            + '<p class="sub">Leave it as production unless your website reads a different one.</p>'
+            + _secret_input("token", "API token", st["token_saved"], "sk...")
+            + '<button type="submit">Check and save</button></div></form>'
+            '<div class="card"><h2>Making the token</h2>'
+            + _steps("Open sanity.io/manage and choose the project your website reads.",
+                     "Open API, then Tokens, and choose Add API token.",
+                     "Name it after this box, choose Editor, and save.",
+                     "Copy the token and paste it above. Sanity shows it only once.")
+            + '<p class="sub">It needs Editor, not Viewer: the SEO machine writes your articles. '
+              'The token is stored on this box and never shown again.</p></div>')
+
+
+@blueprint.route(SANITY, methods=["GET", "POST"])
+def seo_sanity():
+    refuse = _admit()
+    if refuse is not None:
+        return refuse
+    title, lede = "Sanity", "Where your website reads your articles. The SEO machine publishes them here."
+    if request.method == "POST":
+        if not _is_owner():
+            return _owner_refusal(SANITY, title)
+        form = request.form
+        try:
+            project = (form.get("project_id") or "").strip().lower()
+            if not sources.PROJECT_RE.match(project):
+                raise _Refused("A Sanity project ID is letters and numbers only, like abc123xy.")
+            dataset = (form.get("dataset") or "").strip().lower() or "production"
+            if not sources.DATASET_RE.match(dataset):
+                raise _Refused("A dataset name is lowercase letters, numbers, dashes and "
+                               "underscores.")
+            token, typed = _secret(form.get("token"), TOKEN, "a Sanity token")
+            problem = sources.check_sanity(project, dataset, token)
+            if problem:
+                raise _Refused(problem)
+            uid = str(_who().get("id") or "")
+            box_settings.put(settings.MACHINE, "project_id", project, set_by=uid)
+            box_settings.put(settings.MACHINE, "dataset", dataset, set_by=uid)
+            if typed:
+                box_secrets.put(TOKEN, token, user_id=uid)
+        except (_Refused, box_secrets.SecretRejected) as e:
+            log.info("seo.sanity_refused", reason=str(e)[:120])
+            return _page(SANITY, title, lede, _note("", str(e)) + _sanity_form(form)), 400
+        log.info("seo.sanity_connected", user=uid, project=project, dataset=dataset,
+                 token_changed=typed)
+        return redirect(f"{SANITY}?said=connected", code=303)
+    said = request.args.get("said") or ""
+    body = _note(said) if said == "connected" else ""
+    if _is_owner():
+        body += _sanity_form()
+    else:
+        st = sources.sanity_state()
+        body += ('<div class="card"><p><b>'
+                 + _esc(f"Connected to project {st['project']}, dataset {st['dataset']}."
+                        if st["connected"] else "Not connected.")
+                 + '</b></p><p class="sub">Only the owner of this box can change this.</p></div>')
+    return _page(SANITY, title, lede, body), 200
+
+
+def _airtable_form(typed=None) -> str:
+    st = sources.airtable_state()
+    url = st["url"]
+    if typed is not None:
+        # Rebuilt from its parts, so only a real table address is ever shown back (see _shaped).
+        try:
+            url = sources.table_url(*sources.parse_table_url(typed.get("table_url") or ""))
+        except sources.BadTableUrl:
+            url = ""
+    template = (f'<div class="foot"><a href="{_esc(sources.TEMPLATE_URL)}">Copy our template '
+                '&rarr;</a></div>') if sources.TEMPLATE_URL else ""
+    fields = ", ".join(sources.TEMPLATE_FIELDS)
+    return (f'<form method="post" action="{AIRTABLE}"><div class="card">'
+            + _text_input("table_url", "Table address", url,
+                          "https://airtable.com/app.../tbl.../viw...", kind="url")
+            + '<p class="sub">Open the table in Airtable, and the view you want the SEO machine to '
+              'follow, then copy the address from your browser.</p>'
+            + _secret_input("api_key", "Personal access token", st["key_saved"], "pat...")
+            + '<button type="submit">Check and save</button></div></form>'
+            '<div class="card"><h2>Making the token</h2>'
+            + _steps("In Airtable, open Builder hub, then Personal access tokens, and choose "
+                     "Create token.",
+                     "Name it after this box.",
+                     "Add three scopes: " + ", ".join(sources.SCOPES) + ".",
+                     "Under Access, add only the base that holds your content plan.",
+                     "Create it, copy the token and paste it above.")
+            + '<p class="sub">The token is stored on this box and never shown again.</p></div>'
+            f'<div class="card"><h2>Your table</h2><p>It needs these fields, with exactly these '
+            f'names: {_esc(fields)}.</p>{template}</div>')
+
+
+@blueprint.route(AIRTABLE, methods=["GET", "POST"])
+def seo_airtable():
+    refuse = _admit()
+    if refuse is not None:
+        return refuse
+    title, lede = "Airtable", "Where you plan your articles. The SEO machine works from this table."
+    if request.method == "POST":
+        if not _is_owner():
+            return _owner_refusal(AIRTABLE, title)
+        form = request.form
+        try:
+            try:
+                base, table, view = sources.parse_table_url(form.get("table_url") or "")
+            except sources.BadTableUrl as e:
+                raise _Refused(str(e)) from None
+            key, typed = _secret(form.get("api_key"), sources.AIRTABLE_KEY,
+                                 "an Airtable personal access token")
+            problem = sources.check_airtable(key, base, table, view)
+            if problem:
+                raise _Refused(problem)
+            uid = str(_who().get("id") or "")
+            box_settings.put(settings.MACHINE, "airtable_base", base, set_by=uid)
+            box_settings.put(settings.MACHINE, "airtable_table", table, set_by=uid)
+            if view:
+                box_settings.put(settings.MACHINE, "airtable_view", view, set_by=uid)
+            else:
+                box_settings.clear(settings.MACHINE, "airtable_view")
+            if typed:
+                box_secrets.put(sources.AIRTABLE_KEY, key, user_id=uid)
+        except (_Refused, box_secrets.SecretRejected) as e:
+            log.info("seo.airtable_refused", reason=str(e)[:120])
+            return _page(AIRTABLE, title, lede, _note("", str(e)) + _airtable_form(form)), 400
+        log.info("seo.airtable_connected", user=uid, base=base, table=table, key_changed=typed)
+        return redirect(f"{AIRTABLE}?said=connected", code=303)
+    said = request.args.get("said") or ""
+    body = _note(said) if said == "connected" else ""
+    if _is_owner():
+        body += _airtable_form()
+    else:
+        st = sources.airtable_state()
+        body += ('<div class="card"><p><b>'
+                 + ("Connected." if st["connected"] else "Not connected.")
+                 + '</b></p><p class="sub">Only the owner of this box can change this.</p></div>')
+    return _page(AIRTABLE, title, lede, body), 200

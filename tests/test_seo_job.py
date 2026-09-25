@@ -17,6 +17,7 @@ from core import state
 state.init_db()
 
 from marketing.seo_machine import guard, job, plan                       # noqa: E402
+from marketing.seo_machine import publisher as real_publisher            # noqa: E402
 
 _failed = 0
 
@@ -109,6 +110,10 @@ class Publisher:
         self.published.append({"lists": lists, **fields})
         return {"doc_id": "d1", "slug": fields["slug"], "created": True,
                 "url": f"{self.base}/articles/{fields['slug']}" if self.base else f"/articles/{fields['slug']}"}
+
+    def address_refusals(self, slug, *, lists=None):
+        # THE REAL CHECK: it is pure (guard only, no network), so faking it would test nothing.
+        return real_publisher.address_refusals(slug, lists=lists or {})
 
     def ping_indexnow(self, urls):
         if self.ping_boom:

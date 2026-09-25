@@ -53,24 +53,35 @@ ok("a product name that collides with the reserved words",
 ok("a competitor the box named", "competitor" in rules("Better than Acme CRM.", competitors=("Acme CRM",)))
 
 print("\n-- competitors are whole words, which is OSDev6's 'Front' finding (#1545 §5) --")
-RIVALS = ("Front", "HubSpot", "AI Emaily")
-ok("'upfront' is no longer refused by a box that listed 'Front'",
-   guard.check("The upfront cost", competitors=RIVALS) == [])
+RIVALS = ("HubSpot", "AI Emaily")
+FRONT = dict(competitors=("Front",))
+ok("'upfront' is not refused by a box that listed 'Front': whole words only",
+   guard.check("The upfront cost", **FRONT) == [])
 ok("...nor is 'on several fronts' — a company's plural is just an English word",
-   guard.check("on several fronts", competitors=RIVALS) == [])
-ok("the company itself is still caught",
-   "competitor" in rules("Front is a shared inbox", competitors=RIVALS))
-ok("...including possessively", "competitor" in rules("Front's pricing", competitors=RIVALS))
+   guard.check("on several fronts", **FRONT) == [])
+ok("the company itself is still caught", "competitor" in rules("Front is a shared inbox", **FRONT))
+ok("...including possessively", "competitor" in rules("Front's pricing", **FRONT))
 ok("a multi-word name still matches", "competitor" in rules("beats AI Emaily", competitors=RIVALS))
 ok("and matching stays case-insensitive", "competitor" in rules("hubspot", competitors=RIVALS))
 
-# FIXED 2026-09-25 (OSDev1): a one-word name spelled like an ordinary word keeps the capital the
-# buyer typed, so "Front" can go on the list without refusing the site's own "front end" copy.
-ok("'building the front end' passes a box listing 'Front'",
-   "competitor" not in rules("building the front end", competitors=RIVALS))
-ok("...and so does 'in front of you'", "competitor" not in rules("in front of you", competitors=RIVALS))
+# #1574 F-A (2026-09-25): a capital cannot tell a brand from a word, so competitors are ALWAYS
+# case-insensitive, and the buyer marks the few that are everyday words as word_competitors.
+SEED = ("Kinso", "Unibox", "HeyRobyn", "Converlo", "Mailbird", "Missive", "AI Emaily", "Intercom",
+        "Zendesk", "HubSpot", "Salesforce")
+for name in SEED:
+    slug = name.lower().replace(" ", "-")
+    ok(f"seed rival {name} is caught in a lowercase slug and link",
+       "competitor" in rules(f"is-ownbox-cheaper-than-{slug} https://www.{slug.replace('-', '')}.com/pricing",
+                             competitors=SEED))
+ok("'Front' listed as an everyday word spares 'building the front end'",
+   "competitor" not in rules("building the front end", word_competitors=("Front",)))
+ok("...and 'in front of you'", "competitor" not in rules("in front of you", word_competitors=("Front",)))
 ok("...while 'Front' the company, capitalised, is still refused",
-   "competitor" in rules("Try Front today", competitors=RIVALS))
+   "competitor" in rules("Try Front today", word_competitors=("Front",)))
+ok("...and in markup, which has no capitals, it is refused: a public address takes the safe side",
+   "competitor" in rules("front-vs-ownbox", word_competitors=("Front",), markup=True))
+ok("a rival NOT marked as a word is caught in lowercase prose too",
+   "competitor" in rules("we moved off salesforce last year", competitors=("Salesforce",)))
 ok("a number that is not on the box's fact list",
    "unsourced_number" in rules("It costs $500.", allowed_numbers=("499",)))
 

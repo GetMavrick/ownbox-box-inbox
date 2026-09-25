@@ -166,15 +166,8 @@ class GuardRefused(Exception):
         super().__init__("; ".join(f"{r.rule}: {r.found} — {r.why}" for r in refusals))
 
 
-def _plain_name(name: str) -> bool:
-    """A one-word name spelled like an ordinary word: "Front", "Close". Only these keep their case;
-    "HubSpot", "Acme CRM" and "C++" are unlike any sentence and stay case-insensitive."""
-    n = _norm(name).strip()
-    return bool(re.fullmatch(r"[A-Z][a-z]+", n))
-
-
 def check(text: str, *, never_words=(), never_phrases=(), allowed_numbers=(),
-          competitors=()) -> list[Refusal]:
+          competitors=(), word_competitors=(), markup: bool = False) -> list[Refusal]:
     """Every reason this text must not be published. Empty list means it may go.
 
     All four lists are PLAN-STORE ROWS, never constants (`docs/SEO_AEO_MACHINE_BUILD_SPEC.md`
@@ -184,7 +177,14 @@ def check(text: str, *, never_words=(), never_phrases=(), allowed_numbers=(),
     - `never_words` and `never_phrases`: case-insensitive, across spaces, hyphens and line
       breaks, with their plurals (agency → agencies, person → people).
     - `competitors`: the same, without plurals (a company's plural is usually just an English
-      word), and a one-word name that looks like an ordinary word keeps its capital.
+      word), and ALWAYS case-insensitive. #1562 first let every `[A-Z][a-z]+` name keep its
+      capital, to spare "the front end" on a box listing Front; #1574 F-A proved that shape is
+      most brand names (Salesforce, Zendesk, Intercom), so eight of our eleven seed rivals went
+      live unseen in lowercase slugs and links. The guard cannot know which names are words.
+    - `word_competitors`: the few rivals the BUYER marks as also being everyday words ("Front").
+      In prose they match only with the capital the buyer typed. In `markup=True` text (slugs,
+      URLs, code), which carries no case, they match case-insensitively: refusing a
+      "front-end" slug is the safe side of a public address.
     - `allowed_numbers`: value and unit must both match: "$499" = "499" = "499.00", but not
       "499%", "$499k" or "499x". Spelled-out counts ("twelve thousand") need listing too.
     """
@@ -198,8 +198,9 @@ def check(text: str, *, never_words=(), never_phrases=(), allowed_numbers=(),
             for m in (rx.finditer(t) if rx else ()):
                 out.append(Refusal(rule, m.group(0), "on this box's never-use list"))
 
-    for name in competitors or ():
-        rx = _term_re(name, plurals=False, keep_case=_plain_name(name))
+    for name, keep_case in ([(n, False) for n in competitors or ()]
+                            + [(n, not markup) for n in word_competitors or ()]):
+        rx = _term_re(name, plurals=False, keep_case=keep_case)
         if rx and rx.search(t):
             out.append(Refusal("competitor", str(name), "on this box's competitor list"))
 

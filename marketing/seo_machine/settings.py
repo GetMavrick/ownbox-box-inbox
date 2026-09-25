@@ -44,6 +44,11 @@ DEFAULTS: dict = {
     "allowed_numbers": [],    # the box's price and fact list; anything else is refused
     "facts": [],              # the only claims the writer may state
     "weekly_cap": 4,
+    # The Airtable table the business plans its articles in (sources.py). Its key is a credential,
+    # so it lives in box_secrets, never here.
+    "airtable_base": "",      # app…
+    "airtable_table": "",     # tbl…
+    "airtable_view": "",      # viw…, optional: the view the machine follows
 }
 
 

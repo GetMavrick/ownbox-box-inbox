@@ -129,14 +129,28 @@ def _write_and_publish(row: dict) -> dict:
         plan.mark(row_id, "failed", refusal=why)
         log.warning("seo.topic_failed", id=row_id, error=why)
         return {"id": row_id, "status": "failed", "refusal": why}
-    plan.mark(row_id, "writing", slug=slug)            # the claim, and the URL, before any spend
 
     # Both CLEANED by settings: a list saved as text is a list of entries, never its characters
     # (review item 9).
     lists = settings.lists()
+
+    # THE ADDRESS IS CHECKED BEFORE ANY SPEND (REVIEW F-B, OSDev9). It comes from the owner's
+    # question, not from the draft, so a banned word or a competitor in the question is in every
+    # draft's web address. Without this, each attempt paid for an article that could never go
+    # live, and the refusal named a word the owner could not find in the article.
+    bad = publisher.address_refusals(slug, lists=lists)
+    if bad:
+        found = ", ".join(sorted({f'"{r.found}"' for r in bad}))
+        why = (f"{found} would be in this article's web address, which comes from its question. "
+               "Reword the question and add it again.")
+        plan.mark(row_id, "refused", slug=slug, refusal=why)
+        log.info("seo.topic_refused_address", id=row_id, rules=sorted({r.rule for r in bad}))
+        return {"id": row_id, "status": "refused", "refusal": why}
+
+    plan.mark(row_id, "writing", slug=slug)            # the claim, and the URL, before any spend
     try:
         fields = writer.write(question, facts=settings.facts(), lists=lists,
-                              job_id=f"seo:{row_id}")
+                              job_id=f"seo:{row_id}", slug=slug)
         fields["slug"] = slug                          # the row's URL wins over the draft's title
         # The publisher runs the guard again, on the same lists. That is not redundant: it is the
         # door every article passes through, whoever calls it.
