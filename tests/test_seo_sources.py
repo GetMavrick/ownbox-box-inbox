@@ -203,7 +203,7 @@ ok("Data sources is a menu inside SEO", shell.crumb("/seo/sources/sanity") == ("
 ok("...and a row in SEO's own menu", any(i.href == "/seo/sources" for i in shell.rail("/seo/topics").items))
 page = owner.get("/seo/sources").get_data(as_text=True)
 ok("the overview says both are needed, and neither is connected", "needs both" in page
-   and page.count("Not connected.") == 2)
+   and page.count("Not connected.") == 3)          # and PostHog, recommended
 
 print("\ntest_connecting_sanity")
 f = use(Net(gets=SAN_OK, posts={"/data/mutate/": (403, "")}))

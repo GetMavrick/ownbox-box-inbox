@@ -49,6 +49,10 @@ DEFAULTS: dict = {
     "airtable_base": "",      # app…
     "airtable_table": "",     # tbl…
     "airtable_view": "",      # viw…, optional: the view the machine follows
+    # PostHog, where the business's website traffic is read from (posthog.py). Its key is a
+    # credential, so it lives in box_secrets, never here.
+    "posthog_host": "",       # https://us.posthog.com, https://eu.posthog.com or a self-hosted address
+    "posthog_project": "",    # the numeric project ID
 }
 
 
