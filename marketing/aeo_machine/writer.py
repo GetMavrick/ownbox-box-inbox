@@ -1,8 +1,8 @@
 """Question in, article out. The ONLY part of this machine that reasons.
 
-Everything else in `marketing/seo_machine/` is regex, HTTP and dict-building, and deliberately so
+Everything else in `marketing/aeo_machine/` is regex, HTTP and dict-building, and deliberately so
 (`CLAUDE.md` non-negotiable 3). One `brain.think()` call per article, two if the first draft is
-refused, and nothing else on the box spends a token on SEO.
+refused, and nothing else on the box spends a token on AEO.
 
 THE REPAIR ROUND IS NOT POLITENESS, IT IS THE DIFFERENCE BETWEEN PUBLISHING AND NOT. Nobody reads
 an article before it goes live, so a refusal with no repair is simply an article that never
@@ -17,7 +17,7 @@ orphans the old URL and creates a second article, silently. So the slug is deriv
 deterministically, by us.
 
 NOTHING OF OUR BOX IS IN HERE. The facts it may state and the rules it must obey arrive as
-arguments, from the box's settings screen (`docs/SEO_MACHINE_OWNBOX_SEED.md`). A box with no facts
+arguments, from the box's settings screen (`docs/AEO_MACHINE_OWNBOX_SEED.md`). A box with no facts
 entered gets an article that states none.
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ import re
 
 from core import brain
 from core.logging import get_logger
-from marketing.seo_machine import guard, portable_text, publisher, settings
+from marketing.aeo_machine import guard, portable_text, publisher, settings
 
 log = get_logger(__name__)
 
@@ -180,9 +180,9 @@ def write(question: str, *, facts=None, lists=None, category=None, content_type=
     notes = None
 
     for attempt in range(MAX_REPAIRS + 1):
-        raw = brain.think(task="seo.article",
+        raw = brain.think(task="aeo.article",
                           prompt=prompt if notes is None else prompt + "\n\n" + notes,
-                          system=_SYSTEM, max_tokens=_MAX_TOKENS, job_id=job_id, machine="seo")
+                          system=_SYSTEM, max_tokens=_MAX_TOKENS, job_id=job_id, machine="seo")   # the AI-account key live boxes hold
         try:
             fields = _fields(_parse(raw), category=category, content_type=content_type)
             if slug:
@@ -193,7 +193,7 @@ def write(question: str, *, facts=None, lists=None, category=None, content_type=
         except ValueError as e:
             # Unreadable, or no title. That is a draft to redo, not a reason to skip the repair
             # round, which is what it is for.
-            log.warning("seo.draft_unreadable", question=question[:80], attempt=attempt + 1,
+            log.warning("aeo.draft_unreadable", question=question[:80], attempt=attempt + 1,
                         error=str(e)[:160])
             if attempt == MAX_REPAIRS:
                 raise
@@ -203,11 +203,11 @@ def write(question: str, *, facts=None, lists=None, category=None, content_type=
         # The same reading of the article the publisher will do, prose AND markup (review item 2).
         refusals = publisher.refusals(lists=lists, **fields)
         if not refusals:
-            log.info("seo.draft_ok", question=question[:80], attempt=attempt + 1,
+            log.info("aeo.draft_ok", question=question[:80], attempt=attempt + 1,
                      slug=fields["slug"])
             return fields
 
-        log.warning("seo.draft_refused", question=question[:80], attempt=attempt + 1,
+        log.warning("aeo.draft_refused", question=question[:80], attempt=attempt + 1,
                     rules=sorted({r.rule for r in refusals}))
         if attempt == MAX_REPAIRS:
             raise guard.GuardRefused(refusals)

@@ -18,7 +18,7 @@ a reasoning call, and a person decides whether to spend another one ("try again"
 
 WHAT THIS FILE DOES NOT DO. It never calls `brain.think()` (only `writer.py` reasons, and a test
 holds that line), never touches `seo_plan` except through `plan.py` (the only code that does),
-and never reads a setting except through `settings.py`, so the SEO settings screen is the only
+and never reads a setting except through `settings.py`, so the AEO settings screen is the only
 place a value lives. It assumes the box's ONE worker: periodics run one at a time on its thread,
 so a row cannot be taken twice.
 """
@@ -83,7 +83,7 @@ def release_stale(*, now: datetime | None = None) -> int:
             plan.mark(r["id"], "failed", refusal=INTERRUPTED)
             n += 1
     if n:
-        log.warning("seo.topic_interrupted", count=n)
+        log.warning("aeo.topic_interrupted", count=n)
     return n
 
 
@@ -127,7 +127,7 @@ def _write_and_publish(row: dict) -> dict:
     except Exception as e:                                   # noqa: BLE001 — recorded, not raised
         why = f"{type(e).__name__}: {str(e)[:300]}"
         plan.mark(row_id, "failed", refusal=why)
-        log.warning("seo.topic_failed", id=row_id, error=why)
+        log.warning("aeo.topic_failed", id=row_id, error=why)
         return {"id": row_id, "status": "failed", "refusal": why}
 
     # Both CLEANED by settings: a list saved as text is a list of entries, never its characters
@@ -144,13 +144,13 @@ def _write_and_publish(row: dict) -> dict:
         why = (f"{found} would be in this article's web address, which comes from its question. "
                "Reword the question and add it again.")
         plan.mark(row_id, "refused", slug=slug, refusal=why)
-        log.info("seo.topic_refused_address", id=row_id, rules=sorted({r.rule for r in bad}))
+        log.info("aeo.topic_refused_address", id=row_id, rules=sorted({r.rule for r in bad}))
         return {"id": row_id, "status": "refused", "refusal": why}
 
     plan.mark(row_id, "writing", slug=slug)            # the claim, and the URL, before any spend
     try:
         fields = writer.write(question, facts=settings.facts(), lists=lists,
-                              job_id=f"seo:{row_id}", slug=slug)
+                              job_id=f"aeo:{row_id}", slug=slug)
         fields["slug"] = slug                          # the row's URL wins over the draft's title
         # The publisher runs the guard again, on the same lists. That is not redundant: it is the
         # door every article passes through, whoever calls it.
@@ -158,12 +158,12 @@ def _write_and_publish(row: dict) -> dict:
     except guard.GuardRefused as e:
         reasons = "; ".join(f'{r.rule}: "{r.found}" ({r.why})' for r in e.refusals)
         plan.mark(row_id, "refused", refusal=reasons)
-        log.info("seo.topic_refused", id=row_id, rules=sorted({r.rule for r in e.refusals}))
+        log.info("aeo.topic_refused", id=row_id, rules=sorted({r.rule for r in e.refusals}))
         return {"id": row_id, "status": "refused", "refusal": reasons}
     except Exception as e:                                   # noqa: BLE001 — recorded, not raised
         why = f"{type(e).__name__}: {str(e)[:300]}"
         plan.mark(row_id, "failed", refusal=why)
-        log.warning("seo.topic_failed", id=row_id, error=why)
+        log.warning("aeo.topic_failed", id=row_id, error=why)
         return {"id": row_id, "status": "failed", "refusal": why}
 
     plan.mark(row_id, "published", slug=result["slug"], url=result["url"])
@@ -174,9 +174,9 @@ def _write_and_publish(row: dict) -> dict:
         try:
             publisher.ping_indexnow([result["url"]])
         except Exception as e:                               # noqa: BLE001 — see above
-            log.warning("seo.indexnow_raised", id=row_id,
+            log.warning("aeo.indexnow_raised", id=row_id,
                         error=f"{type(e).__name__}: {str(e)[:160]}")
-    log.info("seo.topic_published", id=row_id, slug=result["slug"], created=result["created"])
+    log.info("aeo.topic_published", id=row_id, slug=result["slug"], created=result["created"])
     return {"id": row_id, "status": "published", "url": result["url"], "slug": result["slug"]}
 
 

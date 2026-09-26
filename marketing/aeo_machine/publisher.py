@@ -13,7 +13,7 @@ client learned this and its comment says so. So: look the slug up, patch if it i
 it is not.
 
 NOT CONFIGURED IS AN ANSWER. A box with no Sanity project is not broken, it is a box whose owner
-has not set this up (`docs/SEO_AEO_MACHINE_BUILD_SPEC.md` §5). `is_configured()` says so in words
+has not set this up (`docs/AEO_AEO_MACHINE_BUILD_SPEC.md` §5). `is_configured()` says so in words
 and nothing here raises for it.
 
 NOTHING HERE IS OURS ALONE. Project, dataset and site URL are per-box settings; the write token is
@@ -31,7 +31,7 @@ from urllib.parse import urlencode, urlparse
 
 from core import box_secrets, net
 from core.logging import get_logger
-from marketing.seo_machine import guard, settings
+from marketing.aeo_machine import guard, settings
 
 log = get_logger(__name__)
 
@@ -59,9 +59,9 @@ def is_configured() -> tuple[bool, str]:
     """(ready, why-not). Never raises — an unconfigured box answers, it does not crash."""
     c = _cfg()
     if not c.get("project_id"):
-        return False, "no Sanity project set for this box (SEO settings: project_id)"
+        return False, "no Sanity project set for this box (AEO settings: project_id)"
     if not c.get("dataset"):
-        return False, "no Sanity dataset set for this box (SEO settings: dataset)"
+        return False, "no Sanity dataset set for this box (AEO settings: dataset)"
     if not _token():
         return False, f"no write token in the box's secrets ({TOKEN_KEY})"
     # The site's address is REQUIRED, not optional (OSDev1, #1561): without it every article's URL
@@ -195,7 +195,7 @@ def _readable(doc: dict) -> str:
 
     THE RENDERED WORDS, NOT THE MARKDOWN, for the number rule. "1. Open the app" carries a literal
     `1` that is list markup, not a claim, so the number rule runs on the rendered text, where a
-    numbered list has no digits (`docs/SEO_MACHINE_OWNBOX_SEED.md` §1 depends on that).
+    numbered list has no digits (`docs/AEO_MACHINE_OWNBOX_SEED.md` §1 depends on that).
     """
     prose, _ = _body_parts(doc.get("body"))
     parts = [doc.get("title") or "", doc.get("shortAnswer") or "",
@@ -385,7 +385,7 @@ def publish(*, lists=None, **fields) -> dict:
     """
     ready, why = is_configured()
     if not ready:
-        raise RuntimeError(f"seo publisher not configured: {why}")
+        raise RuntimeError(f"aeo publisher not configured: {why}")
 
     # DEFAULTS FROM THE BOX, NOT FROM EMPTY. A caller that forgets to pass the lists must get the
     # box's rules, not a guard with nothing to check — silently permissive is the one failure mode
@@ -402,7 +402,7 @@ def publish(*, lists=None, **fields) -> dict:
             _endpoint("mutate"), headers=_headers(),
             json={"mutations": [{"patch": {"id": existing["_id"], "set": patch}}]})
         _json_or_raise(status, body, "patch")
-        log.info("seo.article_patched", slug=slug, doc_id=existing["_id"])
+        log.info("aeo.article_patched", slug=slug, doc_id=existing["_id"])
         return {"doc_id": existing["_id"], "url": article_url(slug), "slug": slug,
                 "created": False}
 
@@ -423,7 +423,7 @@ def publish(*, lists=None, **fields) -> dict:
         doc_id = (find_by_slug(slug) or {}).get("_id")
     if not doc_id:
         raise RuntimeError(f"sanity create for {slug!r} returned no id and the slug does not resolve")
-    log.info("seo.article_created", slug=slug, doc_id=doc_id)
+    log.info("aeo.article_created", slug=slug, doc_id=doc_id)
     return {"doc_id": doc_id, "url": article_url(slug), "slug": slug, "created": True}
 
 
@@ -454,8 +454,8 @@ def ping_indexnow(urls: list[str]) -> bool:
         status, _ = net.post_public("https://api.indexnow.org/indexnow",
                                     json={"host": host, "key": key, "urlList": urls})
         ok = status < 400
-        log.info("seo.indexnow_pinged", count=len(urls), status=status, accepted=ok)
+        log.info("aeo.indexnow_pinged", count=len(urls), status=status, accepted=ok)
         return ok
     except Exception as e:                                   # noqa: BLE001 — see the docstring
-        log.warning("seo.indexnow_failed", error=str(e)[:160])
+        log.warning("aeo.indexnow_failed", error=str(e)[:160])
         return False

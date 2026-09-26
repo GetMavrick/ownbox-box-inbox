@@ -1,4 +1,4 @@
-"""SEO > Performance, and the PostHog connection it reads from.
+"""AEO > Performance, and the PostHog connection it reads from.
 
 OWNER, 2026-09-25, in OSDev6's session: "post hog is going to be the next data source we connect ...
 we should suggest post hog" and "Customers are going to demand current performance numbers
@@ -9,7 +9,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
   · a key that works but finds no page views is refused (it is connected; the snippet is missing);
   · the key lands anywhere but box_secrets, under the name the Performance screen reads;
   · anything is ever written to PostHog (every request is a read-only query);
-  · the numbers are not limited to this website's host when SEO Settings names it;
+  · the numbers are not limited to this website's host when AEO Settings names it;
   · a PostHog that is down breaks the Performance page instead of costing it its numbers;
   · PostHog is asked again on every page open (the numbers are cached);
   · a member, or a GET, changes anything;
@@ -17,7 +17,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
 
 NO NETWORK. `posthog.net` is replaced with a scripted stand-in that records every request.
 
-Run: python tests/test_seo_performance.py
+Run: python tests/test_aeo_performance.py
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 os.environ["AIOS_HERMETIC_TEST"] = "1"
-os.environ["AIOS_DB_PATH"] = os.path.join(tempfile.mkdtemp(), "seo_performance.db")
+os.environ["AIOS_DB_PATH"] = os.path.join(tempfile.mkdtemp(), "aeo_performance.db")
 os.environ["DISPATCH_BEARER_TOKEN"] = "bearer"
 os.environ["DASH_TOKEN"] = "pw"
 
@@ -41,7 +41,7 @@ state.init_db()
 
 from core import box_secrets, box_settings, dash, net, shell             # noqa: E402
 from core.dispatch import app as web                                     # noqa: E402
-from marketing.seo_machine import app as seo_app, posthog, settings      # noqa: E402
+from marketing.aeo_machine import app as aeo_app, posthog, settings      # noqa: E402
 
 _failed = 0
 
@@ -145,31 +145,31 @@ MEMBER = state.add_user("sam@northwind-consulting.com", name="Sam")["id"]
 owner, member = client(OWNER), client(MEMBER)
 
 ok("PostHog is a row in the Data sources menu",
-   any(i.href == "/seo/sources/posthog" for i in shell.rail("/seo/sources").items))
-ok("Performance is a row in SEO's own menu",
-   any(i.href == "/seo/performance" for i in shell.rail("/seo/topics").items))
-page = main_of(owner.get("/seo/sources").get_data(as_text=True))
+   any(i.href == "/aeo/sources/posthog" for i in shell.rail("/aeo/sources").items))
+ok("Performance is a row in AEO's own menu",
+   any(i.href == "/aeo/performance" for i in shell.rail("/aeo/topics").items))
+page = main_of(owner.get("/aeo/sources").get_data(as_text=True))
 ok("the overview offers PostHog, as Recommended", "Connect PostHog" in page and "Recommended" in page)
 ok("...and an unconnected PostHog is not drawn as a problem", not re.search(
     r'<div class="card" style="border-color:var\(--danger\)"><h2>PostHog', page))
 
-page = main_of(owner.get("/seo/performance").get_data(as_text=True))
+page = main_of(owner.get("/aeo/performance").get_data(as_text=True))
 ok("before PostHog: the Performance screen says how to connect it, in one tap",
-   "Connect PostHog" in page and 'href="/seo/sources/posthog"' in page)
+   "Connect PostHog" in page and 'href="/aeo/sources/posthog"' in page)
 f = use(Net())
-member.get("/seo/performance")
+member.get("/aeo/performance")
 ok("...and nobody's page open asks PostHog anything", f.seen == [])
 
 print("\ntest_connecting_posthog")
 f = use(Net(status=403))
-r = owner.post("/seo/sources/posthog", data={"region": "eu", "project": "4242", "api_key": KEY})
+r = owner.post("/aeo/sources/posthog", data={"region": "eu", "project": "4242", "api_key": KEY})
 html = r.get_data(as_text=True)
 ok("a key that cannot read the project is refused, with the scope named",
    r.status_code == 400 and posthog.SCOPE in html, r.status_code)
 ok("...nothing is saved", settings.get()["posthog_project"] == "" and not box_secrets.is_set(posthog.KEY))
 ok("...the key is never shown back", KEY not in html)
 ok("...and the region and project stay chosen", 'value="eu" checked' in html and 'value="4242"' in html)
-r = owner.post("/seo/sources/posthog", data={"region": "own", "own_host": "https://us.i.posthog.com",
+r = owner.post("/aeo/sources/posthog", data={"region": "own", "own_host": "https://us.i.posthog.com",
                                              "project": "4242", "api_key": KEY})
 html = r.get_data(as_text=True)
 ok("the event-sending address is refused before PostHog is asked",
@@ -177,12 +177,12 @@ ok("the event-sending address is refused before PostHog is asked",
 ok("...and the address that failed is not put back in the form", 'value="https://us.i.posthog.com"'
    not in html and "Choose US or EU" in html)
 f = use(Net(answers=CHECK))
-r = owner.post("/seo/sources/posthog", data={"region": "us", "project": "42x", "api_key": KEY})
+r = owner.post("/aeo/sources/posthog", data={"region": "us", "project": "42x", "api_key": KEY})
 ok("a project ID that is not a number is refused, and PostHog is not asked",
    r.status_code == 400 and f.seen == [])
 
 f = use(Net(answers={"INTERVAL 30 DAY": [[0]]}))
-r = owner.post("/seo/sources/posthog", data={"region": "us", "project": "4242", "api_key": KEY})
+r = owner.post("/aeo/sources/posthog", data={"region": "us", "project": "4242", "api_key": KEY})
 ok("a key that works on a project with no page views is CONNECTED",
    r.status_code == 303 and box_secrets.get(posthog.KEY) == KEY
    and settings.get()["posthog_host"] == "https://us.posthog.com"
@@ -191,28 +191,28 @@ page = owner.get(r.headers["Location"]).get_data(as_text=True)
 ok("...with the warning that the snippet may be missing", "snippet" in page and "no page" in page)
 
 f = use(Net(answers=CHECK))
-r = owner.post("/seo/sources/posthog", data={"region": "us", "project": "4243", "api_key": ""})
+r = owner.post("/aeo/sources/posthog", data={"region": "us", "project": "4243", "api_key": ""})
 ok("a blank key keeps the saved one, and it is the one that is checked",
    r.status_code == 303 and f.seen and f.seen[0][2]["Authorization"] == f"Bearer {KEY}"
    and settings.get()["posthog_project"] == "4243")
 for data, why in (({"region": "own", "own_host": "https://ph.attacker.example"}, "a new own address"),
                   ({"region": "eu"}, "another region")):
     f = use(Net(answers=CHECK))
-    r = owner.post("/seo/sources/posthog", data={**data, "project": "4243", "api_key": ""})
+    r = owner.post("/aeo/sources/posthog", data={**data, "project": "4243", "api_key": ""})
     ok(f"{why} with the key left blank: refused, and the saved key is sent NOWHERE (OSDev1, HIGH)",
        r.status_code == 400 and f.seen == [] and "Paste the key again" in r.get_data(as_text=True)
        and settings.get()["posthog_host"] == "https://us.posthog.com", (r.status_code, f.seen[:1]))
-page = owner.get("/seo/sources/posthog").get_data(as_text=True)
+page = owner.get("/aeo/sources/posthog").get_data(as_text=True)
 ok("the saved key is never on the page", KEY not in page and "Saved. Leave blank" in page)
 
-r1 = member.post("/seo/sources/posthog", data={"region": "us", "project": "1", "api_key": "phx_" + "E" * 40})
+r1 = member.post("/aeo/sources/posthog", data={"region": "us", "project": "1", "api_key": "phx_" + "E" * 40})
 ok("a member's save is refused, and nothing is changed",
    r1.status_code in (403, 400) and settings.get()["posthog_project"] == "4243"
    and box_secrets.get(posthog.KEY) == KEY, r1.status_code)
-page = main_of(member.get("/seo/sources/posthog").get_data(as_text=True))
+page = main_of(member.get("/aeo/sources/posthog").get_data(as_text=True))
 ok("a member reads the PostHog page without a form or the key",
    "<form" not in page and "Only the owner" in page and KEY not in page)
-owner.get("/seo/sources/posthog?project=9&region=us")
+owner.get("/aeo/sources/posthog?project=9&region=us")
 ok("a GET changes nothing", settings.get()["posthog_project"] == "4243")
 
 print("\ntest_the_numbers")
@@ -244,7 +244,7 @@ posthog.performance(fresh=True)
 ok("...and fresh=True asks again", len(f.seen) > n)
 
 posthog.forget()
-page = main_of(owner.get("/seo/performance").get_data(as_text=True))
+page = main_of(owner.get("/aeo/performance").get_data(as_text=True))
 ok("no page speed anywhere on the screen", "speed" not in page.lower() and "vital" not in page.lower())
 ok("the screen shows the four tiles", all(k in page for k in (
     "Visitors", "Page views", "Article views", "From AI answers")) and page.count('class="pf-t"') == 4)
@@ -254,9 +254,9 @@ ok("...and no change is made up where there is no week before", page.count("vs l
 ok("...the most read article, and where visitors came from",
    ">what-goes-in-a-sow<" in page and "chatgpt.com" in page)
 ok("the tiles are two across on a mobile device and four on a wide screen (mobile first)",
-   ".pf-g{display:grid;grid-template-columns:1fr 1fr" in seo_app._PH_CSS
-   and "@media (min-width:760px){.pf-g{grid-template-columns:repeat(4,1fr)}}" in seo_app._PH_CSS)
-page_m = main_of(member.get("/seo/performance").get_data(as_text=True))
+   ".pf-g{display:grid;grid-template-columns:1fr 1fr" in aeo_app._PH_CSS
+   and "@media (min-width:760px){.pf-g{grid-template-columns:repeat(4,1fr)}}" in aeo_app._PH_CSS)
+page_m = main_of(member.get("/aeo/performance").get_data(as_text=True))
 ok("a member sees the same numbers", "From AI answers" in page_m and "<form" not in page_m)
 
 
@@ -268,7 +268,7 @@ ok("a host saved with www. still matches both", all(
 box_settings.put("seo", "host", "northwind.example")
 
 use(Net(answers={**WEEK, "countIf(timestamp >= now()": [[0, 0, 0, 0, 0, 0, 0, 0]]}))
-page = main_of(owner.get("/seo/performance").get_data(as_text=True))
+page = main_of(owner.get("/aeo/performance").get_data(as_text=True))
 ok("nothing recorded in either week: one card saying so, never four tiles of zero (OSDev1)",
    "No visits recorded yet" in page and "snippet" in page and 'class="pf-t"' not in page)
 
@@ -279,9 +279,9 @@ for bad, why in (({"countIf(timestamp >= now()": [[1, 2, 3]]}, "a totals row of 
                  ({"countIf(timestamp >= now()": [None]}, "a null totals row"),
                  ({"countIf(timestamp >= now()": []}, "no totals row at all")):
     use(Net(answers={**WEEK, **bad}))
-    r = owner.get("/seo/performance")
+    r = owner.get("/aeo/performance")
     ok(f"{why}: the page says it could not be read, and never 500s (OSDev1)",
-       r.status_code == 200 and seo_app._esc(posthog.UNREADABLE) in r.get_data(as_text=True),
+       r.status_code == 200 and aeo_app._esc(posthog.UNREADABLE) in r.get_data(as_text=True),
        r.status_code)
 
 f = use(Net(status=500))
@@ -296,7 +296,7 @@ posthog.performance()
 ok("...and asked again once the minute is up", len(f.seen) == n + 1)
 
 use(Net(status=401))
-page_r = owner.get("/seo/performance")
+page_r = owner.get("/aeo/performance")
 page = main_of(page_r.get_data(as_text=True))
 ok("PostHog refusing the key costs the page its numbers, never the page",
    page_r.status_code == 200 and posthog.BAD_KEY in page and 'class="pf-t"' not in page, page_r.status_code)
@@ -310,7 +310,7 @@ ok("no credential is ever in what performance() returns", KEY not in repr(postho
 print("\ntest_the_words_a_buyer_reads")
 _RESERVED = re.compile(r"\b(phones?|rings?|calls?|dial|lines?|voice)\b", re.I)
 use(Net(answers=WEEK))
-for path in ("/seo/sources", "/seo/sources/posthog", "/seo/performance"):
+for path in ("/aeo/sources", "/aeo/sources/posthog", "/aeo/performance"):
     for who in (owner, member):
         text = re.sub(r"<[^>]+>", " ", main_of(who.get(path).get_data(as_text=True)))
         ok(f"{path} uses none of the reserved nouns", not _RESERVED.search(text),
@@ -320,8 +320,8 @@ for sentence in (v for k, v in vars(posthog).items() if k.isupper() and isinstan
 
 print("\n— and this file cannot silently fall out of CI —")
 if (ROOT / ".github").is_dir():                  # a buyer's box has no repository
-    ok("test_seo_performance is in the workflow's suite list",
-       "test_seo_performance" in (ROOT / ".github/workflows/tests.yml").read_text())
+    ok("test_aeo_performance is in the workflow's suite list",
+       "test_aeo_performance" in (ROOT / ".github/workflows/tests.yml").read_text())
 
 print("\nALL OK" if not _failed else f"\n{_failed} FAILED")
 sys.exit(1 if _failed else 0)

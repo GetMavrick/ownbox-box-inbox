@@ -10,7 +10,7 @@ os.environ.setdefault("AIOS_HERMETIC_TEST", "1")
 os.environ.setdefault("AIOS_DB_PATH", tempfile.mkdtemp() + "/t.db")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from marketing.seo_machine import guard, publisher
+from marketing.aeo_machine import guard, publisher
 
 _failed = 0
 
@@ -54,9 +54,9 @@ class FakeNet:
         return {}
 
 
-# A box with its settings filled in — as the SEO settings SCREEN saves them. Not YAML: a buyer
+# A box with its settings filled in — as the AEO settings SCREEN saves them. Not YAML: a buyer
 # cannot edit YAML, and the exporter's KEEP list strips the section on a sold box, which is what
-# blocked the first version of this publisher (OSDev1, #1554). test_seo_settings.py checks that
+# blocked the first version of this publisher (OSDev1, #1554). test_aeo_settings.py checks that
 # against the exporter itself.
 CFG = {"project_id": "p1", "dataset": "production", "api_version": "2025-02-19",
        "site_url": "https://example.test", "host": "example.test", "indexnow_key": "abc123",
@@ -67,7 +67,7 @@ ARTICLE = dict(title="What an AI coworker does", slug="what-an-ai-coworker-does"
                category="Basics", meta_description="A short description.")
 
 
-from marketing.seo_machine import settings as real_settings
+from marketing.aeo_machine import settings as real_settings
 
 
 def use(cfg=CFG, token="tok"):
@@ -105,7 +105,7 @@ ok("...and one with it is (OSDev1, #1561: the screen and the worker agree)",
 ok("the token has ONE name, the one the owner gave it",
    publisher.TOKEN_KEY == "SANITY_API_TOKEN_OWNBOX", publisher.TOKEN_KEY)
 
-# THE BUG THAT BLOCKED THIS PR. The exporter's customer_voice KEEP list carries no `seo`, so a
+# THE BUG THAT BLOCKED THIS PR. The exporter's customer_voice KEEP list carries no `aeo`, so a
 # sold box has no YAML section at all. Defaults must therefore live in code, or every sold box
 # reports "not configured" forever — the only boxes that matter.
 ok("a sold box, whose YAML section the exporter strips, still has a usable dataset",
@@ -161,7 +161,7 @@ except guard.GuardRefused as e:
 
 print("\n-- the guard reads the RENDERED words, not the markdown --")
 # Blocks written out by hand, NOT built with the converter. This module must not depend on
-# content machine even in its tests — that import is the thing the SEO pack exists to avoid.
+# content machine even in its tests — that import is the thing the AEO pack exists to avoid.
 def blocks(*texts, **kw):
     return [{"_type": "block", "children": [{"_type": "span", "text": t, "marks": []}], **kw}
             for t in texts]
@@ -386,7 +386,7 @@ ok("...including a site_url saved without its https://",
    next(kw["json"] for me, u, kw in f.calls if me == "POST")["host"] == "acme-heating.test")
 
 print("\n-- it has to work on a stranger's box --")
-src = open("marketing/seo_machine/publisher.py").read().lower()
+src = open("marketing/aeo_machine/publisher.py").read().lower()
 # upush96l is the project THIS publisher writes to on our box; 5b464472 is the other one. The
 # first version only looked for the other one, so the likely leak was the one it could not see.
 OURS = ("ownbox.io", "ownbox.app", "upush96l", "5b464472", "brian", "mavrick")
@@ -395,7 +395,7 @@ ok("no brand, project id or domain of ours is hardcoded",
 # Read the AST, not the prose: the module's own docstring says the words "brain.think()", so a
 # grep over source text can only ever fail here. What we care about is whether it CALLS one.
 import ast
-tree = ast.parse(open("marketing/seo_machine/publisher.py").read())
+tree = ast.parse(open("marketing/aeo_machine/publisher.py").read())
 imports = {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)} | {
     a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
 calls = {n.func.attr for n in ast.walk(tree)

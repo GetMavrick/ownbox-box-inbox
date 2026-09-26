@@ -7,7 +7,7 @@ only through `plan.py`, the same path the Topics screen uses.
 """
 import os, sys, tempfile
 os.environ["AIOS_HERMETIC_TEST"] = "1"
-os.environ["AIOS_DB_PATH"] = os.path.join(tempfile.mkdtemp(), "seo_job.db")
+os.environ["AIOS_DB_PATH"] = os.path.join(tempfile.mkdtemp(), "aeo_job.db")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime, timedelta, timezone
@@ -16,8 +16,8 @@ from core import state
 
 state.init_db()
 
-from marketing.seo_machine import guard, job, plan                       # noqa: E402
-from marketing.seo_machine import publisher as real_publisher            # noqa: E402
+from marketing.aeo_machine import guard, job, plan                       # noqa: E402
+from marketing.aeo_machine import publisher as real_publisher            # noqa: E402
 
 _failed = 0
 
@@ -133,7 +133,7 @@ now = datetime.now(timezone.utc)
 
 print("-- the worker runs it --")
 from core.worker import PERIODIC                                          # noqa: E402
-tick = [p for p in PERIODIC if p["name"] == "seo_publish"]
+tick = [p for p in PERIODIC if p["name"] == "aeo_publish"]
 ok("importing the machine registers the writing job's tick", len(tick) == 1, [p["name"] for p in PERIODIC])
 ok("…every minute, so 'Write and publish now' is honoured within one", tick and tick[0]["interval"] == 60.0)
 
@@ -158,7 +158,7 @@ ok("the row records slug, url and when", done["status"] == "published" and done[
 ok("the writer gets the box's facts", w.calls[0]["facts"] == ("The Base Machine is $499 once.",), w.calls[0])
 ok("the writer and the publisher get the SAME lists, the box's own",
    w.calls[0]["lists"] == s.lists() and p.published[0]["lists"] == s.lists())
-ok("the reasoning call is tagged to its row for the spend ledger", w.calls[0]["job_id"] == f"seo:{a}")
+ok("the reasoning call is tagged to its row for the spend ledger", w.calls[0]["job_id"] == f"aeo:{a}")
 ok("the live URL is pinged to IndexNow", p.pinged == [done["url"]], p.pinged)
 wire()
 job.periodic()
@@ -298,7 +298,7 @@ ok("…and the row still says published", row(a)["status"] == "published" and r.
 
 print("\n-- facts and lists saved as text reach the writer as entries, not letters --")
 from core import box_settings                                             # noqa: E402
-from marketing.seo_machine import settings as real_settings               # noqa: E402
+from marketing.aeo_machine import settings as real_settings               # noqa: E402
 box_settings.put("seo", "facts", "The Base Machine is $499 once.\nPro is $1,599 once.")
 box_settings.put("seo", "never_words", "call\nvoice")
 (a,) = reset(("What is an AI business machine?",))
@@ -314,7 +314,7 @@ box_settings.put("seo", "facts", "")
 box_settings.put("seo", "never_words", "")
 
 print("\n-- a relative URL is never pinged --")
-# The real publisher refuses a box with no site URL (test_seo_publisher). This is the guard behind it.
+# The real publisher refuses a box with no site URL (test_aeo_publisher). This is the guard behind it.
 (a,) = reset(("What is an AI business machine?",))
 _, _, p = wire(publisher=Publisher(base=""))
 r = job.periodic()

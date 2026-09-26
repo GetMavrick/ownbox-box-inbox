@@ -9,7 +9,7 @@ os.environ.setdefault("AIOS_HERMETIC_TEST", "1")
 os.environ.setdefault("AIOS_DB_PATH", tempfile.mkdtemp() + "/t.db")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from marketing.seo_machine import guard, writer
+from marketing.aeo_machine import guard, writer
 
 _failed = 0
 
@@ -53,9 +53,9 @@ ok("the body is converted to Portable Text, not left as Markdown",
 ok("the Markdown is kept too, so an article can be re-edited later",
    fields["source_markdown"].startswith("## Heading"))
 ok("FAQs survive", fields["faqs"][0]["question"] == "Is it fast?")
-ok("it reasons on the SEO machine's own AI account", b.calls[0].get("machine") == "seo")
+ok("it reasons on the AEO machine's own AI account", b.calls[0].get("machine") == "seo")
 ok("the call is tagged so the spend ledger can attribute it",
-   b.calls[0].get("task") == "seo.article")
+   b.calls[0].get("task") == "aeo.article")
 
 print("\n-- the slug is ours, not the model's --")
 ok("derived from the title", fields["slug"] == "what-an-ai-coworker-does")
@@ -161,7 +161,7 @@ ok("a banned word in a code block is caught by the writer, not first at the door
 print("\n-- the machine reasons in exactly one place --")
 import ast, glob
 callers = []
-for path in sorted(glob.glob("marketing/seo_machine/*.py")):
+for path in sorted(glob.glob("marketing/aeo_machine/*.py")):
     tree = ast.parse(open(path).read())
     if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
            and n.func.attr == "think" for n in ast.walk(tree)):

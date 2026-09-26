@@ -1,4 +1,4 @@
-"""/settings/seo/google — connect Google Search Console with one button, then pick the site.
+"""/settings/aeo/google — connect Google Search Console with one button, then pick the site.
 
 OWNER, 2026-09-25: a button on the settings page "that has them login into their Google account and
 choose a property/website as their primary." No keys, no Google Cloud, no screen share. The work
@@ -22,8 +22,14 @@ from core.dash.box_settings import _admit, _esc, _is_owner, _who
 from core.dash.home import chrome
 from core.vendors import google_search_console as gsc
 
-DOOR = "/settings/seo/google"
-DONE = "/settings/seo/google/done"
+DOOR = "/settings/aeo/google"
+DONE = "/settings/aeo/google/done"
+# THE OLD ADDRESSES STILL ANSWER, FOREVER (owner, 2026-09-25: "Yes, please code rename"; OSDev1's
+# condition for it). The website's sign-in relay (www.ownbox.io/connect/google) sends Google's
+# answer to OLD_DONE for every box, including boxes that never update, so this alias is never
+# removed. The old door redirects to the new one.
+OLD_DOOR = "/settings/seo/google"
+OLD_DONE = "/settings/seo/google/done"
 _TITLE = "Google Search Console"
 _LEDE = "See what your website is found for on Google. Sign in with Google and pick your site."
 
@@ -151,7 +157,15 @@ def google_search_screen():
     return chrome(DOOR, title=_TITLE, lede=_LEDE, body=body + _back()), 200
 
 
+@blueprint.route(OLD_DOOR, methods=["GET", "POST"])
+def google_search_old_door():
+    # 308, NOT 301: a page left open across the update posts its Connect, Choose and Disconnect
+    # buttons here, and a 301 turns that POST into a GET and drops the form (#1595 review).
+    return redirect(DOOR, code=308)
+
+
 @blueprint.route(DONE, methods=["GET"])
+@blueprint.route(OLD_DONE, methods=["GET"], endpoint="google_search_done_relay")
 def google_search_done():
     refuse = _admit(owner_only=False)
     if refuse is not None:

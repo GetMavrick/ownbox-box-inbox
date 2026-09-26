@@ -8,19 +8,19 @@ right until I measured what importing it does:
     worker.registered_periodic  name=leadmagnet_capture         interval_s=20.0
     worker.registered_periodic  name=leadmagnet_keyword_intake  interval_s=300.0
 
-Importing that module REGISTERS CONTENT MACHINE'S JOBS. A box that bought only the SEO machine
+Importing that module REGISTERS CONTENT MACHINE'S JOBS. A box that bought only the AEO machine
 would start polling Airtable for lead magnets it does not own, every twenty seconds, forever. And
 `export_box.sh` packages machines selectively, so on such a box the import may not even resolve.
 An add-on machine has to stand on its own (`CLAUDE.md` non-negotiable 7).
 
 SO IT IS COPIED, AND THE COPY IS MEASURED. Every symbol in the ported section is byte-for-byte
-identical to its original, and `tests/test_seo_portable_text.py` compares them with
+identical to its original, and `tests/test_aeo_portable_text.py` compares them with
 `inspect.getsource` on every run. Edit either copy and CI fails, naming the symbol that drifted.
 That is the whole reason this is a port rather than a fork: the reserved-word list diverged
 silently across two files and nobody noticed until it mattered (#1552), and this is the same shape
 of risk with a detector attached.
 
-DO NOT EDIT THE PORTED SECTION to fix an SEO bug. Fix it in the original, copy it here, and let
+DO NOT EDIT THE PORTED SECTION to fix an AEO bug. Fix it in the original, copy it here, and let
 the drift test confirm they match. If the two ever genuinely need to differ, delete the drift test
 in the same PR with a reason — do not let it rot.
 

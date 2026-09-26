@@ -91,7 +91,7 @@ def _fetch(start: str, end: str) -> dict:
     try:
         raw = gsc.search_analytics(start, end, ("query",), ROWS)
     except gsc.Refused as e:
-        log.info("seo.searches_unavailable", reason=e.key)
+        log.info("aeo.searches_unavailable", reason=e.key)
         if e.key in ("not_connected", "no_property"):
             return {"ok": False, "why": e.key}
         return {"ok": False, "why": SIGNED_OUT if e.key == "signed_out" else UNREACHABLE}

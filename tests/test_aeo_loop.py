@@ -1,7 +1,7 @@
-"""The SEO machine's real path: question -> writer -> job -> publisher -> guard, end to end.
+"""The AEO machine's real path: question -> writer -> job -> publisher -> guard, end to end.
 
-WHY THIS FILE EXISTS (OSDev9's review, docs/REVIEW_SEO_MACHINE_OSDEV6_FIXES.md §5): every other
-seo suite fakes the module on the far side of its seam. The job's suite fakes the writer, the
+WHY THIS FILE EXISTS (OSDev9's review, docs/REVIEW_AEO_MACHINE_OSDEV6_FIXES.md §5): every other
+aeo suite fakes the module on the far side of its seam. The job's suite fakes the writer, the
 writer's suite checks with its own slug, the publisher's suite never sees the job. Each passed while
 two high-severity bugs lived on the path an article actually takes. "A unit suite proves a module;
 only a seam test proves the machine."
@@ -17,7 +17,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED (the review's §7, one planted failu
   · F-D: a created article has no publishedAt, or a patch moves it;
   · F-E: one banned word produces two refusals.
 
-Run: python tests/test_seo_loop.py
+Run: python tests/test_aeo_loop.py
 """
 from __future__ import annotations
 
@@ -31,13 +31,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 os.environ["AIOS_HERMETIC_TEST"] = "1"
-os.environ["AIOS_DB_PATH"] = os.path.join(tempfile.mkdtemp(), "seo_loop.db")
+os.environ["AIOS_DB_PATH"] = os.path.join(tempfile.mkdtemp(), "aeo_loop.db")
 
 from core import box_settings, state                                     # noqa: E402
 
 state.init_db()
 
-from marketing.seo_machine import guard, job, plan, publisher, writer    # noqa: E402
+from marketing.aeo_machine import guard, job, plan, publisher, writer    # noqa: E402
 
 _failed = 0
 
@@ -239,8 +239,8 @@ ok("one banned word, one refusal", len(found) == 1, found)
 
 print("\n— and this file cannot silently fall out of CI —")
 if (ROOT / ".github").is_dir():                  # a buyer's box has no repository
-    ok("test_seo_loop is in the workflow's suite list",
-       "test_seo_loop" in (ROOT / ".github/workflows/tests.yml").read_text())
+    ok("test_aeo_loop is in the workflow's suite list",
+       "test_aeo_loop" in (ROOT / ".github/workflows/tests.yml").read_text())
 
 print("\nALL OK" if not _failed else f"\n{_failed} FAILED")
 sys.exit(1 if _failed else 0)

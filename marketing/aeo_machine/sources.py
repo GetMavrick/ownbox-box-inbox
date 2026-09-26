@@ -1,4 +1,4 @@
-"""The SEO machine's two data sources, Sanity and Airtable: what a connection is, and the proof of one.
+"""The AEO machine's two data sources, Sanity and Airtable: what a connection is, and the proof of one.
 
 BOTH ARE REQUIRED (owner, 2026-09-25): *"Business owners are going to be required to use sanity and
 set that up. And then they're gonna be required to use Airtable. These are gonna be for hard-core
@@ -32,7 +32,7 @@ log = get_logger(__name__)
 
 # ── Sanity ────────────────────────────────────────────────────────────────────────────────────
 
-# THE PUBLISHER READS THIS NAME (publisher.TOKEN_KEY); tests/test_seo_sources.py holds them equal.
+# THE PUBLISHER READS THIS NAME (publisher.TOKEN_KEY); tests/test_aeo_sources.py holds them equal.
 SANITY_TOKEN = "SANITY_API_TOKEN_OWNBOX"
 # What the machine creates. The proof is a dry-run create of exactly this, so a token that passes
 # here can do the one thing the publisher needs.
@@ -110,7 +110,7 @@ def sanity_state() -> dict:
 
 # ── Airtable ──────────────────────────────────────────────────────────────────────────────────
 
-AIRTABLE_KEY = "AIRTABLE_API_KEY_SEO"
+AIRTABLE_KEY = "AIRTABLE_API_KEY_SEO"   # storage name kept: see settings.MACHINE
 _API = "https://api.airtable.com/v0"
 
 # THE FIELDS THE MACHINE READS AND WRITES, BY NAME. A proposal until the owner's template lands

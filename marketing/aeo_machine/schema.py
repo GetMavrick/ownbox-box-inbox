@@ -1,7 +1,7 @@
-"""The SEO machine's one table: the plan of articles this box will write, and what became of each.
+"""The AEO machine's one table: the plan of articles this box will write, and what became of each.
 
 DECLARED BY THE MACHINE, NOT BY CORE (docs/SPEC_GOLDEN_DROPLET_IMPACT.md §5). `__init__.py` calls
-`state.register_schema("seo_machine", DDL)` at import, so a box that does not carry this machine
+`state.register_schema("aeo_machine", DDL)` at import, so a box that does not carry this machine
 never gets the table, and a box that does gets it whether `init_db()` ran first or not.
 
 A BRAND-NEW TABLE NEEDS NO MIGRATION NUMBER, and two parallel branches must never both claim one.

@@ -17,7 +17,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
 
 NO NETWORK. The Search Console module's `net` is replaced with a stand-in that records requests.
 
-Run: python tests/test_seo_searches.py
+Run: python tests/test_aeo_searches.py
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 os.environ["AIOS_HERMETIC_TEST"] = "1"
-os.environ["AIOS_DB_PATH"] = os.path.join(tempfile.mkdtemp(), "seo_searches.db")
+os.environ["AIOS_DB_PATH"] = os.path.join(tempfile.mkdtemp(), "aeo_searches.db")
 os.environ["DISPATCH_BEARER_TOKEN"] = "bearer"
 os.environ["DASH_TOKEN"] = "pw"
 
@@ -45,7 +45,7 @@ state.init_db()
 from core import box_secrets, dash, net                                  # noqa: E402
 from core.dispatch import app as web                                     # noqa: E402
 from core.vendors import google_search_console as gsc                    # noqa: E402
-from marketing.seo_machine import app as seo_app, searches               # noqa: E402
+from marketing.aeo_machine import app as aeo_app, searches               # noqa: E402
 
 _failed = 0
 
@@ -195,29 +195,33 @@ MEMBER = state.add_user("sam@northwind-consulting.com", name="Sam")["id"]
 owner, member = client(OWNER), client(MEMBER)
 
 use(Net(rows=ROWS))
-page = main_of(owner.get("/seo/performance").get_data(as_text=True))
+page = main_of(owner.get("/aeo/performance").get_data(as_text=True))
 ok("Performance shows Top searches and Opportunities", "Top searches" in page and "Opportunities" in page)
 ok("...each search with its number", "40 clicks" in page and "position 6" in page)
 ok("...a search is escaped, never markup", "&lt;b&gt;bold&lt;/b&gt; &amp; co" in page
    and "<b>bold</b> & co" not in page)
-ok("...and the dates it covers, and that Google is late", "Aug 26 to Sep 22" in page
-   or "to Sep 22" in page, re.findall(r"Searches from Google Search Console[^<]*", page))
+# THE PAGE READS TODAY'S DATE, so the expected range is computed the same way, never typed in:
+# "to Sep 22" was true only on 2026-09-25 and turned main red at midnight UTC (OSDev1, 2026-09-26).
+_s, _e = (dt.date.fromisoformat(d) for d in searches.window())
+_label = f"{_s.strftime('%b')} {_s.day} to {_e.strftime('%b')} {_e.day}"
+ok("...and the dates it covers, and that Google is late", _label in page and "late" in page,
+   f"want {_label!r}: " + str(re.findall(r"Searches from Google Search Console[^<]*", page)))
 ok("no page speed anywhere", "speed" not in page.lower())
 
 box_secrets.clear(gsc.REFRESH, user_id="t")
 f = use(Net(rows=ROWS))
-page = main_of(owner.get("/seo/performance").get_data(as_text=True))
+page = main_of(owner.get("/aeo/performance").get_data(as_text=True))
 ok("Google not connected: the owner is offered Connect, never a row of zeros",
-   "Connect Google Search Console" in page and f'href="{seo_app.GOOGLE}"' in page
+   "Connect Google Search Console" in page and f'href="{aeo_app.GOOGLE}"' in page
    and "0 clicks" not in page and f.seen == [])
-page = main_of(member.get("/seo/performance").get_data(as_text=True))
+page = main_of(member.get("/aeo/performance").get_data(as_text=True))
 ok("...a member is told who can, with no door they are refused at",
-   f'href="{seo_app.GOOGLE}"' not in page and "The owner of this box can connect it" in page)
+   f'href="{aeo_app.GOOGLE}"' not in page and "The owner of this box can connect it" in page)
 signed_in(None)
-page = main_of(owner.get("/seo/performance").get_data(as_text=True))
+page = main_of(owner.get("/aeo/performance").get_data(as_text=True))
 ok("connected with no site chosen: 'Choose your site'", "Choose your site" in page)
 
-page = main_of(owner.get("/seo/sources").get_data(as_text=True))
+page = main_of(owner.get("/aeo/sources").get_data(as_text=True))
 ok("Data sources lists Google Analytics as Coming soon, with no door",
    "Google Analytics" in page and "Coming soon." in page
    and not re.search(r"Google Analytics[^<]*</h2>(?:(?!</div>).)*<a ", page, re.S))
@@ -227,7 +231,7 @@ _RESERVED = re.compile(r"\b(phones?|rings?|calls?|dial|lines?|voice)\b", re.I)
 signed_in()
 use(Net(rows=ROWS))
 for who in (owner, member):
-    for path in ("/seo/performance", "/seo/sources"):
+    for path in ("/aeo/performance", "/aeo/sources"):
         raw = who.get(path).get_data(as_text=True)
         text = re.sub(r"<[^>]+>", " ", re.sub(r"<(style|script)\b.*?</\1>", " ", main_of(raw), flags=re.S))
         ok(f"{path} uses none of the reserved nouns", not _RESERVED.search(text),
@@ -237,8 +241,8 @@ for v in (searches.SIGNED_OUT, searches.UNREACHABLE):
 
 print("\n— and this file cannot silently fall out of CI —")
 if (ROOT / ".github").is_dir():                  # a buyer's box has no repository
-    ok("test_seo_searches is in the workflow's suite list",
-       "test_seo_searches" in (ROOT / ".github/workflows/tests.yml").read_text())
+    ok("test_aeo_searches is in the workflow's suite list",
+       "test_aeo_searches" in (ROOT / ".github/workflows/tests.yml").read_text())
 
 print("\nALL OK" if not _failed else f"\n{_failed} FAILED")
 sys.exit(1 if _failed else 0)

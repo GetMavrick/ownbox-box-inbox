@@ -16,7 +16,7 @@ os.environ.setdefault("AIOS_HERMETIC_TEST", "1")
 os.environ.setdefault("AIOS_DB_PATH", tempfile.mkdtemp() + "/t.db")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from marketing.seo_machine import guard
+from marketing.aeo_machine import guard
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 _failed = 0
@@ -45,7 +45,7 @@ ok("the receptionist's words are refused when the box lists them",
    rules("Never miss a call again", **OURS) == {"never_word"})
 for word in ("phone", "ring", "call", "dial", "line", "voice"):
     ok(f"   ...{word}", "never_word" in rules(f"Our {word} is open", **OURS))
-ok("'voice search' — the SEO industry's own term, the likeliest violation of all",
+ok("'voice search' — the AEO industry's own term, the likeliest violation of all",
    "never_phrase" in rules("Optimise for voice search", **OURS))
 ok("a phrase on the box's list", "never_phrase" in rules("This is the plumbing behind it.", **OURS))
 ok("a product name that collides with the reserved words",
@@ -90,13 +90,13 @@ ok("a box that supplied no lists publishes the sentence OUR box forbids outright
    guard.check("Call our plumbing line for a quote") == [])
 ok("...and a phone-repair shop can write about phones",
    guard.check("We fix phones, and we answer the phone.") == [])
-ok("...and an SEO agency can write the words 'voice search'",
+ok("...and an AEO agency can write the words 'voice search'",
    guard.check("A guide to voice search") == [])
 # Read the AST, not the prose. The docstring EXPLAINS the rule using the very words it no longer
 # enforces, so a grep over source text can only ever fail here. What leaks to a buyer is a
 # module-level list of words, so that is what this looks for.
 import ast
-mod = ast.parse((ROOT / "marketing/seo_machine/guard.py").read_text())
+mod = ast.parse((ROOT / "marketing/aeo_machine/guard.py").read_text())
 word_lists = [t.id for n in mod.body if isinstance(n, ast.Assign)
               for t in n.targets if isinstance(t, ast.Name)
               if isinstance(n.value, (ast.Tuple, ast.List, ast.Set))

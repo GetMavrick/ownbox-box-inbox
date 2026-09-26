@@ -1,4 +1,4 @@
-"""SEO > Data sources: the Sanity and Airtable connections, each proved before it is saved.
+"""AEO > Data sources: the Sanity and Airtable connections, each proved before it is saved.
 
 OWNER, 2026-09-25, in OSDev6's session: "Business owners are going to be required to use sanity and
 set that up. And then they're gonna be required to use Airtable." OSDev1's spec the same afternoon:
@@ -16,7 +16,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
 
 NO NETWORK. `sources.net` is replaced with a scripted stand-in that records every request.
 
-Run: python tests/test_seo_sources.py
+Run: python tests/test_aeo_sources.py
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 os.environ["AIOS_HERMETIC_TEST"] = "1"
-os.environ["AIOS_DB_PATH"] = os.path.join(tempfile.mkdtemp(), "seo_sources.db")
+os.environ["AIOS_DB_PATH"] = os.path.join(tempfile.mkdtemp(), "aeo_sources.db")
 os.environ["DISPATCH_BEARER_TOKEN"] = "bearer"
 os.environ["DASH_TOKEN"] = "pw"
 
@@ -41,7 +41,7 @@ state.init_db()
 
 from core import box_secrets, box_settings, dash, net, shell             # noqa: E402
 from core.dispatch import app as web                                     # noqa: E402
-from marketing.seo_machine import app as seo_app, settings, sources      # noqa: E402
+from marketing.aeo_machine import app as aeo_app, settings, sources      # noqa: E402
 
 _failed = 0
 
@@ -198,47 +198,47 @@ OWNER = state.owner_user()["id"]
 MEMBER = state.add_user("sam@northwind-consulting.com", name="Sam")["id"]
 owner, member = client(OWNER), client(MEMBER)
 
-ok("Data sources is a menu inside SEO", shell.crumb("/seo/sources/sanity") == ("Data sources", "Sanity")
-   and shell.rail("/seo/sources/airtable").back == "/seo", str(shell.crumb("/seo/sources/sanity")))
-ok("...and a row in SEO's own menu", any(i.href == "/seo/sources" for i in shell.rail("/seo/topics").items))
-page = owner.get("/seo/sources").get_data(as_text=True)
+ok("Data sources is a menu inside AEO", shell.crumb("/aeo/sources/sanity") == ("Data sources", "Sanity")
+   and shell.rail("/aeo/sources/airtable").back == "/aeo", str(shell.crumb("/aeo/sources/sanity")))
+ok("...and a row in AEO's own menu", any(i.href == "/aeo/sources" for i in shell.rail("/aeo/topics").items))
+page = owner.get("/aeo/sources").get_data(as_text=True)
 ok("the overview says both are needed, and neither is connected", "needs both" in page
    and page.count("Not connected.") == 3)          # and PostHog, recommended
 
 print("\ntest_connecting_sanity")
 f = use(Net(gets=SAN_OK, posts={"/data/mutate/": (403, "")}))
-r = owner.post("/seo/sources/sanity", data={"project_id": "AbC123xy", "dataset": "", "token": SAN_TOKEN})
+r = owner.post("/aeo/sources/sanity", data={"project_id": "AbC123xy", "dataset": "", "token": SAN_TOKEN})
 html = r.get_data(as_text=True)
 ok("a read-only token is refused with the sentence that says Editor",
    r.status_code == 400 and "Editor access" in html, r.status_code)
-ok("...nothing is saved", settings.get()["project_id"] == "" and not box_secrets.is_set(seo_app.TOKEN))
+ok("...nothing is saved", settings.get()["project_id"] == "" and not box_secrets.is_set(aeo_app.TOKEN))
 ok("...what was typed stays in the form, except the token", 'value="abc123xy"' in html.lower()
    and SAN_TOKEN not in html)
 f = use(Net(gets=SAN_OK, posts=MUTATE_OK))
-r = owner.post("/seo/sources/sanity", data={"project_id": "AbC123xy", "dataset": "", "token": SAN_TOKEN})
+r = owner.post("/aeo/sources/sanity", data={"project_id": "AbC123xy", "dataset": "", "token": SAN_TOKEN})
 ok("a token that can write is saved", r.status_code == 303 and settings.get()["project_id"] == "abc123xy"
    and settings.get()["dataset"] == "production")
 ok("...under the one name the publisher reads",
-   box_secrets.get(seo_app.TOKEN) == SAN_TOKEN and sources.SANITY_TOKEN == "SANITY_API_TOKEN_OWNBOX")
-page = owner.get("/seo/sources/sanity?said=connected").get_data(as_text=True)
+   box_secrets.get(aeo_app.TOKEN) == SAN_TOKEN and sources.SANITY_TOKEN == "SANITY_API_TOKEN_OWNBOX")
+page = owner.get("/aeo/sources/sanity?said=connected").get_data(as_text=True)
 ok("the token is never shown back", SAN_TOKEN not in page and "Leave blank to keep it" in page)
 ok("the screen says it is connected", "Checked and saved" in page)
 f = use(Net(gets=SAN_OK, posts=MUTATE_OK))
-owner.post("/seo/sources/sanity", data={"project_id": "abc123xy", "dataset": "staging", "token": ""})
+owner.post("/aeo/sources/sanity", data={"project_id": "abc123xy", "dataset": "staging", "token": ""})
 ok("a blank token keeps the saved one, and is still proved",
-   settings.get()["dataset"] == "staging" and box_secrets.get(seo_app.TOKEN) == SAN_TOKEN
+   settings.get()["dataset"] == "staging" and box_secrets.get(aeo_app.TOKEN) == SAN_TOKEN
    and f.seen and f.seen[0][2].get("Authorization") == f"Bearer {SAN_TOKEN}")
 f = use(Net(gets=SAN_OK, posts=MUTATE_OK))
-r = owner.post("/seo/sources/sanity", data={"project_id": "not a project!", "token": SAN_TOKEN})
+r = owner.post("/aeo/sources/sanity", data={"project_id": "not a project!", "token": SAN_TOKEN})
 ok("a malformed project ID is refused before anything is sent", r.status_code == 400 and f.seen == [])
-r = owner.post("/seo/sources/sanity", data={"project_id": "abc123xy", "token": "sk has spaces in it now"})
+r = owner.post("/aeo/sources/sanity", data={"project_id": "abc123xy", "token": "sk has spaces in it now"})
 ok("a token with spaces is refused before anything is sent", r.status_code == 400 and f.seen == []
-   and box_secrets.get(seo_app.TOKEN) == SAN_TOKEN)
+   and box_secrets.get(aeo_app.TOKEN) == SAN_TOKEN)
 # A REAL SANITY TOKEN is "sk" and about 180 more characters, longer than any project ID (32) or
 # dataset name (64) may be, so it can never pass either field's shape and be shown back.
 PASTED = "sk" + "Wx9" * 60
 for field in ("project_id", "dataset"):
-    r = owner.post("/seo/sources/sanity",
+    r = owner.post("/aeo/sources/sanity",
                    data={"project_id": "abc123xy", "dataset": "production", field: PASTED, "token": ""})
     ok(f"a token pasted into {field} is never shown back on the refusal (OSDev1, #1572)",
        r.status_code == 400 and PASTED.lower() not in r.get_data(as_text=True).lower())
@@ -247,66 +247,66 @@ ok("...and the dataset limit that guarantees it is where the check relies on it"
 
 print("\ntest_connecting_airtable")
 f = use(Net(gets=AIR_OK))
-r = owner.post("/seo/sources/airtable", data={"table_url": "https://example.com/nope", "api_key": AIR_KEY})
+r = owner.post("/aeo/sources/airtable", data={"table_url": "https://example.com/nope", "api_key": AIR_KEY})
 ok("an address that is not a table is refused before anything is sent",
    r.status_code == 400 and "copy the address" in r.get_data(as_text=True).lower() and f.seen == [])
 PASTED_KEY = "pat" + "W" * 50
-r = owner.post("/seo/sources/airtable", data={"table_url": PASTED_KEY, "api_key": ""})
+r = owner.post("/aeo/sources/airtable", data={"table_url": PASTED_KEY, "api_key": ""})
 ok("a key pasted into Table address is never shown back on the refusal (OSDev1, #1572)",
    r.status_code == 400 and PASTED_KEY not in r.get_data(as_text=True))
 thin = {"tables": [{"id": TABLE, "fields": [{"name": "Question"}], "views": [{"id": VIEW}]}]}
 use(Net(gets={**AIR_OK, f"/meta/bases/{BASE}/tables": (200, json.dumps(thin))}))
-r = owner.post("/seo/sources/airtable", data={"table_url": URL, "api_key": AIR_KEY})
+r = owner.post("/aeo/sources/airtable", data={"table_url": URL, "api_key": AIR_KEY})
 html = r.get_data(as_text=True)
 ok("a table without the template's fields is refused, naming them",
    r.status_code == 400 and "Status" in html and not box_secrets.is_set(sources.AIRTABLE_KEY))
 ok("...and the key is not shown back", AIR_KEY not in html)
 use(Net(gets=AIR_OK))
-r = owner.post("/seo/sources/airtable", data={"table_url": URL, "api_key": AIR_KEY})
+r = owner.post("/aeo/sources/airtable", data={"table_url": URL, "api_key": AIR_KEY})
 s = settings.get()
 ok("a table that passes is saved", r.status_code == 303 and (s["airtable_base"], s["airtable_table"],
    s["airtable_view"]) == (BASE, TABLE, VIEW), r.status_code)
 ok("...with its key in box_secrets, apart from the box's other Airtable key",
    box_secrets.get(sources.AIRTABLE_KEY) == AIR_KEY and sources.AIRTABLE_KEY != "AIRTABLE_API_KEY")
-page = owner.get("/seo/sources/airtable").get_data(as_text=True)
+page = owner.get("/aeo/sources/airtable").get_data(as_text=True)
 ok("the key is never shown back", AIR_KEY not in page and "Leave blank to keep it" in page)
 ok("the screen lists the fields the table needs", all(fl in page for fl in sources.TEMPLATE_FIELDS))
 use(Net(gets=AIR_OK))
-owner.post("/seo/sources/airtable", data={"table_url": f"https://airtable.com/{BASE}/{TABLE}", "api_key": ""})
+owner.post("/aeo/sources/airtable", data={"table_url": f"https://airtable.com/{BASE}/{TABLE}", "api_key": ""})
 ok("saving without a view clears the old one", settings.get()["airtable_view"] == "")
 with state.connect() as c:
-    keys = {r["key"] for r in c.execute("SELECT key FROM box_settings WHERE machine = 'seo'").fetchall()}
+    keys = {r["key"] for r in c.execute("SELECT key FROM box_settings WHERE machine = 'aeo'").fetchall()}
 ok("every key written is one settings.py defines", keys <= set(settings.DEFAULTS),
    sorted(keys - set(settings.DEFAULTS)))
-page = owner.get("/seo/sources").get_data(as_text=True)
+page = owner.get("/aeo/sources").get_data(as_text=True)
 ok("the overview shows both connected", "needs both" not in page
    and "Connected to project abc123xy, dataset staging." in page)
 
 print("\ntest_owner_only_to_change")
-before, secrets = settings.get(), (box_secrets.get(seo_app.TOKEN), box_secrets.get(sources.AIRTABLE_KEY))
+before, secrets = settings.get(), (box_secrets.get(aeo_app.TOKEN), box_secrets.get(sources.AIRTABLE_KEY))
 f = use(Net(gets={**SAN_OK, **AIR_OK}, posts=MUTATE_OK))
-r1 = member.post("/seo/sources/sanity", data={"project_id": "evil1234", "token": "sk" + "E" * 40})
-r2 = member.post("/seo/sources/airtable", data={"table_url": URL, "api_key": "pat" + "E" * 40})
+r1 = member.post("/aeo/sources/sanity", data={"project_id": "evil1234", "token": "sk" + "E" * 40})
+r2 = member.post("/aeo/sources/airtable", data={"table_url": URL, "api_key": "pat" + "E" * 40})
 ok("a member's saves are refused, and nothing is sent or written",
    r1.status_code == 403 and r2.status_code == 403 and f.seen == [] and settings.get() == before
-   and (box_secrets.get(seo_app.TOKEN), box_secrets.get(sources.AIRTABLE_KEY)) == secrets)
-rows = {i.label: i for i in shell.rail("/seo/sources").items}
+   and (box_secrets.get(aeo_app.TOKEN), box_secrets.get(sources.AIRTABLE_KEY)) == secrets)
+rows = {i.label: i for i in shell.rail("/aeo/sources").items}
 ok("Data sources lists Google Search Console, for the owner only",
    rows.get("Google Search Console") is not None and rows["Google Search Console"].owner_only
-   and rows["Google Search Console"].href == "/settings/seo/google")
-page = main_of(member.get("/seo/sources").get_data(as_text=True))
+   and rows["Google Search Console"].href == "/settings/aeo/google")
+page = main_of(member.get("/aeo/sources").get_data(as_text=True))
 ok("a member's overview offers no door they are refused at",
-   'href="/settings/seo/google"' not in page and "Connect " not in page and "See Sanity" in page)
-for path in ("/seo/sources/sanity", "/seo/sources/airtable"):
+   'href="/settings/aeo/google"' not in page and "Connect " not in page and "See Sanity" in page)
+for path in ("/aeo/sources/sanity", "/aeo/sources/airtable"):
     page = main_of(member.get(path).get_data(as_text=True))
     ok(f"a member reads {path} without a form or a credential",
        "<form" not in page and "Only the owner" in page and SAN_TOKEN not in page and AIR_KEY not in page)
-owner.get("/seo/sources/sanity?project_id=zzzz9999&token=" + "sk" + "G" * 40)
+owner.get("/aeo/sources/sanity?project_id=zzzz9999&token=" + "sk" + "G" * 40)
 ok("a GET changes nothing", settings.get()["project_id"] == "abc123xy")
 
 print("\ntest_the_words_a_buyer_reads")
 _RESERVED = re.compile(r"\b(phones?|rings?|calls?|dial|lines?|voice)\b", re.I)
-for path in ("/seo/sources", "/seo/sources/sanity", "/seo/sources/airtable"):
+for path in ("/aeo/sources", "/aeo/sources/sanity", "/aeo/sources/airtable"):
     for who in (owner, member):
         text = re.sub(r"<[^>]+>", " ", main_of(who.get(path).get_data(as_text=True)))
         ok(f"{path} uses none of the reserved nouns", not _RESERVED.search(text),
@@ -316,8 +316,8 @@ for sentence in (v for k, v in vars(sources).items() if k.isupper() and isinstan
 
 print("\n— and this file cannot silently fall out of CI —")
 if (ROOT / ".github").is_dir():                  # a buyer's box has no repository
-    ok("test_seo_sources is in the workflow's suite list",
-       "test_seo_sources" in (ROOT / ".github/workflows/tests.yml").read_text())
+    ok("test_aeo_sources is in the workflow's suite list",
+       "test_aeo_sources" in (ROOT / ".github/workflows/tests.yml").read_text())
 
 print("\nALL OK" if not _failed else f"\n{_failed} FAILED")
 sys.exit(1 if _failed else 0)

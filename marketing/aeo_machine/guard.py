@@ -14,7 +14,7 @@ are our box's *setting*; the guard is the *product*. So `never_words`, `never_ph
 copy, and a box that supplies nothing refuses nothing but unsourced numbers.
 
 Ownbox's own list — the receptionist vocabulary the owner reserved on 2026-09-22 — is therefore
-DATA, entered on the box's SEO settings screen, not code in here.
+DATA, entered on the box's AEO settings screen, not code in here.
 
 NOTHING HERE REASONS. Deterministic work uses no Claude (`CLAUDE.md` non-negotiable 3): this is
 regex and set membership, it runs on every draft, and it costs nothing.
@@ -24,7 +24,7 @@ work"). The first version compared characters exactly, so the text a READER sees
 guard read could differ and a forbidden term walked through: a non-breaking space, a curly
 apostrophe or a soft hyphen inside it; "Call Rail" for CallRail; "agencies" for agency; "$499k" or
 "499%" riding on an allowed 499. Every comparison below now runs on `_norm()` text, and each hole
-has a planted-failure test in tests/test_seo_guard.py.
+has a planted-failure test in tests/test_aeo_guard.py.
 """
 from __future__ import annotations
 
@@ -170,7 +170,7 @@ def check(text: str, *, never_words=(), never_phrases=(), allowed_numbers=(),
           competitors=(), word_competitors=(), markup: bool = False) -> list[Refusal]:
     """Every reason this text must not be published. Empty list means it may go.
 
-    All four lists are PLAN-STORE ROWS, never constants (`docs/SEO_AEO_MACHINE_BUILD_SPEC.md`
+    All four lists are PLAN-STORE ROWS, never constants (`docs/AEO_AEO_MACHINE_BUILD_SPEC.md`
     §2.4). A fresh box with all four empty refuses nothing but unsourced numbers, which is the
     proof that nothing of ours leaks into the product.
 

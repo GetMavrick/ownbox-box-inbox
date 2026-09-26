@@ -51,7 +51,8 @@ def ok(label: str, cond: bool, detail: str = "") -> None:
 # ── the map, measured ──────────────────────────────────────────────────────────
 KERNEL = set(_CREATE.findall(state.SCHEMA))
 MACHINES: dict[str, set[str]] = {}          # registry key -> its tables (only machines this tree ships)
-for pkg, key in (("customer_voice", "customer_voice"), ("lead_machine", "lead"), ("content_machine", "content")):
+for pkg, key in (("customer_voice", "customer_voice"), ("lead_machine", "lead"), ("content_machine", "content"),
+                 ("aeo_machine", "aeo_machine")):
     f = ROOT / "marketing" / pkg / "schema.py"
     if f.exists():
         MACHINES[key] = set(_CREATE.findall(f.read_text()))
@@ -116,7 +117,7 @@ for version in sorted(state.MIGRATIONS):
     ok(f"step {version} ({owner or 'kernel'}) touches only {sorted(allowed)}", named <= allowed and not created,
        f"names {sorted(named)}; creates unknown {sorted(created)}")
 ok("every tagged owner is a machine key the registry knows",
-   set(state._MIGRATION_OWNER.values()) <= {"customer_voice", "lead", "content"},
+   set(state._MIGRATION_OWNER.values()) <= {"customer_voice", "lead", "content", "aeo_machine"},
    str(sorted(set(state._MIGRATION_OWNER.values()))))
 if len(MACHINES) < 3:
     print("  note: this image ships fewer than three machines, so (b) sees only the tables it carries; CI runs the full tree")

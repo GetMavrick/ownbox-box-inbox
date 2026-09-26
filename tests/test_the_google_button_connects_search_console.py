@@ -228,7 +228,7 @@ def pills(page):
     return out
 
 
-r = c.get(gsc_door := "/settings/seo/google")
+r = c.get(gsc_door := "/settings/aeo/google")
 page = r.get_data(as_text=True)
 ok("the screen renders for the owner", r.status_code == 200, str(r.status_code))
 ok("not connected: one button, Connect Google Search Console",
@@ -237,7 +237,7 @@ r = c.post(gsc_door, data={"do": "connect"})
 ok("pressing it goes straight to Google", r.status_code == 303 and
    r.headers["Location"].startswith("https://accounts.google.com/"), r.headers.get("Location", ""))
 n = json.loads(box_secrets.get(gsc.PENDING))["nonce"]
-r = c.get(f"/settings/seo/google/done?code=4/x&state={n}.{HOST}")
+r = c.get(f"/settings/aeo/google/done?code=4/x&state={n}.{HOST}")
 ok("Google's return lands back on the screen, saying it connected",
    r.status_code == 303 and r.headers["Location"].endswith("?said=connected"), r.headers.get("Location", ""))
 page = c.get(f"{gsc_door}?said=connected").get_data(as_text=True)
@@ -247,8 +247,14 @@ c.post(gsc_door, data={"do": "choose", "site": "sc-domain:acme.com"})
 page = c.get(f"{gsc_door}?said=chosen").get_data(as_text=True)
 ok("chosen: the primary site is named", "Primary site: <b>sc-domain:acme.com</b>" in page)
 ok("...and nothing on the screen shouts: changing it and disconnecting are quiet", pills(page) == [], str(pills(page)))
+# THE WEBSITE'S RELAY STILL RETURNS TO THE OLD ADDRESS (sites/ownbox/app/connect/google/relay.mjs),
+# so the box takes Google's answer there too, and the old door redirects to the new one.
 r = c.get("/settings/seo/google/done?error=access_denied&state=x.acme.ownbox.app")
-ok("cancelling on Google's page says it was cancelled", r.headers["Location"].endswith("?said=cancelled"))
+ok("cancelling on Google's page says it was cancelled, via the relay's old address",
+   r.headers["Location"].endswith("?said=cancelled"))
+r = c.get("/settings/seo/google")
+ok("the old door redirects to the new one (308, so a POST keeps its form too)", r.status_code == 308
+   and r.headers["Location"].endswith("/settings/aeo/google"), r.headers.get("Location", ""))
 page = c.get(f"{gsc_door}?said=<script>alert(1)</script>").get_data(as_text=True)
 ok("an unknown word in the address shows nothing", "<script>alert(1)</script>" not in page)
 member = state.add_user("m@acme.com", role="member") if hasattr(state, "add_user") else None
@@ -261,6 +267,10 @@ box_secrets.clear(gsc.REFRESH)
 page = c.get(gsc_door).get_data(as_text=True)          # the test client is "localhost", not ownbox.app
 ok("a box not on ownbox.app says where to open it, with no button",
    "ownbox.app address" in page and pills(page) == [], str(pills(page)))
+
+r = c.post("/settings/seo/google", data={"do": "disconnect"})
+ok("a Google page left open across the rename still posts: the old address 308s with the form kept",
+   r.status_code == 308 and r.headers["Location"].endswith("/settings/aeo/google"), f"{r.status_code} {r.headers.get('Location')}")
 
 print()
 if _failed:

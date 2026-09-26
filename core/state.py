@@ -7,6 +7,7 @@ commits and closes immediately. Back this file up with Litestream (see spec §5/
 """
 import hashlib
 import json
+import os
 import secrets
 import sqlite3
 import threading
@@ -591,6 +592,8 @@ _MIGRATION_OWNER: dict[int, str] = {
     55: "customer_voice",
     # 56 adds inbox_conversations.automated — the same table 48 and 51 touched.
     56: "customer_voice",
+    # 57 copies the AEO Machine's plan rows, settings, keys and AI account to their new names —
+    # data only a box carrying that machine has.
 }
 # A table each machine is known by, for the one-time bootstrap of boxes that predate the split.
 _MACHINE_MARKER = {"customer_voice": "voice_rails", "content": "reel_scripts", "lead": "gtm_leads"}

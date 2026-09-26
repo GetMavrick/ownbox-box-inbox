@@ -1,4 +1,4 @@
-"""Every SEO setting for this box, from the screen the buyer actually uses.
+"""Every AEO setting for this box, from the screen the buyer actually uses.
 
 WHY NOT THE YAML, WHICH IS WHERE THIS STARTED. OSDev1 blocked #1554 over it and the reason is
 checkable rather than stylistic:
@@ -7,7 +7,7 @@ checkable rather than stylistic:
     a box "cannot be given a key later without editing the one file we tell the buyer not to edit".
   * **A sold box does not even have it.** The `customer_voice` case's KEEP list is
     `cost worker brain vendors spaces customer_voice inbox models model_ids rates dash review
-    notify` — no `seo`. The section is stripped on export, so `get_config().get("seo")` is `None`
+    notify` — no `aeo`. The section is stripped on export, so `get_config().get("aeo")` is `None`
     and the machine reports "not configured" forever, on the only boxes that matter.
   * **It would not take effect anyway.** `get_config` is `lru_cache(maxsize=1)`, so a screen that
     wrote YAML would change nothing until the box restarted — `core/state.py:309` records that
@@ -28,6 +28,10 @@ from __future__ import annotations
 
 from core import box_settings
 
+# STORAGE KEEPS ITS ORIGINAL NAME (OSDev1, 2026-09-25). The code and addresses say aeo; the
+# table, settings namespace, secret names and AI account keep the names live boxes already
+# hold. A one-shot copy to new names splits the data when box_update rolls a release back
+# (#1595 review: a row published while rolled back came back 'planned' and republished).
 MACHINE = "seo"
 
 # What a box starts with when nobody has entered anything. Neutral, never Ownbox's.

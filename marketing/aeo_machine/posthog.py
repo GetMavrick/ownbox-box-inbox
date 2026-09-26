@@ -14,7 +14,7 @@ READ-ONLY, AND IT NEVER REASONS. Every number here is a HogQL query against Post
 model is asked anything (CLAUDE.md non-negotiable 3), and nothing is ever written to PostHog.
 
 THE BOX'S OWN SITE ONLY. A PostHog project often collects several sites (the marketing site, the app,
-a docs site). Every query is limited to the host on SEO Settings, so the numbers are this website's.
+a docs site). Every query is limited to the host on AEO Settings, so the numbers are this website's.
 
 A CREDENTIAL NEVER APPEARS IN WHAT THIS RETURNS, the same rule as sources.py.
 """
@@ -33,7 +33,7 @@ from . import settings
 
 log = get_logger(__name__)
 
-KEY = "POSTHOG_API_KEY_SEO"
+KEY = "POSTHOG_API_KEY_SEO"   # storage name kept: see settings.MACHINE
 
 # PostHog Cloud's two regions. The API lives on these hosts, not on the us.i./eu.i. ingestion hosts
 # the website's snippet sends events to. A self-hosted PostHog is its own address.
@@ -130,12 +130,12 @@ def _problem(status: int) -> str | None:
 
 
 def _bare() -> str:
-    """This website's host without www., or "-" (matching nothing) when SEO Settings has none."""
+    """This website's host without www., or "-" (matching nothing) when AEO Settings has none."""
     return _site_host().removeprefix("www.") or "-"
 
 
 def _where(days_from: int, days_to: int = 0) -> str:
-    """The time window, and this website only when SEO Settings names it."""
+    """The time window, and this website only when AEO Settings names it."""
     parts = [f"timestamp >= now() - INTERVAL {int(days_from)} DAY"]
     if days_to:
         parts.append(f"timestamp < now() - INTERVAL {int(days_to)} DAY")
@@ -234,11 +234,11 @@ def _fetch(st: dict) -> dict:
             GROUP BY d ORDER BY views DESC LIMIT 5""")
         return _shape(row, articles, sources)
     except RuntimeError as e:
-        log.info("seo.performance_unavailable", reason=str(e)[:120])
+        log.info("aeo.performance_unavailable", reason=str(e)[:120])
         return {"ok": False, "why": str(e)}
     except (TypeError, ValueError, IndexError, KeyError, AttributeError):
         # A 200 whose rows are not the shape asked for. The page says so; it never 500s.
-        log.info("seo.performance_unreadable")
+        log.info("aeo.performance_unreadable")
         return {"ok": False, "why": UNREADABLE}
 
 
