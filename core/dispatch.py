@@ -208,6 +208,14 @@ def _deploy_authorized(req) -> bool:
     AND ONCE MORE, 2026-09-23 (#1472 R9): `/deploy/updates-plan`, where the provisioner tells the box
     whether updates come with its plan. It stores "on" or "off" and a date, nothing else, and it only
     explains the Updates screen — the box's key, removed on our side, is what stops updates.
+
+    AND 2026-09-26 (docs/SCOPE_TIERS.md): `/deploy/plan`, where the provisioner tells the box its plan.
+    It stores a tier and add-ons from a fixed list, with a seq that only goes up, and answers with the
+    plan held. It switches features on, it is not a lock (SCOPE_TIERS §2.4), and it reads nothing back.
+    AND FOR THE UPGRADE TO PRO, 2026-09-26 (docs/SCOPE_UPGRADE_TO_PRO.md): `/deploy/upgrade-status`
+    stores a stage from a fixed list, and `/deploy/prepare-restart` holds the update lock for at
+    most 30 minutes, and only while an upgrade is under way. Leaked, the worst either does is show a
+    wrong stage or delay an update by half an hour. Neither reads or sends anything.
     """
     narrow = getattr(settings, "deploy_token", "") or ""
     if not narrow:
@@ -456,5 +464,10 @@ def health():
     changes. And it stays unauthenticated like the rest of the response: a commit SHA of a
     private repo is not a secret, and a liveness probe that needs a token is not a liveness
     probe.
+
+    `shifts` is the coworker tick's pulse (docs/SCOPE_SHIFTS.md §3), present only on a box whose
+    tick has run, and it names no coworker: this endpoint is public.
     """
-    return jsonify({"ok": True, **version.status()})
+    from core.coworkers import runner as _shifts
+    pulse = _shifts.health()
+    return jsonify({"ok": True, **version.status(), **({"shifts": pulse} if pulse else {})})

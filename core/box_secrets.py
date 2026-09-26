@@ -1199,7 +1199,7 @@ _AI_STEP = {
     "consent_label": "I have reviewed my provider's terms and want to use my subscription with "
                      "this box.",
     "terms_note": "Optional — nothing here is withheld either way. If you would rather we set "
-                  "this up for you, write to help@ownbox.io.",
+                  "this up for you, ask us at www.ownbox.io/contact.",
     "note": "Without this the box still reads everything and still shows you every message — it "
             "simply will not write the drafts.",
 }

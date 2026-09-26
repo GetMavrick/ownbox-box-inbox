@@ -21,11 +21,42 @@
 set -euo pipefail
 # Serialize deploys: two overlapping runs would interleave git ff / pip install /
 # init_db / restart. flock auto-releases when fd 9 closes (remote shell exit).
-exec 9>/tmp/aios-deploy.lock
-if ! flock -n 9; then
-  echo "DEPLOY ABORTED: another deploy is already in progress on this box."
-  exit 1
-fi
+# >>> coworkers-first (tests/test_box_update_waits_for_coworkers.py runs this block)
+# AN UPDATE NEVER LANDS ON A COWORKER'S SHIFT (docs/SCOPE_SHIFTS.md §3, core/coworkers/locks.py). It
+# waits while a coworker runs, however long that takes (a run is killed by its own limit within about
+# two hours). It also waits while a shift starts within the hour, but only for AIOS_SHIFT_WAIT_MAX
+# (2 hours), so a box with an hourly coworker still updates.
+# Take our lock, THEN check theirs. If a shift started in between, let go and wait again. Holding the
+# deploy lock while waiting for a shift that can't start because of it would turn every shift into a
+# MISSED.
+DEPLOY_LOCK="${AIOS_DEPLOY_LOCK:-/tmp/aios-deploy.lock}"
+SHIFT_LOCK="${AIOS_SHIFT_LOCK:-/run/aios-shift.lock}"
+SHIFT_NEXT="${AIOS_SHIFT_NEXT:-/run/aios-shift.next}"
+SHIFT_WAIT_MAX="${AIOS_SHIFT_WAIT_MAX:-7200}"; SHIFT_WAIT_STEP="${AIOS_SHIFT_WAIT_STEP:-60}"
+shift_busy() { [ -e "$SHIFT_LOCK" ] && ! flock -n "$SHIFT_LOCK" true 2>/dev/null; }
+shift_soon() {
+  local n now; n=$(cat "$SHIFT_NEXT" 2>/dev/null) || return 1
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  now=$(date +%s); [ "$n" -gt "$now" ] && [ "$n" -le $((now + 3600)) ]
+}
+waited=0
+while :; do
+  why=""
+  if shift_busy; then why="a coworker is working"
+  elif [ "$waited" -lt "$SHIFT_WAIT_MAX" ] && shift_soon; then why="a coworker's shift starts within the hour"
+  else
+    exec 9>"$DEPLOY_LOCK"
+    if ! flock -n 9; then
+      echo "DEPLOY ABORTED: another deploy is already in progress on this box."
+      exit 1
+    fi
+    shift_busy || break
+    exec 9>&-; why="a coworker started just as the update began"
+  fi
+  echo "update waiting: $why (${waited}s so far)"
+  sleep "$SHIFT_WAIT_STEP"; waited=$((waited + SHIFT_WAIT_STEP))
+done
+# <<< coworkers-first
 cd /opt/aios
 UNIT_BACKUP="/root/aios-units-backup-$(date -u +%Y%m%dT%H%M%SZ)"
 # >>> ssh-key-selection (tests/test_box_update_ssh_key.py runs this block)
@@ -146,6 +177,11 @@ PY
 # the buyer chose. A box with no connector block prints one line and moves on.
 if [ -f scripts/connector_handoff.py ]; then
   .venv/bin/python scripts/connector_handoff.py || echo "   connector handoff failed; box unaffected"
+fi
+# COWORKERS CAN RUN on every box already sold, with no new image (docs/SCOPE_SHIFTS.md §4.1): the
+# sandbox user, the AI CLI outside /root, and the tick. Idempotent; a failure never fails the update.
+if [ -f scripts/coworker_setup.sh ]; then
+  bash scripts/coworker_setup.sh || echo "   coworker setup failed; box unaffected"
 fi
 # UNIT FILES REACH THE BOX. Editing deploy/*.service did nothing: install_services.sh copies
 # them once, and deploy only restarted. Live-found 2026-09-04 — the installed worker unit was

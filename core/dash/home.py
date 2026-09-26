@@ -1143,8 +1143,9 @@ def settings():
 # page ... explain that they can build their own machine with their SSH access and customize it to
 # their business use cases and workflows. And then on that page you would provide a link to our
 # website where we are going to have machines available for purchase."* Scope and decisions:
-# docs/SCOPE_ADD_MACHINE_PAGE.md §2.
-_MACHINE_SHOP_MAIL = "mailto:help@ownbox.io?subject=Add%20a%20machine%20to%20my%20box"
+# docs/SCOPE_ADD_MACHINE_PAGE.md §2. The ask goes to the site's contact form: help@ownbox.io is not
+# read (owner chose "form only" for /contact, 2026-09-25).
+_MACHINE_SHOP_ASK = "https://www.ownbox.io/contact"
 
 
 def _custom_machine_rows() -> str:
@@ -1186,7 +1187,7 @@ def add_machine():
             '<p class="sub">A machine is a new job your box does: its own screens, its own work in '
             'the background, the same AI account as everything else. Ready-made machines are added '
             'to your box by us.</p>'
-            f'<div class="foot"><a href="{_MACHINE_SHOP_MAIL}">Ask us to add one &rarr;</a></div>'
+            f'<div class="foot"><a href="{_MACHINE_SHOP_ASK}" target="_blank" rel="noopener">Ask us to add one &rarr;</a></div>'
             '</div>')
     if _is_owner():
         body += ('<div class="card"><h2>Build your own</h2>'

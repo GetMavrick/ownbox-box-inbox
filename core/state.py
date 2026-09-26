@@ -418,6 +418,39 @@ CREATE TABLE IF NOT EXISTS seats (
   revoked_at   TEXT
 );
 
+-- A RUN SEAT's exact capabilities (docs/SCOPE_SHIFTS.md §4.1). A seat with a row here holds
+-- EXACTLY this list and nothing its role would otherwise give it; a seat without one holds its
+-- role's. A table of its own rather than a column on `seats`, so no box needs a migration step:
+-- CREATE IF NOT EXISTS runs on every boot, and a box without the table has no run seats.
+CREATE TABLE IF NOT EXISTS seat_capabilities (
+  seat_id      TEXT PRIMARY KEY,   -- seats.id
+  capabilities TEXT NOT NULL       -- JSON array, sorted; may be empty (the seat can call nothing)
+);
+
+-- ONE ROW PER SHIFT SLOT, AND THE SLOT IS THE KEY: a slot runs at most once (docs/SCOPE_SHIFTS.md
+-- §3), and that is this PRIMARY KEY, not a check somebody remembers to make. Written by the tick
+-- (queued, MISSED) and the runner (running, DONE, FAILED); core/coworkers/runs.py is the only
+-- reader and writer. `receipt` is the contract's v1 receipt as JSON once the run has ended.
+CREATE TABLE IF NOT EXISTS coworker_runs (
+  slot          TEXT PRIMARY KEY,    -- contract.slot_key(coworker, date, start)
+  run_id        TEXT NOT NULL UNIQUE,
+  coworker      TEXT NOT NULL,
+  window_start  TEXT NOT NULL,       -- ISO 8601 with the owner's UTC offset
+  window_latest TEXT NOT NULL,
+  status        TEXT NOT NULL,       -- queued | starting | running | DONE | FAILED | MISSED
+  note          TEXT,                -- why a queued slot is waiting; becomes a MISSED reason
+  dry_run       INTEGER NOT NULL DEFAULT 0,
+  unit          TEXT,                -- the systemd unit the run was started in
+  claimed_at    TEXT,                -- when the tick started its unit; a unit this young is not a crash
+  created_at    TEXT NOT NULL,
+  started_at    TEXT,
+  ended_at      TEXT,
+  receipt       TEXT,
+  emailed_at    TEXT,                -- the report, per channel, so a retry never sends twice
+  pushed_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_coworker_runs_status ON coworker_runs(status);
+
 -- EVERY seat-originated call, allowed or refused. `outcome='denied'` rows are the point: a
 -- credential being tried and refused is the signal that matters, and a table that only records
 -- successes cannot show it.
@@ -1921,19 +1954,22 @@ def max_users() -> int:
 
     OWNER, 2026-09-16: regular is THREE people, Pro is unlimited. The tracked config carries the
     base three; a Pro box gets `dash.max_users: 0` written into its untracked overlay at first
-    boot (`scripts/connector_handoff.apply_seats`), from the tier in `provision.json`.
+    boot (`scripts/connector_handoff.apply_seats`), from the tier in `provision.json`. Since
+    SCOPE_TIERS, `core/tiers.py` also answers it, so a plan Ownbox sends later raises it too.
 
     "EDITABLE PER BOX, BY HAND" USED TO BE WRITTEN HERE AND IT WAS NEVER TRUE. The provisioner
     builds boxes unattended and nobody ever opened that file — so for as long as the tier failed
     to reach the droplet, every box booted on the base line and a $1,599 buyer got the $499 seat
     count. A knob only a human can turn is not a tier; it is a bug with a comment on it.
     """
-    from core.config import get_config
+    # THE PLAN DECIDES THE SEATS (docs/SCOPE_TIERS.md §2.1), so an upgrade raises them at once, with
+    # no restart and no file rewritten. The plan only ever WIDENS the configured limit (Pro makes it
+    # unlimited; Base is the configured number), so a plan can never lock a paying customer out.
+    from core import tiers
     try:
-        raw = (get_config().get("dash") or {}).get("max_users", 0)
-        return max(0, int(raw or 0))
-    except Exception:                      # noqa: BLE001 — a junk value must not decide a seat
-        return 0
+        return int(tiers.current()["people"])
+    except Exception:                      # noqa: BLE001 — no plan answer: the config stands
+        return tiers.configured_people()
 
 
 def count_active_users() -> int:
@@ -2587,12 +2623,14 @@ def load_checkpoint(job_id: str, step: str, default=None):
 
 
 # ── heartbeats + alert state (for the watchdog) ─────────────────────────────--
-def heartbeat(component: str, status: str) -> None:
+def heartbeat(component: str, status: str, ts: str | None = None) -> None:
+    # `ts` lets a caller that works on its own clock record THAT time: the coworker tick plans from
+    # "when did I last run", and a heartbeat stamped by a different clock would move its misses.
     with connect() as c:
         c.execute(
             "INSERT INTO heartbeats (component, ts, status) VALUES (?,?,?) "
             "ON CONFLICT(component) DO UPDATE SET ts = excluded.ts, status = excluded.status",
-            (component, _now(), status),
+            (component, ts or _now(), status),
         )
 
 

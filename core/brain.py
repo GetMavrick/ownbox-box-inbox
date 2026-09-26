@@ -28,6 +28,7 @@ import re
 import shutil
 import pathlib
 import subprocess
+import tempfile
 import threading
 import time
 
@@ -810,3 +811,302 @@ def _think_now(task: str, prompt: str, *, system: str | None = None,
     text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
     log.info("think.done", task=task, model=model, cost_usd=round(cost, 5))
     return text
+
+
+# ── run_agent(): a coworker's shift (docs/SCOPE_SHIFTS.md §4) ──────────────────────────────────────
+#
+# THE SECOND GATEWAY, BESIDE think() AND FOR THE SAME REASON (non-negotiable #2). think() is one
+# question and one answer with no tools. A coworker's shift is a loop: the AI reads through the
+# box's MCP, drafts proposals, and leaves notes in its workspace. That loop is the `claude` CLI,
+# and every run of it comes through here so the backend, the $90 guard and the spend ledger stay
+# authoritative for it exactly as they are for think().
+#
+# WHAT THE AI GETS, AND WHY EACH FLAG IS THERE. Measured on the pinned CLI (2.1.278) on
+# 2026-09-26; a live run told to execute `id` and print its environment reported that it had no
+# shell, and its write outside the allowed list came back in `permission_denials`.
+#
+#   --tools Read,Write[,WebSearch][,WebFetch]   the ONLY built-ins. No Bash, no code runners.
+#   --restricted            belt and braces on the same point: drops command/code tools unless
+#                           --tools names them, ignores user/project/local settings, confines
+#                           file tools to the working directory (the coworker's workspace).
+#   --strict-mcp-config + --mcp-config   exactly one MCP server, the box's, on this run's seat;
+#                           no server configured anywhere else on the box can ride along.
+#   --permission-mode dontAsk + --allowedTools  anything not listed is refused, never prompted.
+#                           Nobody is there to answer a prompt; a prompt would hang the shift.
+#   --setting-sources ""    no CLAUDE.md or .claude/ context from the box's own code.
+#   --max-turns             the coworker's turn limit. Hidden from --help, and parsed (measured).
+#   --no-session-persistence   nothing about the run is kept in the CLI's own store.
+#   --max-budget-usd        API-key boxes only: the run's own spending ceiling, in dollars.
+#
+# WHERE IT RUNS. On a box, always in OSDev1's sandbox (core/coworkers/sandbox.py, #1613): its
+# own user, a locked systemd unit, the workspace bind-mounted, /opt/aios hidden. `sandboxed=False`
+# exists for tests and development only; on a box a coworker never runs outside it. Both paths
+# take the same flags and reach the same verdicts, so what the tests prove is what the box runs.
+#
+# WHAT CROSSES INTO THE UNIT, AND HOW (measured by OSDev1 on a box, #1613). A unit starts with
+# systemd's environment, not the caller's, and has its own /tmp, so neither `env=` nor a tempfile
+# reaches it. Instead:
+#   · the credentials (the AI account's, and the run seat as AIOS_SEAT) go in a root-only
+#     EnvironmentFile that systemd reads before dropping to the coworker's user
+#     (sandbox.write_env). Directly, the same values go in a BUILT environment, never a copy of
+#     os.environ: the box's environment carries every vendor key it has.
+#   · the MCP config and the job go in the run's private directory, bound read-only into the unit
+#     (sandbox.run_dir / write_private), and the CLI is given the IN-UNIT paths. The MCP config
+#     names the seat as ${AIOS_SEAT}, which the CLI fills in from its environment (measured on
+#     2.1.278), so even a file the coworker can read holds no credential.
+#   · the prompt goes in on stdin: `systemd-run --pipe` passes it through.
+#   · a run past its minutes is STOPPED (sandbox.stop_argv): killing the waiting client leaves the
+#     unit running, and a coworker drafting after its receipt says FAILED is worse than one that
+#     stopped.
+#
+# NOT UNDER _CLI_LOCK. A shift lasts minutes, and holding the lock that long would starve every
+# draft the box makes meanwhile. Shifts queue behind each other in the runner instead, one at a
+# time, which is the same one-core argument made where it belongs.
+
+class AgentLimit(RuntimeError):
+    """The run hit one of its own limits (minutes, turns or dollars) and was stopped. FAILED, with
+    the limit named, and not retried: the same run would hit the same limit."""
+
+
+_AGENT_ENV_KEEP = ("PATH", "LANG", "LC_ALL", "TZ", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+                   "https_proxy", "http_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE")
+AGENT_WEB = {"search": "WebSearch", "read": "WebFetch"}
+# api_error_status values worth the one retry (§3): rate limited, overloaded, the API's own 5xx.
+_AGENT_RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
+# A SUBSCRIPTION WINDOW, NARROWER THAN think()'s _CLI_LIMIT_RE on purpose: that one also matches
+# "rate limit", and an API's 429 is a busy minute worth the one retry, not a window that closes the
+# shift. Only the words a closed window actually uses count here.
+_AGENT_WINDOW_RE = re.compile(r"usage limit|limit (?:reached|will reset)|out of (?:usage|credits)"
+                              r"|quota", re.I)
+
+
+def _run_agent_cli(cmd: list[str], *, stdin: str, env: dict | None, cwd: str | None,
+                   timeout: float) -> tuple[int, str, str]:
+    """Subprocess seam (single point for tests). Returns (rc, stdout, stderr). No lock: see above."""
+    proc = subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=timeout,
+                          env=env, cwd=cwd)
+    return proc.returncode, proc.stdout or "", proc.stderr or ""
+
+
+def _stop_agent_unit(cmd: list[str]) -> None:
+    """Seam: stop a sandboxed run's unit. Best effort, and loud when it fails."""
+    try:
+        subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
+    except Exception as e:                           # noqa: BLE001 — RuntimeMaxSec is the backstop
+        log.error("brain.agent_unit_not_stopped", cmd=" ".join(cmd), error=f"{type(e).__name__}: {e}")
+
+
+def run_agent(prompt: str, *, run_id: str, coworker: str, workspace, system: str = "",
+              mcp: dict | None = None, web=(), max_turns: int = 40, max_minutes: int = 30,
+              max_usd: float = 1.0, task: str = "coworker", sandboxed: bool = True) -> dict:
+    """Run one coworker shift's AI loop and return what it did. Raises on anything else.
+
+    prompt      today's instructions for the shift (the runner builds them); goes in on stdin
+    run_id      the run's id; its spend lands in the ledger under it, as job_id
+    coworker    the coworker's slug, which names the unit
+    workspace   the coworker's workspace on the box, an existing absolute directory
+    system      the coworker's standing instructions (its job.md)
+    mcp         {"url": ..., "credential": ...}: the box's MCP as the CLI reaches it, and this
+                run's seat. None: no MCP. In the sandbox the url is http://127.0.0.1:8000/mcp.
+    web         any of "search", "read": the web capabilities the coworker was granted
+    max_*       the coworker's limits. max_usd applies on an API-key box only
+    sandboxed   False only in tests and development. On a box, always True.
+
+    Returns {"text", "turns", "minutes", "cost_usd", "api_usd", "backend", "model", "denied"}.
+    `cost_usd` is what was spent: the CLI's figure on an API-key box, 0.0 on a subscription (its
+    marginal cost is zero, as think() records it). `api_usd` is the CLI's figure either way.
+
+    Raises BudgetExceeded (the $90 guard, or a subscription window), RetryableError (the API was
+    busy or unreachable: the runner's one retry), AgentLimit (a limit was hit), RuntimeError
+    (anything else, named), and SandboxError when the sandbox cannot start it safely.
+    """
+    ws = pathlib.Path(workspace)
+    if not ws.is_absolute() or not ws.is_dir():
+        raise ValueError(f"a run's workspace is an existing absolute directory, got {workspace!r}")
+    unknown = sorted(set(web) - set(AGENT_WEB))
+    if unknown:
+        raise ValueError(f"web may be {sorted(AGENT_WEB)}, got {unknown}")
+    ready, why = can_think()
+    if not ready:
+        raise RuntimeError(f"a coworker cannot run: {why}")
+    be = _backend()
+    if be not in ("claude_code", "api"):
+        # A plain refusal, not a quiet fallback onto somebody else's account.
+        raise RuntimeError("coworkers run on a Claude account today, and this box thinks on "
+                           "ChatGPT. Connect a Claude sign-in or an Anthropic key in Set up")
+    if sandboxed:
+        from core.coworkers import sandbox as _sandbox
+        bin_ = _sandbox.cli_path()                 # refuses a CLI under /root, by name
+        unit = _sandbox.unit_name(coworker, run_id)
+    else:
+        bin_ = shutil.which("claude")
+        if not bin_:
+            raise RuntimeError("a coworker runs on the `claude` CLI, and it is not installed — "
+                               "run scripts/install_claude_code.sh")
+    from core import box_secrets
+    if be == "api":
+        # Refuse BEFORE spending if the run's own ceiling could cross the box's line.
+        cost_guard.check(max_usd)
+
+    model = _model_for(task)
+    builtins = ["Read", "Write"] + [AGENT_WEB[w] for w in ("search", "read") if w in set(web)]
+    allowed = builtins + (["mcp__aios"] if mcp else [])
+
+    secrets_ = {"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    if be == "api":
+        secrets_["ANTHROPIC_API_KEY"] = box_secrets.anthropic_key()
+    else:
+        secrets_["CLAUDE_CODE_OAUTH_TOKEN"] = box_secrets.claude_oauth_token()
+    if mcp:
+        secrets_["AIOS_SEAT"] = mcp["credential"]
+    servers = {}
+    if mcp:
+        servers["aios"] = {"type": "http", "url": mcp["url"],
+                           "headers": {"Authorization": "Bearer ${AIOS_SEAT}"}}
+    mcp_json = json.dumps({"mcpServers": servers})
+
+    private = None
+    try:
+        if sandboxed:
+            private = _sandbox.run_dir(run_id)
+            mcp_path = _sandbox.write_private(private, "mcp.json", mcp_json)
+            sys_path = _sandbox.write_private(private, "system.md", system or "")
+            env_file = _sandbox.write_env(private, secrets_)
+        else:
+            private = tempfile.mkdtemp(prefix="aios-run-")
+            os.chmod(private, 0o700)
+            mcp_path = os.path.join(private, "mcp.json")
+            sys_path = os.path.join(private, "system.md")
+            pathlib.Path(mcp_path).write_text(mcp_json)
+            pathlib.Path(sys_path).write_text(system or "")
+            os.mkdir(os.path.join(private, "home"))
+
+        cli = [bin_, "-p", "--output-format", "json", "--model", _cli_model(model),
+               "--tools", ",".join(builtins), "--allowedTools", ",".join(allowed),
+               "--restricted", "--strict-mcp-config", "--mcp-config", mcp_path,
+               "--permission-mode", "dontAsk", "--setting-sources", "",
+               "--max-turns", str(int(max_turns)), "--no-session-persistence",
+               "--system-prompt-file", sys_path]
+        if be == "api":
+            cli += ["--max-budget-usd", f"{max_usd:.2f}"]
+
+        if sandboxed:
+            cmd = _sandbox.argv(unit=unit, command=cli, workspace_dir=str(ws),
+                                minutes=int(max_minutes), env_file=env_file, ro_dir=private)
+            env, cwd = None, None
+        else:
+            passthrough = {k: os.environ[k] for k in _AGENT_ENV_KEEP if k in os.environ}
+            cmd = cli
+            env = {**passthrough, "HOME": os.path.join(private, "home"), **secrets_}
+            cwd = str(ws)
+
+        started = time.monotonic()
+        log.info("brain.agent_start", run_id=run_id, coworker=coworker, backend=be,
+                 model=_cli_model(model), tools=builtins, mcp=bool(mcp), max_turns=max_turns,
+                 max_minutes=max_minutes, sandboxed=sandboxed)
+        try:
+            rc, out, err = _run_agent_cli(cmd, stdin=prompt, env=env, cwd=cwd,
+                                          timeout=max_minutes * 60 + 30)
+        except subprocess.TimeoutExpired as e:
+            if sandboxed:
+                _stop_agent_unit(_sandbox.stop_argv(unit))
+            _record_unreported_spend(run_id=run_id, be=be, model=model, task=task,
+                                     max_usd=max_usd, why="timeout")
+            raise AgentLimit(f"stopped: it ran past its {max_minutes:g}-minute limit") from e
+        minutes = (time.monotonic() - started) / 60
+    finally:
+        if private:
+            shutil.rmtree(private, ignore_errors=True)
+
+    return _agent_verdict(rc, out, err, run_id=run_id, be=be, model=model, task=task,
+                          minutes=minutes, max_turns=max_turns, max_usd=max_usd)
+
+
+_AGENT_SPENT_AFTER_MIN = 1.0
+
+
+def _record_unreported_spend(*, run_id, be, model, task, max_usd, why) -> None:
+    """A run that ended without reporting its cost is recorded at its ceiling.
+
+    A TIMEOUT IS INDETERMINATE, NEVER ASSUMED FREE (non-negotiable #4). On an API-key box the run
+    may have spent anything up to --max-budget-usd, so that is what the $90 guard sees: an
+    overcount that can only make the guard stricter, never an undercount that hides money. A
+    subscription box spends no dollars, so nothing is written for it.
+    """
+    if be != "api":
+        return
+    log.error("brain.agent_spend_unreported", run_id=run_id, why=why, recorded_usd=max_usd)
+    try:
+        state.record_spend(job_id=run_id, task=task, model=f"{model}:unreported",
+                           cost_usd=float(max_usd), input_tokens=0, output_tokens=0,
+                           cache_write_tokens=0, cache_read_tokens=0)
+    except Exception as e:                           # noqa: BLE001 — never mask the real ending
+        log.error("brain.agent_SPEND_UNRECORDED", run_id=run_id, cost_usd=max_usd,
+                  error=str(e)[:200])
+
+
+def _agent_verdict(rc: int, out: str, err: str, *, run_id, be, model, task, minutes,
+                   max_turns, max_usd) -> dict:
+    """What the CLI's JSON says happened, as a result or a named exception."""
+    try:
+        data = json.loads(out) if out.strip() else None
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        # A CLI that dies at start spent nothing; one that ran a minute or more before dying
+        # may have spent up to its ceiling, and never said how much.
+        if minutes >= _AGENT_SPENT_AFTER_MIN:
+            _record_unreported_spend(run_id=run_id, be=be, model=model, task=task,
+                                     max_usd=max_usd, why=f"no result (rc={rc})")
+        blob = (err or out)[-400:]
+        if _AGENT_WINDOW_RE.search(blob):
+            raise BudgetExceeded(f"claude subscription limit: {blob[:200]}")
+        if _CLI_TRANSIENT_RE.search(blob):
+            raise RetryableError(f"agent run transient (rc={rc}): {blob[:200]}")
+        raise RuntimeError(f"agent run failed (rc={rc}): {blob[:300]}")
+
+    # THE MONEY IS RECORDED BEFORE ANY VERDICT: a run stopped at its limit still spent.
+    api_usd = float(data.get("total_cost_usd") or 0.0)
+    spent = api_usd if be == "api" else 0.0
+    usage = data.get("usage") or {}
+    label = model if be == "api" else f"cc:{_cli_model(model)}"
+    try:
+        state.record_spend(
+            job_id=run_id, task=task, model=label, cost_usd=spent,
+            input_tokens=usage.get("input_tokens", 0) or 0,
+            output_tokens=usage.get("output_tokens", 0) or 0,
+            cache_write_tokens=usage.get("cache_creation_input_tokens", 0) or 0,
+            cache_read_tokens=usage.get("cache_read_input_tokens", 0) or 0)
+    except Exception as e:                           # noqa: BLE001 — the run happened and was paid
+        log.error("brain.agent_SPEND_UNRECORDED", run_id=run_id, cost_usd=round(spent, 6),
+                  error=str(e)[:200])
+
+    turns = int(data.get("num_turns") or 0)
+    subtype = str(data.get("subtype") or "")
+    text = str(data.get("result") or "")
+    if subtype == "error_max_turns":
+        raise AgentLimit(f"stopped: it reached its {max_turns}-turn limit")
+    if "budget" in subtype:
+        raise AgentLimit(f"stopped: it reached its ${max_usd:.2f} limit for one run")
+    # JUDGED ON is_error, NOT subtype: a 401 comes back subtype "success" (OSDev1, measured on a
+    # box, #1613). api_error_status says what the API answered, and it alone decides the retry.
+    if data.get("is_error") or subtype != "success":
+        status = data.get("api_error_status")
+        blob = text or err[-300:] or subtype
+        if status in (401, 403) or _CLI_AUTH_RE.search(blob):
+            raise RuntimeError(f"the AI account refused the run ({status or 'auth'}): the Claude "
+                               f"sign-in or key needs attention in Set up")
+        if _AGENT_WINDOW_RE.search(blob):
+            raise BudgetExceeded(f"claude subscription limit: {blob[:200]}")
+        if status in _AGENT_RETRY_STATUS or (status is None and _CLI_TRANSIENT_RE.search(blob)):
+            raise RetryableError(f"agent run: the AI was busy or unreachable "
+                                 f"({status or 'network'}): {blob[:200]}")
+        raise RuntimeError(f"agent run ended with {subtype or 'an error'}"
+                           f"{f' ({status})' if status else ''}: {blob[:300]}")
+
+    denied = [str(d.get("tool_name")) for d in (data.get("permission_denials") or [])
+              if isinstance(d, dict)]
+    log.info("brain.agent_done", run_id=run_id, turns=turns, minutes=round(minutes, 2),
+             cost_usd=round(spent, 5), api_usd=round(api_usd, 5), denied=len(denied))
+    return {"text": text, "turns": turns, "minutes": round(minutes, 3), "cost_usd": spent,
+            "api_usd": api_usd, "backend": be, "model": label, "denied": denied}

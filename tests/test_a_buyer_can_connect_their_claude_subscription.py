@@ -198,7 +198,9 @@ ok("the set-up step links a vendor's own terms",
 ok("...and both vendors' terms are offered, not just the one we happen to use",
    len(step.get("terms_links") or ()) == 2, str(step.get("terms_links")))
 ok("...and names where to ask for help instead",
-   "help@ownbox.io" in (step.get("terms_note") or ""))
+   "ownbox.io/contact" in (step.get("terms_note") or ""), step.get("terms_note"))
+ok("...and not help@ownbox.io, which nobody reads",
+   "help@ownbox.io" not in (step.get("terms_note") or ""))
 ok("...and the field asks for either credential, not only a key",
    "subscription" in step["fields"][0]["label"].lower(), step["fields"][0]["label"])
 

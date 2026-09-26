@@ -87,7 +87,8 @@ ok("...but told who can", "owner" in mhtml)
 
 print("\ntest_no_dead_link_to_a_shop_that_does_not_exist_yet")
 ok("the page does not link to ownbox.io/machines", "ownbox.io/machines" not in html)
-ok("...and still offers a way to get one from us", "mailto:help@ownbox.io" in html)
+ok("...and still offers a way to get one from us", 'href="https://www.ownbox.io/contact"' in html)
+ok("...and never an address nobody reads", "help@ownbox.io" not in html)
 
 print("\ntest_a_box_with_no_machines_of_its_own_never_404s")
 custom_machines._STATUS.clear()

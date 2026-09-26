@@ -521,6 +521,7 @@ models:
                           # enough that the repair pass costs more than Sonnet does up front.
   brain:         sonnet   # the run-the-business channel deserves the better model
   agent:         sonnet   # tool-using loop: strict JSON + multi-step reasoning need Sonnet
+  coworker:      sonnet   # a coworker's shift (brain.run_agent): a tool-using loop, same reason as agent
   default:       haiku
 
 # VERIFY exact current model strings in the Anthropic console.

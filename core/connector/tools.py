@@ -62,7 +62,19 @@ _ARG_TYPES = {"string": str, "integer": int, "boolean": bool}
 # Required rather than defaulted, because a default is the one a hurried tool gets, and the tool
 # most likely to be written in a hurry is the one added to answer an urgent question about people.
 # Refusing at import is cheap; discovering it on a customer's box is not.
-_CAPABILITY = re.compile(r"^(read|write):[a-z][a-z0-9_]{2,39}$")
+_CAPABILITY = re.compile(r"^(read|write|act):[a-z][a-z0-9_]{2,39}$")
+
+# THREE VERBS, AND THE THIRD IS HELD BY NO SEAT (docs/SCOPE_SHIFTS.md §4.2).
+#
+#   read:   sees
+#   write:  leaves something for a human to approve (a proposal, a draft)
+#   act:    does it: sends, publishes, charges
+#
+# `act:` exists so a machine can register the tool a coworker's STEP calls, the box calling it
+# itself before or after the AI, with the owner's grant. No role below holds an `act:`
+# capability and `ai_may_hold()` refuses every one, so no seat, whether a person's assistant or a
+# coworker's run, can call one. That is the whole safety argument for combining machines from
+# different authors: whatever a web page talks the AI into, the most it can do is draft.
 
 # WHAT EACH ROLE MAY SEE, and the point of this table is what is ABSENT from it.
 #
@@ -109,9 +121,35 @@ def visible_to(seat: dict) -> list:
     hiding it: a model that can see a tool will try it, then explain the refusal to a customer as
     if the box were broken.
     """
-    held = _ROLE_CAPABILITIES.get(seat.get("role"), frozenset())
+    mine = held(seat)
     return [s for s in sorted(_REGISTRY.values(), key=lambda s: s["name"])
-            if s["capability"] in held]
+            if s["capability"] in mine]
+
+
+def ai_may_hold(capability: str) -> bool:
+    """May an AI's seat ever hold this? Any `read:`, and `write:proposals`. Never `act:`.
+
+    `write:proposals` rather than `write:*`, because a write is only safe to hand an AI when a
+    human approves what it wrote, and proposals are the one write this box has built that way.
+    A machine that adds another approved-before-it-lands write widens this on purpose, in review.
+    """
+    return (isinstance(capability, str) and bool(_CAPABILITY.match(capability))
+            and (capability.startswith("read:") or capability == "write:proposals"))
+
+
+def held(seat: dict) -> frozenset:
+    """The capabilities this seat holds. A RUN SEAT's are its own list; anyone else's, its role's.
+
+    A run seat is minted for one coworker's shift and holds exactly what that coworker was
+    granted (docs/SCOPE_SHIFTS.md §4.1), not a role's worth: a coworker allowed to read the inbox
+    must not also see what the box is spending because its role happens to. The list is filtered
+    through `ai_may_hold()` HERE as well as at mint, so a row written by anything else still
+    cannot carry an `act:` capability into a call.
+    """
+    explicit = seat.get("capabilities")
+    if explicit is not None:
+        return frozenset(c for c in explicit if ai_may_hold(c))
+    return _ROLE_CAPABILITIES.get(seat.get("role"), frozenset())
 
 
 # MCP's unspecified annotation defaults are hostile to a product like ours: `destructiveHint` and
@@ -123,10 +161,13 @@ def visible_to(seat: dict) -> list:
 # proposals a human approves, so they are additive rather than destructive either way.
 def annotations_for(capability: str) -> dict:
     reading = capability.startswith("read:")
+    # An `act:` tool reaches the world (a sent email cannot be unsent), so it says so. No seat
+    # sees one today; the hints are for the day an owner's trusted coworker is allowed to.
+    acting = capability.startswith("act:")
     return {"readOnlyHint": reading,
             "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False}
+            "idempotentHint": not acting,
+            "openWorldHint": acting}
 
 _REGISTRY: dict = {}
 # What did NOT register, and why. A machine that failed to import is invisible by design — the
@@ -195,8 +236,8 @@ def register(name: str, *, fn, description: str, machine: str, capability: str,
     # TypeError, which is the moment somebody is watching. The shape check is here so the
     # vocabulary cannot drift into free text one tool at a time.
     if not isinstance(capability, str) or not _CAPABILITY.match(capability):
-        raise ValueError(f"tool {name!r}: capability must look like 'read:reports' or "
-                         f"'write:replies', got {capability!r}")
+        raise ValueError(f"tool {name!r}: capability must look like 'read:reports', "
+                         f"'write:proposals' or 'act:send_email', got {capability!r}")
     if not callable(fn):
         raise ValueError(f"tool {name!r} needs a callable")
     for arg, spec in (args or {}).items():
@@ -301,8 +342,7 @@ def call(name: str, raw_args: dict | None, seat: dict) -> tuple[dict, int]:
     # BOTH CHECKS RUN, and they answer different questions: the capability is power over WHAT,
     # `min_role` is how MUCH. A tool may be `read:reports` and still need `act`, so neither
     # subsumes the other and a seat must satisfy both.
-    held = _ROLE_CAPABILITIES.get(seat.get("role"), frozenset())
-    if spec["capability"] not in held:
+    if spec["capability"] not in held(seat):
         _seats.record(seat["id"], name, outcome="denied")
         return {"error": "forbidden",
                 "message": f"{name} needs the {spec['capability']} capability; "

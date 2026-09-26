@@ -1,0 +1,18 @@
+# THE COWORKER TICK (docs/SCOPE_SHIFTS.md §3). aios-shifts.timer starts this every minute; it starts
+# whatever shift is due and returns. It never waits for a run: each run is its own transient unit.
+[Unit]
+Description=AIOS coworker shift tick
+# NOTHING RUNS on a box with no coworker, or before the tick ships. systemd checks these before
+# starting any process, so the timer costs nothing on such a box.
+ConditionPathExistsGlob=/opt/aios/my/coworkers/*/coworker.yaml
+ConditionPathExists=/opt/aios/scripts/shift_tick.py
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aios
+EnvironmentFile=/opt/aios/.env
+Environment=PATH=/usr/local/bin:/root/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+ExecStart=/opt/aios/.venv/bin/python /opt/aios/scripts/shift_tick.py
+TimeoutStartSec=50
+Nice=5

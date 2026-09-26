@@ -1661,6 +1661,47 @@ def deploy_updates_plan():
     return jsonify({"ok": True}), 200
 
 
+@blueprint.post("/deploy/plan")
+def deploy_plan():
+    """Ownbox telling this box what its plan is (docs/SCOPE_TIERS.md §2.2): {"seq", "tier", "add"}.
+
+    Behind the per-box deploy token, like the two above. An unknown tier or feature is refused and
+    never stored. A seq that is not newer than the one held is refused, so a delayed older message
+    never undoes a newer one. EVERY answer carries the plan the box now holds: that reply is how
+    the provisioner knows its message landed, including when a retry arrives after the first did."""
+    from core import tiers
+    try:
+        return jsonify({"ok": True, "plan": tiers.set_plan(request.get_json(silent=True) or {})}), 200
+    except tiers.PlanRefused as e:
+        return jsonify({"error": "stale_seq" if e.stale else "bad_plan", "message": str(e),
+                        "plan": tiers.current()}), (409 if e.stale else 400)
+@blueprint.post("/deploy/upgrade-status")
+def deploy_upgrade_status():
+    """The provisioner saying where this box's upgrade to Pro is (docs/SCOPE_UPGRADE_TO_PRO.md).
+
+    A stage from a fixed list and a short detail, nothing else. An unknown stage is refused."""
+    from core import upgrade
+    body = request.get_json(silent=True) or {}
+    try:
+        upgrade.set_status(str(body.get("stage") or ""), str(body.get("detail") or ""))
+    except ValueError as e:
+        return jsonify({"error": "bad_stage", "message": str(e)}), 400
+    return jsonify({"ok": True}), 200
+
+
+@blueprint.post("/deploy/prepare-restart")
+def deploy_prepare_restart():
+    """The provisioner asking the box to get ready to be shut down and resized.
+
+    200 once the box holds the update lock; 202 with the reason while a coworker works or an update
+    installs (the provisioner asks again on its next run); 409 when no upgrade is under way."""
+    from core import upgrade
+    got = upgrade.prepare_restart()
+    if got.get("ready"):
+        return jsonify(got), 200
+    return jsonify(got), (409 if got.get("refused") else 202)
+
+
 @blueprint.post("/deploy/move-status")
 def deploy_move_status():
     """The provisioner reporting progress. An unknown state is refused, never stored."""

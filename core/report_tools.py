@@ -77,12 +77,18 @@ def report_day(day: str | None = None, *, seat: dict):
     stale, written_at = _stale(rows)
 
     withheld = []
-    if seat.get("role") == "read":
+    # BY CAPABILITY, not by role. A coworker's run seat is minted `act` and holds only what it was
+    # granted, so asking "is this a read seat" would hand the meters to a coworker allowed to read
+    # the report and nothing about spend. A read seat does not hold read:spend either, so for every
+    # seat that existed before run seats, this is the same answer as before.
+    if "read:spend" not in tools.held(seat):
         kept = [r for r in rows if r.get("machine") not in _OWNER_ONLY_SEGMENTS]
         if len(kept) != len(rows):
             # NAMED, not silently dropped. A caller that cannot tell a withheld field from an
-            # absent one will report the absence as a fact.
-            withheld = [f"{m}:role_read" for m in sorted(_OWNER_ONLY_SEGMENTS)]
+            # absent one will report the absence as a fact. `role_read` is what a read seat has
+            # always been told; a run seat is told the capability it was not granted.
+            why = "role_read" if seat.get("role") == "read" else "not_granted_read_spend"
+            withheld = [f"{m}:{why}" for m in sorted(_OWNER_ONLY_SEGMENTS)]
         rows = kept
 
     return {

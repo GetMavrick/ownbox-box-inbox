@@ -1,0 +1,12 @@
+# Every minute, on the minute. Persistent=false on purpose: a tick missed while the box was down is not
+# replayed; the next tick sees the missed window and reports it MISSED (docs/SCOPE_SHIFTS.md §3).
+[Unit]
+Description=AIOS coworker shift tick, every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
