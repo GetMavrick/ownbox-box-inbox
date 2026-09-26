@@ -3680,9 +3680,11 @@ self.addEventListener('notificationclick', function (event) {
   var to = (event.notification.data && event.notification.data.navigate) || '/inbox/inbox';
   // ONLY OUR OWN APP. The payload is authored by the box and encrypted to this subscription, so
   // this is defence in depth, not a fix — the same rule safe_next applies on the way in. The
-  // morning review (/app/review) is the one door outside the inbox a notification may open.
-  if (typeof to !== 'string' || (to.indexOf('/inbox/') !== 0 && to !== '/app/review'
-      && to.indexOf('/app/review/') !== 0)) { to = '/inbox/inbox'; }
+  // morning review (/app/review) and Shifts (/shifts/, where a coworker's report opens) are the
+  // doors outside the inbox a notification may open.
+  var door = typeof to === 'string' && (to === '/app/review' || to.indexOf('/app/review/') === 0
+      || to.indexOf('/shifts/') === 0);
+  if (typeof to !== 'string' || (to.indexOf('/inbox/') !== 0 && !door)) { to = '/inbox/inbox'; }
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     .then(function (list) {
       for (var i = 0; i < list.length; i++) {

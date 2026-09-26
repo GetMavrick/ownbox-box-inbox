@@ -1674,6 +1674,8 @@ from core.dash import home as _home  # noqa: E402,F401
 from core.dash import box_settings as _box_settings  # noqa: E402,F401
 from core.dash import box_email as _box_email  # noqa: E402,F401 — its own file, same drawer
 from core.dash import google_search as _google_search  # noqa: E402,F401 — the Search Console button
+from core.dash import shifts as _shifts  # noqa: E402,F401 — Shifts: coworkers on a schedule (Pro)
+from core.dash import upgrade as _upgrade  # noqa: E402,F401 — Upgrade to Pro: the button and its sheet
 
 # THE BOX'S ONE LOOK: the stylesheet and fonts every screen links (`look.head_tags()`), served from
 # the box itself. Imported HERE for the same reason as the two above.

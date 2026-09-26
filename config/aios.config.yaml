@@ -426,6 +426,15 @@ dash:
   # keeps exactly the behaviour it has today.
   mail_compose: gmail
 
+# ADD-ON MACHINES ARE FEATURES (docs/SCOPE_TIERS.md §2.7). Each feature names the module prefixes
+# that make up that machine: a prefix covers itself and everything under it, in `modules:`,
+# `web_modules:` and packs alike. Once Ownbox has told the box its plan, a machine whose feature the
+# plan lacks is not imported (no screens, no workers, no tools); its data is never touched. Until
+# then every machine loads. A module no feature names is not an add-on and always loads.
+machine_features:
+  machine:aeo:   [marketing.aeo_machine, marketing.seo_machine]   # seo_machine: the old import name
+  machine:inbox: [marketing.customer_voice]                        # the inbox, its app, and its rails
+
 web_modules:
   - marketing.customer_voice.app
   - marketing.aeo_machine.app

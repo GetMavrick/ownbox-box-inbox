@@ -7,7 +7,8 @@
 What it does, in order, refusing before it copies anything:
   1. reads machine.yaml and validates it (core.packs — refusal names the field)
   2. checks `contract` against the plug contract and `requires_foundation` against
-     core/FOUNDATION_VERSION (names both versions, tells you to `git pull`)
+     core/FOUNDATION_VERSION (names both versions, tells you to `git pull`), and `needs:`
+     against this box's plan: a pack that needs Coworkers is refused on Base, "needs Base Machine Pro"
   3. D6b — the HOST core machine must already be installed here. A recipe never lands in
      bare foundation, and a Content-hosted recipe never lands in a Lead box.
   4. D7 — records the pack in licence.json (a record, not a lock). With --require-licence,
@@ -90,6 +91,9 @@ def main(argv) -> int:
     ok, msg = packs.requires_ok(m)
     if not ok:
         return fail(msg)
+    ok, msg = packs.needs_ok(m)                        # needs: [coworkers] on a Base box: refused before a file is copied
+    if not ok:
+        return fail(f"this pack {msg}. It installs once this box's plan includes {', '.join(m['needs'])}.")
     if m["contract"] != 1:
         return fail(f"contract {m['contract']} — this foundation speaks plug contract 1")
     marker = ROOT / HOST_MARKER[m["host"]]
@@ -115,7 +119,7 @@ def main(argv) -> int:
     except Exception:  # noqa: BLE001 — a box without that host has no plug to read
         kernel = set()
     try:
-        for o in packs.discover():
+        for o in packs.discover(include_held=True):      # a pack waiting on the plan still owns its prefix
             if o["slug"] != m["slug"] and o["prefix"] == m["prefix"] and m["prefix"] not in kernel:
                 return fail(f"prefix '{m['prefix']}' is already claimed by the installed pack {o['slug']} — "
                             f"a new prefix belongs to one pack")

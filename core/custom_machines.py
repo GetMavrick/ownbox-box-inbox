@@ -80,6 +80,15 @@ def _manifest(folder: pathlib.Path) -> tuple[dict | None, str]:
         ok, why = False, f"foundation version could not be checked: {type(e).__name__}"
     if not ok:
         return None, why
+    # `needs: [coworkers]` — checked at every start, so a folder copied onto a Base box shows
+    # "needs Base Machine Pro" on the Add a Machine page and registers nothing (SCOPE_TIERS §2.3).
+    try:
+        why = packs.needs_refused(m)
+        ok, held = packs.needs_ok(m) if not why else (False, why)
+    except Exception as e:                          # noqa: BLE001
+        ok, held = False, f"the plan could not be checked: {type(e).__name__}"
+    if not ok:
+        return None, held
     return m, ""
 
 

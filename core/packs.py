@@ -36,6 +36,10 @@ AUTOPILOT_MAX_USD = 5                             # owner, 2026-09-05: "Five dol
 _SLUG = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 _PREFIX = re.compile(r"^[a-z][a-z0-9_]{1,15}$")
 _VERSION = re.compile(r"^\d+(\.\d+)*$")
+# `needs:` arrived in this foundation. A box older than it ignores the field and would install the
+# machine anyway, half of it, so a manifest that says `needs:` must also require this version: the
+# older box then refuses it on `requires_foundation`, which it does understand. SCOPE_TIERS §2.3.
+NEEDS_SINCE = "1.2"
 
 
 class PackError(ValueError):
@@ -94,6 +98,9 @@ def validate(m: dict, pack_dir: pathlib.Path | None = None) -> None:
     rf = str(need("requires_foundation"))
     if not _VERSION.match(rf):
         raise PackError(f"requires_foundation: '{rf}' is not a version")
+    why = needs_refused(m)
+    if why:
+        raise PackError(why)
     has_kind, has_module = "kind" in m, "module" in m
     if has_kind == has_module:
         raise PackError("exactly one of `kind` (config recipe) or `module` (code recipe) is required")
@@ -179,9 +186,43 @@ def requires_ok(m: dict) -> tuple[bool, str]:
                    f"Take the update first: git pull && bash scripts/install.sh")
 
 
-def discover(roots: Iterator[pathlib.Path] | None = None) -> list[dict]:
-    """Every valid pack under the roots, sorted by slug. Invalid ones are reported, not loaded."""
-    out, seen = [], set()
+def needs_refused(m: dict) -> str:
+    """Why a manifest's `needs:` is malformed, or "" (absent is fine). Shared by packs and the
+    owner's own machines (core/custom_machines.py), so one field means one thing on a box.
+
+    FEATURES, NEVER TIERS. `needs: [coworkers]`, never `needs: [pro]`: which tier includes a
+    feature is core/tiers.py's one table, and a machine that named a tier would break the day a
+    feature moved between tiers. An unknown name is refused, naming it."""
+    if "needs" not in m:
+        return ""
+    wanted = m["needs"]
+    if not isinstance(wanted, list) or not wanted or not all(isinstance(f, str) for f in wanted):
+        return "needs: expected a list of feature names, e.g. needs: [coworkers]"
+    from core import tiers
+    unknown = [f for f in wanted if f not in tiers.FEATURES]
+    if unknown:
+        hint = " (that is a tier; name the feature it includes)" if unknown[0] in tiers.TIERS else ""
+        return f"needs: '{unknown[0]}' is not a feature this foundation knows{hint}; known: {sorted(tiers.FEATURES)}"
+    rf = str(m.get("requires_foundation", "0"))
+    if not _VERSION.match(rf) or _vtuple(rf) < _vtuple(NEEDS_SINCE):
+        return (f"needs: requires_foundation must be {NEEDS_SINCE} or later, "
+                f"so a box too old to read needs: refuses this machine instead of installing half of it")
+    return ""
+
+
+def needs_ok(m: dict) -> tuple[bool, str]:
+    """Does this box's plan include everything the manifest `needs`? (ok, message). Call
+    needs_refused() first. Reads the plan without the config (tiers.features()), because
+    discover() below runs while the config is loading."""
+    wanted = m.get("needs") or []
+    if not wanted:
+        return True, ""
+    from core import tiers
+    return tiers.needs(wanted)
+
+
+def _walk(roots) -> Iterator[dict]:
+    seen = set()
     for r in (roots or PACK_ROOTS):
         r = pathlib.Path(r)
         if not r.is_dir():
@@ -193,8 +234,24 @@ def discover(roots: Iterator[pathlib.Path] | None = None) -> list[dict]:
             if m["slug"] in seen:
                 raise PackError(f"two packs claim slug '{m['slug']}' ({d})")
             seen.add(m["slug"])
-            out.append(m)
-    return out
+            yield m
+
+
+def held_back(roots: Iterator[pathlib.Path] | None = None) -> list[tuple[str, str]]:
+    """(slug, why) for every valid pack this box's plan does not include — for the log and the
+    doctor. discover() leaves these out; they are waiting, not broken."""
+    return [(m["slug"], why) for m in _walk(roots) for ok, why in [needs_ok(m)] if not ok]
+
+
+def discover(roots: Iterator[pathlib.Path] | None = None, *, include_held: bool = False) -> list[dict]:
+    """Every valid pack under the roots, sorted by slug. Invalid ones are reported, not loaded.
+
+    A pack whose `needs:` this box's plan does not include is left out too, so nothing loads it:
+    not the worker, not the web process, not the coworker runner, not its config defaults. That
+    is checked here, at every start, so a pack copied onto the box by hand past add_machine.py's
+    refusal still registers nothing (SCOPE_TIERS §2.3). held_back() says which, and why.
+    `include_held` is for the installer only: a waiting pack still owns its slug and prefix."""
+    return [m for m in _walk(roots) if include_held or needs_ok(m)[0]]
 
 
 def invalid(roots=None) -> list[tuple[str, str]]:

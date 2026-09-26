@@ -63,7 +63,14 @@ def load_modules() -> None:
     a one-line config edit, no kernel change.
     """
     import importlib
+
+    from core import tiers
+    # AN ADD-ON MACHINE THE PLAN LACKS IS NOT IMPORTED (SCOPE_TIERS §2.7): no handlers, no
+    # periodics, no tools. Its tables and files stay exactly as they are.
     for path in get_config().get("modules", []):
+        if not tiers.module_on(path):
+            log.info("worker.module_not_in_plan", module=path)
+            continue
         importlib.import_module(path)
         log.info("worker.module_loaded", module=path)
     # PACKS ARE FOUND, NOT LISTED (plan D3). A pack dropped under a host machine's plugins/
@@ -76,8 +83,13 @@ def load_modules() -> None:
         mod = m.get("module")
         if not mod:
             continue                                   # a config recipe: the host runs it by kind
+        if not tiers.module_on(mod):
+            log.info("worker.pack_not_in_plan", slug=m["slug"], module=mod)
+            continue
         importlib.import_module(mod)
         log.info("worker.pack_loaded", slug=m["slug"], module=mod, host=m["host"])
+    for slug, why in packs.held_back():                # needs: a feature this plan does not include
+        log.warning("worker.pack_not_in_plan", slug=slug, reason=why)
     # THE OWNER'S OWN MACHINES, AND NEVER A CRASH. Unlike `modules:` above, which are ours and may
     # fail loudly, these are the buyer's code: one that raised here would stop the worker, fail the
     # post-update health check, and roll every future release back. `load` never raises.
@@ -115,6 +127,8 @@ def import_registrations() -> list[str]:
     try:
         from core import packs
         paths += [m["module"] for m in packs.discover() if m.get("module")]
+        from core import tiers
+        paths = tiers.modules_on(paths)             # the plan's machines only (SCOPE_TIERS §2.7)
     except Exception as e:                          # noqa: BLE001 — discovery must not cost the page
         log.error("worker.registrations_discover_failed", error=type(e).__name__, detail=str(e)[:200])
     failed = []

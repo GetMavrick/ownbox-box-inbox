@@ -460,10 +460,13 @@ def _load_machines() -> None:
     """
     import importlib
 
+    from core import tiers
     from core.config import get_config
     from core.connector import tools as _tools
     cfg = get_config()
-    for path in list(cfg.get("modules", [])) + list(cfg.get("web_modules", [])):
+    # Only the machines in the plan (SCOPE_TIERS §2.7), so a coworker never reaches a switched-off
+    # machine's tools.
+    for path in tiers.modules_on(list(cfg.get("modules", [])) + list(cfg.get("web_modules", []))):
         try:
             importlib.import_module(path)
         except Exception as e:                              # noqa: BLE001
@@ -471,7 +474,7 @@ def _load_machines() -> None:
     try:
         from core import packs
         for m in packs.discover():
-            if m.get("module"):
+            if m.get("module") and tiers.module_on(m["module"]):
                 try:
                     importlib.import_module(m["module"])
                 except Exception as e:                      # noqa: BLE001

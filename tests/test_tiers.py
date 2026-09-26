@@ -59,7 +59,8 @@ ok("seats carry today's values: Base is the box's configured limit (3 as shipped
    tiers.TIERS["ownbox"]["people"] is None and tiers.TIERS["pro"]["people"] == 0
    and tiers.current()["people"] == 3)
 ok("coworkers are Pro's feature, and the known features are what the table names",
-   "coworkers" in tiers.TIERS["pro"]["features"] and tiers.FEATURES == {"coworkers"})
+   "coworkers" in tiers.TIERS["pro"]["features"]
+   and tiers.FEATURES == {"coworkers", "machine:aeo", "machine:inbox"})
 
 print("where the answer comes from")
 fresh("pro")

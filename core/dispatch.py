@@ -49,8 +49,12 @@ def _load_web_modules() -> None:
     module directly. Each listed module exposes a Flask `blueprint`."""
     import importlib
 
+    from core import tiers
     from core.config import get_config
     for path in get_config().get("web_modules", []):
+        if not tiers.module_on(path):                  # an add-on machine the plan lacks: no screens
+            log.info("dispatch.web_module_not_in_plan", module=path)
+            continue
         mod = importlib.import_module(path)
         app.register_blueprint(mod.blueprint)
         log.info("dispatch.web_module_loaded", module=path)
@@ -97,11 +101,13 @@ def _load_packs() -> None:
     """
     import importlib
 
-    from core import packs
+    from core import packs, tiers
     for m in packs.discover():
         mod = m.get("module")
         if not mod:
             continue                                   # a config recipe: no module to import
+        if not tiers.module_on(mod):                   # its machine is not in the plan (§2.7)
+            continue
         try:
             importlib.import_module(mod)
         except Exception as e:                         # noqa: BLE001 — see the docstring

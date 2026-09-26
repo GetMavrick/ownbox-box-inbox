@@ -220,7 +220,7 @@ a.row:hover{color:var(--accent)}
    A CARD IS NOT A DESIGN SYSTEM. The rule that keeps this honest is that a control takes its
    colour from the same tokens the surface behind it does — no literal anywhere below. */
 label{display:block;font-size:var(--t-label);font-weight:600;margin:16px 0 8px}
-input[type=text],input[type=password],input[type=email],input[type=url],input:not([type]),
+input[type=text],input[type=password],input[type=email],input[type=url],input[type=time],input:not([type]),
 select,textarea{width:100%;font:inherit;font-size:16px;font-weight:400;min-height:var(--control);
 padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);
 color:var(--ink)}
@@ -909,6 +909,10 @@ def _home() -> str:
     # the one you want your thumb near while reading the morning's numbers on a phone; Managed is
     # a thing you go looking for on a particular day, so it sits below the numbers and above the
     # one button on this page that changes what the box is doing.
+    # UPGRADE TO PRO SITS UNDER THE NUMBERS, above Managed: a thing the owner chooses on a
+    # particular day, like Managed, and never above what the box did today. Its own file draws it.
+    from core.dash import upgrade as _upgrade
+    body += _upgrade.dashboard_card()
     body += _managed_card()
     body += _stop_card()
     return chrome("/dashboard", title="Base Machine",
@@ -1259,6 +1263,9 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                             "owner_only": True},
                            {"key": "agent", "label": "AI coworkers", "href": "/settings/agent",
                             "owner_only": True},
+                           # SHIFTS: coworkers that work on a schedule (Pro). Beside AI coworkers
+                           # because both are AI working on the box; open to a member to look at.
+                           {"key": "shifts", "label": "Shifts", "href": "/settings/shifts"},
                            {"key": "updates", "label": "Updates", "href": "/settings/updates"},
                            {"key": "access", "label": "Server access",
                             "href": "/settings/access", "owner_only": True},

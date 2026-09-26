@@ -324,7 +324,7 @@ push.encrypt, net.post_public, push._vapid_header = _enc, _post, _vap
 _sw_file = ROOT / "marketing/customer_voice/app.py"
 if _sw_file.is_file():
     sw = _sw_file.read_text()
-    guard = re.search(r"if \(typeof to !== 'string'.*?\{ to = '/inbox/inbox'; \}", sw, re.S).group(0)
+    guard = re.search(r"(?:var door = .*?)?if \(typeof to !== 'string'.*?\{ to = '/inbox/inbox'; \}", sw, re.S).group(0)
     ok("the service worker lets a tap open the review", "'/app/review/'" in guard and "'/app/review'" in guard)
     ok("...and still sends anything else back to the inbox", "to.indexOf('/inbox/') !== 0" in guard)
 else:
