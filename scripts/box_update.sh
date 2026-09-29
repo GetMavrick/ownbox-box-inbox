@@ -19,6 +19,10 @@
 # out and restarts. Migrations are additive and do not roll back; the pre-migration snapshot below is the
 # way back for the database if one is ever needed.
 set -euo pipefail
+# A CHECK-IN AFTER EVERY UPDATE ATTEMPT, whatever it decided (docs/PLAN_NO_GHOST_BOXES.md P1): installed,
+# up to date, refused, rolled back or off. So Ownbox hears how an update went without waiting six hours.
+# --no-block: the check-in runs as its own unit, after this script, and can never hold it up or fail it.
+trap 'systemctl start --no-block aios-checkin.service >/dev/null 2>&1 || true' EXIT
 # Serialize deploys: two overlapping runs would interleave git ff / pip install /
 # init_db / restart. flock auto-releases when fd 9 closes (remote shell exit).
 # >>> coworkers-first (tests/test_box_update_waits_for_coworkers.py runs this block)
@@ -92,7 +96,7 @@ mkdir -p /var/lib/aios
 PREV_SHA=$(git rev-parse HEAD)
 PREV_RELEASE=$(cat /var/lib/aios/release 2>/dev/null || true)
 set +e
-.venv/bin/python -m core.release.update --repo /opt/aios --source "$SOURCE" \
+.venv/bin/python -m core.release.update --repo /opt/aios --source "$SOURCE" --honour-plan \
   --log /var/lib/aios/updates.jsonl > /tmp/aios-release-choice.txt 2>&1
 choice_rc=$?
 set -e
@@ -103,6 +107,9 @@ case "$choice_rc" in
        echo "UP TO DATE: no newer verified release — nothing installed."
        exit 0
      fi ;;
+  3) echo "UPDATES OFF: Ownbox Managed has ended on this box, so it fetched nothing and installed nothing."
+     echo "It keeps running exactly as it is. Resuming Managed turns updates back on."
+     exit 0 ;;
   2) echo "DEPLOY REFUSED: every newer release failed verification — this box stays where it is."
      echo "The reasons are above and in /var/lib/aios/updates.jsonl."
      exit 1 ;;
@@ -182,6 +189,10 @@ fi
 # sandbox user, the AI CLI outside /root, and the tick. Idempotent; a failure never fails the update.
 if [ -f scripts/coworker_setup.sh ]; then
   bash scripts/coworker_setup.sh || echo "   coworker setup failed; box unaffected"
+fi
+# THE CHECK-IN REACHES every box already sold the same way (docs/PLAN_NO_GHOST_BOXES.md P1).
+if [ -f scripts/checkin_setup.sh ]; then
+  bash scripts/checkin_setup.sh || echo "   check-in setup failed; box unaffected"
 fi
 # UNIT FILES REACH THE BOX. Editing deploy/*.service did nothing: install_services.sh copies
 # them once, and deploy only restarted. Live-found 2026-09-04 — the installed worker unit was

@@ -43,7 +43,7 @@ _failed = 0
 
 # EVERY PAGE THE APP SERVES BEHIND THE DOOR. A thread is included because it is the deepest screen
 # and the one a notification opens straight into — the exact path where losing the install matters.
-PAGES = ("/inbox/", "/inbox/inbox", "/inbox/inbox/zc_seed", "/inbox/settings")
+PAGES = ("/inbox/inbox", "/inbox/inbox/zc_seed", "/inbox/settings")
 
 
 def ok(what: str, cond: bool, got: str = "") -> None:
@@ -169,9 +169,11 @@ def test_the_install_files_are_still_served():
            and kind in r.headers.get("Content-Type", ""),
            f"{r.status_code} {r.headers.get('Content-Type','')}")
     m = json.loads(c.get("/inbox/manifest.webmanifest").get_data(as_text=True))
-    ok("the app still starts inside /inbox/",
-       m.get("start_url") == "/inbox/" and m.get("scope") == "/inbox/",
-       f"{m.get('start_url')} {m.get('scope')}")
+    # STILL STARTS IN THE INBOX AND IS STILL THE SAME APP, WHILE ITS SCOPE COVERS THE BOX (owner,
+    # 2026-09-29: "keep you inside"): the menu's other machines no longer open in a browser sheet.
+    ok("the app still starts inside /inbox/, as the same app, and keeps you inside the box",
+       m.get("start_url") == "/inbox/inbox" and m.get("id") == "/inbox/" and m.get("scope") == "/",
+       f"{m.get('start_url')} id={m.get('id')} scope={m.get('scope')}")
 
 
 def test_the_installed_app_wears_the_box_ground():

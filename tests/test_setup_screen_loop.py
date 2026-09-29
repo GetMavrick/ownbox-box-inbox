@@ -329,7 +329,7 @@ def test_the_connect_button_now_reaches_the_set_up_screen():
                                   "happened": [], "watch": []}
         store.list_conversations = lambda space, **kw: []
         app, c = _c()
-        for path in ("/inbox/", "/inbox/inbox"):
+        for path in ("/inbox/inbox",):
             got = re.findall(r'<a class="btn" href="([^"]+)">([^<]+)<',
                              c.get(path).get_data(as_text=True))
             ok(f"{path} sends him to the set-up screen",

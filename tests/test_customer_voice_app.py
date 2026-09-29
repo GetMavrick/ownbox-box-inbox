@@ -97,10 +97,16 @@ def test_the_dash_password_opens_it_and_today_renders():
         app, c = _client(token="")
         r = c.post("/dash/login", data={"token": settings.dash_token})
         ok("the dash password is accepted", r.status_code in (302, 303), str(r.status_code))
-        r2 = c.get("/inbox/")
-        ok("...and the phone app opens on it", r2.status_code == 200, str(r2.status_code))
+        # THE APP OPENS ON ITS MESSAGES (owner, 2026-09-29, IA D1): its old first address, which
+        # installed icons and old notifications still open, sends him there.
+        r1 = c.get("/inbox/")
+        ok("...and the app's first address sends him to his messages",
+           r1.status_code == 302 and (r1.headers.get("Location") or "").endswith("/inbox/inbox"),
+           f"{r1.status_code} {r1.headers.get('Location')}")
+        r2 = c.get("/inbox/inbox")
+        ok("...which open", r2.status_code == 200, str(r2.status_code))
         body = r2.get_data(as_text=True)
-        ok("...on the Today screen", ">Today<" in body)
+        ok("...as the message list", '<h1 class="vh">Inbox</h1>' in body or ">Messages<" in body)
         ok("...wearing the box's own name, not ours",
            "Mavrick" not in body, "the brand is hard-coded somewhere")
         # A PAGE OF CUSTOMER MESSAGES IS NEVER A SEARCH RESULT, whoever holds the link.
@@ -130,7 +136,7 @@ def test_the_token_opens_it_too_and_never_stays_in_the_address():
         ok("...and the address it sends him to carries NO token",
            "k=" not in loc and "a-real-token" not in loc, loc)
         ok("...and the cookie was banked", "aios_app_k" in str(r.headers))
-        r2 = c.get("/inbox/")
+        r2 = c.get("/inbox/inbox")
         ok("...so the next page opens without it", r2.status_code == 200, str(r2.status_code))
 
         app, c2 = _client(token="a-real-token")
@@ -176,10 +182,12 @@ def test_an_unreadable_report_is_a_thin_page_not_a_500():
             raise RuntimeError("no such table: voice_observations")
 
         rep.report = boom
-        r = c.get("/inbox/")
-        ok("an unreadable report still renders a page", r.status_code == 200, str(r.status_code))
+        # THE FIRST SCREEN NO LONGER READS THE REPORT AT ALL (IA D1, 2026-09-29): the day's summary
+        # moved to the Morning Review, so a report that cannot be read cannot cost him his messages.
+        r = c.get("/inbox/inbox")
+        ok("an unreadable report still leaves the first screen whole", r.status_code == 200,
+           str(r.status_code))
         body = r.get_data(as_text=True)
-        ok("...that says so plainly", "could not be read" in body)
         ok("...and no stack trace reaches the screen", "Traceback" not in body)
     finally:
         rep.report, cfg.get_config = real_report, real
@@ -399,7 +407,9 @@ def test_the_install_files_are_public_and_carry_nothing():
         m = json.loads(c.get("/inbox/manifest.webmanifest").get_data(as_text=True))
         ok("display is standalone, which is what makes push possible at all",
            m.get("display") == "standalone", str(m.get("display")))
-        ok("...start_url points back through the gated door", m.get("start_url") == "/inbox/")
+        # THE APP OPENS ON ITS MESSAGES (IA D1, 2026-09-29), behind the same gate as every screen.
+        ok("...start_url opens the messages, through the gated door",
+           m.get("start_url") == "/inbox/inbox")
         ok("...and it names both sizes Chrome asks for",
            sorted(i["sizes"] for i in m["icons"]) == ["192x192", "512x512"],
            str([i["sizes"] for i in m["icons"]]))
@@ -427,7 +437,13 @@ def test_the_icons_are_real_pngs_drawn_without_a_dependency():
     # this app a stranger can hit without a credential, and it is 262k iterations of a Python loop
     # on a one-vCPU box. Without the cache a loop of requests buys our CPU for free. Asserted on
     # the function rather than by timing it, because a timing test on a shared runner is a flake.
-    ok("the drawing is cached", hasattr(_app._png, "cache_info"), str(type(_app._png)))
+    # THE CACHE LIVES IN CORE NOW (2026-09-29): the inbox's icon comes through look.app_png, which is
+    # the client's uploaded icon or the mark — each cached by what it draws. A cache here outlived an
+    # upload and served the old mark until a restart, so it moved to where the version is known.
+    from core import client_icon as _ci
+    from core.dash import look as _lk
+    ok("the drawing is cached", hasattr(_lk.mark_png, "cache_info") and hasattr(_ci._tile, "cache_info"),
+       f"{type(_lk.mark_png)} {type(_ci._tile)}")
     ok("...and a repeat call hands back the same object, not a redraw",
        _app._png(192) is _app._png(192))
 

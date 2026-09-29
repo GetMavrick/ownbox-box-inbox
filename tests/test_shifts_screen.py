@@ -124,8 +124,8 @@ tools.register("draft_reply", fn=lambda **k: {"id": "d_1"}, description="draft a
 print("\ntest_the_menu_has_a_shifts_row")
 sec = next((s for s in shell.sections() if s.key == "settings"), None)
 labels = [i.label for i in sec.items] if sec else []
-ok("Shifts is in System Settings, right after AI coworkers",
-   "Shifts" in labels and labels.index("Shifts") == labels.index("AI Coworkers") + 1, str(labels))
+ok("Shifts is in System Settings, right after Assistants, in the Your AI group",
+   "Shifts" in labels and labels.index("Shifts") == labels.index("Assistants") + 1, str(labels))
 ok("...open to a member, who may look", not next(i for i in sec.items if i.label == "Shifts").owner_only)
 ok("the top of the menu is unchanged: no row of its own", "shifts" not in [s.key for s in shell.sections()])
 

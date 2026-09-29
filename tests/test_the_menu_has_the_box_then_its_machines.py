@@ -7,7 +7,8 @@ machines. Which would be unified inbox and then add a machine."* And of that sec
 subtle. Almost just like an extra space."*
 
 So this suite renders the real menu, the way a buyer's box draws it, and holds:
-  1. the rows, in order: Base Machine, System Settings, Unified Inbox, Add a Machine;
+  1. the rows, in order: Base Machine, Morning Review, System Settings, the add-on machines,
+     Add a Machine — and a member is not shown the Morning Review, which refuses them;
   2. exactly one row opens a new group, and it is the first add-on machine;
   3. the gap is space and nothing else: no heading, no rule, no extra words;
   4. a machine that registers a low `order` still cannot climb above the box's own rows,
@@ -63,8 +64,37 @@ print("\ntest_the_rows_read_in_the_owners_order")
 html, nav = menu("/dashboard")
 rows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', nav, re.S)
 # THE ADD-ON MACHINES SIT BETWEEN THE BOX'S OWN ROWS AND ADD A MACHINE, in their registered order.
-ok("Base Machine, System Settings, then the add-on machines and Add a Machine",
-   rows == ["Base Machine", "System Settings", "AEO Machine", "Unified Inbox", "Add a Machine"], str(rows))
+# THE MORNING REVIEW JOINS THE BOX'S OWN ROWS (owner, 2026-09-29: "Add the Morning Review to the
+# menu"), beside Base Machine because both are read, where System Settings is changed.
+ok("Base Machine, Morning Review, System Settings, then the add-on machines and Add a Machine",
+   rows == ["Base Machine", "Morning Review", "System Settings", "AEO Machine", "Unified Inbox",
+            "Add a Machine"], str(rows))
+ok("...and the Morning Review row opens the review", '<a href="/app/review"' in nav)
+_rv = c.get("/app/review")
+_rv_nav = _rv.get_data(as_text=True).split('<nav class="rail"', 1)[-1].split("</nav>", 1)[0]
+ok("...which marks its own row as the page you are on",
+   _rv.status_code == 200
+   and re.findall(r'<a href="([^"]*)"[^>]*aria-current="page"', _rv_nav) == ["/app/review"],
+   str(_rv.status_code))
+
+# A MEMBER IS SHOWN NO ROW THE PAGE WOULD REFUSE. The review publishes what the box spends and its
+# gate sends anyone but the owner to sign in, so a member's menu is shorter, not broken.
+_m = app.test_client()
+_m.set_cookie(dash.COOKIE, dash.new_session(state.add_user("lena.okafor@acme.co", name="Lena",
+                                                           role="member")["id"]))
+_m_nav = _m.get("/dashboard").get_data(as_text=True).split('<nav class="rail"', 1)[-1].split("</nav>", 1)[0]
+_m_rows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', _m_nav, re.S)
+ok("a member's menu has no Morning Review row", "Morning Review" not in _m_rows
+   and "/app/review" not in _m_nav, str(_m_rows))
+ok("...and still has the rest, in the same order",
+   _m_rows == ["Base Machine", "System Settings", "AEO Machine", "Unified Inbox", "Add a Machine"],
+   str(_m_rows))
+try:
+    shell.register_section("odd_home", order=2, machine="core", title="Odd", href="/odd-home",
+                           home=True, owner_only=True)
+    ok("an owner-only section cannot also be the home every back arrow lands on", False)
+except ValueError:
+    ok("an owner-only section cannot also be the home every back arrow lands on", True)
 ok("the page itself is titled Base Machine", "<h1>Base Machine</h1>" in html)
 ok("...and no row or heading on it still says Dashboard",
    ">Dashboard<" not in html and '"lbl">Dashboard' not in html)
@@ -81,6 +111,31 @@ ok("the gap is extra room above that row", re.search(r"\.nav a\.grp\{margin-top:
 ok("...and nothing else: no rule and no heading between the groups",
    "<hr" not in nav and "<h2" not in nav and "<h3" not in nav
    and not re.search(r"\.nav a\.grp\{[^}]*border", css))
+
+print("\ntest_system_settings_is_four_groups_with_plain_names")
+# Owner, 2026-09-29, IA decision D4 (docs/SCOPE_APP_IA.md): Your AI · Reaching you · Your team ·
+# The server, each opened by the same subtle gap as the main menu's groups, and plain names —
+# Assistants (not AI Coworkers), Email (not Outbound Email).
+_sn = menu("/settings/people")[1]
+_srows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', _sn, re.S)
+ok("the rows, in their groups' order",
+   _srows == ["Overview", "AI Account", "Assistants", "Shifts", "Mobile App", "Email", "People",
+              "Updates", "Server Access", "Move Your Box"], str(_srows))
+_sgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
+                   _sn, re.S)
+ok("...each group opening with a gap, and nothing else", _sgrp == ["AI Account", "Mobile App", "People",
+   "Updates"], str(_sgrp))
+ok("...and no old name is left", "AI Coworkers" not in _sn and "Outbound Email" not in _sn)
+_mc = app.test_client()
+_mc.set_cookie(dash.COOKIE, dash.new_session(state.add_user("tomas.reyes@acme.co", name="Tomas",
+                                                            role="member")["id"]))
+_mn = _mc.get("/settings").get_data(as_text=True).split('<nav class="rail"', 1)[-1].split("</nav>", 1)[0]
+_mgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
+                   _mn, re.S)
+# A GROUP WHOSE FIRST ROWS A MEMBER IS NOT SHOWN still opens with its gap, on the first row they are.
+ok("a member's shorter menu keeps its gaps on the rows they are shown",
+   _mgrp == ["Shifts", "Mobile App", "Updates"], str(_mgrp))
+
 
 print("\ntest_every_settings_page_says_where_you_are")
 # EVERY SUB-PAGE MARKS ITS OWN ROW. /settings/email passed "/settings" to chrome() and read

@@ -116,7 +116,7 @@ def ratio(a, b):
 
 
 print("\ntest_every_text_colour_reads")
-for fg in ("ink", "ink-2", "ink-3", "link", "ok", "warn", "bad"):
+for fg in ("ink", "ink-2", "ink-3", "link", "blue", "ok", "warn", "bad"):
     for bg in ("ground", "card"):
         r = ratio(token(fg), token(bg))
         ok(f"--{fg} on --{bg}: {r:.2f}:1 (AA needs 4.5)", r >= 4.5)
@@ -125,7 +125,7 @@ ok(f"button text on the ink pill: {r:.2f}:1", r >= 4.5)
 
 print("\ntest_every_text_colour_reads_in_dark")
 # Owner, 2026-09-27: dark mode, modelled on the homepage's dark half. Same rule, same pairs.
-for fg in ("ink", "ink-2", "ink-3", "link", "ok", "warn", "bad"):
+for fg in ("ink", "ink-2", "ink-3", "link", "blue", "ok", "warn", "bad"):
     for bg in ("ground", "card"):
         r = ratio(dark(fg), dark(bg))
         ok(f"dark --{fg} on --{bg}: {r:.2f}:1 (AA needs 4.5)", r >= 4.5)
@@ -253,12 +253,12 @@ print("\ntest_raw_colours_only_go_down")
 # numbers in comments (#879) are not colours and are not counted.
 BASELINE = {
     "core/dash/home.py": 3,
-    "core/dash/__init__.py": 27,        # the front door moved onto the tokens (OSDev1, 2026-09-24)
+    "core/dash/__init__.py": 3,         # the operator console on the tokens too (owner, 2026-09-29)
     "core/dash/review.py": 19,
     "core/dash/box_settings.py": 4,
     "marketing/customer_voice/app.py": 14,   # step 6, then one dark (PR #1659 §14)
     "marketing/customer_voice/inbox/render.py": 3,
-    "marketing/lead_machine/machine_app.py": 9,
+    "marketing/lead_machine/machine_app.py": 1,   # the Lead app on the tokens (owner, 2026-09-29)
 }
 _HEX = re.compile(r"#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})(?![0-9a-zA-Z])")
 
@@ -280,6 +280,30 @@ for path, most in BASELINE.items():
     ok(f"{path}: {n} raw colours, at most {most}", n <= most)
     if n < most:
         print(f"       lower its BASELINE to {n} in this file — it moved onto the tokens")
+
+print("\ntest_translucent_colours_only_go_down_too")
+# THE HEX RATCHET ABOVE COULD NOT SEE rgba() OR hsla(), so 109 translucent literals in these files were
+# invisible to it (measured 2026-09-29, docs/SCOPE_MOBILE_APP_REDESIGN.md §8). Same rule, same files:
+# the count may only fall. A token declaration counts too, which is deliberate — a translucent value
+# that belongs in box.css should move there, and this is what notices when it does.
+RGBA_BASELINE = {
+    "core/dash/home.py": 1,
+    "core/dash/__init__.py": 0,
+    "core/dash/review.py": 6,
+    "core/dash/box_settings.py": 0,
+    "marketing/customer_voice/app.py": 39,
+    "marketing/customer_voice/inbox/render.py": 0,
+    "marketing/lead_machine/machine_app.py": 1,
+}
+_FN = re.compile(r"\b(?:rgba?|hsla?)\(")
+for path, most in RGBA_BASELINE.items():
+    if not os.path.isfile(os.path.join(ROOT, path)):
+        print(f"  --   {path} does not ship on this box; nothing to count")
+        continue
+    n = len(_FN.findall(open(os.path.join(ROOT, path), encoding="utf-8").read()))
+    ok(f"{path}: {n} translucent colours, at most {most}", n <= most)
+    if n < most:
+        print(f"       lower its RGBA_BASELINE to {n} in this file")
 
 print("\n" + ("all good" if not _failed else f"{_failed} FAILED"))
 sys.exit(1 if _failed else 0)

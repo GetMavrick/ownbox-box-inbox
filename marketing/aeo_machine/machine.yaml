@@ -1,0 +1,18 @@
+# The AEO Machine describes itself here (core/machines.py, docs/SCOPE_MACHINE_MARKETPLACE.md §3.3).
+# The box reads this file to know the machine exists: its feature, what it's made of, where it loads
+# and which tiers include it. Nothing else in the box names this machine.
+addon: 1
+slug: aeo                          # feature machine:aeo, the name plans and orders already use
+name: AEO Machine
+modules:                           # the prefixes that ARE this machine; the plan gates all of them
+  - marketing.aeo_machine
+  - marketing.seo_machine          # the old import name, a two-file forward (its __init__.py says why)
+worker:
+  - marketing.aeo_machine          # AEO articles: plan, write, check, publish (dark until its settings are filled in)
+web:
+  - marketing.aeo_machine.app      # /aeo/*: Articles, Performance, Data sources, Settings. Login-only; old /seo/* redirects
+tiers: [pro]                       # Pro includes it; Base gets it through a plan's add:
+product:
+  name: AEO Machine
+# Its menu rows are registered by marketing/aeo_machine/app.py, and its settings live in
+# box_settings (marketing/aeo_machine/settings.py), so it has no menu: or config: here.

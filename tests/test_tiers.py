@@ -58,9 +58,13 @@ ok("every tier has a display name, and Base's id is not its name",
 ok("seats carry today's values: Base is the box's configured limit (3 as shipped), Pro unlimited",
    tiers.TIERS["ownbox"]["people"] is None and tiers.TIERS["pro"]["people"] == 0
    and tiers.current()["people"] == 3)
+# The add-on machines are the ones this box SHIPS (each found by its machine.yaml, #1665 §3.3):
+# the repository and a customer_voice box carry both, a lead box carries neither.
+shipped = {f"machine:{s}" for s, pkg in (("aeo", "aeo_machine"), ("inbox", "customer_voice"))
+           if (ROOT / "marketing" / pkg / "machine.yaml").exists()}
 ok("coworkers are Pro's feature, and the known features are what the table names",
    "coworkers" in tiers.TIERS["pro"]["features"]
-   and tiers.FEATURES == {"coworkers", "machine:aeo", "machine:inbox"})
+   and tiers.FEATURES == {"coworkers"} | shipped and shipped <= tiers.TIERS["pro"]["features"])
 
 print("where the answer comes from")
 fresh("pro")

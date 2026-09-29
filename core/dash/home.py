@@ -147,8 +147,8 @@ color:var(--faint);font-size:12.5px;line-height:1.4}
 @media (max-width:820px){
  .scrim{display:block}
  .lay{display:block}
- .rail{position:fixed;top:0;bottom:0;right:0;width:86vw;max-width:340px;z-index:40;
-  border-left:1px solid var(--line);transform:translateX(101%);transition:transform .22s ease;
+ .rail{position:fixed;top:0;bottom:0;left:0;width:86vw;max-width:340px;z-index:40;
+  border-right:1px solid var(--line);transform:translateX(-101%);transition:transform .22s ease;
   overflow-y:auto;padding-top:env(safe-area-inset-top,0px);box-shadow:var(--drawer-flat)}
  .navtoggle:checked~.lay .rail{transform:none;box-shadow:var(--drawer-lift)}
  .navtoggle:checked~.scrim{opacity:1;pointer-events:auto}
@@ -157,15 +157,17 @@ color:var(--faint);font-size:12.5px;line-height:1.4}
 """
 
 # ── THIS PAGE'S OWN CHROME: the bar that holds the hamburger, and the cards under it ─────────
+# THE MENU IS ON THE LEFT, then the client's icon and the app's name, on every screen so the button
+# never changes sides; the drawer opens from the left to match. Owner, 2026-09-29, reversing the
+# right-hand button he had chosen that morning: "I think it was a bad idea to move the hamburger
+# menu over to the right side. In fact, I know it was. I think we should move it back to the left.
+# It has a better flow and feel."
 _PAGE = """.topbar{display:none;position:sticky;top:env(safe-area-inset-top,0px);z-index:30;
 align-items:center;gap:12px;height:52px;padding:0 6px 0 4px;background:var(--ground);
 border-bottom:1px solid var(--hairline)}
 .navtoggle:focus-visible~.topbar .ham{outline:2px solid var(--accent);outline-offset:-2px}
 .mark{font-weight:600;letter-spacing:-.01em}
-/* THE HEADER IS THE CLIENT'S ICON, THE APP'S NAME, AND THE MENU ON THE RIGHT (owner, 2026-09-29, on
-   every screen so the button never changes sides). The drawer opens from the right to match: the
-   thumb that pressed it is on that side. */
-.topbar .appmark{width:32px;height:32px;margin-left:10px}
+.topbar .appmark{width:32px;height:32px}
 /* the home's cards: one column on a mobile, a grid once there is room, as the owner's target draws */
 .dash-grid{display:grid;gap:16px;margin-bottom:16px}
 .dash-grid>.card{margin-bottom:0}
@@ -420,6 +422,9 @@ _FWD_CHEVRON = ('<svg class="fwd" width="16" height="16" viewBox="0 0 24 24" fil
                 'stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>')
 # A PLUS, and nothing else. This row adds a machine to the box; the glyph is the verb.
 _ADD_ICON = "M12 5.5v13M5.5 12h13"
+# A SUNRISE for the Morning Review: the horizon, the sun half up, and the arrow of its rising.
+_SUNRISE_ICON = ("M2 20h20M7 20a5 5 0 0 1 10 0M12 4v8M9.5 6.5 12 4l2.5 2.5"
+                 "M5.6 13.6l1.4 1.4M18.4 13.6 17 15")
 # A GEAR. Two subpaths in one `d` — the cog outline and the hole — because `_svg` draws exactly
 # one path and a gear without its centre reads as a flower.
 _GEAR_ICON = ("M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"
@@ -567,11 +572,14 @@ def chrome(path: str, *, title: str, lede: str, body: str,
     landing = ""
     if sec is not None and sec.items:
         landing = next((i.href for i in sec.items if i.href == sec.href), sec.items[0].href)
-    # ONLY FROM A ROW OF THIS SECTION, AND NEVER TO THE PAGE ITSELF. The Base Machine's section has no
+    # ONLY FROM A ROW OF THIS SECTION, AND NEVER TO THE PAGE ITSELF. By key: the rail hands back a
+    # grouped copy of a row (`shell._grouped`), which is the same row but not an equal object.
+    # The Base Machine's section has no
     # rows, so there is no landing row to compare against, and an unguarded rule drew "‹ Base
     # Machine" on the Base Machine (caught by test_the_dashboard_reads, 2026-09-29).
     back = (f'<a class="back" href="{_esc(sec.href)}">&lsaquo; {_esc(sec.title)}</a>'
-            if sec is not None and here is not None and here in sec.items and here.href != landing
+            if sec is not None and here is not None and any(i.key == here.key for i in sec.items)
+            and here.href != landing
             and sec.href.rstrip("/") != path.rstrip("/") else "")
     # WHICH APP THIS SCREEN IS. A machine that registered one (core/dash/look.py) names every tab
     # and every home-screen icon for itself; anything else is the Base Machine's.
@@ -591,9 +599,8 @@ def chrome(path: str, *, title: str, lede: str, body: str,
 {theme.head_tags(th)}
 <title>{_esc(name)} · {_esc(app["name"] if app else title)}</title>{look.head_tags()}{look.app_tags(app)}<style>{CSS}</style></head><body>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
-<div class="topbar">{look.header_mark()}
-<span class="mark">{_esc(app["name"] if app else "Base Machine")}</span><span class="grow"></span>
-<label class="ham" for="navtoggle" role="button" aria-label="Menu">{_HAM}</label></div>
+<div class="topbar"><label class="ham" for="navtoggle" role="button" aria-label="Menu">{_HAM}</label>
+{look.header_mark()}<span class="mark">{_esc(app["name"] if app else "Base Machine")}</span></div>
 <label class="scrim" for="navtoggle" aria-label="Close menu"></label>
 <div class="lay {shape}">{rail_html(path, who=who, email=email)}
 <main class="main">{back}{crumb}<h1>{_esc(title)}</h1><p class="lede">{_esc(lede)}</p>
@@ -647,6 +654,9 @@ def _segments(view: dict) -> str:
     heading, a subtitle and no rows at all, which reads as a screen that is broken rather than a
     machine that is idle.
     """
+    # ONE RULE FOR "IS THERE ANYTHING TO SHOW", shared with the Morning Review (owner, 2026-09-29:
+    # "If a line doesn't have data, it should not be displayed"). Zero is nothing too.
+    from core.dash.review import has_value
     out = []
     for seg in view.get("segments") or []:
         head = seg.get("headline") or {}
@@ -660,7 +670,7 @@ def _segments(view: dict) -> str:
         # registered and a guard written on it can never fire — which is exactly what happened:
         # two idle machines each drew a card with a heading, a subtitle and no rows. The LABEL is
         # the signal, because only a reporter that meant to say something sets one.
-        if txt:
+        if txt and (val is None or has_value(val)):
             rows.append('<div class="row">'
                         + (f'<span class="n">{_esc(val)}</span>' if val is not None else "")
                         + f'<span>{_esc(txt)}</span></div>')
@@ -671,7 +681,7 @@ def _segments(view: dict) -> str:
         # each a number over the words its machine chose. Only figures with a value: an empty one is a
         # promise of data, which this page does not make.
         figs = [f for f in (seg.get("figures") or {}).values()
-                if isinstance(f, dict) and f.get("value") not in (None, "", "—") and f.get("label")][:4]
+                if isinstance(f, dict) and has_value(f.get("value")) and f.get("label")][:4]
         if figs:
             rows.append('<div class="ui-metrics">' + "".join(
                 f'<div class="ui-metric"><b>{_esc(f["value"])}</b><span>{_esc(f["label"])}</span></div>'
@@ -733,8 +743,11 @@ def _this_machine_card() -> str:
     # owner time, <db dir>/backups/aios-YYYY-MM-DD.db, seven kept). Litestream also carries the database
     # off the box as it changes; the nightly copy is the one with a time a person can read.
     last = _last_backup()
-    rows.append('<div class="row"><span class="what">Last backup</span>'
-                f'<span>{_esc(last) if last else "No nightly copy yet"}</span></div>')
+    # A LINE WITHOUT DATA IS NOT DRAWN (owner, 2026-09-29). Before the first nightly copy there is
+    # no backup time to show, so there is no row; it appears the morning after the first copy.
+    if last:
+        rows.append('<div class="row"><span class="what">Last backup</span>'
+                    f'<span>{_esc(last)}</span></div>')
     try:
         du = shutil.disk_usage("/")
         rows.append(f'<div class="row"><span class="what">Disk</span>'
@@ -775,15 +788,26 @@ def _queue_card() -> str:
                             "ORDER BY updated_at DESC LIMIT 1").fetchone()
     except Exception:                        # noqa: BLE001
         return ""
-    figs = [("Running", q.get("running", 0)), ("Waiting", q.get("queued", 0)), ("Done today", done)]
+    # ONLY THE FIGURES WITH SOMETHING IN THEM (owner, 2026-09-29: "If nothing exists, we don't
+    # wanna have zeros"), and a queue with nothing running, waiting, done or failed is no card.
+    figs = [(k, int(v or 0)) for k, v in (("Running", q.get("running", 0)),
+                                          ("Waiting", q.get("queued", 0)), ("Done today", done))
+            if int(v or 0)]
     body = ('<div class="ui-metrics">' + "".join(
-        f'<div class="ui-metric"><b>{int(v or 0)}</b><span>{k}</span></div>' for k, v in figs) + '</div>')
+        f'<div class="ui-metric"><b>{v}</b><span>{k}</span></div>' for k, v in figs) + '</div>'
+            if figs else "")
     if now:
-        body += (f'<p class="mono now"><span class="dot"></span>{_esc(now[0] or "work")} · '
-                 f'{_esc(str(now[1])[:4])} · {_esc(_ago_short(now[2]))}</p>')
+        # THE WORK IN WORDS, not its code name and id: "draft_reply · 90b7" read like a log line.
+        words = (str(now[0] or "").replace("_", " ").strip().capitalize()) or "Working"
+        ago = _ago_short(now[2])
+        body += (f'<p class="now"><span class="dot"></span>{_esc(words)}'
+                 + (f' · started {_esc(ago)} ago' if ago and ago != "0s" else " · just started")
+                 + '</p>')
     if q.get("failed_24h"):
         n = int(q["failed_24h"])
         body += f'<p class="stale">{n} {"job" if n == 1 else "jobs"} failed in the last day</p>'
+    if not body:
+        return ""
     return f'<div class="card"><h2 class="eyebrow">Queue</h2>{body}</div>'
 
 
@@ -806,7 +830,9 @@ def _mcp_card() -> str:
         go = "/settings/agent" if "/settings/agent" in _serving() else ""
         said = ('<p class="quiet">Nothing connected yet.'
                 + (f' <a href="{go}">Connect an assistant &rarr;</a>' if go else "") + '</p>')
-    return (f'<div class="card"><h2 class="eyebrow">MCP</h2>'
+    # "ASSISTANTS", NOT "MCP" (owner, 2026-09-29, IA D4): the name of what is connected, not of
+    # the protocol it speaks. The address stays, since it is what gets pasted into one.
+    return (f'<div class="card"><h2 class="eyebrow">Assistants</h2>'
             f'<p class="mono">{_esc(address)}</p>{said}</div>')
 
 
@@ -819,7 +845,9 @@ def _ai_card() -> str:
         e = next((x for x in box_secrets.setup_state() if x.get("key") == "anthropic"), None)
     except Exception:                        # noqa: BLE001
         return ""
-    if e is None:
+    if e is None or e.get("status") == "not_connected":
+        # NOT SET UP IS THE SET-UP CARD'S LINE, which leads this page until it is done. Drawing it
+        # here too was the same sentence twice, one card apart (2026-09-29).
         return ""
     said, tone = _BOX_SAID.get(str(e.get("status")), _BOX_SAID["not_connected"])
     press = "Change" if e.get("status") == "connected" else "Set up"
@@ -1337,7 +1365,7 @@ def settings():
                 "get them in your inbox too.")
         body += ('<div class="card"><h2>Email</h2>'
                  f'<p class="sub">{said}</p>'
-                 '<div class="foot"><a href="/settings/email">Outbound Email &rarr;</a>'
+                 '<div class="foot"><a href="/settings/email">Email settings &rarr;</a>'
                  '</div></div>')
         body += ('<div class="card"><h2>The machine itself</h2>'
                  '<p class="sub">This box is a server you own outright. Put your own key on it '
@@ -1448,6 +1476,15 @@ def add_machine():
 shell.register_section("dashboard", order=0, machine="core", title="Base Machine",
                        href="/dashboard", home=True, icon=_HOME_ICON)
 
+# THE MORNING REVIEW SITS RIGHT BELOW BASE MACHINE. Owner, 2026-09-29: "Add the Morning Review to
+# the menu." It had no row — the 8 AM message and the email were its only doors. It is the box's
+# own (every machine reports into it), so it joins the base group, and it sits with Base Machine
+# because both are read, where System Settings is changed. OWNER-ONLY because its page publishes
+# what the box spends and refuses anyone else (`review._admit`); a member is shown no row rather
+# than a door that sends them to sign in again.
+shell.register_section("review", order=5, machine="core", title="Morning Review",
+                       href="/app/review", icon=_SUNRISE_ICON, owner_only=True)
+
 # ADD A MACHINE CLOSES THE ADD-ON GROUP. Owner, 2026-09-24: the add-on machines are *"unified inbox
 # and then add a machine"* — the machines a box has, then the way to add one more. `order=1000`
 # keeps it below any machine a box gains later, including one its owner builds.
@@ -1472,25 +1509,37 @@ shell.register_section("add_machine", order=1000, machine="core", title="Add a M
 shell.register_section("settings", order=10, machine="core", title="System Settings",
                        href="/settings", icon=_GEAR_ICON, items=[
                            {"key": "overview", "label": "Overview", "href": "/settings"},
+                           # FOUR GROUPS, PLAIN NAMES (owner, 2026-09-29, IA decision D4 in
+                           # docs/SCOPE_APP_IA.md): Your AI · Reaching you · Your team · The server.
+                           # Each group opens with a little room, no heading — the same subtle gap
+                           # the main menu uses between the box's rows and its machines.
+                           #
+                           # YOUR AI: the account that writes, the assistants you already pay for
+                           # (it read "AI Coworkers", and Pro's scheduled coworkers are Shifts — two
+                           # things under one word), and Shifts.
                            {"key": "ai", "label": "AI Account", "href": "/settings/ai",
-                            "owner_only": True},
-                           {"key": "mobile", "label": "Mobile App", "href": "/settings/mobile"},
-                           # OUTBOUND EMAIL, owner 2026-09-24: this is the email the box SENDS
-                           # (Morning Review, alerts), not the inbox it reads.
-                           {"key": "email", "label": "Outbound Email", "href": "/settings/email",
-                            "owner_only": True},
-                           {"key": "agent", "label": "AI Coworkers", "href": "/settings/agent",
-                            "owner_only": True},
-                           # SHIFTS: coworkers that work on a schedule (Pro). Beside AI coworkers
-                           # because both are AI working on the box; open to a member to look at.
-                           {"key": "shifts", "label": "Shifts", "href": "/settings/shifts"},
-                           {"key": "updates", "label": "Updates", "href": "/settings/updates"},
-                           {"key": "access", "label": "Server Access",
-                            "href": "/settings/access", "owner_only": True},
-                           {"key": "move", "label": "Move Your Box", "href": "/settings/move",
-                            "owner_only": True},
-                           # PEOPLE HAD NO DOOR. The page existed and nothing on a box linked to
-                           # it, so inviting a colleague meant knowing the address.
+                            "owner_only": True, "group": "ai"},
+                           {"key": "agent", "label": "Assistants", "href": "/settings/agent",
+                            "owner_only": True, "group": "ai"},
+                           {"key": "shifts", "label": "Shifts", "href": "/settings/shifts",
+                            "group": "ai"},
+                           # REACHING YOU: the app on your mobile, and the email the box SENDS
+                           # (Morning Review, alerts). It read "Outbound Email" (owner, 2026-09-24)
+                           # so it was not taken for the inbox it reads; under "Reaching you" the
+                           # plain word says the same, and D4 chose it.
+                           {"key": "mobile", "label": "Mobile App", "href": "/settings/mobile",
+                            "group": "reach"},
+                           {"key": "email", "label": "Email", "href": "/settings/email",
+                            "owner_only": True, "group": "reach"},
+                           # YOUR TEAM. PEOPLE HAD NO DOOR once: the page existed and nothing on a
+                           # box linked to it, so inviting a colleague meant knowing the address.
                            {"key": "people", "label": "People", "href": "/settings/people",
-                            "owner_only": True},
+                            "owner_only": True, "group": "team"},
+                           # THE SERVER: what it runs, who can sign in to it, and taking it with you.
+                           {"key": "updates", "label": "Updates", "href": "/settings/updates",
+                            "group": "server"},
+                           {"key": "access", "label": "Server Access",
+                            "href": "/settings/access", "owner_only": True, "group": "server"},
+                           {"key": "move", "label": "Move Your Box", "href": "/settings/move",
+                            "owner_only": True, "group": "server"},
                        ])

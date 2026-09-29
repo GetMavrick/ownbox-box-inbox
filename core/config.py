@@ -364,6 +364,10 @@ def get_config() -> dict:
     import yaml
     with open(CONFIG_PATH) as f:
         cfg = yaml.safe_load(f)
+    # ADD-ON MACHINES DESCRIBE THEMSELVES (core/machines.py, #1665 §3.3): each machine's own config
+    # defaults sit BENEATH the tracked file, so the tracked file and the overlay both win over them.
+    from core import machines as _machines
+    cfg = _machines.into_config(cfg, stage="defaults")
     # PACK DEFAULTS ARE A MIDDLE LAYER (plan D6): tracked config < each installed pack's
     # manifest `config:` < my/settings.yaml. A pack carries every knob with its default and
     # a comment; the buyer's overlay holds only what they changed; an update to either the
@@ -381,7 +385,9 @@ def get_config() -> dict:
                 cfg = _deep_merge(cfg, yaml.safe_load(f) or {})
     except Exception:  # pragma: no cover — a broken overlay must not brick boot
         pass
-    return cfg
+    # ...and their modules and machine_features: entry join AFTER the overlay, so a machine found on
+    # disk always has its gate (tiers.module_on decides whether it loads; a list never does).
+    return _machines.into_config(cfg, stage="wiring")
 
 
 def as_bool(value, default: bool = False) -> bool:

@@ -204,6 +204,8 @@ messy = dict(CLEAN, faqs=[{"id": 1, "question": "Who signs it?", "answer": "Both
 model_says(messy)
 row = run_one("SOW", "What should a statement of work include?")
 created = [m["create"] for m in MUTATIONS if "create" in m]
+ok("...and the row keeps the title it was published under, for the Morning Review",
+   row.get("title") == CLEAN["title"], row.get("title"))
 ok("publishes, on the first paid draft", row["status"] == "published" and CALLS["think"] == 1,
    (row["status"], row.get("refusal"), CALLS["think"]))
 ok("...with each FAQ exactly {question, answer}, both strings",

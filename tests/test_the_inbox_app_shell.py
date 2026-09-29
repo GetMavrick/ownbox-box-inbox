@@ -1,25 +1,17 @@
-"""Today opens with a greeting, the app ships its own typefaces, and the orb sits in the bar.
+"""The inbox app's shell: its own typefaces, the orb in the tab bar, the Appearance switch, and
+the reader's clock.
 
-THREE OWNER CALLS, 2026-09-18, in one screen's worth of work:
-  1. *"Yes today header."*  — a greeting and one plain sentence, after he put a competitor's
-     phone screen beside ours and ours opened with the word "Today" in an h1.
-  2. *"A all the way."*     — Archivo headings over a Public Sans body, of the three pairings
-     rendered on the real screen.
-  3. *"Ship the orb in place and make it look really cool like glass, but don't make it do
-     anything yet."* — his call, made after I argued that a control which does nothing is the
-     dead control this app keeps deleting. The objection was mine and it lost; what this suite
-     guards is that it is not a CONTROL at all, so nobody is promised anything.
+THIS FILE WAS test_today_says_good_morning. The Today screen and its greeting went on 2026-09-29
+(owner, IA decision D1 in docs/SCOPE_APP_IA.md: the day's summary is the Morning Review's, "right
+now" is the Base Machine's, and the inbox opens on its messages). What that suite held about the
+greeting went with it; what it held about everything else still ships, and is held here, on the
+messages screen. Two owner calls from 2026-09-18 still stand:
+  1. *"A all the way."*  — the typefaces stay served by this box, never by Google.
+  2. *"Ship the orb in place and make it look really cool like glass, but don't make it do
+     anything yet."* — so it is decoration, never a control.
 
-WHAT THIS SUITE IS REALLY FOR. Not that the words appear — that a future tidy-up cannot quietly
-undo the three things that make them true: the screen must keep computing nothing, the fonts
-must keep coming from this box, and the orb must keep being decoration.
-
-THE BUG THIS WORK UNCOVERED IS IN HERE TOO, and it is the most valuable line in the file. The
-report reads a Space and so does the screen, and they were not the same one: `_space_name()`
-answers "the first Space" and `app._space()` answers "the Space of this request". On a sold box
-there is one and they agree; on a multi-Space box `/inbox/` was rendering one tenant's inbox
-figures directly above another tenant's conversation list. Found by rendering the greeting and
-noticing it had no sentence.
+THE BUG THE OLD SUITE FOUND IS STILL HELD: the report reads a Space and must read the one it is
+asked for, not "the first Space", or one tenant's figures reach another's review.
 """
 import os
 import pathlib
@@ -29,7 +21,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-_DB = pathlib.Path(tempfile.mkdtemp(prefix="today-hello-")) / "box.db"
+_DB = pathlib.Path(tempfile.mkdtemp(prefix="inbox-shell-")) / "box.db"
 # BEFORE ANY core IMPORT — core.config.Settings reads os.environ at class-body time.
 os.environ["AIOS_DB_PATH"] = str(_DB)
 os.environ.setdefault("DASH_TOKEN", "test-dash-pw")
@@ -102,58 +94,22 @@ def _wipe() -> None:
         c.execute("DELETE FROM inbox_conversations")
 
 
-def _hello_of(body: str) -> str:
-    if 'class="hello"' not in body:
-        return ""
-    return body.split('class="hello"', 1)[1].split("</div>", 1)[0]
-
-
-# ── the greeting replaced a heading that said nothing ─────────────────────────────────────────
-print("test_today_opens_with_a_greeting")
+# ── the messages screen, as the rest of this file reads it ─────────────────────────────────────
 _listening(True)
 _wipe()
 _talk("g1", "Dana Whitfield", mins=3)
 _c_ = _c()
-_b = _c_.get("/inbox/").get_data(as_text=True)
-ok("Today answers", "<h1>" in _b)
-ok("it opens with the greeting block", 'class="hello"' in _b)
-# THE DATE IS IN THE BAR AND "Today" IS THE TAB HE PRESSED. The largest type on the app's first
-# screen was spent on the one fact already stated twice.
-# READ THE MARKUP, NOT THE PAGE. This app inlines its whole stylesheet, so every CSS COMMENT
-# ships as page bytes — and the comment above `.hello` explains that it replaced an
-# `<h1>Today</h1>`, which is the exact string this line looks for. It matched its own
-# explanation. THIRD TIME this trap has cost a test tonight; the fix is always the same, which
-# is to read the region you actually mean.
-_markup = _b.split("</style>", 1)[-1]
-ok("...and no longer with an h1 that says Today", "<h1>Today</h1>" not in _markup)
-ok("the greeting is a time of day",
-   any(w in _b for w in ("Good morning.", "Good afternoon.", "Good evening.")), _b[:0])
-ok("...and the sentence carries the numbers", 'class="line"' in _b)
+_b = _c_.get("/inbox/inbox").get_data(as_text=True)
+ok("the messages screen answers", "<h1" in _b)
 
 
-# ── the sentence is the report's, not the screen's ────────────────────────────────────────────
-print("\ntest_the_screen_still_computes_nothing")
-# THE RULE THIS PAGE LIVES BY: one producer, so the 8am message and the screen can never
-# disagree. That is why `unread` was added to `report()` rather than counted here.
-_today_src = _SRC.split("def r_today(", 1)[-1].split("\ndef ", 1)[0]
-_hello_src = _SRC.split("def _hello(", 1)[-1].split("\ndef ", 1)[0]
-for _name, _src in (("r_today", _today_src), ("_hello", _hello_src)):
-    ok(f"{_name} calls no store reader of its own",
-       not re.search(r"(unread_conversations|awaiting_reply|day_counts)\s*\(", _src),
-       f"{_name} is counting for itself")
-ok("the report is what produces unread", "unread_conversations(" in
-   pathlib.Path(_rep.__file__).read_text())
-ok("...and exposes it as a figure", '"inbox_unread"' in pathlib.Path(_rep.__file__).read_text())
-
-
-# ── the Space bug this work found ─────────────────────────────────────────────────────────────
+# ── the Space bug the old Today screen found ──────────────────────────────────────────────────
 print("\ntest_the_report_answers_for_the_space_the_screen_is_showing")
 # THE FAILURE: `_space_name()` is "the first Space" and `_space()` is "this request's Space".
 # They agree on a sold box and not on a multi-Space one, so Today rendered one tenant's figures
 # above another tenant's list. Caught because the greeting came back with no sentence at all.
 import inspect                                      # noqa: E402
 ok("report() takes a space", "space" in inspect.signature(_rep.report).parameters)
-ok("...and Today passes its own", "_report(day, space=_space())" in _SRC)
 # DELIBERATELY DIFFERENT COUNTS. The first version of this seeded one conversation in each
 # Space, so both reported "1 waiting" and the assertion passed for a reason that had nothing to
 # do with scoping — it would have gone green with the argument ignored entirely.
@@ -173,37 +129,6 @@ ok("...and the other has three, from the same function",
    (_theirs.get("inbox_waiting") or {}).get("value") == 3, str(_theirs.get("inbox_waiting")))
 ok("...and asking for a Space with nothing in it says nothing about the inbox",
    "inbox_waiting" not in (_rep.report(_rtoday(), space="empty-space").get("figures") or {}))
-
-
-# ── every sentence it can say is true ─────────────────────────────────────────────────────────
-print("\ntest_all_four_sentences")
-def _line(figs: dict) -> str:
-    return re.sub(r"<[^>]+>", "", _app._hello(figs))
-
-_both = _line({"inbox_waiting": {"value": 9}, "inbox_unread": {"value": 4}})
-ok("unread and waiting", "4 unread" in _both and "9 people" in _both, _both)
-_u = _line({"inbox_waiting": {"value": 0}, "inbox_unread": {"value": 4}})
-ok("unread only, and it says nobody is waiting",
-   "4 unread" in _u and "Nobody is waiting" in _u, _u)
-_w = _line({"inbox_waiting": {"value": 1}})
-ok("waiting only, singular", "Nothing unread" in _w and "1 person" in _w, _w)
-_none = _line({"inbox_waiting": {"value": 0}})
-ok("neither — and it says the good thing out loud", "caught up" in _none, _none)
-# NO INBOX SEGMENT, NO SENTENCE. Inventing "you have 0 of everything" for a box that has never
-# had a conversation is the row of zeroes this screen exists not to show.
-ok("a box with no inbox segment gets the greeting alone",
-   'class="line"' not in _app._hello({}), _line({}))
-
-
-# ── a dash is not a figure ────────────────────────────────────────────────────────────────────
-print("\ntest_a_dash_is_never_rendered_as_a_number")
-# Under the old `<h1>Today</h1>` a shrug was harmless. Under a greeting that has just said
-# something true it is the largest thing on the screen, which is what made this mine to fix.
-_tiles = re.findall(r'<div class="fig"><div class="v">([^<]*)</div>', _b)
-ok("no figure tile is a dash", not any(t.strip() == "—" for t in _tiles), str(_tiles))
-ok("...and the headline block is absent rather than shrugging",
-   not re.search(r'<div class="head"><div class="v">\s*—\s*</div>', _b))
-ok("the tiles that remain all say something", all(t.strip() for t in _tiles), str(_tiles))
 
 
 # ── the box serves its own typefaces ──────────────────────────────────────────────────────────
@@ -259,6 +184,12 @@ ok("...dead centre of an even number of tabs", _n(_left) == _n(_right) == 2,
    f"{_n(_left)} left, {_n(_right)} right")
 # HIS CALL: in place, glass, doing nothing. So it is not a disabled button (which reads as
 # broken) and not a link somewhere unrelated (which is worse) — it is decoration.
+# THE TABS ARE THE MENU'S ROWS (owner, 2026-09-29, IA D1 and D5): Messages · Replies · Search ·
+# Settings. No "Today" — the day's summary is the Morning Review's — and no "Inbox" beside a menu
+# that calls the same screen Messages.
+_labels = re.findall(r'<a class="tab[^"]*" href="[^"]+"[^>]*>.*?<span>([^<]+)</span></a>', _bar, re.S)
+ok("the tabs are Messages, Replies, Search and Settings",
+   _labels == ["Messages", "Replies", "Search", "Settings"], str(_labels))
 ok("it is not a link", '<a class="orb' not in _bar)
 ok("it is not a button", "<button" not in _bar)
 ok("it is hidden from a screen reader", 'class="orb" aria-hidden="true"' in _bar)
@@ -278,22 +209,8 @@ ok("it is absent where the bar is",
              re.S) is not None)
 
 
-# ── THE SEAM THAT BROKE EIGHT ASSERTIONS SILENTLY ─────────────────────────────────────────────
-print("\ntest_a_box_nothing_can_reach_still_opens_on_the_set_up")
-# THE GREETING DOES NOT OUTRANK THE SET-UP. On day one a buyer needs to connect a channel, not to
-# be greeted, and test_today_first_screen already guards that order. This asserts the new header
-# did not quietly climb above it — the two screens cannot drift while both are checked.
-_listening(False)
-_bare = _c().get("/inbox/").get_data(as_text=True)
-ok("a bare box leads with the set-up", "Your box is running" in _bare)
-ok("...and is given no greeting to read instead", 'class="hello"' not in _bare)
-_listening(True)
-_after = _c().get("/inbox/").get_data(as_text=True)
-ok("...while a listening box gets the greeting back", 'class="hello"' in _after)
-
-
 print("\ntest_the_screen_and_the_report_agree_on_the_signature")
-# r_today calls report(day, space=…) INSIDE A GUARD that turns any exception into "the report
+# THE OLD TODAY SCREEN called report(day, space=…) INSIDE A GUARD that turns any exception into "the report
 # could not be read". That guard is right — a buyer must never see a stack trace — but it also
 # swallows a plain signature mismatch, and the screen then renders the set-up with no figures and
 # no greeting while every suite that does not assert on a figure stays green. That is exactly what
@@ -305,8 +222,6 @@ ok("report() takes the Space the screen is showing", "space" in _sig.parameters,
 ok("...defaulted, so the 8am message and every other caller are unchanged",
    "space" in _sig.parameters and _sig.parameters["space"].default is None,
    str(_sig.parameters.get("space")))
-ok("...and the screen actually passes it",
-   "space=_space()" in _inspect.getsource(_app.r_today))
 
 
 # ── WHAT A BUYER MEETS, MEASURED ON AN EXPORTED BOX ───────────────────────────────────────────
@@ -374,43 +289,22 @@ ok("...and clears it, so the box lands on white",
    "Max-Age=0" in " ".join(v for k, v in _old.headers if k == "Set-Cookie"))
 
 
-# ── the greeting reads the reader's clock ─────────────────────────────────────────────────────
-print("\ntest_the_greeting_is_the_readers_time_of_day")
-# OWNER, 2026-09-24: "that thing says good afternoon when it's morning here. It should be on the
-# local time not UTC." A sold box runs on UTC; the reader's zone is `notify.buyer_timezone()`
-# (the settings override, then the zone the browser gave at claim). Each case below picks a
-# zone whose time of day DIFFERS from the box's own, so reading the box's clock fails it.
-from zoneinfo import ZoneInfo as _Z                                        # noqa: E402
-from core import notify as _notify, report as _report                      # noqa: E402
+# ── the reader's clock ──────────────────────────────────────────────────────────────────────────
+print("\ntest_times_are_on_the_readers_clock")
+# OWNER, 2026-09-24: "It should be on the local time not UTC." A sold box runs on UTC; the reader's
+# zone is `notify.buyer_timezone()` (the settings override, then the zone the browser gave at claim).
+from core import notify as _notify                                         # noqa: E402
 from marketing.customer_voice import app as _cv                            # noqa: E402
-
-def _word(h):
-    return "Good morning" if h < 12 else ("Good afternoon" if h < 17 else "Good evening")
-
-_box_word = _word(datetime.now(_report.tz()).hour)
 _real_bt = _notify.buyer_timezone
 try:
-    _seen = set()
-    for _off in range(-12, 15):
-        _zone = f"Etc/GMT{'+' if _off <= 0 else '-'}{abs(_off)}" if _off else "UTC"
-        _w = _word(datetime.now(_Z(_zone)).hour)
-        if _w == _box_word or _w in _seen:
-            continue
-        _seen.add(_w)
-        _notify.buyer_timezone = (lambda z=_zone: z)
-        _got = _cv._hello({})
-        ok(f"a reader in {_zone} is told '{_w}', not the box's '{_box_word}'",
-           f"<h1>{_w}.</h1>" in _got, _got[:80])
-    ok("...checked against at least one other time of day", len(_seen) >= 1)
-    # THE TIMES IN A THREAD READ THE SAME CLOCK: 17:00 UTC is 19:00 two hours east.
+    # THE TIMES IN A THREAD READ THE READER'S CLOCK: 17:00 UTC is 19:00 two hours east.
     _notify.buyer_timezone = lambda: "Etc/GMT-2"
     ok("a message's time is printed on the reader's clock",
        _cv._when("2026-09-24T17:00:00+00:00") == "Thu 24 Sep, 19:00",
        _cv._when("2026-09-24T17:00:00+00:00"))
     # A ZONE THE BOX CANNOT READ FALLS BACK TO THE BOX'S CLOCK, never a 500.
     _notify.buyer_timezone = lambda: "Not/AZone"
-    ok("an unreadable zone still greets, on the box's clock",
-       f"<h1>{_box_word}.</h1>" in _cv._hello({}))
+    ok("an unreadable zone still prints a time", bool(_cv._when("2026-09-24T17:00:00+00:00")))
 finally:
     _notify.buyer_timezone = _real_bt
 
@@ -423,7 +317,7 @@ if not (_here / ".github").is_dir():
     print("  --   not the repo — a buyer's box has no CI manifest to be named in")
 else:
     ok("registered in the suite list",
-       "test_today_says_good_morning" in (_here / ".github/workflows/tests.yml").read_text())
+       "test_the_inbox_app_shell" in (_here / ".github/workflows/tests.yml").read_text())
 
 
 print(f"\n{'FAILED — ' + str(_failed) + ' failure(s)' if _failed else 'all checks passed'}")

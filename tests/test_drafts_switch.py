@@ -331,7 +331,7 @@ def test_the_key_is_never_rendered_back_anywhere():
     print("test_the_key_is_never_rendered_back_anywhere")
     box_secrets.put(box_secrets.ANTHROPIC, KEY)
     c = client()
-    for path in ("/inbox/settings", "/inbox/drafts", "/inbox/", "/inbox/inbox"):
+    for path in ("/inbox/settings", "/inbox/drafts", "/inbox/inbox"):
         r = c.get(path)
         body = r.get_data(as_text=True)
         # THE PAGE HAS TO HAVE RENDERED BEFORE ITS SILENCE MEANS ANYTHING. Without this line the

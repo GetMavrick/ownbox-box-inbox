@@ -67,7 +67,10 @@ try:
     m = json.loads(r.get_data(as_text=True) or "{}")
 except ValueError:
     m = {}
-ok("it is named Ownbox on the icon", m.get("short_name") == "Ownbox" and m.get("name") == "Ownbox", str(m))
+# THE CLIENT'S NAME ON THEIR OWN HOME SCREEN (owner, 2026-09-29), not ours: `dash.brand()` is the
+# buyer's on a sold box, and the product's own name only on a box nobody has bought.
+BASE = dash.brand()
+ok("it is named for the client on the icon", m.get("short_name") == BASE and m.get("name") == BASE, str(m))
 ok("it opens standalone, like the inbox, starting at the box's front door",
    m.get("display") == "standalone" and m.get("start_url") == "/" and m.get("scope") == "/")
 for icon in m.get("icons") or []:
@@ -82,10 +85,10 @@ print("\ntest_core_screens_link_it_and_machines_do_not")
 page = owner.get("/settings").get_data(as_text=True)
 ok("a core screen links the Base Machine's manifest",
    '<link rel="manifest" href="/ui/manifest.webmanifest">' in page)
-ok("...and names it Ownbox for iOS", '<meta name="apple-mobile-web-app-title" content="Ownbox">' in page)
+ok("...and names it for the client for iOS", f'<meta name="apple-mobile-web-app-title" content="{BASE}">' in page)
 ok("...exactly once", page.count('rel="manifest"') == 1)
 if HAS_INBOX:
-    inbox = owner.get("/inbox/").get_data(as_text=True)
+    inbox = owner.get("/inbox/inbox").get_data(as_text=True)
     ok("the inbox links its own manifest and not the Base Machine's",
        "/inbox/manifest.webmanifest" in inbox and "/ui/manifest.webmanifest" not in inbox)
 else:
@@ -98,8 +101,8 @@ ok("the page draws the apps as they will sit on a home screen", bool(strip))
 tiles = re.findall(r'<a href="([^"]+)"><img src="([^"]+)"[^>]*><span>([^<]+)</span></a>',
                    strip.group(1) if strip else "")
 names = [t[2] for t in tiles]
-ok("the Base Machine is first, as Ownbox, opening the box", bool(tiles) and tiles[0][:1] == ("/",)
-   and names[0] == "Ownbox", str(tiles[:1]))
+ok("the Base Machine is first, named for the client, opening the box", bool(tiles) and tiles[0][:1] == ("/",)
+   and names[0] == BASE, str(tiles[:1]))
 # THE AEO MACHINE IS ITS OWN APP TOO (owner, 2026-09-29: "All the screens on AEO machine need to
 # reflect AEO machine"), so a box that ships it offers its tile beside the inbox's.
 try:
@@ -107,7 +110,7 @@ try:
     HAS_AEO = True
 except ImportError:
     HAS_AEO = False
-want = (["Ownbox"] + (["AEO Machine"] if HAS_AEO else [])
+want = ([BASE] + (["AEO Machine"] if HAS_AEO else [])
         + (["Unified Inbox"] if HAS_INBOX else []))
 ok(f"one tile per app the box serves: {want}", names == want, str(names))
 for href, src, name in tiles:
@@ -116,6 +119,91 @@ for href, src, name in tiles:
 ok("the tiles are read from the box's routes, not written down in core",
    "Unified Inbox" not in open(os.path.join(os.path.dirname(os.path.dirname(
        os.path.abspath(__file__))), "core", "dash", "box_settings.py"), encoding="utf-8").read())
+
+
+print("\ntest_the_owner_can_give_the_box_its_own_icon")
+# Owner, 2026-09-27 and 2026-09-29: the client uploads their icon on this page, PNG or JPEG, and it
+# appears in every header and on every home-screen app. The first place a client's file enters the
+# box, so every refusal is exercised, not just the happy path.
+import io as _io  # noqa: E402
+import json as _json  # noqa: E402
+import re as _re  # noqa: E402
+from PIL import Image as _Img  # noqa: E402
+from core import client_icon  # noqa: E402
+from core.dash import look as _look  # noqa: E402
+
+
+def _img(w, h, fmt="PNG", mode="RGBA", colour=(20, 90, 200, 255)):
+    b = _io.BytesIO()
+    _Img.new(mode, (w, h), colour if mode != "1" else 1).save(b, format=fmt)
+    return b.getvalue()
+
+
+def _post(client, data, name="logo.png"):
+    return client.post("/settings/mobile/icon", data={"icon": (_io.BytesIO(data), name)},
+                       content_type="multipart/form-data")
+
+
+mark192 = _look.mark_png(192)
+page = owner.get("/settings/mobile").get_data(as_text=True)
+ok("the owner is offered the upload, beside the home-screen apps it changes",
+   'id="icon"' in page and 'action="/settings/mobile/icon"' in page and 'accept="image/png,image/jpeg"' in page)
+member_id = state.add_user("ines@brightline.example", role="member")["id"]
+mc = app.test_client()
+mc.set_cookie(dash.COOKIE, dash.new_session(member_id))
+ok("a member is not offered it", 'id="icon"' not in mc.get("/settings/mobile").get_data(as_text=True))
+_post(mc, _img(512, 512))
+ok("...and a member's upload is refused, changing nothing", client_icon.current() is None)
+
+for label, data, name, code in (
+        ("a GIF", _img(300, 300, "GIF", "RGB", (0, 0, 0)), "logo.gif", "format"),
+        ("an SVG, which can carry script", b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)'
+         b'</script></svg>', "logo.svg", "unreadable"),
+        ("a text file named .png", b"not an image at all", "logo.png", "unreadable"),
+        ("an image too small for a home screen", _img(100, 100), "logo.png", "small"),
+        ("an empty file", b"", "logo.png", "empty"),
+        ("a decompression bomb", _img(7000, 6000, "PNG", "1"), "bomb.png", "unreadable"),
+        ("a file over 5 MB", b"\x89PNG" + b"0" * (client_icon.MAX_BYTES + 10), "big.png", "large")):
+    r = _post(owner, data, name)
+    where = r.headers.get("Location", "")
+    ok(f"{label} is refused, saying why", r.status_code == 303 and f"icon_error={code}" in where, where)
+ok("...and nothing refused was kept", client_icon.current() is None)
+said = owner.get("/settings/mobile?icon_error=format").get_data(as_text=True)
+ok("the refusal reads as a sentence, chosen by its code", client_icon.SAID["format"] in said)
+forged = owner.get("/settings/mobile?icon_error=%3Cb%3Epwned-by-url%3C%2Fb%3E").get_data(as_text=True)
+ok("...and a forged code cannot write its own: the address picks a sentence, never supplies one",
+   "pwned-by-url" not in forged and client_icon.SAID["unreadable"] in forged)
+
+wide = _io.BytesIO()
+_Img.effect_noise((700, 700), 90).convert("RGB").save(wide, format="PNG")
+ok("(a real-world-size logo: over 256 KB)", len(wide.getvalue()) > 256 * 1024, str(len(wide.getvalue())))
+r = _post(owner, wide.getvalue())
+ok("this route takes it, though every other route stops at 256 KB",
+   r.status_code == 303 and "icon=saved" in r.headers.get("Location", ""), r.headers.get("Location", ""))
+got = client_icon.current()
+ok("the icon is kept, with a version", bool(got and got.get("sha")), str(got))
+
+m192 = owner.get("/ui/icon-192.png").data
+t = _Img.open(_io.BytesIO(m192))
+ok("the home-screen icon is now the client's, not the mark", m192 != mark192 and t.size == (192, 192))
+ok("...opaque, since an iPhone paints transparency black", t.mode == "RGB")
+ok("the inbox's own icon address serves it too", owner.get("/inbox/icon-192.png").data == m192
+   if HAS_INBOX else True)
+a180 = _Img.open(_io.BytesIO(owner.get("/apple-touch-icon.png").data))
+ok("...and the iPhone's touch icon", a180.size == (180, 180) and a180.mode == "RGB")
+man = _json.loads(owner.get("/ui/manifest.webmanifest").get_data(as_text=True))
+ok("the manifest names the new icon by its version, so a phone fetches it",
+   all(i["src"].endswith(f"?v={got['sha']}") for i in man["icons"]), str(man["icons"]))
+head = owner.get("/dashboard").get_data(as_text=True)
+ok("every header draws it", f'src="/ui/client-icon.png?v={got["sha"]}"' in head)
+master = _Img.open(_io.BytesIO(owner.get("/ui/client-icon.png").data))
+ok("the header's picture is the re-encoded upload, square, never the file as sent",
+   master.format == "PNG" and master.size == (512, 512))
+
+r = owner.post("/settings/mobile/icon", data={"do": "remove"})
+ok("removing it brings the mark back everywhere", r.status_code == 303 and client_icon.current() is None
+   and owner.get("/ui/icon-192.png").data == mark192
+   and 'src="/ui/icon.svg"' in owner.get("/dashboard").get_data(as_text=True))
 
 print("\n" + ("all good" if not _failed else f"{_failed} FAILED"))
 sys.exit(1 if _failed else 0)

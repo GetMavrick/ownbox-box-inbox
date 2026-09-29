@@ -110,6 +110,9 @@ if printf '%s' "$origin" | grep -Eq '^(git@github\.com:|https://github\.com/)Get
 else
   echo "aios-update.timer: not enabled (origin is not a box repository: ${origin:-none})"
 fi
+# THE CHECK-IN (docs/PLAN_NO_GHOST_BOXES.md P1). Its unit runs only on a sold box, so it is safe to
+# enable everywhere; on the operator's box it never starts.
+bash "$AIOS/scripts/checkin_setup.sh" || true
 
 # 5. Verify.
 sleep 2

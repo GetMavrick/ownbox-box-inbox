@@ -58,8 +58,28 @@ def _load_web_modules() -> None:
         mod = importlib.import_module(path)
         app.register_blueprint(mod.blueprint)
         log.info("dispatch.web_module_loaded", module=path)
+    _load_machine_menus()
     _load_packs()
     _load_custom_machines()
+
+
+def _load_machine_menus() -> None:
+    """A self-describing machine's `menu:` (core/machines.py), registered for it when its plan holds it.
+
+    A machine that registers its own rows in code (the AEO Machine, the Unified Inbox) has no `menu:`
+    and is untouched. One that declares a row here gets it without editing the menu, which is the
+    point of §3.3. A row another machine already holds is refused by the shell, logged, and skipped.
+    """
+    from core import machines, shell, tiers
+    for m in machines.discover():
+        menu = m.get("menu")
+        if not menu or not tiers.module_on(m["modules"][0]):
+            continue
+        try:
+            shell.register_section(menu["key"], order=int(menu.get("order", 100)), machine=m["slug"],
+                                   title=menu["title"], href=menu["href"], icon=menu.get("icon", ""))
+        except Exception as e:                         # noqa: BLE001 — a bad row costs that row only
+            log.error("dispatch.machine_menu_refused", machine=m["slug"], error=str(e)[:200])
 
 
 def _load_custom_machines() -> None:

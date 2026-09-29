@@ -40,7 +40,7 @@ REFSPEC = "refs/tags/release/*:refs/tags/release/*"     # no leading '+': never 
 
 @dataclass
 class Decision:
-    status: str                         # "selected" | "up_to_date" | "all_refused" | "cannot_run"
+    status: str                         # "selected" | "up_to_date" | "all_refused" | "cannot_run" | "no_managed"
     current: str | None = None
     selected: str | None = None
     principal: str | None = None
@@ -114,8 +114,19 @@ def installed_release(repo: Path, release_file: str | Path | None = None) -> str
 
 
 def choose(repo: str | Path, source: str, *, log_path: str | Path | None = None,
-           now: datetime | None = None) -> Decision:
+           now: datetime | None = None, updates_off: dict | None = None) -> Decision:
     repo = Path(repo)
+    # UPDATES OFF MEANS NO FETCH AT ALL (docs/PLAN_NO_GHOST_BOXES.md P5; owner, 2026-09-23: updates come
+    # with Managed and stop at the end of the period paid for). Removing the box's key on Ownbox's side
+    # was the only lock, and the https mirror below walks straight past it: the repository is public.
+    # So the box stops itself, before either door is tried, and says why in the same log the Updates
+    # screen reads. The key removal stays as the second lock. Neither is the only one.
+    if updates_off is not None:
+        until = str(updates_off.get("until") or "")
+        return _log(Decision("no_managed", current=installed_release(repo),
+                             detail="updates are off: Ownbox Managed " + (f"ended {until}" if until else
+                                                                            "is not on this box")),
+                    log_path, source)
     if _git(repo, "rev-parse", "--is-inside-work-tree").stdout.strip() != "true":
         return _log(Decision("cannot_run", detail=f"{repo} is not a git work tree"), log_path, source)
 
@@ -201,8 +212,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo", default="/opt/aios")
     ap.add_argument("--source", required=True, help="a git remote URL or a path to a bundle file")
     ap.add_argument("--log", default="/var/lib/aios/updates.jsonl")
+    ap.add_argument("--honour-plan", action="store_true",
+                    help="a box's own updater: stop before fetching when Ownbox has said updates are off")
     a = ap.parse_args(argv)
-    d = choose(a.repo, a.source, log_path=a.log)
+    # OPT-IN, BECAUSE NOT EVERY CALLER IS A BOX. The provisioner installs its own releases through this
+    # same module (provisioner/deploy/setup.sh) and has no Managed plan to honour.
+    off = None
+    if a.honour_plan:
+        from core import box_updates
+        p = box_updates.plan()                  # {} when unreadable or never told, which reads as ON
+        off = p if p.get("updates") == "off" else None
+    d = choose(a.repo, a.source, log_path=a.log, updates_off=off)
     for r in d.refused:
         print(f"refused {r['tag']}: {r['reason']}")
     for t in d.tamper:
@@ -213,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
     if d.status == "up_to_date":
         return 0
     print(d.detail or d.status)
+    if d.status == "no_managed":
+        return 3
     return 2 if d.status == "all_refused" else 1
 
 

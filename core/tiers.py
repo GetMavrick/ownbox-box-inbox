@@ -34,18 +34,21 @@ log = get_logger(__name__)
 # matching the pricing page and the Stripe products). `people` is the seat limit, carrying today's values
 # unchanged (owner, 2026-09-16: Base is three people, Pro is unlimited): 0 is unlimited, and None
 # is "the box's configured limit", `dash.max_users`, which ships as 3 and which an owner may raise.
+# ADD-ON MACHINES ARE FEATURES TOO (SCOPE_TIERS §2.7), and they DESCRIBE THEMSELVES (core/machines.py,
+# #1665 §3.3): each machine's own machine.yaml names its feature `machine:<slug>`, the tiers that
+# include it and the modules that make it up, so this table names no machine and a new machine never
+# edits it. Base includes none and gets the one it was bought with through `add`.
+from core import machines as _machines
+
 TIERS = {
-    "ownbox": {"name": "Base Machine", "features": frozenset(), "people": None},
-    "pro":    {"name": "Base Machine Pro", "features": frozenset({"coworkers", "machine:aeo", "machine:inbox"}),
+    "ownbox": {"name": "Base Machine", "features": frozenset() | _machines.in_tier("ownbox"), "people": None},
+    "pro":    {"name": "Base Machine Pro", "features": frozenset({"coworkers"}) | _machines.in_tier("pro"),
                "people": 0},
 }
-# ADD-ON MACHINES ARE FEATURES TOO (SCOPE_TIERS §2.7). Base includes neither and gets the one it was
-# bought with through `add`; Pro includes both. The feature is `machine:<slug>`, and which of the
-# box's modules make up that machine is DATA, config `machine_features:`, so core never names a
-# machine's package. A module no feature claims is not an add-on and always loads.
 DEFAULT = "ownbox"
-# Every feature a plan may name. An add-on is one of these; anything else is refused.
-FEATURES = frozenset().union(*(t["features"] for t in TIERS.values()))
+# Every feature a plan may name: the tiers' own, plus every add-on machine found on this box.
+# Anything else is refused.
+FEATURES = frozenset().union(*(t["features"] for t in TIERS.values())) | _machines.features()
 
 NS, KEY = "core", "plan"                 # box_settings: {"seq", "tier", "add", "since"}
 
@@ -189,6 +192,11 @@ def module_on(path: str) -> bool:
         feature = machine_of(path)
         if not feature:
             return True
+        # A MACHINE THAT NEEDS A FEATURE this plan lacks doesn't load, even on a box Ownbox never
+        # told (the same rule as a pack's `needs:`, core/packs.py). A machine with no needs is unchanged.
+        wanted = _machines.needs_of(feature)
+        if wanted and not needs(wanted)[0]:
+            return False
         c = current()
         return c["source"] != "ownbox" or feature in c["features"]
     except Exception:                   # noqa: BLE001 — a question we cannot answer switches nothing off

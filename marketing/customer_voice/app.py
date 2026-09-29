@@ -949,7 +949,7 @@ button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
    app's bar is visible at every width because it carries the brand and the date.
    SO THE BUTTON HIDES, NOT THE BAR — above 820px the rail is on screen and a button that opens
    what you can already see is the dead control this codebase keeps deleting. */
-.bar-in .ham{display:none;margin-left:auto;margin-right:-6px}
+.bar-in .ham{display:none;margin-left:-6px}
 .navtoggle:focus-visible~.bar .ham{outline:2px solid var(--accent);outline-offset:-2px}
 
 /* THE MENU BUTTON SHOWS ONLY WHERE THE RAIL IS HIDDEN — above the breakpoint the rail is on
@@ -1086,12 +1086,11 @@ def _monogram(name: str) -> str:
 # INSTALLED, THERE IS NO BROWSER CHROME. A PWA on a home screen has no back button, no address
 # bar and no tabs, so the app has to supply its own furniture — and on a phone that furniture is
 # a bottom bar, in reach of a thumb, in the idiom every native app on the device already uses.
-# Three destinations because the app has three: the briefing, the conversations, and the settings
-# that hold the light/dark switch. A tab bar with a dead tab in it is the dead control this
-# codebase keeps deleting.
+# THE TABS ARE THE MENU'S ROWS: Messages · Replies · Search · Settings (owner, 2026-09-29, IA
+# decisions D1 and D5 in docs/SCOPE_APP_IA.md). "Today" went — the day's summary is the Morning
+# Review's job and "right now" is the Base Machine's — so the app opens on its messages. A tab bar
+# with a dead tab in it is the dead control this codebase keeps deleting.
 _TABS = (
-  ("/inbox/", "Today",
-   "M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5"),
   # THE TRAY IS THE ONE EVERY APP DRAWS; WHAT ARRIVES IN IT IS OURS. Owner, 2026-09-16: the
   # fonts and "the inbox and settings icons" are the two places this product stops copying the
   # competitor. A plain tray says mail; a tray with separate streams running into it says the
@@ -1104,9 +1103,13 @@ _TABS = (
   #
   # AND IT IS DELIBERATELY NOT AN ARROW. A downward arrow into a tray is the download glyph on
   # every platform there is, and the first draft of this icon was exactly that.
-  ("/inbox/inbox", "Inbox",
+  ("/inbox/inbox", "Messages",
    "M3.5 12.5v5.6a1.4 1.4 0 0 0 1.4 1.4h14.2a1.4 1.4 0 0 0 1.4-1.4v-5.6h-4.3l-1.3 2.2H9.1"
    "l-1.3-2.2zM7.6 4.3 9.9 9.6M16.4 4.3 14.1 9.6"),
+  # REPLIES: the drafts the box wrote, waiting for a yes. The reply arrow, the one every mail app
+  # draws for "answer this".
+  ("/inbox/waiting", "Replies",
+   "M9.5 14.5 4.5 9.5l5-5M4.5 9.5h10a5.5 5.5 0 0 1 0 11H12"),
   # SEARCH EARNED A TAB WHEN IT EARNED A SCREEN (2026-09-18). It had no address: the field lives
   # on the list, so reaching "search" meant first loading fifty conversations you did not want,
   # and on a phone the field then sits at the top of the screen where a thumb cannot go.
@@ -1163,18 +1166,17 @@ shell.register_section(
     items=[
         {"key": "messages", "label": "Messages", "href": "/inbox/inbox",
          "icon": _TAB_ICON["/inbox/inbox"]},
-        {"key": "today", "label": "Today", "href": "/inbox/",
-         "icon": _TAB_ICON["/inbox/"]},
-        # DRAFTS SITS SECOND, NEXT TO MESSAGES, because it is the same queue seen from the other
-        # end: Messages is who has written to you, Drafts is who is still waiting on an answer.
+        # REPLIES TO SEND SITS SECOND, NEXT TO MESSAGES, because it is the same queue seen from the
+        # other end: Messages is who has written to you; this is the answers waiting for a yes.
+        # "Drafts" until 2026-09-29, when the owner chose the page's own words for it (IA D5).
         # The owner asked for it by name on 2026-09-22 and called the drafting behind it "one of
         # the killer features for the unified inbox — the big time-saver".
         #
         # ROUTE `/inbox/waiting`, LABEL "Drafts". `/inbox/drafts` is already the AI-account form
         # (§2.6) — a misnamed route from before this screen existed. Renaming it today would
         # break a link somebody may already hold; it should move in its own change.
-        {"key": "waiting", "label": "Drafts", "href": "/inbox/waiting",
-         "icon": _TAB_ICON["/inbox/inbox"]},
+        {"key": "waiting", "label": "Replies to send", "href": "/inbox/waiting",
+         "icon": _TAB_ICON["/inbox/waiting"]},
         # SEARCH IS LISTED HERE BECAUSE IT IS A SCREEN OF THIS SECTION, and leaving it out was a
         # real defect rather than an omission: `shell.is_current` falls back to the section's own
         # href for a path no item claims, so standing on /inbox/search the rail lit *Today*. A
@@ -1251,7 +1253,7 @@ def _tabbar(here: str) -> str:
     except Exception:                                    # noqa: BLE001 — a tab bar never 500s
         pass
     for href, label, d in _TABS:
-        on = " on" if (here == href or (href != "/inbox/" and here.startswith(href))) else ""
+        on = " on" if (here == href or here.startswith(href + "/")) else ""
         cur = ' aria-current="page"' if on else ""
         # A DOT, NOT A NUMBER — owner, 2026-09-17, choosing between the two rendered side by
         # side. From another screen the only question is whether anything is waiting, and a dot
@@ -1398,18 +1400,6 @@ def _menu_button() -> str:
             f'aria-controls="railnav">{_HAM}</label>')
 
 
-def _daystamp(day: str) -> str:
-    """The date, as a caption on the Today heading — "" when this render has no day to show.
-
-    IT USED TO LIVE IN THE TITLE BAR, and the bar is now mobile-only, so on a desktop the date
-    simply vanished. Moving it here is the owner's instruction and it is also the better place:
-    the bar is chrome that repeats on every screen of the machine, while the date is a fact
-    about THIS one.
-    """
-    d = str(day or "").strip()
-    return f'<span class="daystamp">{_esc(d)}</span>' if d else ""
-
-
 def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> str:
     brand = dash.brand()
     # HIS CHOICE IS STAMPED ON <html>. No stamp means he has never chosen, and that renders
@@ -1427,7 +1417,7 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
         # UNSTAMPED IS WHITE, not "ask the OS". Declaring the dark variant here would paint a
         # black band above a white app on an installed iOS home-screen icon — the status bar
         # following a preference the page itself no longer follows.
-        tc = f'<meta name="theme-color" content="{_THEME_BG["light"]}">'
+        tc = f'<meta name="theme-color" content="{_THEME_BG["light"]}">' + _core_theme.status_bar("light")
     return f"""<!doctype html><html lang="en"{stamp}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
@@ -1438,12 +1428,11 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
      `Notification` even exists, and this legacy pair is what older iOS reads for the same thing.
      Both cost one line and the failure they prevent is silent. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>{_esc(brand)} · {APP_TITLE}</title>{_look.head_tags()}<style>{CSS}</style></head>
 <body{' class="ib"' if wide else ''}>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
-<div class="bar"><div class="bar-in">{_look.header_mark()}
-<span class="brand">{APP_TITLE}</span>{_menu_button()}</div></div>
+<div class="bar"><div class="bar-in">{_menu_button()}{_look.header_mark()}
+<span class="brand">{APP_TITLE}</span></div></div>
 <label class="scrim" for="navtoggle" aria-label="Close menu"></label>
 <div class="lay">{_rail(here or request.path)}
 <main class="main"><div class="wrap">{body}</div></main></div>
@@ -1452,79 +1441,6 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
 
 
 # ── Today ───────────────────────────────────────────────────────────────────────────────────
-def _rows(items: list, *, needs: bool = False) -> str:
-    """A list of {text, value?, href?} as rows. NO INVENTED NUMBER: an item with no `value` renders
-    as a sentence, not as a zero — the same rule the morning review keeps, because "0" and "nothing
-    to report" are different claims and a dashboard that conflates them starts lying quietly.
-
-    AN `href` IS A LINK, and this is the half that was missing. The report writes "3 conversations
-    are waiting on your reply" into `needs_you` WITH `href: /inbox/inbox` — and this function
-    rendered `text` and `value` only, so the one instruction on the first screen a buyer opens
-    landed as dead text beside a number. The row he most needs to act on was the row he could not
-    tap.
-
-    RESOLVED AGAINST THE LIVE URL MAP, never trusted. The href arrives from a REPORTER, which is a
-    different module with no idea which pages this box serves — and a reporter is the kind of
-    producer that outlives the screen it was written for. An unserved path renders as the plain
-    row it was before, which is exactly what it should degrade to.
-    """
-    out = []
-    for it in items:
-        n = it.get("value")
-        cell = f'<span class="n">{_esc(n)}</span>' if n is not None else ""
-        inner = f'{cell}<span class="t">{_esc(it.get("text"))}</span>'
-        go = _live(str(it.get("href") or "")) if it.get("href") else ""
-        out.append(f'<a class="row go" href="{_esc(go)}">{inner}</a>' if go
-                   else f'<div class="row">{inner}</div>')
-    return f'<div class="card{" needs" if needs else ""}">{"".join(out)}</div>'
-
-
-def _first_run(day: str = "") -> str:
-    """TODAY, ON A BOX NOTHING CAN REACH — the set-up, not a report.
-
-    Measured by rendering it on a bare box (2026-09-16): a customer who had just bought a unified
-    inbox was greeted with a website uptime report — a dash for the headline, "— of checks answered
-    today", "0 checks on your site", and two rails asking for a web address. Not one word about
-    messages. The report is not wrong; it is not what this person came for, and this is the screen
-    the app opens on.
-
-    THE SAME TEST AND THE SAME BUTTON AS THE EMPTY INBOX, deliberately: two screens that disagree
-    about whether the box is listening, or about where to send him, is worse than either being
-    wrong on its own. The button is absent when this box serves nowhere to put it.
-    """
-    go = _connect_href()
-    return (f'<h1>Today{_daystamp(day)}</h1><div class="head">'
-            '<div class="v">Your box is running.</div>'
-            '<div class="l">Nothing is connected to it yet, so there is nothing here to report. '
-            'Connect your inbox and this screen fills itself.</div></div>'
-            + (f'<div class="card"><div class="setrow">'
-               '<b>What lands here once you do</b>'
-               '<span>Every message anyone sends you, in one list — and each morning, what came '
-               'in overnight and who is still waiting on you.</span>'
-               f'<p style="margin:10px 0 0"><a class="btn" href="{go}">{_connect_verb(go)}</a>'
-               '</p></div></div>' if go else ""))
-
-
-# ── the greeting this screen now opens with ─────────────────────────────────────────────────
-#
-# OWNER, 2026-09-18, after putting a competitor's phone screen beside ours: build the Today
-# header. Theirs opens with a greeting and one plain sentence — "You've got 4 new and 9 active
-# conversations" — where ours opened with the word "Today" in an h1.
-#
-# "Today" WAS TELLING HIM NOTHING HE DID NOT ALREADY KNOW. The date is in the bar directly above
-# it and the word is on the tab he pressed to get here, so the largest type on the first screen
-# of the app was spent on the one fact already stated twice. The greeting takes that space.
-#
-# IT COMPUTES NOTHING, WHICH IS THE RULE THIS SCREEN LIVES BY. Every number here is read out of
-# the figures the REPORT produced — the same producer as the 8am message — so the sentence a
-# person reads at breakfast and the one on the screen can never disagree. That is why `unread`
-# was added to `report()` rather than counted here, and it is the same count the dot on the Inbox
-# tab uses, so the phone's mark cannot drift from the morning's sentence either.
-#
-# AND THERE IS NO NAME IN IT. Theirs says "Good morning, Sarah." This box does not know a first
-# name — `dash.brand()` is the BUSINESS, and greeting a plumber by his company name reads like a
-# utility bill. A greeting with no name is better than a greeting with the wrong one, and better
-# than one invented for a mock.
 def _reader_zone():
     """THE CLOCK OF THE PERSON READING, not the box's. -> a tzinfo, or None for the host's clock.
 
@@ -1549,179 +1465,15 @@ def _reader_zone():
         return None
 
 
-def _hello(figs: dict) -> str:
-    """Time of day, then one true sentence built from the report's own figures."""
-    from datetime import datetime
-    # THE READER'S CLOCK, NOT THE BOX'S — see `_reader_zone`. Three words only, and only these:
-    # "Just good morning, good afternoon and good evening" (owner, 2026-09-24).
-    hour = datetime.now(_reader_zone()).hour
-    word = "Good morning" if hour < 12 else ("Good afternoon" if hour < 17 else "Good evening")
-
-    # NO INBOX SEGMENT, NO SENTENCE. The report stays silent about the inbox on a box that has
-    # never had a conversation, and inventing "you have 0 of everything" for it is the row of
-    # zeroes this page exists not to show. The greeting stands alone and the report's own
-    # headline speaks underneath.
-    if "inbox_waiting" not in (figs or {}):
-        return f'<div class="hello"><h1>{word}.</h1></div>'
-
-    def _n(key: str) -> int:
-        try:
-            return int((figs.get(key) or {}).get("value") or 0)
-        except (TypeError, ValueError):
-            return 0
-
-    unread, waiting = _n("inbox_unread"), _n("inbox_waiting")
-    who = "person" if waiting == 1 else "people"
-    if unread and waiting:
-        line = (f'You have <b>{unread} unread</b>, and <b>{waiting} {who}</b> '
-                f'waiting on a reply.')
-    elif unread:
-        line = f'You have <b>{unread} unread</b>. Nobody is waiting on a reply.'
-    elif waiting:
-        line = f'Nothing unread. <b>{waiting} {who}</b> waiting on a reply.'
-    else:
-        # THE GOOD STATE, SAID OUT LOUD. A screen that only speaks when something is wrong is a
-        # screen that only ever nags, and this is the one moment the app has something to tell
-        # him that is not a job.
-        line = 'Nothing unread, and nobody waiting. You are caught up.'
-    return f'<div class="hello"><h1>{word}.</h1><p class="line">{line}</p></div>'
-
-
 @blueprint.get("/inbox/")
 @blueprint.get("/inbox")
 def r_today():
-    """WHAT HAPPENED TODAY, off the report this machine already writes.
+    """THE INBOX OPENS ON ITS MESSAGES. Owner, 2026-09-29, IA decision D1 (docs/SCOPE_APP_IA.md):
+    three screens summarised the same day, so the day went to the Morning Review and "right now" to
+    the Base Machine, and this app's "Today" screen went. Its address still answers — installed
+    icons, bookmarks and old notifications open it — and sends them to the messages."""
+    return redirect("/inbox/inbox", code=302)
 
-    `marketing/customer_voice/report.report(day, space=…)` is the source — this screen
-    adds no figure of its own and computes nothing. That is deliberate: the 8am message and this
-    page must never be able to disagree, and the only way to guarantee that is one producer.
-
-    A 500 HERE IS WORSE THAN A THIN PAGE. The report reads a dozen tables and a box mid-migration
-    can be missing one; the lead app's front page 500'd exactly that way on `daily_reports`. So the
-    read is guarded and the screen says it could not read rather than showing a stack trace.
-    """
-    from core.report import today as _today
-    day = _today()
-    label = day.strftime("%a %-d %b") if isinstance(day, date) else str(day)
-    try:
-        from marketing.customer_voice.report import report as _report
-        # THE SPACE THIS SCREEN IS SHOWING, not the box's first one. Without this the figures
-        # above the list belong to a different tenant than the list — see `report()`.
-        v = _report(day, space=_space())
-    except Exception as e:                       # noqa: BLE001 — the front page outranks the cause
-        log.warning("voice.report_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
-        # A BOX NOTHING CAN REACH LEADS WITH THE SET-UP HERE TOO — and STILL SAYS THE REPORT
-        # COULD NOT BE READ. My first version replaced the sentence, and CI was right to refuse
-        # it: an unreadable report is a real fault, and a screen that swallows one because the
-        # buyer has nothing connected yet is how a broken box looks fine to everybody. What was
-        # wrong was the ORDER, not the sentence. On a bare box the fault is not his first screen
-        # and not the headline; it sits under the set-up, where it belongs — true for him, still
-        # there for whoever is debugging the box.
-        fault = ('<div class="quiet">Today\'s report could not be read on this box. '
-                 'Nothing has been lost; the next poll writes it again.</div>')
-        body = (_first_run(label) + fault if _nothing_arrives_yet() else
-                f'<h1>Today{_daystamp(label)}</h1><div class="head"><div class="v">—</div>'
-                '<div class="l">Today\'s report could not be read on this box. '
-                'Nothing has been lost; the next poll writes it again.</div></div>')
-        return _shell(body, day=label), 200
-
-    # ── THE FIRST SCREEN A BUYER EVER SEES ──────────────────────────────────────────────
-    # MEASURED ON A BARE BOX, 2026-09-16, by rendering it: Today greeted a customer who had just
-    # bought a unified inbox with a WEBSITE UPTIME REPORT — a dash for the headline, "— of checks
-    # answered today", "0 checks on your site", and two rails asking for a web address. Not one
-    # word about messages, which is the product. The report is not wrong; it is simply not what
-    # this person came for, and it is the screen the app opens on.
-    #
-    # SO ON A BOX NOTHING CAN REACH, TODAY IS THE SET-UP. `_nothing_arrives_yet()` is the same
-    # test the empty inbox uses, and the same button — resolved from the live url_map — so the two
-    # screens can never disagree about whether this box is listening or about where to send him.
-    #
-    # NOTHING IS DELETED, ONLY RE-ORDERED. Everything the report produced still renders below
-    # this: a buyer who HAS named a website still sees it. What changes is what is at the top on
-    # the day he arrives, and a headline of "0 rails set up" is not it.
-    first_run = _nothing_arrives_yet()
-    if first_run:
-        parts = [_first_run(label)]
-    else:
-        head = v.get("headline") or {}
-        # THE GREETING IS THE HEADING NOW, and the report's own headline keeps its block right
-        # under it. Deleting that block to make room would have thrown away the report's lead
-        # figure for a nicer opening, which is a trade this page should never make.
-        parts = [_hello(v.get("figures") or {})]
-        # A DASH IS NOT A FIGURE, and under the new greeting it was actively bad: rendered on a
-        # box with no website, this block put a huge "—" captioned "good checks today" directly
-        # beneath "you have 4 unread, and 5 people waiting on a reply". The greeting had just
-        # said something true and useful, and the largest thing under it was a shrug.
-        #
-        # THE ADJACENCY IS WHAT MADE IT WRONG, so it is mine to fix rather than inherited: the
-        # block was fine under an `<h1>Today</h1>` that promised nothing. It is kept whenever it
-        # carries a real value — a box that watches a website still sees its headline.
-        _hv = str(head.get("value") or "").strip()
-        # SAID ONCE. The report's inbox headline is "N waiting on you", which the greeting has just
-        # said in a sentence; on the owner's demo box the same 2 appeared four times on one screen.
-        _said_hv = ("inbox_waiting" in (v.get("figures") or {})
-                    and str(head.get("label") or "") == "waiting on you")
-        if _hv and _hv != "—" and not _said_hv:
-            parts.append(f'<div class="head">'
-                         f'<div class="v">{_esc(_hv)}</div>'
-                         f'<div class="l">{_esc(head.get("label") or "")}</div></div>')
-
-    # ORDER IS THE MESSAGE: what needs him, then what happened, then what to keep an eye on. The
-    # report already ranks them that way for the 8am send and this screen does not re-sort them.
-    if v.get("needs_you"):
-        parts.append('<h1>Needs you</h1>' + _rows(v["needs_you"], needs=True))
-
-    figs = v.get("figures") or {}
-    # EACH NUMBER ONCE, where it is most use. The greeting says unread and waiting in a sentence,
-    # and "What happened" says how many came in; the 8am message needs those as figures, this
-    # screen has already said them. Only the tiles nothing above or below repeats are drawn.
-    _said = set()
-    if "inbox_waiting" in figs and not first_run:
-        _said |= {"inbox_waiting", "inbox_unread"}
-    if any(str(r.get("text") or "") == "messages came in" for r in (v.get("happened") or [])):
-        _said.add("inbox_today")
-    if figs:
-        # A DASH IS NOT A FIGURE HERE EITHER, and it is the same rule as the headline above. On
-        # an inbox-only box — which is most boxes this product is sold to — the website segment
-        # contributes "— of checks answered today", so the greeting's real sentence was landing
-        # on top of a tile that shrugs. A figure with nothing in it is the row of zeroes this
-        # screen's own comments keep deleting; it is dropped, and the tiles that know something
-        # close the gap.
-        cells = "".join(f'<div class="fig"><div class="v">{_esc(f.get("value"))}</div>'
-                        f'<div class="l">{_esc(f.get("label"))}</div></div>'
-                        for k, f in figs.items()
-                        if k not in _said and str(f.get("value") or "").strip() not in ("", "—"))
-        if cells:
-            parts.append(f'<div class="figs">{cells}</div>')
-
-    if v.get("happened"):
-        parts.append('<h1>What happened</h1>' + _rows(v["happened"]))
-    # THE WATCH LIST'S INBOX LINE is the greeting's number again ("Inbox — 2 waiting on you").
-    _watch = [r for r in (v.get("watch") or [])
-              if not ("inbox_waiting" in _said and "waiting on you" in str(r.get("text") or ""))]
-    if _watch:
-        parts.append('<h1>Worth watching</h1>' + _rows(_watch))
-
-    # A QUIET DAY SAYS SO, ONCE. An empty screen reads as a broken app, which is the single most
-    # expensive thing a page like this can do — it is the defect the lead app spent two days
-    # removing from every one of its branches.
-    if (not any(v.get(k) for k in ("needs_you", "happened", "watch")) and not figs
-            and not first_run):
-        # NOT ON A FIRST RUN, because there it is the wrong of the two true sentences. "The rails
-        # you own are being polled" is reassurance for a box that is listening and has heard
-        # nothing; said to a box with nothing connected it promises a poll that will never find
-        # anything — the same lie the empty inbox screen was just fixed for telling.
-        parts.append('<div class="quiet">Nothing has come through yet today. '
-                     'Your accounts are being polled; the first thing they find appears here.'
-                     '</div>')
-
-    # THE FOOTER EXPLAINS FIGURES, so it only belongs under some. "Every figure here is read from
-    # your own rails" under a screen carrying no figure is the same small untruth this app keeps
-    # deleting — and on a first run that is exactly what it was.
-    if figs or v.get("happened"):
-        parts.append('<div class="foot">Every figure here comes from your own accounts. '
-                     'It is the same report that goes out at 8am.</div>')
-    return _shell("".join(parts), day=label), 200
 
 # ── time a person can read ──────────────────────────────────────────────────────────────────
 def _when(v) -> str:
@@ -3515,7 +3267,8 @@ def r_theme():
     return resp
 
 
-@functools.lru_cache(maxsize=4)
+# NOT CACHED HERE ANY MORE: core's answer caches by the icon's version, and a cache here outlived an
+# upload — the inbox served the old mark until the box restarted (found by its test, 2026-09-29).
 def _png(size: int) -> bytes:
     """The app's icon at `size`: the Ownbox mark, drawn by core/dash/look.py.
 
@@ -3528,8 +3281,11 @@ def _png(size: int) -> bytes:
     WHY BYTES IN THE MODULE still holds. A manifest's `icons` are URLs the browser fetches, so this
     app keeps its own two addresses; the picture comes from core, which every box has, and never
     from `sites/`, which no box has. The drawing is Pillow-free for the same reason as before.
+
+    THE CLIENT'S ICON ONCE THEY UPLOAD ONE (owner, 2026-09-29: it appears "everywhere"), through
+    core's one answer for every home screen, so this app never learns that an upload exists.
     """
-    return _look.mark_png(size)
+    return _look.app_png(size)
 
 
 @blueprint.get("/inbox/manifest.webmanifest")
@@ -3540,22 +3296,25 @@ def r_manifest():
     push on an iPhone, ever."""
     import json
     from flask import Response
+    # THE WHOLE BOX IS IN SCOPE, AND THE APP IS STILL THIS ONE (owner, 2026-09-29: "keep you inside").
+    # The menu reaches System Settings and the Base Machine, and outside its scope an iPhone opened
+    # those in a browser sheet with a Done button. `id` pins who the app is — it was its start_url,
+    # "/inbox/", and still is — so widening the scope changes where it goes, not what it is.
     m = {
+        "id": "/inbox/",
         "name": f"{dash.brand()} · {APP_TITLE}",
         "short_name": APP_TITLE,
-        "start_url": "/inbox/",
-        "scope": "/inbox/",
+        # THE APP OPENS ON ITS MESSAGES (IA D1, 2026-09-29). `id` stays "/inbox/": it is the
+        # installed app's identity, and changing it would make every installed icon a stranger.
+        "start_url": "/inbox/inbox",
+        "scope": "/",
         "display": "standalone",
         "background_color": THEME,
         "theme_color": THEME,
-        "icons": [
-            # BOTH SIZES, because Chrome's installability criteria want a 192 and a 512, and
-            # `maskable` so an Android launcher crops our own safe zone rather than a square.
-            {"src": "/inbox/icon-192.png", "sizes": "192x192", "type": "image/png",
-             "purpose": "any maskable"},
-            {"src": "/inbox/icon-512.png", "sizes": "512x512", "type": "image/png",
-             "purpose": "any maskable"},
-        ],
+        # BOTH SIZES, because Chrome's installability criteria want a 192 and a 512, and `maskable`
+        # so an Android launcher crops our own safe zone rather than a square. At this app's own two
+        # addresses, versioned once a client icon is uploaded so a phone fetches the new one.
+        "icons": _look.manifest_icons("/inbox/icon-{n}.png"),
     }
     return Response(json.dumps(m), mimetype="application/manifest+json")
 
@@ -5219,15 +4978,16 @@ def r_waiting():
 
     rows = drafts.waiting(space, limit=200)
     if not rows:
-        body = ('<h1>Drafts</h1>'
-                '<div class="card"><div class="row"><span class="t">Nothing is waiting. When a '
+        # THE PAGE SAYS WHAT ITS MENU ROW SAYS: "Replies to send" (IA D5, 2026-09-29).
+        body = ('<h1>Replies to send</h1>'
+                '<div class="card"><div class="row"><span class="t">Nothing to send. When a '
                 'customer writes and your box drafts a reply, it appears here for you to read '
                 'and send.</span></div></div>'
                 '<div class="foot"><a href="/inbox/inbox">← All conversations</a></div>')
         return _shell(note + body, here="/inbox/waiting"), 200
 
     n = len(rows)
-    body = (f'<h1>{n} {"reply" if n == 1 else "replies"} waiting.</h1>'
+    body = (f'<h1>{n} {"reply" if n == 1 else "replies"} to send.</h1>'
             '<p class="quiet">Your box wrote these. Read them, tick the ones you are happy with, '
             'and send. Nothing goes out until you press the button — and anything you want to '
             'change, open the conversation and edit it there.</p>'

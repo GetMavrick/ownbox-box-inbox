@@ -119,14 +119,23 @@ def _restore() -> None:
 # ── the five ────────────────────────────────────────────────────────────────────────────────────
 
 def test_a_zero_is_a_number_and_survives_to_the_screen():
-    """`str(s or "")` is how a dashboard loses every zero it was asked to show."""
+    """`str(s or "")` is how a dashboard loses every zero it was asked to show — so `_esc` keeps
+    one. WHETHER A ZERO IS DRAWN is a different question, and the owner answered it on 2026-09-29,
+    looking at a new box's page of zeros: *"If nothing exists, we don't wanna have zeros"* and
+    *"If a line doesn't have data, it should not be displayed."* So the escaping keeps the zero
+    and the page decides, by one rule (`review.has_value`), not to draw a line that is one."""
     ok("_esc(0) keeps the zero", home._esc(0) == "0", repr(home._esc(0)))
     ok("_esc(False) keeps it too", home._esc(False) == "False", repr(home._esc(False)))
     ok("...and None is still the only absence", home._esc(None) == "")
     _reports(lead_machine={"title": "Lead",
                            "headline": {"value": 0, "label": "emails sent"}})
     words = _text(_page())
-    ok("a reported zero reaches the page", "0 emails sent" in words, words[-200:])
+    ok("a reported zero is not drawn: a line with no data is no line", "emails sent" not in words,
+       words[-200:])
+    _reports(lead_machine={"title": "Lead",
+                           "headline": {"value": 3, "label": "emails sent"}})
+    words = _text(_page())
+    ok("...while a real number is", "3 emails sent" in words, words[-200:])
 
 
 def test_the_headline_says_words_not_just_a_number():
@@ -333,10 +342,10 @@ def test_the_phone_gets_a_drawer_not_a_stack():
        'class="scrim"' in html_ and html_.count('for="navtoggle"') == 2)
     ok("...driven by a control a keyboard can reach, not a hidden input",
        ".navtoggle{position:absolute" in html_ and 'type="checkbox" id="navtoggle"' in html_)
-    # FROM THE RIGHT since 2026-09-29: the menu button moved to the top right (owner), and the drawer
-    # comes out from the side the thumb pressed.
-    ok("the drawer is off-canvas until asked for, on the right where the button is",
-       "transform:translateX(101%)" in html_ and "top:0;bottom:0;right:0" in html_)
+    # FROM THE LEFT, where the button is. It moved right on 2026-09-29 and came back left the same
+    # afternoon (owner: "I think we should move it back to the left. It has a better flow and feel").
+    ok("the drawer is off-canvas until asked for, on the left where the button is",
+       "transform:translateX(-101%)" in html_ and "top:0;bottom:0;left:0" in html_)
     ok("...and opening it is what brings it back",
        ".navtoggle:checked~.lay .rail{transform:none" in html_)
     ok("...with motion respected", "prefers-reduced-motion" in html_)
@@ -544,14 +553,15 @@ def test_the_boxs_own_cards_read_what_the_box_records():
     words = _text(body)
     ok("the machine's card says what state it is in, where it lives and how full it is",
        "This machine" in words and "Address" in words and " GB of " in words, words[:200])
-    ok("...and says when the last nightly backup was, or that none has been taken yet",
-       "Last backup" in words, words[:200])
+    # NO BACKUP YET IS NO ROW, not a row saying so (owner, 2026-09-29); the next test holds both.
     q = dict((lbl, int(v)) for v, lbl in re.findall(
         r'<div class="ui-metric"><b>(\d+)</b><span>(Running|Waiting|Done today)</span></div>', body))
-    ok("the queue counts the work actually in the jobs table", q == {"Running": 1, "Waiting": 0, "Done today": 2},
-       str(q))
-    ok("...and names what is running now, by its intent and id",
-       re.search(r'class="mono now">.*draft_reply · ' + re.escape(str(ids[0])[:4]), body) is not None)
+    ok("the queue counts the work actually in the jobs table, and draws no zero",
+       q == {"Running": 1, "Done today": 2}, str(q))
+    # IN WORDS, NOT ITS CODE NAME AND ID: "draft_reply · 90b7" read like a log line to a buyer.
+    ok("...and says what is running now, in words",
+       re.search(r'class="now">.*Draft reply', body) is not None
+       and "draft_reply" not in body and str(ids[0])[:4] + " ·" not in body)
 
 
 def test_last_backup_is_the_newest_nightly_copy():
@@ -570,7 +580,8 @@ def test_last_backup_is_the_newest_nightly_copy():
            is not None, words[words.find("Last backup"):][:60])
     finally:
         f.unlink()
-    ok("...and with none there it says so plainly", "No nightly copy yet" in _text(_page()))
+    ok("...and with none there, there is no row: a line without data is not drawn",
+       "Last backup" not in _text(_page()))
 
 
 def test_the_owners_cards_are_the_owners():
@@ -581,7 +592,8 @@ def test_the_owners_cards_are_the_owners():
     sid, _ = seats.mint("Claude Code", "act")
     seats.touch(sid)
     owner = _text(_page())
-    ok("the owner sees what is connected, named", "MCP" in owner and "1 client connected" in owner
+    # "ASSISTANTS", NOT "MCP" (owner, 2026-09-29, IA D4): what is connected, not the protocol.
+    ok("the owner sees what is connected, named", "Assistants" in owner and "1 client connected" in owner
        and "Claude Code" in owner, owner[:240])
     ok("...and the AI account's state", "Your AI" in owner)
     member = state.add_user("rosa@northwind.example", role="member")["id"]

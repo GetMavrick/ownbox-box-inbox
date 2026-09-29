@@ -1,0 +1,21 @@
+# THE BOX'S CHECK-IN (docs/PLAN_NO_GHOST_BOXES.md P1): tells Ownbox this box is running, signed with its
+# own update key. No customer data; the owner sees the last message and can switch it off on
+# Settings -> Updates. Never fails the unit: a check-in that cannot be sent is retried at the next tick.
+[Unit]
+Description=AIOS check-in: tell Ownbox this box is running
+# Only a sold box checks in: it has a provision.json and its own update key. systemd checks these before
+# starting any process, so on any other machine the timer costs nothing.
+ConditionPathExists=/opt/aios/provision.json
+ConditionPathExists=/var/lib/aios/update_key
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aios
+EnvironmentFile=/opt/aios/.env
+ExecStart=/opt/aios/.venv/bin/python -m core.checkin
+TimeoutStartSec=60
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true

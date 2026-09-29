@@ -102,7 +102,7 @@ def published_since(iso: str) -> int:
 
 
 def mark(plan_id: int, status: str, *, slug: str | None = None, url: str | None = None,
-         refusal: str | None = None) -> None:
+         refusal: str | None = None, title: str | None = None) -> None:
     """Record what the job did with a row.
 
     `published` stamps `published_at` and clears the request; `refused` and `failed` need a reason,
@@ -121,6 +121,9 @@ def mark(plan_id: int, status: str, *, slug: str | None = None, url: str | None 
     if url is not None:
         sets.append("url = ?")
         args.append(url)
+    if title is not None and str(title).strip():         # the published article's own title
+        sets.append("title = ?")
+        args.append(str(title).strip()[:300])
     if status == "published":
         sets += ["published_at = ?", "requested_at = NULL", "refusal = NULL"]
         args.append(now)

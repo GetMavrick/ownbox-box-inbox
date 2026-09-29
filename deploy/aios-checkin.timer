@@ -1,0 +1,12 @@
+# Two minutes after boot, then every six hours, spread so a fleet does not arrive in the same second.
+# scripts/box_update.sh also starts one after every update attempt.
+[Unit]
+Description=AIOS check-in, every six hours
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=6h
+RandomizedDelaySec=20min
+
+[Install]
+WantedBy=timers.target

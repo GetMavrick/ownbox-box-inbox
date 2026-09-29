@@ -166,7 +166,7 @@ def _write_and_publish(row: dict) -> dict:
         log.warning("aeo.topic_failed", id=row_id, error=why)
         return {"id": row_id, "status": "failed", "refusal": why}
 
-    plan.mark(row_id, "published", slug=result["slug"], url=result["url"])
+    plan.mark(row_id, "published", slug=result["slug"], url=result["url"], title=fields.get("title"))
     # A ping needs an absolute URL. `is_configured` requires one, so this guard is belt and braces.
     # And a ping NEVER undoes a publish: the article is live and the row says so, so a failure
     # here is a slower crawl, logged, not an exception out of the worker's tick.

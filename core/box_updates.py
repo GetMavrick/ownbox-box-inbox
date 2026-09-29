@@ -152,6 +152,12 @@ def state() -> dict:
                    said="A newer release was offered but could not be verified, so this box "
                         "stayed on the one it trusts. That is the safe outcome, and it is worth "
                         "telling us about.")
+    elif status == "no_managed":
+        # THE LAST CHECK STOPPED BECAUSE MANAGED HAD ENDED, and the plan has since come back on (while
+        # it is still off, the rule below says so instead). Nothing is wrong: the next check fetches.
+        out.update(state="resumed", ok=None,
+                   said="Updates are back on with Ownbox Managed. This box checks twice a day, and "
+                        "the next check installs anything newer. Nothing for you to do.")
     elif status == "rolled_back":
         out.update(state="rolled_back", ok=False,
                    said=f"An update was installed and then undone, so this box is back on "
@@ -167,8 +173,8 @@ def state() -> dict:
                    said="This box reported an update result this page does not recognise.")
 
     # MANAGED ENDED OUTRANKS EVERYTHING (owner, 2026-09-23: updates come with Managed, and stop at the
-    # end of the period already paid for). The box can no longer fetch releases, so every state above
-    # would read as a failure — "could not check" — when the truth is a plan that ended.
+    # end of the period already paid for). The box's own updater stops before fetching (core/release/
+    # update.py, --honour-plan), so this sentence is true, not a label over updates still arriving.
     p = plan()
     if p.get("updates") == "off":
         when = _day(p.get("until"))
@@ -338,7 +344,9 @@ def plan() -> dict:
 
 def set_plan(updates: str, until: str = "") -> None:
     """Store what the provisioner says. Only "on" and "off" are accepted; anything else is refused.
-    This only EXPLAINS: what stops updates is the key removed on Ownbox's side."""
+    The box's updater reads it and fetches nothing while it says "off" (core/release/update.py,
+    --honour-plan; docs/PLAN_NO_GHOST_BOXES.md P5). The key removed on Ownbox's side is the second lock:
+    the box repository is public, so that removal alone never stopped the https mirror."""
     if updates not in ("on", "off"):
         raise ValueError(f"unknown updates plan {updates!r}")
     until = str(until or "")[:40]

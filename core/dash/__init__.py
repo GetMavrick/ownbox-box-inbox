@@ -159,99 +159,106 @@ def require_session():
 # stylesheet, which is shipped to the browser verbatim on every page — `test_client_home` caught
 # the word "every" in it and `test_lead_dash` read the date in it as a phone number. A comment in
 # a CSS string is page weight and page content, not a note to the next developer.
+# THE OPERATOR CONSOLE, IN THE BOX'S LOOK (owner, 2026-09-29: "Both, now" — everything on the box is one
+# design; docs/SCOPE_MOBILE_APP_REDESIGN.md §22). Every colour below is a box.css token, so the console
+# follows the person's own Light, Dark or Automatic like the other screens; the shapes are unchanged.
+# THE EXPLANATION LIVES HERE, NOT IN THE CSS: comments inside the string ship in the page, and the
+# client's home refuses our vocabulary ("every", "config", …) while the lead listing refuses any run of
+# digits long enough to be a phone number — a date in a CSS comment tripped the second.
 CSS = """
+/* The operator console, in the box's look: box.css tokens, so it follows the person's own theme. */
 *{box-sizing:border-box;margin:0;padding:0}
-body{min-height:100vh;background:#15181C;color:#E8E9EA;display:flex;flex-direction:column;
-font:14px/1.5 "Inter Tight","Inter",-apple-system,system-ui,sans-serif}
+body{min-height:100vh;background:var(--ground);color:var(--ink);display:flex;flex-direction:column;
+font:14px/1.5 var(--sans)}
 a{text-decoration:none;color:inherit}
-header{border-bottom:1px solid rgba(255,255,255,.1);padding:16px 24px;display:flex;
-align-items:center;gap:16px}
+header{border-bottom:1px solid var(--hairline);padding:16px 24px;display:flex;
+align-items:center;gap:10px 16px;flex-wrap:wrap}
 .crumb{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:500}
-.crumb .b1{color:rgba(255,255,255,.4)} .crumb .b1:hover{opacity:.8}
-.crumb .sep{color:rgba(255,255,255,.2)}
-.hdr-right{margin-left:auto;display:flex;align-items:center;gap:12px}
-.btn-new{padding:8px 16px;background:rgba(255,255,255,.1);color:#fff;font-size:14px;
-font-weight:500;border-radius:8px;border:1px solid rgba(255,255,255,.1);cursor:pointer;
-display:inline-block;font-family:inherit}
-.btn-new:hover{background:rgba(255,255,255,.15)}
+.crumb .b1{color:var(--ink-3)} .crumb .b1:hover{opacity:.8}
+.crumb .sep{color:var(--ink-3)}
+/* THE LINKS WRAP ON A MOBILE rather than running off the edge a word at a time (found by rendering
+   the console at 390px: "Open the app" stacked one word per line past the right edge). */
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
+.hdr-right a{white-space:nowrap}
+.btn-new{padding:8px 16px;background:var(--card);color:var(--ink);font-size:14px;
+font-weight:500;border-radius:var(--r-pill);border:1px solid var(--line);cursor:pointer;
+display:inline-block;font-family:inherit;width:auto;min-height:0}
+.btn-new:hover{background:var(--wash)}
 main{flex:1;width:100%;margin:0 auto;padding:40px 24px;display:flex;
 flex-direction:column;gap:32px}
 main.wide{max-width:896px} main.narrow{max-width:672px}
-h1{font-size:30px;font-weight:700;color:#fff}
-.projid{color:rgba(255,255,255,.4);font-size:14px;margin-top:4px;
-font-family:ui-monospace,Menlo,monospace}
+h1{font-size:30px;font-weight:700;color:var(--ink)}
+.projid{color:var(--ink-3);font-size:14px;margin-top:4px;font-family:var(--mono)}
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:24px}
 .stat{display:flex;flex-direction:column;gap:4px}
-.lbl{font-size:10px;font-family:ui-monospace,Menlo,monospace;
-color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.1em}
-.stat .v{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums;color:#fff}
-.stat .v.green{color:#4ade80}
-hr{border:0;border-top:1px solid rgba(255,255,255,.1)}
+.lbl{font-size:10px;font-family:var(--mono);color:var(--ink-3);text-transform:uppercase;letter-spacing:.1em}
+.stat .v{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink)}
+.stat .v.green{color:var(--ok)}
+hr{border:0;border-top:1px solid var(--hairline)}
 .chips{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
-.chip{padding:6px 14px;border-radius:8px;font-size:14px;font-weight:500;
-color:rgba(255,255,255,.5);display:inline-block}
-.chip:hover{color:rgba(255,255,255,.7);background:rgba(255,255,255,.05)}
-.chip.on{background:rgba(255,255,255,.15);color:#fff}
-.chip .n{margin-left:6px;font-size:12px;font-family:ui-monospace,Menlo,monospace;
-color:rgba(255,255,255,.3)}
-.chip.on .n{color:rgba(255,255,255,.6)}
+.chip{padding:6px 14px;border-radius:var(--r-pill);font-size:14px;font-weight:500;
+color:var(--ink-2);display:inline-block}
+.chip:hover{color:var(--ink);background:var(--wash)}
+.chip.on{background:var(--ink);color:var(--on-ink)}
+.chip .n{margin-left:6px;font-size:12px;font-family:var(--mono);color:var(--ink-3)}
+.chip.on .n{color:var(--on-ink);opacity:.75}
 .rows{display:flex;flex-direction:column}
 .rowa{display:flex;align-items:center;gap:16px;padding:16px;margin:0 -16px;
-border-radius:8px;border-bottom:1px solid rgba(255,255,255,.05)}
-.rowa:hover{background:rgba(255,255,255,.03)}
+border-radius:8px;border-bottom:1px solid var(--hairline)}
+.rowa:hover{background:var(--wash)}
 .icbox{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;
-justify-content:center;font-size:14px;flex:none}
-.icbox.green{background:rgba(20,83,45,.4);color:#4ade80}
-.icbox.blue{background:rgba(30,58,138,.4);color:#60a5fa;font-weight:700}
-.icbox.red{background:rgba(127,29,29,.4);color:#f87171}
-.icbox.amber{background:rgba(120,53,15,.4);color:#fcd34d}
-.icbox.gray{background:rgba(255,255,255,.06);color:rgba(255,255,255,.4)}
+justify-content:center;font-size:14px;flex:none;background:var(--wash)}
+.icbox.green{color:var(--ok)}
+.icbox.blue{color:var(--blue);font-weight:700}
+.icbox.red{color:var(--bad)}
+.icbox.amber{color:var(--warn)}
+.icbox.gray{color:var(--ink-3)}
 .rowa .mid{flex:1;min-width:0}
-.rowa .t{color:#fff;font-size:14px;font-weight:500;white-space:nowrap;
+.rowa .t{color:var(--ink);font-size:14px;font-weight:500;white-space:nowrap;
 overflow:hidden;text-overflow:ellipsis}
-.rowa .m{color:rgba(255,255,255,.4);font-size:12px;margin-top:2px;
-font-family:ui-monospace,Menlo,monospace}
-.pill{font-size:11px;padding:4px 10px;border-radius:9999px;flex:none;
-font-family:ui-monospace,Menlo,monospace}
-.pill.green{background:rgba(20,83,45,.4);color:#86efac}
-.pill.blue{background:rgba(30,58,138,.4);color:#93c5fd}
-.pill.red{background:rgba(127,29,29,.4);color:#fca5a5}
-.pill.amber{background:rgba(120,53,15,.4);color:#fcd34d}
-.pill.gray{background:rgba(255,255,255,.06);color:rgba(255,255,255,.5)}
-.dl{flex:none;color:rgba(255,255,255,.3);font-size:14px;padding:0 4px}
-.dl:hover{color:#5865F2}
-section .val{color:rgba(255,255,255,.8);font-size:14px}
-section .val.strong{color:#fff;font-weight:500}
+.rowa .m{color:var(--ink-3);font-size:12px;margin-top:2px;font-family:var(--mono)}
+.pill{font-size:11px;padding:4px 10px;border-radius:var(--r-pill);flex:none;font-family:var(--mono);
+background:var(--wash);border:1px solid var(--hairline)}
+.pill.green{color:var(--ok)}
+.pill.blue{color:var(--blue)}
+.pill.red{color:var(--bad)}
+.pill.amber{color:var(--warn)}
+.pill.gray{color:var(--ink-2)}
+.dl{flex:none;color:var(--ink-3);font-size:14px;padding:0 4px}
+.dl:hover{color:var(--link)}
+section .val{color:var(--ink-2);font-size:14px}
+section .val.strong{color:var(--ink);font-weight:500}
 .lblrow{display:flex;align-items:center;justify-content:space-between;
 margin-bottom:8px}
 .lbl.mb{display:block;margin-bottom:8px}
-.words{font-size:10px;font-family:ui-monospace,Menlo,monospace;
-color:rgba(255,255,255,.3)}
-.scriptbox{background:rgba(255,255,255,.05);border-radius:8px;padding:12px 16px;
-color:rgba(255,255,255,.8);font-size:14px;line-height:1.625;white-space:pre-wrap}
+.words{font-size:10px;font-family:var(--mono);color:var(--ink-3)}
+.scriptbox{background:var(--wash);border-radius:8px;padding:12px 16px;
+color:var(--ink);font-size:14px;line-height:1.625;white-space:pre-wrap}
 .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:24px}
 .vgroup{display:flex;flex-direction:column;gap:12px}
+/* VIDEO SITS ON BLACK IN EITHER THEME: a player's letterbox is the frame's, not the page's. */
 .vwrap{border-radius:8px;overflow:hidden;background:#000}
 video{width:100%;max-height:480px;border-radius:8px;display:block;background:#000}
-.dlink{display:inline-flex;align-items:center;gap:6px;color:#5865F2;font-size:14px;
+.dlink{display:inline-flex;align-items:center;gap:6px;color:var(--link);font-size:14px;
 font-weight:500}
 .dlink:hover{opacity:.85}
-.okhead{color:#86efac;font-weight:600;font-size:14px}
-.failhead{color:#fca5a5;font-weight:600;font-size:14px}
+.okhead{color:var(--ok);font-weight:600;font-size:14px}
+.failhead{color:var(--bad);font-weight:600;font-size:14px}
 .stack8{display:flex;flex-direction:column;gap:32px}
 select,input[type=text],input[type=email],input[type=tel],input[type=url],
-input[type=number],input[type=password],textarea{background:rgba(255,255,255,.05);
-color:#E8E9EA;border:1px solid rgba(255,255,255,.1);border-radius:8px;
-padding:10px 12px;font:inherit;width:100%}
+input[type=number],input[type=password],textarea{background:var(--card);
+color:var(--ink);border:1px solid var(--line);border-radius:8px;
+padding:10px 12px;font:inherit;font-size:16px;width:100%}
 textarea{min-height:160px;line-height:1.625}
 .formrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.btn-primary{padding:8px 16px;background:#5865F2;color:#fff;font-size:14px;
-font-weight:500;border-radius:8px;border:0;cursor:pointer;font-family:inherit}
+.btn-primary{padding:8px 16px;background:var(--ink);color:var(--on-ink);font-size:14px;
+font-weight:500;border-radius:var(--r-pill);border:0;cursor:pointer;font-family:inherit;
+width:auto;min-height:44px}
 .btn-primary:hover{opacity:.9}
-footer{border-top:1px solid rgba(255,255,255,.05);padding:16px 24px;text-align:center}
-footer p{font-size:12px;color:rgba(255,255,255,.2)}
+footer{border-top:1px solid var(--hairline);padding:16px 24px;text-align:center}
+footer p{font-size:12px;color:var(--ink-3)}
 select,input[type=text],input[type=email],input[type=tel],input[type=url],input[type=number]{width:100%}
-/* Phones (the review link opens from Slack on a phone by design): stack the
+/* On a mobile (the review link opens from Slack on a mobile by design): stack the
    two-column grids — side-by-side at 380px crushes selects to one letter. */
 @media (max-width:720px){.grid2{grid-template-columns:1fr}}
 """
@@ -522,9 +529,14 @@ def page(crumb_tail: str, main_cls: str, body: str,
          refresh: int | None = None, product: str = "") -> str:
     title = title if title is not None else brand()
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
-    return f"""<!doctype html><html><head><meta charset="utf-8">
+    # THE BOX'S STYLESHEET AND THE PERSON'S OWN THEME, stamped before the first paint, as chrome() does.
+    from core.dash import look as _look
+    from core.dash import theme as _theme
+    th = _theme.for_request()
+    return f"""<!doctype html><html lang="en"{_theme.html_attr(th)}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">{meta}
-<title>{html.escape(title)}</title><style>{CSS}</style></head><body>
+{_theme.head_tags(th)}
+<title>{html.escape(title)}</title>{_look.head_tags()}<style>{CSS}</style></head><body>
 <header><div class="crumb"><a class="b1" href="{_home_href()}">{html.escape(brand())}</a>
 <span class="sep">/</span><span>{crumb_tail}</span></div>
 <div class="hdr-right">{hdr_right}</div></header>

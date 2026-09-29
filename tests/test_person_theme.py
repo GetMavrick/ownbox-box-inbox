@@ -159,6 +159,17 @@ if _inbox.is_file():
        'class="ui-seg"' in i and 'name="next" value="/inbox/settings"' in i and _pressed(i) == ["system"],
        str(_pressed(i)))
 
+print("\nthe iPhone's clock — (WebDev2, PR #1659 install phase: white over a dark app)")
+_SB = re.compile(r'<meta name="apple-mobile-web-app-status-bar-style" content="(\w[\w-]*)">')
+for choice, want in (("dark", "black"), ("light", "default"), ("system", "default")):
+    owner.post(theme.ROUTE, data={"theme": choice})
+    for path in ("/dashboard",) + (("/inbox/inbox",) if _inbox.is_file() else ()):
+        got = _SB.findall(page(owner, path).split("</head>")[0])
+        ok(f"{choice}: {path} declares the clock once, as {want}", got == [want], str(got))
+ok("core's screens also say they open full screen on an older iPhone",
+   '<meta name="apple-mobile-web-app-capable" content="yes">' in page(owner, "/dashboard"))
+owner.post(theme.ROUTE, data={"theme": "light"})
+
 print()
 if _failed:
     print(f"{_failed} FAILED")

@@ -111,7 +111,7 @@ def test_it_is_visible_from_the_other_screens_which_is_the_point():
     _wipe()
     _seed("t3", "Cara Diaz", [("in", "is Friday still ok?")])
     c = _c()
-    for path in ("/inbox/", "/inbox/settings"):
+    for path in ("/inbox/search", "/inbox/settings"):
         ok(f"lit on {path}", _lit(c, path), _bar(c, path)[:160])
 
 

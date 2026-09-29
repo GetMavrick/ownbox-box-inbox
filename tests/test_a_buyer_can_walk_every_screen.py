@@ -354,8 +354,6 @@ DOORS: dict[str, str] = {
     "/claim": "the welcome email's link, on a box nobody has signed in to yet (section 4 above)",
     "/dash/login": "where require_session() sends anyone signed out (core/dash/__init__.py)",
     "/join": "the invite link People sends, /join?t=<token> (core/dash/__init__.py)",
-    "/app/review": "the Morning Review: its daily email and notification open /app/review/<day> "
-                   "(core/report.py). Owner-only, and not in the menu",
     "/dash/managed": "the Base Machine's Managed card, drawn only on a box sold as Managed",
     "/dash/people": "the older address of /settings/people, still answering for saved links",
     "/tls/ask": "asked by the box's web server on the loopback before it issues a certificate, "
@@ -371,6 +369,8 @@ for _rule in app.url_map.iter_rules():
     _path = str(_rule.rule)
     if "GET" not in (_rule.methods or ()) or "<" in _path or _path in SKIP:
         continue
+    if _path.endswith((".png", ".svg", ".ico", ".webmanifest", ".js", ".css", ".woff2")):
+        continue                                   # an image, a manifest, a script: fetched, not visited
     _mod = getattr(app.view_functions.get(_rule.endpoint), "__module__", "") + "."
     if not _mod.startswith(_CLIENT_MODULES):
         continue
@@ -439,7 +439,7 @@ def _expected_app(path: str) -> tuple[str, str]:
         return "Unified Inbox", "/inbox/manifest.webmanifest"
     if path.startswith(("/aeo", "/settings/aeo/")):
         return "AEO Machine", "/aeo/manifest.webmanifest"
-    return "Ownbox", "/ui/manifest.webmanifest"
+    return dash.brand(), "/ui/manifest.webmanifest"   # the client's name (owner, 2026-09-29)
 
 
 _wrong, _by_app = [], {}
@@ -454,12 +454,12 @@ for _p, _html in READ.items():
     _by_app.setdefault(_name, set()).add(_p)
     if _got != ([_man], [_name]):
         _wrong.append(f"{_p}: manifest {_got[0]} home-screen name {_got[1]}")
-    elif _name != "Ownbox" and not _title.endswith("· " + _name):
+    elif _man != "/ui/manifest.webmanifest" and not _title.endswith("· " + _name):
         _wrong.append(f"{_p}: tab reads {_title!r}")
 ok("every screen installs as its machine, and a machine's tabs all read its name",
    not _wrong, "; ".join(sorted(_wrong)[:4]))
 ok("...and the walks reached screens of all three apps",
-   {"Unified Inbox", "AEO Machine", "Ownbox"} <= set(_by_app), str(sorted(_by_app)))
+   {"Unified Inbox", "AEO Machine", dash.brand()} <= set(_by_app), str(sorted(_by_app)))
 _aeo_m = owner().get("/aeo/manifest.webmanifest")
 _aeo = json.loads(_aeo_m.get_data(as_text=True)) if _aeo_m.status_code == 200 else {}
 ok("the AEO Machine's manifest is public and names it", _aeo_m.status_code == 200
@@ -506,11 +506,13 @@ ok("no trail anywhere says Overview",
    not any(re.search(r'class="crumb"[^>]*>[^<]*(<b>)?Overview', h) for h in READ.values()))
 
 
-# ── 9. every header: the client's icon, the app's name, the menu on the right ────────────
-print("\ntest_every_header_is_icon_name_then_menu")
+# ── 9. every header: the menu, the client's icon, the app's name ──────────────────────────
+print("\ntest_every_header_is_menu_icon_then_name")
 
-# Owner, 2026-09-29, choosing his target header: the client's icon, the machine's name, and the
-# menu button on the right — on every screen, so the button never changes sides between them.
+# Owner, 2026-09-29: the client's icon and the machine's name on every screen, so the button never
+# changes sides between them. The menu went to the right that morning and came back to the left
+# that afternoon: "I think it was a bad idea to move the hamburger menu over to the right side...
+# I think we should move it back to the left. It has a better flow and feel."
 from core.dash import look as _look  # noqa: E402
 
 _bad = []
@@ -522,14 +524,16 @@ for _p, _html in READ.items():
     _order = [m for m in re.findall(r'class="(ui-disc appmark|mark|brand|ham)"', _b)]
     _name = re.sub(r"<[^>]+>", "", (re.search(r'class="(?:mark|brand)">(.*?)</span>', _b, re.S)
                                      or [None, ""])[1]).strip()
-    if (_order[:1] != ["ui-disc appmark"] or _order[-1:] != ["ham"]
+    if (_order[:2] != ["ham", "ui-disc appmark"] or _order[-1:] == ["ham"]
             or f'src="{_look.client_icon()}"' not in _b
-            or _name != _expected_app(_p)[0].replace("Ownbox", "Base Machine")):
+            or _name != ("Base Machine" if _expected_app(_p)[1] == "/ui/manifest.webmanifest"
+                         else _expected_app(_p)[0])):
         _bad.append(f"{_p}: {_order} {_name!r}")
-ok(f"every header is the client's icon, the app's name, then the menu ({len(READ)} read)",
+ok(f"every header is the menu, the client's icon, then the app's name ({len(READ)} read)",
    not _bad, "; ".join(_bad[:3]))
-ok("...and the drawer opens from the right, where the button is",
-   "transform:translateX(101%)" in READ.get("/dashboard", ""))
+ok("...and the drawer opens from the left, where the button is",
+   "transform:translateX(-101%)" in READ.get("/dashboard", "")
+   and "transform:translateX(101%)" not in READ.get("/dashboard", ""))
 
 
 print("\n— and this file cannot silently fall out of CI —")

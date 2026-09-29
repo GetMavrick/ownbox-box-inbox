@@ -1,21 +1,16 @@
-"""Today — the first screen a customer ever sees, and the one row he most needs to tap.
+"""The first screen a buyer sees — and on a box nothing can reach, the one thing he can do there.
 
-TWO DEFECTS, BOTH FOUND BY RENDERING THE PAGE AND READING IT.
+THE NAME IS HISTORY, THE PROMISE IS NOT. This file guarded "Today", the inbox's first screen, from
+2026-09-16: a box nothing could reach greeted its owner with a website uptime report, and the one
+instruction on it was not a link. On 2026-09-29 the owner made Messages the first screen (IA
+decision D1, docs/SCOPE_APP_IA.md: the day's summary is the Morning Review's, and the inbox opens
+on its messages), and Today's address now forwards there. The promises this file kept move with
+the screen they are about:
 
-1. A BOX NOTHING CAN REACH GREETED ITS OWNER WITH A WEBSITE UPTIME REPORT. Rendered on a bare box
-   (2026-09-16): a dash for the headline, "— of checks answered today", "0 checks on your site",
-   and two rails asking for a web address. Not one word about messages, on a box sold as a unified
-   inbox, on the screen the app opens on. The report was not wrong — it was not what this person
-   came for, and it was the first thing he read after paying.
-
-2. THE ONE INSTRUCTION ON THAT SCREEN WAS NOT A LINK. `report()` writes "3 conversations are
-   waiting on your reply" into `needs_you` WITH `href: /inbox/inbox`, and `_rows()` rendered `text`
-   and `value` only — so the row a person most needs to act on was the row he could not tap.
-
-WHAT THIS FILE HOLDS. That a first run leads with the set-up and promises no poll that will never
-find anything; that nothing the report produced is DELETED by the re-order, only moved below it;
-that an href becomes a real link resolved against the live url_map, and that an href this box does
-not serve degrades to the plain row it was rather than to a 404 in somebody's first five minutes.
+  1. the app's first address lands on the first screen;
+  2. on a box nothing can reach, that screen says so, names the one thing to connect, and offers
+     exactly one button, to a route THIS box serves — never a poll that will never find anything;
+  3. on a box that is listening, it is the list, with no set-up standing in front of it.
 
 Run: python tests/test_today_first_screen.py
 """
@@ -27,7 +22,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-_DB = pathlib.Path(tempfile.mkdtemp(prefix="today-first-")) / "box.db"
+_DB = pathlib.Path(tempfile.mkdtemp(prefix="first-screen-")) / "box.db"
 # BEFORE ANY core IMPORT — core.config.Settings reads os.environ at class-body time.
 os.environ["AIOS_DB_PATH"] = str(_DB)
 os.environ.setdefault("DASH_TOKEN", "test-dash-pw")
@@ -59,228 +54,60 @@ def _text(html_: str) -> str:
     return " ".join(_h.unescape(re.sub(r"<[^>]+>", " ", stripped)).split())
 
 
-# A REAL BUYER BOX ON DAY ONE: no channel connected, and no rail named either. Both halves matter —
-# the rails half is what made the old screen a website report, and stubbing only the channels would
-# have tested this on the developer's own box, which has rails.
-_NO_RAILS = {"headline": {"value": 0, "label": "rails set up"},
-             "needs_you": [], "figures": {}, "happened": [],
-             "watch": [{"text": "Nothing set up yet — say which of these this business has",
-                        "state": "connect"}]}
-
-
-def _with(*, listening: bool, report, path: str = "/inbox/"):
-    """Render Today on a box we have fully described, and hand back (app, html)."""
+def _with(*, listening: bool, conversations: list):
+    """Render the first screen on a box we have fully described, and hand back (app, html)."""
     from core import box_secrets, spaces
-    import marketing.customer_voice.report as rep
-    keep = (box_secrets.email_credential, spaces.all_spaces, rep.report)
+    from marketing.customer_voice.inbox import store
+    keep = (box_secrets.email_credential, spaces.all_spaces, store.list_conversations)
     try:
         box_secrets.email_credential = (lambda: {"user": "a@b.c", "password": "x"}) if listening \
             else (lambda: {})
         spaces.all_spaces = lambda: [{"name": "default"}]
-        rep.report = report if callable(report) else (
-            # **kw, NOT (day): the real report takes the Space this request is showing, and a stub
-            # of the OLD signature raises TypeError inside r_today's guard — which degrades the
-            # screen to "could not be read" and takes eight assertions down with it, silently.
-            lambda day, r=report, **kw: dict(r, title="Today"))
+        store.list_conversations = lambda space, **kw: list(conversations)
         app, c = _signed_in()
-        return app, c.get(path).get_data(as_text=True)
+        return app, c.get("/inbox/inbox").get_data(as_text=True)
     finally:
-        box_secrets.email_credential, spaces.all_spaces, rep.report = keep
+        box_secrets.email_credential, spaces.all_spaces, store.list_conversations = keep
 
 
-def test_a_box_nothing_can_reach_opens_on_the_set_up_not_a_report():
-    """The screen he lands on after paying says what this box is for and what to do about it."""
-    app, body = _with(listening=False, report=_NO_RAILS)
-    words = _text(body)
-    ok("it leads with the box being up, not with a count of rails",
-       "Your box is running." in words)
-    ok("...and says plainly that nothing is connected",
-       "Nothing is connected to it yet" in words)
-    # "CONNECT ONE" NAMED NOTHING (launch sweep, 2026-09-24): one of what? The step the box needs
-    # is the inbox, and the sentence says so.
-    ok("...and names the one thing to connect", "Connect your inbox" in words
-       and "Connect one" not in words)
-    # NOT A SCORE. The old screen's headline was the rails count — which rendered as an em-dash,
-    # because `0 or "—"` is an em-dash, so his first screen led with a shrug and a caption.
-    ok("...and never opens on a rails score", "rails set up" not in words, words[:160])
+print("test_the_first_address_lands_on_the_first_screen")
+_app, _c = _signed_in()
+_r = _c.get("/inbox/")
+ok("the app's first address forwards to its messages",
+   _r.status_code == 302 and (_r.headers.get("Location") or "").endswith("/inbox/inbox"),
+   f"{_r.status_code} {_r.headers.get('Location')}")
 
-    # THE PROMISE THE EMPTY INBOX WAS JUST FIXED FOR MAKING. "The rails you own are being polled"
-    # is reassurance for a box that IS listening; on one with nothing connected it promises a poll
-    # that cannot find anything.
-    ok("...and promises no poll that will never find anything",
-       "are being polled" not in words, words[:200])
+print("\ntest_a_box_nothing_can_reach_says_so_and_offers_the_one_way_in")
+_app, _body = _with(listening=False, conversations=[])
+_words = _text(_body.split("</style>", 1)[-1])
+ok("it says plainly that nothing is connected", "nothing is connected" in _words.lower(), _words[:240])
+ok("...and names the one thing to connect", "Connect your inbox" in _words, _words[:240])
+# THE PROMISE THE EMPTY INBOX MUST NOT MAKE ON A DEAF BOX: "the first person who messages you
+# appears here" — nobody is coming, because nothing is listening.
+ok("...and promises no message that cannot arrive",
+   "The first person who messages you appears here" not in _words, _words[:240])
+_btns = re.findall(r'<a class="btn" href="([^"?#]+)', _body)
+ok("there is exactly one button", len(_btns) == 1, str(_btns))
+_routes = {str(r) for r in _app.url_map.iter_rules()}
+ok("...pointing only at a route THIS box serves", _btns and all(b in _routes for b in _btns),
+   f"{_btns} vs the url_map")
 
-    # "Every figure here is read from your own rails", printed under a screen with no figure, is
-    # the same small untruth in caption form.
-    ok("...and claims no figures under a screen carrying none",
-       "Every figure here" not in words)
+print("\ntest_a_listening_box_gets_its_list")
+_conv = {"zcid": "zc_first", "platform": "email", "participant": "Hana Okoye",
+         "last_inbound_at": "2026-09-29T08:00:00+00:00", "last_body": "Do you open on Saturdays?",
+         "unread": 1}
+_app, _body = _with(listening=True, conversations=[_conv])
+_words = _text(_body.split("</style>", 1)[-1])
+ok("the list is the screen", "Hana Okoye" in _words, _words[:240])
+ok("...with no set-up standing in front of it", "nothing is connected" not in _words.lower())
 
+print("\n— and this file cannot silently fall out of CI —")
+_here = pathlib.Path(__file__).resolve().parents[1]
+if not (_here / ".github").is_dir():
+    print("  --   not the repo — a buyer's box has no CI manifest to be named in")
+else:
+    ok("registered in the suite list",
+       "test_today_first_screen" in (_here / ".github/workflows/tests.yml").read_text())
 
-def test_the_one_thing_he_can_do_is_offered_and_cannot_404():
-    app, body = _with(listening=False, report=_NO_RAILS)
-    ok("there is exactly one button", body.count('class="btn"') == 1, str(body.count('class="btn"')))
-    routes = {str(r) for r in app.url_map.iter_rules()}
-    targets = re.findall(r'class="btn" href="([^"?#]+)', body)
-    ok("...pointing only at a route THIS box serves",
-       targets and all(t in routes for t in targets), f"{targets} vs the url_map")
-    ok("...and it says what he gets, not just what to press",
-       "What lands here once you do" in _text(body))
-
-
-def test_the_re_order_deletes_nothing_the_report_produced():
-    """A buyer with a website but no channel still has a website. The set-up goes ABOVE the report,
-    it does not replace it — the regression that would make this fix worse than the defect."""
-    r = dict(_NO_RAILS, happened=[{"text": "checks on your site", "value": 96}],
-             figures={"up": {"value": "100%", "label": "good checks today"}})
-    app, body = _with(listening=False, report=r)
-    words = _text(body)
-    # `.find`, not `.index`: a missing substring RAISES, and a raise here ends the whole file —
-    # it did, on the probe, and four later tests silently never ran.
-    i, j = words.find("Your box is running"), words.find("96")
-    ok("the set-up is still first", 0 <= i < j, f"at {i} vs {j}")
-    ok("...and his real figure is still on the page", "100%" in words and "96" in words)
-    ok("...and the footer comes back once there are figures to explain",
-       "Every figure here" in words)
-
-
-def test_a_listening_box_gets_its_report_untouched():
-    r = {"headline": {"value": 3, "label": "waiting on you"},
-         "needs_you": [], "figures": {"w": {"value": 3, "label": "waiting on you"}},
-         "happened": [{"text": "messages came in", "value": 11}], "watch": []}
-    app, body = _with(listening=True, report=r)
-    words = _text(body)
-    ok("a box that IS listening still opens on its report", "waiting on you" in words)
-    ok("...and is never told to connect something it already has",
-       "Nothing is connected to it yet" not in words)
-
-
-def test_the_row_he_must_act_on_is_a_link():
-    """`needs_you` carries an href and it was being dropped. This is the whole point of the row."""
-    r = dict(_NO_RAILS, needs_you=[{"text": "3 conversations are waiting on your reply",
-                                    "href": "/inbox/inbox"}])
-    app, body = _with(listening=True, report=r)
-    ok("the waiting row is an anchor, not a div",
-       '<a class="row go" href="/inbox/inbox">' in body,
-       re.findall(r'<(?:a|div) class="row[^"]*"[^>]*>', body)[:3])
-    ok("...and it still reads exactly as the report wrote it",
-       "3 conversations are waiting on your reply" in _text(body))
-
-
-def test_an_href_this_box_does_not_serve_is_not_a_link():
-    """THE REPORT IS A DIFFERENT MODULE and has no idea which pages this box serves — the same
-    per-box fact `core.dash.landing()` exists for. An unserved path degrades to the plain row it
-    was before, never to a 404 handed to somebody in their first five minutes."""
-    r = dict(_NO_RAILS, needs_you=[{"text": "something happened", "href": "/inbox/not-a-page"}])
-    app, body = _with(listening=True, report=r)
-    ok("no anchor is drawn for a route this box lacks", "/inbox/not-a-page" not in body)
-    ok("...and the row itself is still shown", "something happened" in _text(body))
-    ok("...as a plain row", '<div class="row">' in body)
-
-
-def test_a_row_that_goes_somewhere_looks_like_one_and_not_like_a_web_link():
-    """Kinso's rule and this app's: the WHOLE row is the target, with a visible affordance. A bare
-    `text-decoration:none` would leave it indistinguishable from the rows that go nowhere."""
-    from marketing.customer_voice.app import CSS
-    css = re.sub(r"(?s)/\*.*?\*/", " ", CSS)
-    ok("the row link drops the browser's underline and link colour",
-       "a.row{text-decoration:none;color:inherit}" in css.replace("\n", ""))
-    ok("...and carries a chevron, so the affordance is seen and not discovered by tapping",
-       "a.row::after" in css)
-    ok("...and answers a finger", "a.row:active" in css)
-
-
-def test_an_unreadable_report_on_a_bare_box_is_still_the_set_up():
-    """The guarded read says "could not be read". True about the read — and as somebody's FIRST
-    screen it reports a fault in a report he has no data for yet."""
-    def boom(day):
-        raise RuntimeError("no such table: daily_reports")
-
-    app, body = _with(listening=False, report=boom)
-    words = _text(body)
-    ok("a bare box leads with the set-up even when the report cannot be read",
-       "Your box is running." in words)
-    # THE FAULT IS NOT DELETED, IT IS DEMOTED. My first version replaced the sentence outright
-    # and CI refused it — rightly: a screen that swallows a real fault because the buyer has
-    # nothing connected yet is how a broken box looks fine to everybody. It is below the set-up
-    # now, and it is not the headline.
-    i, j = words.find("Your box is running"), words.find("could not be read")
-    ok("...and still says the report could not be read", j > 0, words[:200])
-    ok("...below the set-up, not as his first sentence", 0 <= i < j, f"at {i} vs {j}")
-
-    # AND THE GUARD IS STILL A GUARD on a box that is listening: there the sentence is the right
-    # one, and it must never become a 500 or a stack trace.
-    from core.config import settings                                           # noqa: F401
-    app2, b2 = _with(listening=True, report=boom)
-    ok("a listening box still gets the honest sentence", "could not be read" in _text(b2))
-    ok("...and never a stack trace", "Traceback" not in b2)
-
-
-def test_ci_actually_runs_this_file():
-    wf = pathlib.Path(__file__).resolve().parents[1] / ".github/workflows/tests.yml"
-    me = pathlib.Path(__file__).stem
-    if not wf.is_file():
-        # A SOLD BOX HAS NO CI AND THIS SUITE SHIPS INTO ONE. The read used to raise
-        # FileNotFoundError and take the whole file down with it, so a buyer running their own
-        # suites watched this one crash.
-        #
-        # Reported, not asserted, and deliberately so. The hazard this guards is a HAND-MAINTAINED
-        # list in tests.yml drifting away from a filename. In a box there is no list, so there is
-        # nothing that could have drifted — the box runs whatever is in tests/. Writing an ok()
-        # here would mean inventing a condition that is true by construction, which is the shape
-        # of a check that proves nothing. The line says why it did not run instead.
-        print(f"  --   no workflow here — this box is not the repo, so {me} has no list to be "
-              "missing from")
-        return
-    ok(f"{me} is in the workflow's suite list", me in wf.read_text(),
-       "CI would skip this file and still print green")
-
-
-def test_today_says_each_number_once():
-    """Measured on the demo box, 2026-09-24: "2 waiting" appeared four times on one screen.
-
-    The greeting said it, then the report's headline, a tile and the watch list said it again, and
-    "messages today" repeated "messages came in". Each number is now said once, where it is most
-    use; a figure nothing else on the screen says still gets its tile.
-    """
-    inbox = {"headline": {"value": 2, "label": "waiting on you"},
-             "needs_you": [{"text": "2 conversations are waiting on your reply",
-                            "href": "/inbox/inbox"}],
-             "figures": {"inbox_waiting": {"value": 2, "label": "waiting on you"},
-                         "inbox_unread": {"value": 3, "label": "not opened yet"},
-                         "inbox_today": {"value": 3, "label": "messages today"},
-                         "uptime": {"value": "99.0%", "label": "of checks answered today"}},
-             "happened": [{"text": "messages came in", "value": 3},
-                          {"text": "people wrote for the first time", "value": 3}],
-             "watch": [{"text": "Inbox — 2 waiting on you"},
-                       {"text": "Your site answered slowly twice"}]}
-    _, body = _with(listening=True, report=inbox)
-    words = _text(body)
-    ok("the greeting says the two inbox numbers", "3 unread" in words and "2 people" in words,
-       words[:200])
-    ok("...and the rest of the screen does not say 'waiting on you' again",
-       not re.search(r"waiting on you\b", words), words[:600])
-    ok("the reply that needs him is still offered", "waiting on your reply" in words)
-    ok("'messages today' is not a tile beside 'messages came in'", "messages today" not in words)
-    ok("a figure nothing else says keeps its tile", "of checks answered today" in words)
-    ok("...and so does a watch line that is not the greeting's",
-       "answered slowly twice" in words)
-    ok("what happened still reads in full",
-       "messages came in" in words and "people wrote for the first time" in words)
-    ok("no reader meets the word 'rails'", "rails" not in words.lower(), words[-200:])
-
-
-if __name__ == "__main__":
-    for fn in (test_a_box_nothing_can_reach_opens_on_the_set_up_not_a_report,
-               test_the_one_thing_he_can_do_is_offered_and_cannot_404,
-               test_the_re_order_deletes_nothing_the_report_produced,
-               test_a_listening_box_gets_its_report_untouched,
-               test_the_row_he_must_act_on_is_a_link,
-               test_an_href_this_box_does_not_serve_is_not_a_link,
-               test_a_row_that_goes_somewhere_looks_like_one_and_not_like_a_web_link,
-               test_an_unreadable_report_on_a_bare_box_is_still_the_set_up,
-               test_today_says_each_number_once,
-               test_ci_actually_runs_this_file):
-        print(fn.__name__)
-        fn()
-    print(f"{_failed} FAILED" if _failed else "all ok")
-    sys.exit(1 if _failed else 0)
+print(f"\n{'FAILED — ' + str(_failed) + ' failure(s)' if _failed else 'all checks passed'}")
+sys.exit(1 if _failed else 0)

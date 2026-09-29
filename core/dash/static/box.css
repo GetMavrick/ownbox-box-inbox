@@ -50,6 +50,9 @@
 
   /* the one highlight colour: text links and a single dot, never buttons or headings */
   --link: #b5401a;
+  /* blue, the palette's other colour (cream, white, black, rust, blue): information, never an action.
+     The homepage's own pair (sites/ownbox globals.css --blue / --new-ink). */
+  --blue: #185fa5;
 
   /* status, each at least 4.5:1 on the cream and on white */
   --ok: #1d7a44;
@@ -122,6 +125,7 @@ html[data-theme="dark"] {
   --on-ink: #111111;            /* so the ink pill turns cream with black text */
   /* rust at the same hue and saturation, raised until it reads: #b5401a is 3.34 on this ground */
   --link: #e1592d;
+  --blue: #85b7eb;              /* the homepage's dark-half blue: #185fa5 is 2.89 on this ground */
   --ok: #5cc88a;
   --warn: #e0b050;
   --bad: #f0857a;

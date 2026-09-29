@@ -40,3 +40,7 @@ def _aeo_publish_tick():
 
 
 _register_periodic(_aeo_publish_tick, interval_s=60, name="aeo_publish")
+
+# THE MORNING REVIEW SEGMENT, registered at import like every machine's: the worker imports this
+# package, and the review's snapshot runs in the worker (core/report.py says why).
+from . import report  # noqa: E402,F401

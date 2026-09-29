@@ -121,7 +121,7 @@ def _marks(body: str) -> tuple:
             if '<nav class="rail"' in body else "")
     return (bar.count('aria-current'), re.findall(r'<a href="([^"]*)"[^>]*aria-current', rail))
 
-for _path in ("/inbox/search", "/inbox/inbox", "/inbox/", "/inbox/settings"):
+for _path in ("/inbox/search", "/inbox/inbox", "/inbox/settings"):
     _body = _c_.get(_path).get_data(as_text=True)
     _barn, _rail = _marks(_body)
     ok(f"{_path} lights exactly one tab", _barn == 1, str(_barn))

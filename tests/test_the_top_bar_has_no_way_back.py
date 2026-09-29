@@ -48,7 +48,7 @@ c = app.test_client()
 c.set_cookie(dash.COOKIE, dash.new_session(state.owner_user()["id"]))
 
 print("\ntest_the_top_bar_has_no_way_back")
-for path in ("/inbox/", "/inbox/inbox", "/inbox/setup"):
+for path in ("/inbox/inbox", "/inbox/setup"):
     r = c.get(path)
     if r.status_code != 200:
         ok(f"{path} renders", False, str(r.status_code))

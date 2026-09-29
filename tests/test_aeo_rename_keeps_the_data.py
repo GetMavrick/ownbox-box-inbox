@@ -13,6 +13,7 @@ set of names, shared by the release before and the release after, cannot drift.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 
@@ -46,8 +47,17 @@ ok("...and no second copy under a new name exists to drift", "aeo_plan" not in t
 ok("settings live under machine 'seo'", settings.MACHINE == "seo", settings.MACHINE)
 ok("the Airtable key keeps its name", sources.AIRTABLE_KEY == "AIRTABLE_API_KEY_SEO", sources.AIRTABLE_KEY)
 ok("the PostHog key keeps its name", posthog.KEY == "POSTHOG_API_KEY_SEO", posthog.KEY)
-ok("no data-copy migration ships with the rename", 57 not in state.MIGRATIONS and state.SCHEMA_VERSION == 56,
-   f"version {state.SCHEMA_VERSION}")
+# NO MIGRATION COPIES OR MOVES THE MACHINE'S DATA TO NEW NAMES. This pinned "no step 57 at all"
+# until 57 became the plan table's title column (the Morning Review, 2026-09-29): what it protects
+# is that nothing under the old names is ever copied, renamed or dropped, so it now asks exactly that.
+import inspect                                                               # noqa: E402
+
+_aeo_steps = {v: inspect.getsource(state.MIGRATIONS[v]) for v, o in state._MIGRATION_OWNER.items()
+              if o == "aeo_machine" and v in state.MIGRATIONS}
+_moves = re.compile(r"aeo_plan|RENAME|DROP|INSERT|box_settings|box_secrets|machine_accounts|copytree")
+ok("no data-copy migration ships with the rename",
+   not any(_moves.search(src.split('"""', 2)[-1]) for src in _aeo_steps.values()),
+   {v: _moves.findall(src.split('"""', 2)[-1]) for v, src in _aeo_steps.items()})
 
 print("\n-- what the release BEFORE wrote, the release AFTER reads (rolled forward) --")
 with state.connect() as c:

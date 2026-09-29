@@ -350,10 +350,12 @@ def test_the_connect_button_now_reaches_somewhere_that_can_act():
         rep.report = lambda day, **kw: {"headline": {}, "needs_you": [], "figures": [],
                                   "happened": [], "watch": []}
         app, c = _c()
-        body = c.get("/inbox/").get_data(as_text=True)
+        # THE FIRST SCREEN IS THE MESSAGES since 2026-09-29 (IA D1); on a bare box it is the one
+        # that has to send him somewhere that can connect.
+        body = c.get("/inbox/inbox").get_data(as_text=True)
         routes = {str(r) for r in app.url_map.iter_rules()}
         targets = re.findall(r'class="btn" href="([^"?#]+)', body)
-        ok("Today offers a button", bool(targets), body[:200])
+        ok("the first screen offers a button", bool(targets), body[:200])
         ok("...pointing at a route this box serves", all(t in routes for t in targets), str(targets))
         ok("...and it is not the page that cannot connect anything",
            targets != ["/inbox/settings"], str(targets))
@@ -425,7 +427,7 @@ def test_the_button_says_what_the_screen_it_reaches_actually_offers():
     # `getattr`, NOT `voice._connect_verb`. A missing attribute RAISES, and a raise ends the whole
     # file — I probed this test against the previous commit and it aborted here with an
     # AttributeError instead of reporting a failure, taking `test_ci_actually_runs_this_file` with
-    # it. That is the same hazard as the `.index` call in test_today_first_screen, reintroduced in
+    # it. That is the same hazard as the `.index` call in the old test_today_first_screen (retired 2026-09-29), reintroduced in
     # the very next file I wrote. A test that cannot report its own absence is not a test.
     verb = getattr(voice, "_connect_verb", None)
     ok("the app decides the verb from the destination at all", callable(verb), str(verb))
@@ -455,7 +457,7 @@ def test_the_button_says_what_the_screen_it_reaches_actually_offers():
                                   "happened": [], "watch": []}
         store.list_conversations = lambda space, **kw: []
         app, c = _c()
-        for path in ("/inbox/", "/inbox/inbox"):
+        for path in ("/inbox/inbox",):
             got = re.findall(r'<a class="btn" href="([^"]+)">([^<]+)<',
                              c.get(path).get_data(as_text=True))
             ok(f"{path} offers one button", len(got) == 1, str(got))

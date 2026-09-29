@@ -248,8 +248,9 @@ with state.connect() as c:
 r = client().get("/inbox/waiting")
 body = r.get_data(as_text=True)
 ok("it renders", r.status_code == 200, str(r.status_code))
-ok("...and says nothing is waiting, in words a buyer can act on",
-   "Nothing is waiting" in body, body[:200])
+# "REPLIES TO SEND" is the row's name and the page's (owner, 2026-09-29, IA D5).
+ok("...and says there is nothing to send, in words a buyer can act on",
+   "Nothing to send" in body and "<h1>Replies to send</h1>" in body, body[:200])
 
 
 print("\nFAILED" if _failed else "\nALL PASS")

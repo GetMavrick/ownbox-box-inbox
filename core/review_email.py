@@ -73,15 +73,23 @@ def build(day, now=None) -> dict:
             continue                          # a machine this box does not run gets no empty section
         needs = [n.get("text", "") for n in (t or {}).get("needs_you") or [] if n.get("text")]
         needs_total += len(needs)
+        # A LINE WITHOUT DATA IS NOT SENT (owner, 2026-09-29), and a machine with nothing left to
+        # say gets no section — the rule the page and the morning message follow (report.has_value).
+        happened = [(x.get("text", ""), x.get("value")) for x in (y or {}).get("happened") or []
+                    if x.get("text") and (x.get("value") in (None, "") or report.has_value(x.get("value")))]
+        headline = (_headline(y) if y and not y.get("error")
+                    and report.has_value((y.get("headline") or {}).get("value")) else "")
+        watch, error = _watch(t), (y or {}).get("error")
+        if not (needs or headline or happened or watch or error):
+            continue
         machines.append({
-            "machine": m, "title": (y or t).get("title") or m, "needs": needs, "watch": _watch(t),
-            "error": (y or {}).get("error"),
-            "headline": _headline(y) if y and not y.get("error") else "",
-            "happened": [(x.get("text", ""), x.get("value")) for x in (y or {}).get("happened") or []],
+            "machine": m, "title": (y or t).get("title") or m, "needs": needs, "watch": watch,
+            "error": error, "headline": headline, "happened": happened,
         })
     mrow = tday.get(report.METERS)
     meters = ({"headline": _headline(mrow), "watch": _watch(mrow)}
-              if mrow and not mrow.get("error") else None)
+              if mrow and not mrow.get("error")
+              and (report.has_value((mrow.get("headline") or {}).get("value")) or _watch(mrow)) else None)
     when = f"{now:%a %d %b}"
     if needs_total:
         subject = (f"Morning review, {when}: {needs_total} thing{'s' if needs_total != 1 else ''} "
@@ -113,7 +121,7 @@ def text(e: dict) -> str:
     if not e["machines"]:
         lines += ["No machine reported yesterday. The first full day lands tomorrow.", ""]
     if e["meters"]:
-        lines.append(f"Meters: {e['meters']['headline']}")
+        lines.append(f"Spend: {e['meters']['headline']}")
         lines += [f"  {_MARK.get(st, '·')} {w}" for st, w in e["meters"]["watch"]]
         lines.append("")
     lines.append(f"The full review: {e['link']}")
@@ -148,7 +156,7 @@ def html(e: dict) -> str:
     if not e["machines"]:
         out.append("<p>No machine reported yesterday. The first full day lands tomorrow.</p>")
     if e["meters"]:
-        out.append(f'<p style="margin:24px 0 2px"><strong>Meters:</strong> {esc(e["meters"]["headline"])}</p>')
+        out.append(f'<p style="margin:24px 0 2px"><strong>Spend:</strong> {esc(e["meters"]["headline"])}</p>')
         if e["meters"]["watch"]:
             out.append(_list("Vendors", [f"{esc(_MARK.get(st, '·'))} {esc(w)}" for st, w in e["meters"]["watch"]], "#8a5a00"))
     out.append(f'<p style="margin:24px 0 0"><a href="{esc(e["link"], quote=True)}">Open the full review</a></p></div>')

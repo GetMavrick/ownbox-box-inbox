@@ -83,8 +83,11 @@ try:
 except ValueError:
     manifest = {}
 ok("the manifest is served at /inbox/ without a login", m.status_code == 200, str(m.status_code))
-ok("its scope and start_url are /inbox/", manifest.get("scope") == "/inbox/" and manifest.get("start_url") == "/inbox/",
-   f"{manifest.get('scope')} {manifest.get('start_url')}")
+# IT STARTS IN THE INBOX AND IS THE INBOX'S APP, AND ITS SCOPE IS THE BOX (owner, 2026-09-29: "keep
+# you inside" — the menu's other machines no longer open in a browser sheet on an iPhone).
+ok("it starts on its messages as the same app (id /inbox/), and keeps you inside the box",
+   manifest.get("start_url") == "/inbox/inbox" and manifest.get("id") == "/inbox/" and manifest.get("scope") == "/",
+   f"{manifest.get('scope')} {manifest.get('start_url')} {manifest.get('id')}")
 ok("its icons are under /inbox/", all(str(i.get("src", "")).startswith("/inbox/") for i in manifest.get("icons") or [])
    and bool(manifest.get("icons")), str(manifest.get("icons")))
 w = c.get("/inbox/sw.js")

@@ -1087,7 +1087,7 @@ def agent_state() -> dict:
 
 
 _AGENT_STEP = {
-    "key": "agent", "title": "Your AI coworkers",
+    "key": "agent", "title": "Your assistants",
     "surface": SURFACE_BOX,
     # CORE CAN VOUCH FOR ITS OWN DOOR, which is the whole point of the door having moved. This
     # step mints a credential that reads every message on the box, so it is the owner's alone —

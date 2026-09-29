@@ -104,8 +104,8 @@ def control(next_path: str) -> str:
     """Light / Dark / Automatic for whoever is asking: one form, three buttons, no script.
 
     EACH CHOICE IS ITS OWN SUBMIT BUTTON, so one tap saves it and a page with JavaScript blocked
-    still switches; the chosen one is marked with aria-pressed, which box.css draws as the ink
-    pill. "Automatic" is Apple's word for following the device (owner, 2026-09-27: "system
+    still switches; the chosen one is marked with aria-pressed, which box.css draws raised, not
+    inked, so the screen's one primary stays its own. "Automatic" is Apple's word for following the device (owner, 2026-09-27: "system
     default"). Drawn by core so System Settings and the inbox cannot offer two different switches.
     """
     import html as _html
@@ -125,15 +125,28 @@ def html_attr(choice: str) -> str:
     return f' data-theme="{"light" if v == "system" else v}"'
 
 
+def status_bar(choice: str) -> str:
+    """The iPhone's clock over an installed app: white on a dark app, dark on a light one.
+
+    iOS paints the bar behind the clock from theme-color, but the CLOCK'S colour comes from this
+    tag, and "default" is dark text — unreadable over a dark app. Dark therefore asks for "black"
+    (white text); Light and Automatic keep "default", which is what every page carried before, so
+    nothing a person already had got worse (WebDev2, PR #1659 plan §15, install phase). Checked in
+    code, not yet on a device: a real iPhone is the last word on this one."""
+    return ('<meta name="apple-mobile-web-app-status-bar-style" content="'
+            + ("black" if (_valid(choice) or DEFAULT) == "dark" else "default") + '">')
+
+
 def head_tags(choice: str) -> str:
-    """For `<head>`: theme-color, and for System the script that decides before paint."""
+    """For `<head>`: theme-color, the status bar's clock, and for System the script that decides
+    before paint."""
     v = _valid(choice) or DEFAULT
     if v != "system":
-        return f'<meta name="theme-color" content="{GROUND[v]}">'
+        return f'<meta name="theme-color" content="{GROUND[v]}">' + status_bar(v)
     return (f'<meta name="theme-color" media="(prefers-color-scheme: light)" '
             f'content="{GROUND["light"]}">'
             f'<meta name="theme-color" media="(prefers-color-scheme: dark)" '
-            f'content="{GROUND["dark"]}">' + _DEVICE_SCRIPT)
+            f'content="{GROUND["dark"]}">' + status_bar(v) + _DEVICE_SCRIPT)
 
 
 @blueprint.route(ROUTE, methods=["POST"])

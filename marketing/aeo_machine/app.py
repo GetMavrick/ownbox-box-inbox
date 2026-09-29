@@ -103,7 +103,9 @@ def aeo_manifest():
     from flask import Response
     # STARTS WHERE /aeo LANDS, INSIDE ITS OWN SCOPE. /aeo itself only forwards to Articles and has no
     # trailing-slash twin, and a start_url outside the scope makes a browser throw the scope away.
-    m = _look.manifest_for(APP, start_url=TOPICS, scope=HOME + "/")
+    # THE WHOLE BOX IS IN SCOPE (owner, 2026-09-29: "keep you inside"), so the menu's System Settings
+    # and Base Machine stay in the app rather than opening a browser sheet on an iPhone.
+    m = _look.manifest_for(APP, start_url=TOPICS, scope="/")
     return Response(json.dumps(m), mimetype="application/manifest+json",
                     headers={"Cache-Control": "public, max-age=3600"})
 

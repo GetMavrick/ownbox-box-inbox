@@ -20,6 +20,7 @@ surfaces, on purpose — somebody will one day "fix" one to match the other, and
 bug (spec §2.4).
 """
 import html
+import re
 from datetime import date as _date
 from datetime import datetime
 from datetime import timedelta as _timedelta
@@ -31,9 +32,11 @@ from core import report
 from core.dash import blueprint
 
 TITLES = {"customer_voice": "Unified Inbox", "content_machine": "Content", "lead_machine": "Lead"}
-_PILL = {"ok": "green", "warn": "amber", "fail": "red", "connect": "blue"}
 
-CSS = """
+# THE NOTES BELOW STAY IN THE SOURCE AND NEVER SHIP. The page is a buyer's screen, and the walk
+# (tests/test_a_buyer_can_walk_every_screen.py) reads every byte a buyer is served for the words
+# this box never says; one of the owner's quotes in a note used one. Stripped once, at import.
+_CSS_SRC = """
 .rv{--rv-bg:#15181C;--rv-ink:#e6e6e6;--rv-strong:#C2F3F4;--rv-accent:#C2F3F4;--rv-spark:#7fd1d3;
 --rv-edge:#23282f;--rv-rule:#1f242b;--rv-field:#2a2f36;--rv-dim:#9aa3ad;--rv-faint:#6f7883;
 --rv-text:#cfd5db;--rv-bad:#e05b5b;--rv-warn-edge:#6b4a1a;--rv-warn-bg:#241b0e;--rv-warn-ink:#f0c674;
@@ -46,7 +49,7 @@ CSS = """
 --rv-dim:var(--ink-2);--rv-faint:var(--ink-3);--rv-text:var(--ink-2);--rv-bad:var(--bad);
 --rv-warn-edge:var(--warn);--rv-warn-bg:var(--card);--rv-warn-ink:var(--ink);
 --rv-pill:var(--wash);--rv-pill-ink:var(--ink-2);--rv-green:var(--wash);--rv-green-ink:var(--ok);
---rv-blue:var(--wash);--rv-blue-ink:var(--ink-2);--rv-red:var(--wash);--rv-red-ink:var(--bad);
+--rv-blue:var(--wash);--rv-blue-ink:var(--blue, var(--ink-2));--rv-red:var(--wash);--rv-red-ink:var(--bad);
 --rv-amber:var(--wash);--rv-amber-ink:var(--warn);--rv-radius:var(--r-md);--rv-mono:var(--mono)}
 .rv.on-box .seg{padding:22px}
 .rv.on-box .rv-warn{border-left-width:3px}
@@ -59,32 +62,30 @@ CSS = """
 .seg{border:1px solid var(--rv-edge);border-radius:var(--rv-radius);padding:16px 18px;margin:0 0 14px;background:var(--rv-bg)}
 .seg .hd{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .seg .hd h2{margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--rv-faint)}
-.seg .hd .big{font-size:22px;font-weight:600;color:var(--rv-ink);font-variant-numeric:tabular-nums}
-.seg .hd .big small{font-size:13px;color:var(--rv-dim);font-weight:400;margin-left:6px}
-.seg .hd .delta{font-size:12px;color:var(--rv-dim);margin-left:8px}
-.rv-rail{display:grid;grid-template-columns:110px 1fr;gap:6px 14px;align-items:baseline;padding:6px 0;border-top:1px solid var(--rv-rule)}
+.seg .big{font-size:28px;font-weight:600;line-height:1.2;color:var(--rv-ink);font-variant-numeric:tabular-nums;margin:0 0 10px}
+.seg .big small{font-size:15px;color:var(--rv-dim);font-weight:400;margin-left:8px}
+.seg .delta{font-size:13px;color:var(--rv-dim);margin-left:8px;font-weight:400}
+.rv-when{color:var(--rv-faint);white-space:nowrap}
+.rv-needs ul{list-style:none;margin:0;padding:0}
+.rv-needs li{padding:10px 0;border-top:1px solid var(--rv-rule);font-size:16px}
+.rv-needs li:first-child{border-top:0;padding-top:0}
+.rv-needs li:last-child{padding-bottom:0}
+.rv-rail ul.col{display:block}
+.rv-rail ul.col li{margin:0 0 6px}
+.seg .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 8px 1px 0;background:var(--rv-amber-ink)}
+.seg .dot.fail{background:var(--rv-red-ink)}
+.seg .dot.connect{background:var(--rv-blue-ink)}
+.rv-rail{display:grid;grid-template-columns:160px 1fr;gap:6px 14px;align-items:baseline;padding:6px 0;border-top:1px solid var(--rv-rule)}
 .rv-rail .k{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--rv-faint)}
 .rv-rail ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px}
 .rv-rail li{font-size:14px;color:var(--rv-text)}
 .rv-rail li b{color:var(--rv-ink);font-variant-numeric:tabular-nums}
-.rv-rail li b.zero{color:var(--rv-bad)}
-.rv-rail li.need a{color:var(--rv-accent)}
-.rv-rail .pill{margin-right:6px}
 .rv-note{font-size:12px;color:var(--rv-faint);margin-top:8px}
 .rv-warn{border:1px solid var(--rv-warn-edge);background:var(--rv-warn-bg);color:var(--rv-warn-ink);border-radius:10px;padding:12px 16px;margin:0 0 14px}
 .rv-empty{color:var(--rv-dim);font-size:14px}
 
-/* THE BODY BRINGS ITS OWN PRIMITIVES, because it is rendered in two different shells. `.pill`
-   and `.dlink` are defined in core.dash's stylesheet and the lead app's chrome has neither, so
-   the four watch states rendered as bare grey words on the tab the owner opens every morning —
-   ok and fail looking identical is the exact opposite of what a status pill is for. Scoped
-   under .seg/.rv-top so this cannot reach out and restyle a host page that has its own. */
-.seg .pill,.rv-top .pill{display:inline-block;font-size:11px;padding:4px 10px;border-radius:9999px;
-flex:none;font-family:var(--rv-mono);background:var(--rv-pill);color:var(--rv-pill-ink)}
-.seg .pill.green{background:var(--rv-green);color:var(--rv-green-ink)}
-.seg .pill.blue{background:var(--rv-blue);color:var(--rv-blue-ink)}
-.seg .pill.red{background:var(--rv-red);color:var(--rv-red-ink)}
-.seg .pill.amber{background:var(--rv-amber);color:var(--rv-amber-ink)}
+/* THE BODY BRINGS ITS OWN LINK STYLE, because it is rendered in two different shells and the
+   lead app's chrome does not define `.dlink`. Scoped under .seg so it cannot restyle a host page. */
 .seg .dlink{color:var(--rv-accent);font-weight:500;text-decoration:none}
 .seg .dlink:hover{text-decoration:underline}
 /* THE SPARKLINE. currentColor so it inherits whichever shell it is drawn in — the app's
@@ -113,9 +114,7 @@ flex:none;font-family:var(--rv-mono);background:var(--rv-pill);color:var(--rv-pi
   .rv-top form,.rv-top select{width:100%}
   .rv-top select{min-height:44px}
   .seg{padding:14px}
-  .seg .hd{display:block}
-  .seg .hd .big{display:block;margin-top:6px}
-  .seg .hd .delta{display:block;margin:4px 0 0}
+  .seg .delta{display:block;margin:4px 0 0}
   .rv-rail{grid-template-columns:1fr;gap:4px;padding:10px 0}
   .rv-rail ul{gap:6px 14px}
   .rv-rail li{line-height:1.5}
@@ -126,6 +125,7 @@ flex:none;font-family:var(--rv-mono);background:var(--rv-pill);color:var(--rv-pi
   .seg .spark .sk{display:block;margin-top:4px}
 }
 """
+CSS = re.sub(r"\s*/\*.*?\*/", "", _CSS_SRC, flags=re.S)
 
 
 def _esc(v) -> str:
@@ -136,6 +136,11 @@ def _fmt(v) -> str:
     if isinstance(v, float):
         return f"{v:.0f}"
     return str(v)
+
+
+# ONE RULE FOR "IS THERE ANYTHING TO SHOW", owned by the report so the page, the email and the
+# morning message draw the same lines (owner, 2026-09-29). Re-exported: the dashboard reads it here.
+has_value = report.has_value
 
 
 def _picker(v: dict, action: str = "/app/review") -> str:
@@ -150,7 +155,7 @@ def _picker(v: dict, action: str = "/app/review") -> str:
     becomes a dead end."""
     opts = "".join(
         f'<option value="{_esc(d["day"])}"{" selected" if d["day"] == v["day"] else ""}>'
-        f'{"Live — " if d["live"] else ""}{_esc(d["label"])}</option>' for d in v["days"])
+        f'{"Today — " if d["live"] else ""}{_esc(d["label"])}</option>' for d in v["days"])
     return (f'<form method="get" action="{_esc(action)}"><select name="day" onchange="this.form.submit()">'
             + opts + '</select><noscript><button type="submit">Go</button></noscript></form>')
 
@@ -179,7 +184,8 @@ def _spark(points: list, back: int = 30, day: str = "") -> str:
     tell a climb from 0-to-3 from a climb from 300-to-900, and both are the same picture.
     """
     pts = [p for p in (points or []) if isinstance(p.get("value"), (int, float))]
-    if len(pts) < 2:
+    if len(pts) < 2 or not any(p["value"] for p in pts):
+        # A MONTH AT ZERO IS NOT A TREND, it is a flat line saying nothing happened (2026-09-29).
         return ""
     try:
         end = _date.fromisoformat(day) if day else _date.fromisoformat(pts[-1]["day"])
@@ -254,66 +260,112 @@ def _spark(points: list, back: int = 30, day: str = "") -> str:
             f'<span class="sk">{_esc(label)} &middot; {_esc(rng)}</span></div>')
 
 
+_STATE_WORD = {"fail": "Needs attention", "warn": "Worth a look", "connect": "To connect"}
+
+
 def _segment(r: dict, back: int = 30, day: str = "") -> str:
+    """One machine's section, drawing ONLY WHAT HAS A VALUE (`has_value`, owner 2026-09-29).
+
+    WHAT NEEDS HIM IS NOT HERE. Every machine's "needs you" lines lead the page in one card
+    (`_needs`), the way the Base Machine's "Waiting on you" card does; repeated under each machine
+    they were the same sentence twice, and "Nothing." under every quiet one.
+
+    A line with nothing in it is not drawn; a rail with no lines is not drawn; a machine with no
+    rails is not drawn. "ok" watch lines are not drawn either — "Running" is what a machine with
+    no warning already is. What is left says something, or the section is absent.
+    """
     title = _esc(r.get("title") or TITLES.get(r.get("machine"), r.get("machine")))
     if r.get("error"):
+        # A SOURCE THAT FAILED MUST NOT LOOK LIKE A SOURCE WITH NOTHING TO SAY (report §1.11), so
+        # this one is drawn even though it carries no figure.
         return (f'<section class="seg"><div class="hd"><h2>{title}</h2></div>'
-                f'<p class="rv-empty">⚠ {_esc(r["error"])}</p></section>')
+                f'<p class="rv-empty"><span class="dot fail"></span>{_esc(r["error"])}</p></section>')
     h = r.get("headline") or {}
-    delta = h.get("delta")
-    dtxt = (f'<span class="delta">{"+" if delta > 0 else ""}{_fmt(delta)} vs the day before</span>'
-            if isinstance(delta, (int, float)) and delta else "")
-    head = (f'<div class="hd"><h2>{title}</h2><div class="big">{_esc(_fmt(h.get("value", 0)))}'
-            f'<small>{_esc(h.get("label", ""))}</small>{dtxt}</div></div>'
-            # THE CHART SITS UNDER THE NUMBER IT CHARTS. Owner, 2026-09-09, asked the Today page
-            # for "data and graphs and charts"; this is the headline's own last month, and it is
-            # absent for any machine whose headline is not a number.
-            + _spark(r.get("history"), back, day))
-    needs = r.get("needs_you") or []
-    if needs:
-        items = "".join(
-            f'<li class="need">→ ' + (f'<a class="dlink" href="{_esc(n.get("href"))}">{_esc(n.get("text"))}</a>'
-                                      if n.get("href") else _esc(n.get("text"))) + "</li>"
-            for n in needs)
-    else:
-        items = '<li>Nothing.</li>'
-    rails = [f'<div class="rv-rail"><span class="k">Needs you</span><ul>{items}</ul></div>']
-    happened = r.get("happened") or []
+    head = ""
+    if has_value(h.get("value")) and str(h.get("label") or "").strip():
+        delta = h.get("delta")
+        dtxt = (f'<span class="delta">{"+" if delta > 0 else ""}{_fmt(delta)} vs the day before</span>'
+                if isinstance(delta, (int, float)) and delta else "")
+        head = (f'<div class="big">{_esc(_fmt(h["value"]))}<small>{_esc(h.get("label", ""))}</small>'
+                f'{dtxt}</div>'
+                # THE CHART SITS UNDER THE NUMBER IT CHARTS. Owner, 2026-09-09, asked for "data and
+                # graphs and charts"; it is the headline's own last month, absent when there is none.
+                + _spark(r.get("history"), back, day))
+    rails = []
+    happened = [x for x in (r.get("happened") or [])
+                if str(x.get("text") or "").strip()
+                and (x.get("value") in (None, "") or has_value(x.get("value")))]
     if happened:
         items = "".join(
-            f'<li><b class="{"zero" if x.get("value") in (0, 0.0) else ""}">{_esc(_fmt(x.get("value", "")))}</b> {_esc(x.get("text"))}</li>'
+            f'<li><b>{_esc(_fmt(x["value"]))}</b> {_esc(x.get("text"))}</li>'
             if x.get("value") not in (None, "") else f'<li>{_esc(x.get("text"))}</li>'
             for x in happened)
-        rails.append(f'<div class="rv-rail"><span class="k">Happened</span><ul>{items}</ul></div>')
-    watch = r.get("watch") or []
-    if watch:
-        items = "".join(
-            f'<li><span class="pill {_PILL.get(w.get("state"), "amber")}">{_esc(w.get("state"))}</span>'
-            + (f'<a class="dlink" href="{_esc(w.get("href"))}">{_esc(w.get("text"))}</a>' if w.get("href") else _esc(w.get("text")))
-            + "</li>"
-            for w in watch)
-        rails.append(f'<div class="rv-rail"><span class="k">Watch</span><ul>{items}</ul></div>')
-    figures = r.get("figures") or {}
+        rails.append(f'<div class="rv-rail"><span class="k">What happened</span><ul>{items}</ul></div>')
+    figures = [(k, f) for k, f in (r.get("figures") or {}).items()
+               if isinstance(f, dict) and has_value(f.get("value"))]
     if figures:
         items = "".join(
-            f'<li><b>{_esc(_fmt(f.get("value", "")))}</b> {_esc(f.get("label") or k)}</li>'
-            for k, f in figures.items())
-        rails.append(f'<div class="rv-rail"><span class="k">Numbers</span><ul>{items}</ul></div>')
-    notes = "".join(f'<div class="rv-note">{_esc(n)}</div>' for n in (r.get("notes") or []))
-    return f'<section class="seg">{head}{"".join(rails)}{notes}</section>'
+            f'<li><b>{_esc(_fmt(f.get("value")))}</b> {_esc(f.get("label") or k)}</li>'
+            for k, f in figures)
+        rails.append(f'<div class="rv-rail"><span class="k">Where things stand</span><ul>{items}</ul></div>')
+    watch = [w for w in (r.get("watch") or [])
+             if w.get("state") != "ok" and str(w.get("text") or "").strip()]
+    if watch:
+        items = "".join(
+            f'<li><span class="dot {_esc(w.get("state") or "warn")}" role="img" '
+            f'aria-label="{_esc(_STATE_WORD.get(w.get("state"), "Worth a look"))}"></span>'
+            + (f'<a class="dlink" href="{_esc(w.get("href"))}">{_esc(w.get("text"))}</a>'
+               if w.get("href") else _esc(w.get("text")))
+            + "</li>"
+            for w in watch)
+        rails.append(f'<div class="rv-rail"><span class="k">Worth watching</span><ul class="col">{items}</ul></div>')
+    notes = "".join(f'<div class="rv-note">{_esc(n)}</div>' for n in (r.get("notes") or [])
+                    if str(n or "").strip())
+    if not (head or rails or notes):
+        return ""
+    return (f'<section class="seg"><div class="hd"><h2>{title}</h2></div>{head}'
+            f'{"".join(rails)}{notes}</section>')
+
+
+def _needs(segments: list) -> str:
+    """EVERY MACHINE'S "NEEDS YOU" LINES, FIRST AND TOGETHER — the reason he opens the page.
+    Absent when nothing needs him; the sentence above the page already says so."""
+    items = []
+    for r in segments or []:
+        for n in r.get("needs_you") or []:
+            text = str(n.get("text") or "").strip()
+            if not text:
+                continue
+            items.append('<li>' + (f'<a class="dlink" href="{_esc(n.get("href"))}">{_esc(text)}</a>'
+                                   if n.get("href") else _esc(text)) + '</li>')
+    if not items:
+        return ""
+    return (f'<section class="seg rv-needs"><div class="hd"><h2>Needs you</h2></div>'
+            f'<ul>{"".join(items)}</ul></section>')
 
 
 def _meters(r: dict | None) -> str:
     if not r or r.get("error"):
         return ""
     h = r.get("headline") or {}
-    items = "".join(f'<li><b>{_esc(x.get("text"))}</b> {_esc(x.get("value", ""))}</li>' for x in r.get("happened") or [])
-    warn = "".join(f'<li><span class="pill {_PILL.get(w.get("state"), "amber")}">{_esc(w.get("state"))}</span>{_esc(w.get("text"))}</li>'
-                   for w in r.get("watch") or [])
-    return (f'<section class="seg"><div class="hd"><h2>Meters</h2><div class="big">{_esc(h.get("value", ""))}'
-            f'<small>{_esc(h.get("label", ""))}</small></div></div>'
-            f'<div class="rv-rail"><span class="k">This cycle</span><ul>{items or "<li>No metered vendor on this box.</li>"}</ul></div>'
-            + (f'<div class="rv-rail"><span class="k">Watch</span><ul>{warn}</ul></div>' if warn else "")
+    # A METER NOTHING HAS USED HAS NO DATA (owner, 2026-09-29), so only the ones in use are listed,
+    # and a box that has spent nothing this cycle shows no Spend section at all.
+    used = [x for x in (r.get("happened") or [])
+            if str(x.get("text") or "").strip() and has_value(x.get("value"))]
+    warn = [w for w in (r.get("watch") or []) if w.get("state") != "ok" and str(w.get("text") or "").strip()]
+    spent = has_value(h.get("value"))
+    if not (spent or used or warn):
+        return ""
+    items = "".join(f'<li><b>{_esc(x.get("text"))}</b> {_esc(x.get("value", ""))}</li>' for x in used)
+    warns = "".join(f'<li><span class="dot {_esc(w.get("state") or "warn")}" role="img" '
+                    f'aria-label="{_esc(_STATE_WORD.get(w.get("state"), "Worth a look"))}"></span>'
+                    f'{_esc(w.get("text"))}</li>' for w in warn)
+    return (f'<section class="seg"><div class="hd"><h2>Spend</h2></div>'
+            + (f'<div class="big">{_esc(h.get("value", ""))}<small>{_esc(h.get("label", ""))}</small></div>'
+               if spent else "")
+            + (f'<div class="rv-rail"><span class="k">This cycle</span><ul>{items}</ul></div>' if items else "")
+            + (f'<div class="rv-rail"><span class="k">Worth watching</span><ul class="col">{warns}</ul></div>'
+               if warns else "")
             + "</section>")
 
 
@@ -407,28 +459,34 @@ def body(v: dict, *, action: str = "/app/review", heading: str = "Morning Review
         return f"{open_}{head}{lede}</div>", (200 if v["live"] else 404)
 
     n = v["needs"]
+    lede = ""
     if v["stale"]:
         lede = (f'<div class="rv-warn">No report since {_esc(v["stale"])} — the machine has not '
                 f'written one in over {report.STALE_AFTER_S // 60} minutes. These numbers are from '
                 f'then, not from now.</div>')
+    back = int(v.get("history_days") or 30)
+    drawn = "".join(_segment(r, back, v.get("day") or "") for r in v["segments"])
+    # A QUIET DAY IS ONE CALM SENTENCE, never a page of empty sections (owner, 2026-09-29).
+    quiet = "" if (drawn or n) else (" All quiet so far today." if v["live"] else " A quiet day.")
+    if v["stale"]:
+        pass
     elif v["live"]:
-        said = ("<b>Nothing needs you this morning.</b>" if not n
+        said = ("<b>Nothing needs you right now.</b>" if not n
                 else f'<b>{n}</b> {"thing needs" if n == 1 else "things need"} you.')
-        lede = f'<p class="rv-lede">{said} &nbsp;·&nbsp; as of {_esc(v["as_of"])}, and it moves</p>'
+        lede = f'<p class="rv-lede">{said}{quiet} <span class="rv-when">Updated at {_esc(v["as_of"])}</span></p>'
     else:
         said = ("<b>Nothing needed you.</b>" if not n
                 else f'<b>{n}</b> {"thing needed" if n == 1 else "things needed"} you.')
-        lede = f'<p class="rv-lede">{said} &nbsp;·&nbsp; {_esc(v["label"])}, final</p>'
+        lede = f'<p class="rv-lede">{said}{quiet} <span class="rv-when">{_esc(v["label"])}, final</span></p>'
 
-    back = int(v.get("history_days") or 30)
-    segs = ("".join(_segment(r, back, v.get("day") or "") for r in v["segments"])
-            or '<p class="rv-empty">No machine reported that day.</p>')
+    segs = _needs(v["segments"]) + (drawn if v["segments"] else
+                                    '<p class="rv-empty">No machine reported that day.</p>')
     # WITHHELD OUT LOUD. A rail that simply vanishes for a stranger is indistinguishable from a
     # box that spent nothing, and the owner reading his own page has to be able to tell "you are
     # not signed in" from "there is nothing here" — the same distinction the floor page draws
     # between an empty book and an empty machine.
     money = (_meters(v["meters"]) if show_money else
-             '<section class="seg"><div class="hd"><h2>Meters</h2></div>'
+             '<section class="seg"><div class="hd"><h2>Spend</h2></div>'
              '<p class="rv-empty">What this box spends is not shown without a key. '
              'Sign in, or open this page with yours.</p></section>')
     return f"{open_}{head}{lede}{segs}{money}</div>", 200
@@ -444,7 +502,7 @@ def render(day: str, now: datetime | None = None) -> tuple[str, int]:
     # look (owner's order, 2026-09-24, relayed by OSDev1). Now it has the menu and the tokens.
     from core.dash.home import chrome
     return chrome("/app/review", title="Morning Review",
-                  lede="What your box did, and what needs you.", body=inner), status
+                  lede="What needs you, and what your box did.", body=inner), status
 
 
 @blueprint.get("/app/review")

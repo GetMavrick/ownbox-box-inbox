@@ -130,7 +130,11 @@ ok("the rows come from the renderer, not from a list in this file",
 print("\ntest_the_rail_answers_where_am_i")
 _rail = _b.split('<nav class="rail"', 1)[-1].split("</nav>", 1)[0]
 ok("the rail is on the page", 'id="railnav"' in _b)
-ok("...and it lists this machine's screens", all(w in _rail for w in ("Messages", "Today")))
+# MESSAGES · REPLIES TO SEND · SEARCH · SETTINGS (owner, 2026-09-29, IA D1 and D5): no "Today",
+# whose summary is the Morning Review's, and "Drafts" is called what its page is called.
+ok("...and it lists this machine's screens",
+   all(w in _rail for w in ("Messages", "Replies to send", "Search", "Settings"))
+   and ">Today<" not in _rail and ">Drafts<" not in _rail)
 ok("...and marks the one you are standing on",
    _rail.count('aria-current="page"') == 1, _rail.count('aria-current="page"'))
 ok("...and the way out names where it goes", "Base Machine" in _rail)

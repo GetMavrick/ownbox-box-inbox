@@ -213,7 +213,7 @@ def test_every_screen_names_one_home_screen_icon():
     from core.config import settings
     c = app.test_client()
     c.post("/dash/login", data={"token": settings.dash_token})
-    for path in ("/inbox/", "/inbox/inbox", "/inbox/settings"):
+    for path in ("/inbox/inbox", "/inbox/settings"):
         head = c.get(path).get_data(as_text=True).split("</head>", 1)[0]
         n = len(re.findall(r'rel="apple-touch-icon"', head))
         ok(f"{path} names exactly one home-screen icon, the mark", n == 1

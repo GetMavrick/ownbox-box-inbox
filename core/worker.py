@@ -90,6 +90,9 @@ def load_modules() -> None:
         log.info("worker.pack_loaded", slug=m["slug"], module=mod, host=m["host"])
     for slug, why in packs.held_back():                # needs: a feature this plan does not include
         log.warning("worker.pack_not_in_plan", slug=slug, reason=why)
+    from core import machines                          # a refused machine.yaml is named, never silent
+    for path, why in machines.invalid():
+        log.error("worker.machine_manifest_refused", manifest=path, reason=why)
     # THE OWNER'S OWN MACHINES, AND NEVER A CRASH. Unlike `modules:` above, which are ours and may
     # fail loudly, these are the buyer's code: one that raised here would stop the worker, fail the
     # post-update health check, and roll every future release back. `load` never raises.

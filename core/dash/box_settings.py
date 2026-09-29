@@ -36,7 +36,9 @@ asking waits for a root-scoped worker, which is a separate change with its own b
 # ring, call, dial, line, voice or answer. `tests/test_no_voice_words_on_the_app.py` enforces it.
 
 import html as _html
+import json
 import os
+import subprocess
 
 from flask import jsonify, redirect, request
 
@@ -628,6 +630,72 @@ def _apps_card() -> str:
             + f'<div class="apps">{tiles}</div></div>')
 
 
+def _icon_card() -> str:
+    """OWNER ONLY: the client's icon, for every header and every home-screen app on this box.
+
+    Owner, 2026-09-29: uploaded here, beside the home-screen apps it changes, PNG or JPEG, and worn
+    everywhere. The check and the re-encoding live in core/client_icon.py; this is the form.
+    """
+    if not _is_owner():
+        return ""
+    from flask import request as _rq
+    from core import client_icon
+    from core.dash import look
+    got = client_icon.current()
+    said = ""
+    if _rq.args.get("icon_error"):
+        said = f'<p class="stale">{_esc(client_icon.said(_rq.args["icon_error"]))}</p>'
+    elif _rq.args.get("icon") == "saved":
+        said = '<p class="ok">Saved. Every screen now wears it, and every app added from now on.</p>'
+    elif _rq.args.get("icon") == "removed":
+        said = '<p class="ok">Back to the Ownbox mark.</p>'
+    remove = ('<form method="post" action="/settings/mobile/icon"><input type="hidden" name="do" '
+              'value="remove"><button class="ghost" type="submit">Use the Ownbox mark again</button></form>'
+              if got else "")
+    return ('<div class="card" id="icon"><h2>Your icon</h2>'
+            '<p class="sub">It appears in the header of every screen and on the home screen for every '
+            'app on this box. A PNG or JPEG, square is best, at least 192 pixels on a side.</p>'
+            f'<p>{look.header_mark()} '
+            f'<span class="quiet">{"Your icon" if got else "The Ownbox mark, until you upload yours"}</span></p>'
+            + said +
+            '<form method="post" action="/settings/mobile/icon" enctype="multipart/form-data">'
+            '<label for="icon-file">Choose a PNG or JPEG</label>'
+            '<input id="icon-file" type="file" name="icon" accept="image/png,image/jpeg" required>'
+            '<button class="ghost" type="submit">Upload icon</button></form>'
+            + remove +
+            '<p class="quiet">An iPhone keeps the icon an app had when it was added. To see the new one '
+            'there, remove the app from the home screen and add it again.</p></div>')
+
+
+@blueprint.post("/settings/mobile/icon")
+def box_mobile_icon():
+    """Save, or remove, the client's icon. Owner only, like the card that sends it.
+
+    THE ONLY ROUTE ON THE BOX THAT TAKES MORE THAN 256 KB. `core/dispatch.py` caps every request
+    there, deliberately, and a logo exported from a design tool is often larger — so this one route
+    raises its own limit to the icon's, before anything reads the body. Nothing else moves."""
+    refuse = _admit(owner_only=True)
+    if refuse is not None:
+        return refuse
+    from flask import request as _rq
+    from werkzeug.exceptions import RequestEntityTooLarge
+    from core import client_icon
+    _rq.max_content_length = client_icon.MAX_BYTES + 64 * 1024
+    back = "/settings/mobile"
+    try:
+        if _rq.form.get("do") == "remove":
+            client_icon.remove()
+            return redirect(f"{back}?icon=removed#icon", code=303)
+        f = _rq.files.get("icon")
+        data = f.read(client_icon.MAX_BYTES + 1) if f else b""
+        client_icon.save(data, by=(_who() or {}).get("id"))
+    except RequestEntityTooLarge:
+        return redirect(f"{back}?icon_error=large#icon", code=303)
+    except client_icon.Refused as e:
+        return redirect(f"{back}?icon_error={e.code}#icon", code=303)
+    return redirect(f"{back}?icon=saved#icon", code=303)
+
+
 def _platform_cards() -> str:
     """iPhone on the left, Android on the right — because whoever prints this does not know which
     device the next person has. Drawn from the step; this file names no platform of its own."""
@@ -745,6 +813,7 @@ def box_mobile():
                   'The card above is about the device you are holding.</p></div>')
 
     body.append(_apps_card())
+    body.append(_icon_card())
     body.append('<div class="card">' + _platform_cards() + '</div>')
 
     # WHEN THE ASKING HAPPENS, said plainly, because a set-up step that ends with nothing switched
@@ -1050,7 +1119,7 @@ def box_agent():
     from core.connector import seats
 
     if not _is_owner():
-        return chrome("/settings/agent", title="AI Coworkers",
+        return chrome("/settings/agent", title="Assistants",
                       lede="This one is the owner's.",
                       body='<div class="card"><p>Only the owner of this box can connect an AI '
                            'coworker, because the connection can read every message on it.</p>'
@@ -1076,7 +1145,7 @@ def box_agent():
             # NEVER A REDIRECT AND NEVER A QUERY STRING. The credential is rendered into this one
             # response and then it is gone: a redirect would put it in a URL, and gunicorn logs
             # raw query stnotifies.
-            return chrome("/settings/agent", title="AI Coworkers",
+            return chrome("/settings/agent", title="Assistants",
                           lede="Copy the key now — it is shown once.",
                           # ONE ADDRESS, THE SHORT ONE — carried across from #1417 (OSDev1),
                           # which landed on main while this screen was being moved into core.
@@ -1088,7 +1157,7 @@ def box_agent():
                           # side alone would have silently reverted his fix.
                           body=_seat_credential(label, credential, f"{root}/mcp")
                                + '<div class="foot"><a href="/settings/agent">'
-                                 '&larr; AI coworkers</a></div>'), 200
+                                 '&larr; Assistants</a></div>'), 200
 
     root = str(request.host_url or "").rstrip("/")
     clients = "".join(f'<div class="row"><b style="flex:1;min-width:0">{_esc(c["name"])}</b>'
@@ -1133,7 +1202,7 @@ def box_agent():
             + '</details>'
             + _seat_rows(seats.all_seats())
             + _back())
-    return chrome("/settings/agent", title="AI Coworkers",
+    return chrome("/settings/agent", title="Assistants",
                   lede="Let an assistant you already pay for read this box.",
                   body=body), 200
 
@@ -1388,7 +1457,8 @@ def _ago(seconds) -> str:
     if s < 0:
         return "at a time this box reads as the future"
     if s < 3600:
-        return f"{max(1, s // 60)} minutes ago"
+        m = max(1, s // 60)
+        return f"{m} minute{'s' if m != 1 else ''} ago"
     if s < 86400:
         h = s // 3600
         return f"{h} hour{'s' if h != 1 else ''} ago"
@@ -1448,7 +1518,7 @@ def _updates_page(note: str = ""):
             + (f'<p class="quiet">Last checked {_esc(_ago(st.get("checked_s_ago")))}.</p>'
                if st.get("checked_at") else "")
             + '</div>'
-            + resume_card + edited_card +
+            + resume_card + edited_card + _checkin_card(_is_owner()) +
             '<div class="card"><h2>How updates arrive</h2>'
             f'<p>{_esc(box_updates.HOW_UPDATES_ARRIVE)}</p>'
             + ('' if edited_card else
@@ -1460,6 +1530,66 @@ def _updates_page(note: str = ""):
 
 
 _SHOWN_FILES = 20
+
+
+def _checkin_card(owner: bool) -> str:
+    """The box's check-in with Ownbox (docs/PLAN_NO_GHOST_BOXES.md P1): what it says, the exact last
+    message, and, for the owner, the switch.
+
+    THE MESSAGE ITSELF IS THE OWNER'S TO SEE. It is harmless, but it names the box's order, so it is
+    shown to the owner only. Everybody else sees what it is for and whether it is on.
+    SWITCHING OFF IS BEHIND A TICK, like putting files back: it is the one control here that makes this
+    box harder for us to help, so it is never the easiest thing on the screen to hit by accident.
+    """
+    from core import checkin
+    on, sent = checkin.enabled(), checkin.last()
+    what = ("This box tells Ownbox it is running, " + checkin.EVERY + ": which release it is on, "
+            "whether its last update worked, and which of its own health checks are failing, by name. "
+            "Your messages, contacts, leads, settings and keys are never part of it. If it goes quiet, "
+            "we notice and get in touch.")
+    out = ['<div class="card"><h2>Check-in with Ownbox</h2>', f'<p>{_esc(what)}</p>']
+    if not on:
+        out.append('<p><b>Switched off.</b> Ownbox is told once that you turned it off, and nothing is '
+                   'sent after that. We can no longer see whether this box is healthy.</p>')
+    if sent.get("at"):
+        told = "delivered" if sent.get("sent") else f'not delivered ({_esc(sent.get("result") or "")})'
+        out.append(f'<p class="quiet">Last sent {_esc(_ago(_seconds_since(sent.get("at"))))} to '
+                   f'{_esc(_host_of(sent.get("to") or ""))}: {told}.</p>')
+        if owner and sent.get("payload"):
+            out.append('<details><summary>Exactly what was sent</summary><pre class="addr" '
+                       'style="white-space:pre-wrap;word-break:break-all">'
+                       + _esc(json.dumps(sent["payload"], indent=1, sort_keys=True)) + '</pre></details>')
+    elif on:
+        out.append('<p class="quiet">Nothing sent yet. The first check-in goes out within a few minutes '
+                   'of the box starting.</p>')
+    if owner and on:
+        out.append('<form method="post" action="/settings/updates/checkin">'
+                   '<input type="hidden" name="to" value="off">'
+                   '<label class="consent"><input type="checkbox" name="confirm" value="yes" required> '
+                   'Stop telling Ownbox this box is running</label>'
+                   '<button type="submit" style="margin-top:14px">Switch off</button></form>')
+    elif owner:
+        out.append('<form method="post" action="/settings/updates/checkin">'
+                   '<input type="hidden" name="to" value="on">'
+                   '<button type="submit">Switch back on</button></form>')
+    else:
+        out.append('<p class="quiet">The owner of this box can switch this off here.</p>')
+    return "".join(out) + "</div>"
+
+
+def _seconds_since(iso) -> float | None:
+    from datetime import datetime, timezone
+    try:
+        t = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        t = t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - t).total_seconds())
+    except (TypeError, ValueError):
+        return None
+
+
+def _host_of(url: str) -> str:
+    from urllib.parse import urlsplit
+    return urlsplit(url).hostname or url
 
 
 def _edited_card(files: list, owner: bool) -> str:
@@ -1518,6 +1648,45 @@ def box_updates_put_back():
     else:
         res = box_updates.put_back(by=str(_who().get("id") or ""))
     return _updates_page(_put_back_note(res))
+
+
+@blueprint.route("/settings/updates/checkin", methods=["POST"])
+def box_checkin_switch():
+    """Switch the box's check-in off or back on. Owner-only, on the POST as well as the page.
+
+    Either way one check-in goes out now: switching off sends the single "switched off" message (so
+    Ownbox knows this box chose quiet rather than went dark), switching on sends a fresh one.
+    """
+    refuse = _admit(owner_only=False)
+    if refuse is not None:
+        return refuse
+    if not _is_owner():
+        return chrome("/settings/updates", title="Updates", lede="This one is the owner's.",
+                      body='<div class="card"><p>Only the owner of this box can switch its check-in '
+                           'off or on.</p></div>' + _back()), 403
+    from core import checkin
+    to = request.form.get("to")
+    if to == "off" and request.form.get("confirm") != "yes":
+        return _updates_page(_put_back_note({"ok": False, "said": "Nothing was changed — tick the box "
+                                                                  "to confirm first."}))
+    if to not in ("on", "off"):
+        return _updates_page(_put_back_note({"ok": False, "said": "Nothing was changed."}))
+    checkin.set_enabled(to == "on", by=str(_who().get("id") or ""))
+    _start_checkin()
+    said = ("Switched off. Ownbox is being told once, and nothing is sent after that." if to == "off"
+            else "Switched back on. A check-in is on its way now.")
+    return _updates_page(_put_back_note({"ok": True, "said": said}))
+
+
+def _start_checkin() -> None:
+    """Start one check-in now, as its own unit, without waiting for it. Nothing here can fail the page."""
+    if os.environ.get("AIOS_HERMETIC_TEST"):
+        return
+    try:
+        subprocess.Popen(["systemctl", "start", "--no-block", "aios-checkin.service"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, ValueError):
+        pass
 
 
 # ── take this box to your own DigitalOcean account ──────────────────────────────────────────────────

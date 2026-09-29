@@ -81,7 +81,7 @@ def head_tags() -> str:
             f'<link rel="stylesheet" href="/ui/box.css?v={version()}">'
             '<link rel="icon" href="/favicon.ico" sizes="32x32">'
             '<link rel="icon" href="/ui/icon.svg" type="image/svg+xml">'
-            '<link rel="apple-touch-icon" href="/apple-touch-icon.png">')
+            f'<link rel="apple-touch-icon" href="/apple-touch-icon.png{icon_version()}">')
 
 
 @blueprint.get("/ui/box.css")
@@ -226,8 +226,43 @@ def favicon():
 @blueprint.get("/apple-touch-icon.png")
 @blueprint.get("/apple-touch-icon-precomposed.png")
 def apple_touch_icon():
-    """180 pixels, the size an iPhone asks for."""
-    return Response(mark_png(180), mimetype="image/png", headers={"Cache-Control": _ICON_CACHE})
+    """180 pixels, the size an iPhone asks for: the client's icon once uploaded, else the mark."""
+    return Response(app_png(180), mimetype="image/png", headers={"Cache-Control": _icon_cache()})
+
+
+# THE CLIENT'S ICON OR THE BOX'S MARK, ONE ANSWER FOR EVERY HOME SCREEN (owner, 2026-09-29: the upload
+# appears "everywhere"). Every icon route on the box asks this — core's, and a machine's own, since the
+# Unified Inbox draws its icons through it too — so no machine has to know an upload exists.
+def app_png(size: int) -> bytes:
+    from core import client_icon
+    return client_icon.tile_png(size) or mark_png(size)
+
+
+def icon_version() -> str:
+    """"?v=<sha>" once a client icon is uploaded, else "": a new icon is a new address, so a phone that
+    cached the old one fetches the new one rather than keeping it for a day."""
+    from core import client_icon
+    got = client_icon.current()
+    return f"?v={got['sha']}" if got else ""
+
+
+def _icon_cache() -> str:
+    """Immutable when asked for by the current version, a day otherwise — the mark's old promise."""
+    from flask import request as _rq
+    v = icon_version()
+    return ("public, max-age=31536000, immutable" if v and _rq.args.get("v") == v[3:]
+            else "public, max-age=3600")
+
+
+@blueprint.get("/ui/client-icon.png")
+def ui_client_icon():
+    """The uploaded icon itself, margins transparent, for a header to draw on its white disc. Public,
+    like every icon: a sign-in screen and a home screen fetch it without a session."""
+    from core import client_icon
+    png = client_icon.master_png()
+    if png is None:
+        return ("", 404)
+    return Response(png, mimetype="image/png", headers={"Cache-Control": _icon_cache()})
 
 
 # THE BASE MACHINE IS AN APP OF ITS OWN. Owner, 2026-09-24, with a screenshot of two home-screen
@@ -236,7 +271,18 @@ def apple_touch_icon():
 # manifest, so adding the Base Machine offered the page title as its name and opened it in the
 # browser. This is its manifest: the product's name on the icon, standalone like the inbox, and the
 # same mark the tab and touch icon already use.
-APP_NAME = "Ownbox"
+APP_NAME = "Ownbox"          # the product's own name: what an unsold box, with no buyer yet, is called
+
+
+def base_name() -> str:
+    """The Base Machine's name on a home screen: THE CLIENT'S (owner, 2026-09-29, "The client's
+    name"), since it is their box and the header already says Base Machine once it is open. On an
+    unsold box, with no buyer, `dash.brand()` answers with the product's own name."""
+    try:
+        from core.dash import brand
+        return str(brand() or APP_NAME)
+    except Exception:                   # noqa: BLE001 — a name, never a 500
+        return APP_NAME
 _APP_SIZES = (192, 512)
 
 
@@ -244,12 +290,22 @@ _APP_SIZES = (192, 512)
 def ui_manifest():
     """Public, as every manifest must be: a home screen fetches it without a session."""
     import json
-    m = {"name": APP_NAME, "short_name": APP_NAME, "start_url": "/", "scope": "/",
+    # `id` IS WHO THE APP IS, AND IT IS WHAT IT ALWAYS WAS: an app with no id is identified by its
+    # start_url, which is "/". Saying so now means a later start_url change cannot orphan installs.
+    m = {"id": "/", "name": base_name(), "short_name": base_name(), "start_url": "/", "scope": "/",
          "display": "standalone", "background_color": _GROUND_HEX, "theme_color": _GROUND_HEX,
-         "icons": [{"src": f"/ui/icon-{n}.png", "sizes": f"{n}x{n}", "type": "image/png",
-                    "purpose": "any"} for n in _APP_SIZES]}
+         "icons": manifest_icons("/ui/icon-{n}.png")}
     return Response(json.dumps(m), mimetype="application/manifest+json",
                     headers={"Cache-Control": "public, max-age=3600"})
+
+
+def manifest_icons(pattern: str) -> list[dict]:
+    """The two sizes every manifest names, at the app's own addresses, versioned by the client's icon.
+    `any maskable`: the mark keeps its cream square inside the safe zone, and a client's icon is drawn
+    into it (core/dash/client_icon.py), so one picture is right for both purposes."""
+    v = icon_version()
+    return [{"src": pattern.format(n=n) + v, "sizes": f"{n}x{n}", "type": "image/png",
+             "purpose": "any maskable"} for n in _APP_SIZES]
 
 
 @blueprint.get("/ui/icon-<int:size>.png")
@@ -257,7 +313,7 @@ def ui_icon_png(size: int):
     """Exactly the two sizes the manifest names, and a 404 for any other: a size is a key."""
     if size not in _APP_SIZES:
         return ("", 404)
-    return Response(mark_png(size), mimetype="image/png", headers={"Cache-Control": _ICON_CACHE})
+    return Response(app_png(size), mimetype="image/png", headers={"Cache-Control": _icon_cache()})
 
 
 # ONE HOME-SCREEN APP PER MACHINE, AND EVERY SCREEN OF THE MACHINE INSTALLS AS IT. Owner, 2026-09-29:
@@ -284,7 +340,9 @@ def client_icon() -> str:
     the box's own mark. One function, so the upload (docs/SCOPE_MOBILE_APP_REDESIGN.md, the install
     phase) changes one line and every header follows. Owner, 2026-09-27: "we are going to keep the
     name of the client and give them the ability to upload their icon"."""
-    return "/ui/icon.svg"
+    from core import client_icon as _ci
+    got = _ci.current()
+    return f"/ui/client-icon.png?v={got['sha']}" if got else "/ui/icon.svg"
 
 
 def header_mark() -> str:
@@ -294,18 +352,20 @@ def header_mark() -> str:
 
 def app_tags(app: dict | None = None) -> str:
     """What makes a screen installable, and under which name. Without `app`, the Base Machine's."""
-    href, name = (app["manifest"], app["name"]) if app else ("/ui/manifest.webmanifest", APP_NAME)
+    href, name = (app["manifest"], app["name"]) if app else ("/ui/manifest.webmanifest", base_name())
+    # CAPABLE IS WHAT AN OLDER iPHONE READS before it opens a home-screen icon full screen; a newer one
+    # reads the manifest's `display`. One line, and the failure it prevents is silent.
     return (f'<link rel="manifest" href="{_html.escape(href)}">'
-            f'<meta name="apple-mobile-web-app-title" content="{_html.escape(name)}">')
+            f'<meta name="apple-mobile-web-app-title" content="{_html.escape(name)}">'
+            '<meta name="apple-mobile-web-app-capable" content="yes">')
 
 
 def manifest_for(app: dict, *, start_url: str, scope: str) -> dict:
     """A machine's manifest: its own name, its own address space, the box's mark and colours. The
     mark is drawn to the edge with the cream square inside the safe zone, so it is `maskable` too."""
-    return {"name": app["name"], "short_name": app["name"], "start_url": start_url, "scope": scope,
-            "display": "standalone", "background_color": _GROUND_HEX, "theme_color": _GROUND_HEX,
-            "icons": [{"src": f"/ui/icon-{n}.png", "sizes": f"{n}x{n}", "type": "image/png",
-                       "purpose": "any maskable"} for n in _APP_SIZES]}
+    return {"id": start_url, "name": app["name"], "short_name": app["name"], "start_url": start_url,
+            "scope": scope, "display": "standalone", "background_color": _GROUND_HEX,
+            "theme_color": _GROUND_HEX, "icons": manifest_icons("/ui/icon-{n}.png")}
 
 
 @blueprint.get("/ui/icon.svg")
@@ -366,6 +426,21 @@ def _specimen() -> str:
     <p class="ui-empty">Nothing here yet. The first report appears within fifteen minutes.</p>
     <div class="ui-actions"><a class="ui-btn ui-compact ui-ghost" href="#">Small action</a>
       <button type="button" class="ui-danger">Remove</button></div></section>
+
+  <section class="ui-card"><h2>Added in the redesign</h2>
+    <p class="ui-eyebrow">A choice among a few: the chosen one is raised, never inked</p>
+    <div class="ui-seg"><button type="button" aria-pressed="true">Light</button>
+      <button type="button" aria-pressed="false">Dark</button>
+      <button type="button" aria-pressed="false">Automatic</button></div>
+    <p class="ui-eyebrow">Figures: a number over the words that say what it counts</p>
+    <div class="ui-metrics"><div class="ui-metric"><b>4</b><span>drafts ready to send</span></div>
+      <div class="ui-metric"><b>21m</b><span>oldest waiting</span></div></div>
+    <p class="ui-eyebrow">A mark that is not ours, on its white disc in both themes</p>
+    <p><span class="ui-disc"><img src="{client_icon()}" alt=""></span></p>
+    <p class="ui-eyebrow">Status: green is good, amber is caution, red is stop, and always with a word</p>
+    <p><span class="ui-chip"><span class="ui-dot ok"></span>Running</span>
+      <span class="ui-chip"><span class="ui-dot warn"></span>Worth watching</span>
+      <span class="ui-chip"><span class="ui-dot bad"></span>Needs you</span></p></section>
 </div>"""
 
 

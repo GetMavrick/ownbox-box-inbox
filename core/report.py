@@ -179,6 +179,21 @@ def _normalize(machine: str, title: str, rep) -> dict:
     }
 
 
+# VENDORS AS A PERSON READS THEM (owner, 2026-09-29, via WebDev2: the review listed "apollo" and
+# "mev_leads"). Two meters can share one account, so the name says which. A vendor not listed here
+# reads as its key, spaced and capitalised, never as a config key.
+_VENDOR_NAMES = {
+    "heygen": "HeyGen", "scrapecreators": "ScrapeCreators", "mev_wallet": "MyEmailVerifier",
+    "email_verify": "MyEmailVerifier (inbox checks)", "mev_leads": "MyEmailVerifier (lead checks)",
+    "google_places": "Google Places", "prospeo": "Prospeo", "apollo": "Apollo", "hunter": "Hunter",
+    "tomba": "Tomba", "resend": "Resend",
+}
+
+
+def vendor_name(key) -> str:
+    return _VENDOR_NAMES.get(str(key)) or str(key).replace("_", " ").strip().title()[:40]
+
+
 def _meters_report(day: date) -> dict:
     """The rail that absorbed the cost digest (§1.7): the same meters, from the same guard the
     vendors are charged against, stored with the day."""
@@ -186,15 +201,15 @@ def _meters_report(day: date) -> dict:
     at = datetime.combine(day, datetime.min.time(), tzinfo=tz()) + timedelta(hours=23, minutes=59)
     at = min(at, now_local())
     rows = cost_digest.meters(at)
-    happened = [{"text": f"{r['vendor']} {r['used']:.0f} of {r['cap']:.0f}",
+    happened = [{"text": f"{vendor_name(r['vendor'])} {r['used']:.0f} of {r['cap']:.0f}",
                  "value": f"{r['pct']:.0f}%"} for r in rows]
     watch = []
     for r in rows:
         if r["cap"] and r["used"] >= r["cap"]:
-            watch.append({"text": f"{r['vendor']} is AT CAP — calls are refused until the cycle resets",
+            watch.append({"text": f"{vendor_name(r['vendor'])} is AT CAP — calls are refused until the cycle resets",
                           "state": "fail"})
         elif r["pct"] >= cost_digest.WARN_PCT:
-            watch.append({"text": f"{r['vendor']} is at {r['pct']:.0f}% of its cap", "state": "warn"})
+            watch.append({"text": f"{vendor_name(r['vendor'])} is at {r['pct']:.0f}% of its cap", "state": "warn"})
     usd = None
     try:
         usd = {"spend": float(cost_guard.month_to_date_spend(at)), "ceiling": float(cost_guard.ceiling())}
@@ -562,6 +577,37 @@ def _fmt_value(v) -> str:
     return str(v)
 
 
+_BLANK = frozenset({"", "—", "–", "-", "n/a", "none"})
+
+
+def has_value(v) -> bool:
+    """IS THERE ANYTHING TO SHOW? A LINE WITHOUT ONE IS NOT DRAWN.
+
+    Owner, 2026-09-29, looking at this page rendered on a box with nothing in it yet: *"That's
+    exactly what we do not want!!! what a depressing looking screen. If nothing exists, we don't
+    wanna have zeros."* and *"If a line doesn't have data, it should not be displayed."* The page
+    drew ten meters at "0 of N", a headline reading "None", zeros in red, and "Nothing." under
+    every machine.
+
+    So None, blank, a dash, and zero in any spelling ("0", "0.0", "$0", "$0.00", "0%") are
+    nothing. A sentence with a number in it ("3 of 50 used") is something. One rule, used by the
+    page, the Base Machine dashboard, the email and this module's message, so none of them can
+    disagree about what counts."""
+    if v is None or isinstance(v, bool):
+        return bool(v)
+    if isinstance(v, (int, float)):
+        return v != 0
+    t = str(v).strip()
+    if t.lower() in _BLANK:
+        return False
+    bare = re.sub(r"[\s$€£%,.+]", "", t)
+    if bare and set(bare) <= {"0"}:
+        return False
+    # "0 of 20", "$0 of $90", "0% used" — a count that starts at nothing is still nothing. A time
+    # such as "00:30" is not caught: the zero must be followed by a space, a % or the end.
+    return not re.match(r"^[$€£]?0(?:[.,]0+)?(?:\s|%|$)", t)
+
+
 def render(day: date, now: datetime | None = None) -> str:
     """The message: Needs you → Yesterday → Watch → Meters (spec §2.4). A phone, at breakfast,
     in eight seconds; urgency first. The PAGE orders by machine instead, and the divergence is
@@ -582,19 +628,31 @@ def render(day: date, now: datetime | None = None) -> str:
     else:
         lines.append("Nothing needs you this morning.")
     lines.append(f"Yesterday, {day:%a %d %b}")
+    said = 0
     for r in segs(yday):
         if r.get("error"):
             lines.append(f"  {r['title']}: ⚠ {r['error']}")
+            said += 1
             continue
+        # A LINE WITHOUT DATA IS NOT SENT (owner, 2026-09-29: "If a line doesn't have data, it
+        # should not be displayed"), and a machine with no line left is not named at all.
         h = r.get("headline") or {}
+        happened = [x for x in r.get("happened") or [] if str(x.get("text") or "").strip()
+                    and (x.get("value") in (None, "") or has_value(x.get("value")))]
+        if not (has_value(h.get("value")) or happened):
+            continue
+        said += 1
         delta = h.get("delta")
         dtxt = f" ({'+' if delta > 0 else ''}{_fmt_value(delta)} vs the day before)" if isinstance(delta, (int, float)) and delta else ""
-        lines.append(f"  {r['title']}: {_fmt_value(h.get('value', 0))} {h.get('label', '')}{dtxt}".rstrip())
-        for x in r.get("happened") or []:
+        lines.append(f"  {r['title']}: {_fmt_value(h['value'])} {h.get('label', '')}{dtxt}".rstrip()
+                     if has_value(h.get("value")) else f"  {r['title']}")
+        for x in happened:
             v = x.get("value")
             lines.append(f"    · {x.get('text', '')}" + (f" — {_fmt_value(v)}" if v not in (None, "") else ""))
     if not segs(yday):
         lines.append("  (no machine reported yesterday — the first full day lands tomorrow)")
+    elif not said:
+        lines.append("  A quiet day.")
     # METERS ARE IN THE WATCH LIST, not only in the rail at the bottom. SMOKETESTED against the
     # live box 2026-09-09: google_places read 201 of 200 — AT CAP, every further call refused —
     # and the message did not say so anywhere, because this list was built from the SEGMENTS and
@@ -608,10 +666,12 @@ def render(day: date, now: datetime | None = None) -> str:
         lines += [f"  {'!!' if w.get('state') == 'fail' else '→' if w.get('state') == 'connect' else ' !'} "
                   f"{w.get('text', '')}  [{t}]" for t, w in watch]
     meters = next((r for r in tday if r.get("machine") == METERS), None)
-    if meters and not meters.get("error"):
+    if meters and not meters.get("error") and has_value((meters.get("headline") or {}).get("value")):
+        # SPEND ONLY WHEN THERE IS SOME, and only the meters in use.
         h = meters.get("headline") or {}
-        lines.append(f"Meters  {_fmt_value(h.get('value', ''))} {h.get('label', '')}".rstrip())
-        lines += [f"  {x.get('text', '')} ({x.get('value', '')})" for x in meters.get("happened") or []]
+        lines.append(f"Spend  {_fmt_value(h.get('value', ''))} {h.get('label', '')}".rstrip())
+        lines += [f"  {x.get('text', '')} ({x.get('value', '')})" for x in meters.get("happened") or []
+                  if has_value(x.get("value"))]
     lines.append(page_url(day))
     text = "\n".join(lines)
     if len(text) > SLACK_LIMIT:

@@ -625,8 +625,8 @@ _MIGRATION_OWNER: dict[int, str] = {
     55: "customer_voice",
     # 56 adds inbox_conversations.automated — the same table 48 and 51 touched.
     56: "customer_voice",
-    # 57 copies the AEO Machine's plan rows, settings, keys and AI account to their new names —
-    # data only a box carrying that machine has.
+    # 57 adds seo_plan.title — the AEO Machine's plan table, only on a box that carries it.
+    57: "aeo_machine",
 }
 # A table each machine is known by, for the one-time bootstrap of boxes that predate the split.
 _MACHINE_MARKER = {"customer_voice": "voice_rails", "content": "reel_scripts", "lead": "gtm_leads"}
@@ -708,7 +708,7 @@ def _replay_machine(conn, machine: str, upto: int) -> None:
 # concurrent migrators: worker, dispatch, and watchdog can all boot and call init_db;
 # exactly one runs the steps, the rest wait on the lock then see the bumped version.
 
-SCHEMA_VERSION = 56
+SCHEMA_VERSION = 57
 
 
 def _migration_1(c) -> None:
@@ -1809,6 +1809,24 @@ def _migration_56(c) -> None:
         _add_column_if_missing(c, "inbox_conversations", "automated", "INTEGER")
 
 
+
+def _migration_57(c) -> None:
+    """THE MORNING REVIEW NAMES AN ARTICLE BY ITS TITLE, AND THE PLAN NEVER KEPT ONE.
+
+    The AEO Machine's plan table held the question, the slug and the address of each article,
+    but not the title its writer gave it, so the review could only say which question an article
+    answered, never what it was called (OSDev1, 2026-09-29: "articles published with their
+    titles"). One nullable column, filled from the next article on; an older row has none, and
+    the review names it by its question instead.
+
+    The table keeps its original name on purpose (OSDev1's ruling on #1595: storage names stay, so
+    a rollback never splits a box's data). Tagged `aeo_machine` in _MIGRATION_OWNER: a box without
+    the machine has no such table.
+    """
+    if _table_exists(c, "seo_plan"):
+        _add_column_if_missing(c, "seo_plan", "title")
+
+
 MIGRATIONS = {
     46: _migration_46,   # the schema split's bootstrap (kernel step)
     1: _migration_1, 2: _migration_2, 3: _migration_3, 4: _migration_4,
@@ -1826,7 +1844,7 @@ MIGRATIONS = {
               45: _migration_45, 47: _migration_47, 48: _migration_48,
               49: _migration_49, 50: _migration_50, 51: _migration_51, 52: _migration_52,
               53: _migration_53, 54: _migration_54, 55: _migration_55,
-              56: _migration_56}
+              56: _migration_56, 57: _migration_57}
 
 
 # init_db IS SAFE TO CALL FROM MANY THREADS AND PROCESSES AT ONCE. Main went red on 2026-09-06

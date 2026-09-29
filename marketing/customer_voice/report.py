@@ -100,10 +100,11 @@ def _rail_line(rail: str, st: str) -> dict | None:
         said = rails.explain(rail)
         if said:
             return {"text": f"{name} — {said}", "state": rails.CONNECT}
-        # NOTHING IS WRONG AND NOTHING IS MISSING — it simply has not run yet. Say that, rather
-        # than repeating a setup instruction the box can see has already been carried out.
+        # NOTHING IS WRONG AND NOTHING IS MISSING — it simply hasn't run yet, so there's no line at
+        # all (owner, 2026-09-29: "If a line doesn't have data, it should not be displayed"). It was
+        # "waiting for its first check", a line with nothing in it.
         if rail in rails.NO_AUTH and health.configured():
-            return {"text": f"{name} — waiting for its first check", "state": rails.CONNECT}
+            return None
         # NOT A FAILURE. Owner, 2026-09-09: an owned-but-unconnected rail says "connect your
         # Google Business Profile". Same pixel as a red line, opposite outcome — one reads as a
         # broken machine, the other as the next step.

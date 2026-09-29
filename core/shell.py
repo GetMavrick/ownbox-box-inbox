@@ -111,6 +111,11 @@ class Item:
     # THIS ROW OPENS A NEW GROUP, so the renderer leaves a little more room above it. Set by
     # `rail()` where the sections cross from one `GROUPS` entry to the next, never by a caller.
     group_start: bool = False
+    # A SUB-MENU'S ROWS MAY FALL INTO GROUPS too, drawn the same way — a little room, no heading
+    # (owner, 2026-09-24, of the main menu: "very subtle. Almost just like an extra space"). The
+    # first user is System Settings (owner, 2026-09-29, IA D4: Your AI · Reaching you · Your team ·
+    # The server). A machine names the group; `rail()` turns a change of name into the gap.
+    group: str = ""
 
 
 @dataclass(frozen=True)
@@ -130,6 +135,10 @@ class Section:
     # parent; and it claims the pages its own items point at, because a setting's one home need not
     # live under the section's own path (/inbox/mailbox is the Unified Inbox's mailbox setting).
     parent: str = ""
+    # A SECTION ONLY THE OWNER MAY OPEN, dropped from everyone else's menu exactly as an owner-only
+    # `Item` is. The first is the Morning Review (owner, 2026-09-29: "Add the Morning Review to the
+    # menu"): its page publishes what the box spends, and its gate sends anyone else to sign in.
+    owner_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -167,7 +176,7 @@ GROUPS = ("base", "addons")
 
 def register_section(key: str, *, order: int, machine: str, title: str, href: str,
                      items: Iterable = (), home: bool = False, icon: str = "",
-                     group: str = "", parent: str = "") -> None:
+                     group: str = "", parent: str = "", owner_only: bool = False) -> None:
     """Declare one rail section. Called at import, like every other seam in this box.
 
     CHECKED HERE, AT IMPORT, where a mistake is a failed boot line — not on the screen, where it
@@ -208,6 +217,9 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
             raise ValueError(f"rail section {key!r} cannot nest under {parent!r}, itself nested")
         if home:
             raise ValueError(f"rail section {key!r} cannot be both nested and home")
+    if owner_only and home:
+        # THE HOME IS WHERE EVERY BACK ARROW LANDS, for a member too; hiding it strands them.
+        raise ValueError(f"rail section {key!r} cannot be both owner-only and home")
         group = group or up.group
     group = group or ("base" if machine == "core" else "addons")
     if group not in GROUPS:
@@ -238,7 +250,8 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
         # machine that owns the section owns how it looks, exactly as it owns its title.
         built.append(Item(key=ikey, label=str(it["label"]).strip(),
                           href=str(it["href"]), tone=tone, icon=str(it.get("icon") or ""),
-                          owner_only=bool(it.get("owner_only"))))
+                          owner_only=bool(it.get("owner_only")),
+                          group=str(it.get("group") or "")))
 
     if home:
         other = next((s for s in _SECTIONS.values() if s.home and s.key != key), None)
@@ -249,7 +262,7 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
 
     _SECTIONS[key] = Section(key=key, order=order, machine=machine, title=title.strip(),
                              href=href, items=tuple(built), home=bool(home), icon=str(icon or ""),
-                             group=group, parent=str(parent or ""))
+                             group=group, parent=str(parent or ""), owner_only=bool(owner_only))
     log.info("shell.section_registered", key=key, machine=machine, items=len(built))
 
 
@@ -356,6 +369,18 @@ def current(path: str) -> Section | None:
     return best
 
 
+def _grouped(items: tuple) -> tuple:
+    """A sub-menu's rows with `group_start` set where a named group begins. Rows with no group
+    never open one, so a menu that names none draws exactly as before."""
+    from dataclasses import replace
+    out, prev = [], None
+    for i, it in enumerate(items):
+        start = bool(i and it.group and it.group != prev)
+        out.append(replace(it, group_start=start) if start else it)
+        prev = it.group or prev
+    return tuple(out)
+
+
 def rail(path: str) -> Rail:
     """What the left rail shows for this path — the whole two-level decision, in one place.
 
@@ -370,19 +395,20 @@ def rail(path: str) -> Rail:
     path = path or "/"
     here = current(path)
     if here is not None and here.items and not here.home:
+        items = _grouped(here.items)
         up = _SECTIONS.get(here.parent) if here.parent else None
         if up is not None:
             # BACK GOES UP ONE, to the menu this one opened from, never all the way home.
-            return Rail(level=2, title=here.title, back=up.href, items=here.items, here=path,
+            return Rail(level=2, title=here.title, back=up.href, items=items, here=path,
                         back_label=up.title)
-        return Rail(level=2, title=here.title, back=home_href(), items=here.items, here=path,
+        return Rail(level=2, title=here.title, back=home_href(), items=items, here=path,
                     back_label=home_title())
     # LEVEL 1 — the sections themselves, rendered through the same `Item` the second level uses so
     # a template has one row to draw and not two. A NESTED section is reached from its parent,
     # never listed here.
     got = tuple(s for s in sections() if not s.parent)
     top = tuple(Item(key=s.key, label=s.title, href=s.href, icon=s.icon,
-                     submenu=bool(s.items) and not s.home,
+                     owner_only=s.owner_only, submenu=bool(s.items) and not s.home,
                      group_start=i > 0 and s.group != got[i - 1].group)
                 for i, s in enumerate(got))
     return Rail(level=1, title="", back="", items=top, here=path)
