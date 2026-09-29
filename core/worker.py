@@ -93,8 +93,10 @@ def load_modules() -> None:
     # THE OWNER'S OWN MACHINES, AND NEVER A CRASH. Unlike `modules:` above, which are ours and may
     # fail loudly, these are the buyer's code: one that raised here would stop the worker, fail the
     # post-update health check, and roll every future release back. `load` never raises.
-    from core import custom_machines
-    custom_machines.load("worker")
+    from core import custom_machines, machine_breaks
+    # R4: THE OWNER IS TOLD WHEN AN UPDATE STOPS ONE. Here, in the one process that boots once, so
+    # one break is announced once (core/machine_breaks.py). `observe` never raises either.
+    machine_breaks.observe(custom_machines.load("worker"))
 
 
 _REGISTRATIONS_IMPORTED = False

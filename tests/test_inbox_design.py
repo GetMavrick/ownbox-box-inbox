@@ -109,15 +109,35 @@ _box_m = re.search(r":root\s*\{([^}]*)\}", _BOX_CSS.read_text()) if _BOX_CSS.is_
 BOX = _tokens(_box_m.group(1)) if _box_m else {}
 ok(f"box.css gives the inbox its base tokens ({len(BOX)})", len(BOX) >= 20, str(_BOX_CSS))
 LIGHT_BASE = {**BOX, **LIGHT}
+# box.css CARRIES DARK TOO (PR #1659 §14): `html[data-theme="dark"]` re-values its colours, so a
+# name this page points at one of them follows the theme with nothing redeclared here.
+_box_dark_m = re.search(r'^html\[data-theme="dark"\]\s*\{([^}]*)\}',
+                        _BOX_CSS.read_text() if _BOX_CSS.is_file() else "", re.M)
+BOX_DARK = _tokens(_box_dark_m.group(1)) if _box_dark_m else {}
+ok(f"box.css carries a dark block for the inbox to follow ({len(BOX_DARK)})", len(BOX_DARK) >= 10)
+
+
+def _follows_into_dark(name: str, seen: tuple = ()) -> bool:
+    """True when light's value for `name` is a var() chain ending at a colour that the dark stamp
+    or box.css's dark block re-values. A literal at the end of the chain that only light defines
+    is exactly the rot this section exists to catch."""
+    m = re.fullmatch(r"var\(\s*--([a-z][a-z0-9-]*)\s*\)", (LIGHT.get(name) or BOX.get(name) or "").strip())
+    if not m:
+        return name in BOX_DARK
+    nxt = m.group(1)
+    if nxt in STAMP or nxt in BOX_DARK:
+        return True
+    return nxt not in seen and _follows_into_dark(nxt, seen + (name,))
 
 
 # ── the rot guard ───────────────────────────────────────────────────────────────────────────
 print("\ntest_no_token_exists_in_only_one_theme")
-# A TOKEN THE OTHER THEME NEVER REDEFINES INHERITS THE LIGHT VALUE. On a dark ground that is a
+# A TOKEN THE OTHER THEME NEVER RE-VALUES INHERITS THE LIGHT VALUE. On a dark ground that is a
 # light-theme colour on a dark surface — unreadable, and invisible to whoever added it, because
-# they were looking at the theme they wrote.
-missing_stamp = sorted(set(LIGHT) - set(STAMP))
-ok("every light token is redefined for the explicit dark stamp"
+# they were looking at the theme they wrote. Re-valued means either redeclared in the dark stamp
+# below, or pointed by var() at a box.css colour that box.css's own dark block re-values.
+missing_stamp = sorted(n for n in set(LIGHT) - set(STAMP) if not _follows_into_dark(n))
+ok("every light token follows the explicit dark stamp"
    + (f" — MISSING: {missing_stamp}" if missing_stamp else ""), not missing_stamp)
 stray = sorted(set(STAMP) - set(LIGHT_BASE))
 ok("dark introduces no token light has never heard of"
@@ -128,12 +148,12 @@ used = set(re.findall(r"var\(\s*--([a-z][a-z0-9-]*)", CSS))
 undefined = sorted(used - set(LIGHT_BASE))
 ok("every var(--x) resolves to a token in the light base"
    + (f" — UNDEFINED: {undefined}" if undefined else ""), not undefined)
-# A BOX COLOUR A RULE USES DIRECTLY MUST BE REDEFINED FOR DARK. box.css is light-only, so a rule
-# reading var(--ink) straight from it would paint the site's black text on the dark ground.
+# A BOX COLOUR A RULE USES DIRECTLY MUST HAVE A DARK VALUE SOMEWHERE — the stamp here, or box.css's
+# own dark block. Without one a rule reading var(--ink) would paint black text on the dark ground.
 _rules_only = re.sub(r"(?s)(?<!\])\n:root\{[^}]*\}|:root\[data-theme=\"dark\"\]\{[^}]*\}", " ", CSS)
 _direct = set(re.findall(r"var\(\s*--([a-z][a-z0-9-]*)", _rules_only))
 _box_colours = {k for k, v in BOX.items() if v.startswith(("#", "rgb", "hsl"))}
-_unpaired = sorted((_direct & _box_colours) - set(LIGHT) - set(STAMP))
+_unpaired = sorted((_direct & _box_colours) - set(LIGHT) - set(STAMP) - set(BOX_DARK))
 ok("every box colour a rule reads directly is redefined for dark"
    + (f" — LIGHT-ONLY IN DARK: {_unpaired}" if _unpaired else ""), not _unpaired)
 

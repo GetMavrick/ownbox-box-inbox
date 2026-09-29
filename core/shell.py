@@ -255,9 +255,16 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
 
 def sections() -> tuple[Section, ...]:
     """Every registered section, in rail order. Ties break on key so the rail cannot reshuffle
-    itself between two renders of the same box — a menu whose items move is a menu nobody learns."""
-    return tuple(sorted(_SECTIONS.values(),
-                        key=lambda s: (GROUPS.index(s.group), s.order, s.key)))
+    itself between two renders of the same box — a menu whose items move is a menu nobody learns.
+
+    THE MACHINES ARE IN ALPHABETICAL ORDER BY THEIR NAME. Owner, 2026-09-27: "change the order of
+    the apps listed on the menu. Preferably they are in alphabetical order." The box's own rows
+    (machine "core", such as Add a Machine at the foot) keep their `order` around them."""
+    def place(s):
+        if s.group == "addons" and s.machine != "core":
+            return (GROUPS.index(s.group), 0, s.title.lower(), s.key)
+        return (GROUPS.index(s.group), s.order, "", s.key)
+    return tuple(sorted(_SECTIONS.values(), key=place))
 
 
 # THE KEY A MACHINE USES TO SAY "MY SET-UP SCREEN IS HERE". One string, named once, because the

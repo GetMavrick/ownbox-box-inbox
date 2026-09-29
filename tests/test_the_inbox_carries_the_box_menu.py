@@ -187,14 +187,25 @@ _dark = re.search(r':root\[data-theme="dark"\]\{(.*?)\n\}', _app.CSS, re.S)
 ok("both palette blocks were found to check", bool(_light) and bool(_dark))
 # LIGHT IS THE BOX'S LOOK (docs/SCOPE_DESIGN_LANGUAGE.md step 6): the inbox links box.css, which
 # answers --ink, --line and --scrim under the same names, so light's answer is box.css with this
-# app's block on top. Dark must still answer every name itself: box.css is light-only.
+# app's block on top. DARK IS box.css's TOO (PR #1659 §14): its `html[data-theme="dark"]` block
+# re-values those names, and this app's dark block holds only what box.css has no name for — so
+# dark's answer is the whole cascade: box.css light and dark, then this app's light and dark.
+# Whether each dark answer is actually a DARK value is test_inbox_design's job; this one proves the
+# rail never meets an unresolved variable.
 _box_css = pathlib.Path(_home.__file__).resolve().parent / "static" / "box.css"
 _box_root = re.search(r":root\s*\{([^}]*)\}", _box_css.read_text()) if _box_css.is_file() else None
 _box_names = set(re.findall(r"--([a-z0-9-]+)\s*:", _box_root.group(1))) if _box_root else set()
+_box_dark = re.search(r'^html\[data-theme="dark"\]\s*\{([^}]*)\}', _box_css.read_text(), re.M) \
+    if _box_css.is_file() else None
+_box_dark_names = set(re.findall(r"--([a-z0-9-]+)\s*:", _box_dark.group(1))) if _box_dark else set()
+ok("box.css carries a dark block for the rail to resolve against", bool(_box_dark_names))
+_light_names = set(re.findall(r"--([a-z0-9-]+)\s*:", _light.group(1))) if _light else set()
 for _name, _blk in (("light", _light), ("dark", _dark)):
     _have = set(re.findall(r"--([a-z0-9-]+)\s*:", _blk.group(1)))
     if _name == "light":
         _have |= _box_names
+    else:
+        _have |= _box_names | _box_dark_names | _light_names
     ok(f"...and the {_name} palette answers every name the rail asks for",
        _asked <= _have, str(sorted(_asked - _have)))
 

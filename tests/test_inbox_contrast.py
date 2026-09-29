@@ -68,22 +68,26 @@ def _declared(selector: str) -> dict:
     return {k: v.strip() for k, v in re.findall(r"--([\w-]+)\s*:\s*([^;]+);", body)}
 
 
-def _box() -> dict:
-    """core/dash/static/box.css's :root. LIGHT IS THE BOX'S LOOK (docs/SCOPE_DESIGN_LANGUAGE.md
-    step 6): the inbox's light tokens are var()s onto these names, so the value a person sees is
-    this file's. box.css ships with core, so it is present on every box that ships this suite."""
+def _box(dark: bool = False) -> dict:
+    """core/dash/static/box.css's tokens. LIGHT IS THE BOX'S LOOK (docs/SCOPE_DESIGN_LANGUAGE.md
+    step 6): the inbox's tokens are var()s onto these names, so the value a person sees is this
+    file's. box.css ships with core, so it is present on every box that ships this suite.
+    DARK IS box.css's TOO (PR #1659 §14): `html[data-theme="dark"]` declares what differs, on top
+    of `:root`, which is how the browser resolves it."""
     css = pathlib.Path(__file__).resolve().parents[1] / "core" / "dash" / "static" / "box.css"
-    m = re.search(r":root\s*\{([^}]*)\}", css.read_text()) if css.is_file() else None
-    if not m:
-        return {}
-    body = re.sub(r"(?s)/\*.*?\*/", " ", m.group(1))
-    return {k: v.strip() for k, v in re.findall(r"--([\w-]+)\s*:\s*([^;]+);", body)}
+    text = re.sub(r"(?s)/\*.*?\*/", " ", css.read_text()) if css.is_file() else ""
+    out: dict = {}
+    for sel in ([r":root"] + ([r'html\[data-theme="dark"\]'] if dark else [])):
+        m = re.search(r"^" + sel + r"\s*\{([^}]*)\}", text, re.M)
+        if m:
+            out.update({k: v.strip() for k, v in re.findall(r"--([\w-]+)\s*:\s*([^;]+);", m.group(1))})
+    return out
 
 
 def _cascade(selector: str) -> dict:
     """What a name resolves against in this theme, lowest first: box.css, then the light block,
     then (for dark) the dark block. The same order the browser applies them in."""
-    layers = [_box(), _declared(":root")]
+    layers = [_box(dark=selector != ":root"), _declared(":root")]
     if selector != ":root":
         layers.append(_declared(selector))
     out: dict = {}
@@ -155,11 +159,24 @@ def test_the_two_themes_have_the_same_tokens():
     invisible to anyone developing in the other one.
 
     Light is box.css with this page's block on top, so a name box.css supplies counts as light's.
-    Dark must still redefine every name this page's light block declares."""
-    light = set(_declared(":root"))
+    Dark must re-value every name this page's light block declares: redeclare it, or point it by
+    var() at a box.css colour that box.css's own dark block re-values (PR #1659 §14)."""
+    light_decl = _declared(":root")
+    light = set(light_decl)
     base = light | set(_box())
     dark = set(_declared(':root[data-theme="dark"]'))
-    ok("dark defines every token light does", not (light - dark), str(sorted(light - dark)))
+    box_light, box_dark_all = _box(), _box(dark=True)
+    box_dark = {k for k in box_dark_all if box_dark_all[k] != box_light.get(k)}
+
+    def follows(name, seen=()):
+        m = re.fullmatch(r"var\(\s*--([\w-]+)\s*\)", (light_decl.get(name) or box_light.get(name) or "").strip())
+        if not m:
+            return name in box_dark
+        nxt = m.group(1)
+        return nxt in dark or nxt in box_dark or (nxt not in seen and follows(nxt, seen + (name,)))
+
+    unfollowed = sorted(n for n in light - dark if not follows(n))
+    ok("dark re-values every token light does", not unfollowed, str(unfollowed))
     ok("...and dark defines nothing light has never heard of", not (dark - base),
        str(sorted(dark - base)))
 

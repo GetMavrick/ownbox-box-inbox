@@ -116,6 +116,19 @@ def _rail_line(rail: str, st: str) -> dict | None:
     return None                                     # ok rails speak through their numbers below
 
 
+def _waited(iso: str) -> str:
+    """How long ago, in the fewest characters a person reads at a glance: 21m, 3h, 2d."""
+    from datetime import datetime, timezone
+    try:
+        then = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        s = max(0, int((datetime.now(timezone.utc) - then).total_seconds()))
+    except (TypeError, ValueError):
+        return ""
+    return f"{s // 60}m" if s < 3600 else (f"{s // 3600}h" if s < 172800 else f"{s // 86400}d")
+
+
 def report(day: date, space: str | None = None) -> dict:
     """The morning page for `day`, for `space` — or for this box's own Space when none is named.
 
@@ -281,6 +294,28 @@ def report(day: date, space: str | None = None) -> dict:
 
     # Every rail he owns gets a line when it is waiting on him or failing. A rail he does not own
     # is absent — no line, no zero, no nag.
+    # WHAT THE BOX HAS READY, AND HOW LONG THE OLDEST HAS WAITED (owner, 2026-09-29, his target
+    # dashboard). Both are facts the inbox already holds: the drafts the Drafts screen lists, and
+    # the conversations the list calls waiting. Each is said only when it is true right now.
+    try:
+        from marketing.customer_voice.drafter import store as _drafts
+        ready = _drafts.waiting_count(inbox_space)
+    except Exception:                            # noqa: BLE001 — a figure, never the report
+        ready = 0
+    if ready:
+        figures["inbox_drafts"] = {"value": ready, "label": "drafts ready to send"}
+        noun = "reply is" if ready == 1 else "replies are"
+        needs_you.append({"text": f"{ready} {noun} written and ready to send",
+                          "href": "/inbox/waiting"})
+    if waiting:
+        try:
+            rows = inbox_store.list_conversations(inbox_space, limit=500, waiting=True)
+            stamps = sorted(str(r.get("last_inbound_at") or "") for r in rows if r.get("last_inbound_at"))
+            age = _waited(stamps[0]) if stamps else ""
+        except Exception:                        # noqa: BLE001 — a figure, never the report
+            age = ""
+        if age:
+            figures["inbox_oldest"] = {"value": age, "label": "oldest waiting"}
     for rail in rails.ALL:
         st = rails.state_of(rail)
         if st in (rails.CONNECT, rails.FAIL):

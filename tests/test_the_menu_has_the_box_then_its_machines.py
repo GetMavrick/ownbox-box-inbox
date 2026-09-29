@@ -64,7 +64,7 @@ html, nav = menu("/dashboard")
 rows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', nav, re.S)
 # THE ADD-ON MACHINES SIT BETWEEN THE BOX'S OWN ROWS AND ADD A MACHINE, in their registered order.
 ok("Base Machine, System Settings, then the add-on machines and Add a Machine",
-   rows == ["Base Machine", "System Settings", "Unified Inbox", "AEO", "Add a Machine"], str(rows))
+   rows == ["Base Machine", "System Settings", "AEO Machine", "Unified Inbox", "Add a Machine"], str(rows))
 ok("the page itself is titled Base Machine", "<h1>Base Machine</h1>" in html)
 ok("...and no row or heading on it still says Dashboard",
    ">Dashboard<" not in html and '"lbl">Dashboard' not in html)
@@ -75,7 +75,7 @@ print("\ntest_one_subtle_gap_before_the_add_on_machines")
 grp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
                  nav, re.S)
 ok("exactly one row opens a new group, and it is the first add-on machine",
-   grp == ["Unified Inbox"], str(grp))
+   grp == ["AEO Machine"], str(grp))
 css = home.CSS
 ok("the gap is extra room above that row", re.search(r"\.nav a\.grp\{margin-top:\d+px\}", css))
 ok("...and nothing else: no rule and no heading between the groups",
@@ -97,6 +97,12 @@ for it in sec.items:
     lit = re.findall(r'<a href="([^"]*)"[^>]*aria-current="page"', nav_)
     ok(f"{it.href}: the menu marks its own row", lit == [it.href], str(lit))
     crumb = re.search(r'<div class="crumb">(.*?)</div>', page_, re.S)
+    if it.href == sec.href:
+        # THE SECTION'S OWN SCREEN DRAWS NO TRAIL (owner, 2026-09-29: the breadcrumb without
+        # "Overview"). Its heading already names it; "System Settings / Overview" read it back.
+        ok(f"{it.href}: the section's own screen draws no trail; its heading names it",
+           not crumb and "<h1>System Settings</h1>" in page_, crumb.group(1) if crumb else "")
+        continue
     ok(f"{it.href}: the breadcrumb names it", bool(crumb) and f"<b>{it.label}</b>" in crumb.group(1),
        crumb.group(1) if crumb else "no crumb")
 

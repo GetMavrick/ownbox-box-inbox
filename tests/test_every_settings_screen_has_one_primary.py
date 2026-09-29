@@ -57,6 +57,10 @@ _QUIET = ("ghost", "ui-ghost", "danger", "ui-danger")
 def ink_pills(page: str) -> list[str]:
     """The label of every control on the page that draws as the ink pill."""
     main = page.split("</nav>", 1)[-1]                   # the menu's rows are links, not pills
+    # A SEGMENTED CONTROL'S BUTTONS ARE CHOICES, NOT ACTIONS. box.css draws `.ui-seg` buttons flat
+    # and the chosen one raised, never inked, so none of them is the screen's primary. Removed
+    # here by the class box.css styles them with, so a plain button beside one still counts.
+    main = re.sub(r'<form class="ui-seg"[^>]*>.*?</form>', "", main, flags=re.S)
     out = []
     for m in re.finditer(r"<(button|input|a)\b([^>]*)>(.*?)(?=</\1>|<)", main, re.S):
         tag, attrs, text = m.group(1), m.group(2), m.group(3)
@@ -130,6 +134,11 @@ ok("an outline, a danger and a plain link are none",
    ink_pills('<nav></nav><button class="ghost">A</button><button class="danger">B</button>'
              '<a href="/x">C</a><input type="text" value="d">') == [])
 ok("a link styled as a button counts", ink_pills('<nav></nav><a class="ui-btn" href="/x">Go</a>') == ["Go"])
+ok("a segmented control's choices are not pills",
+   ink_pills('<nav></nav><form class="ui-seg" method="post"><button name="t" value="a" '
+             'aria-pressed="true">A</button><button name="t" value="b">B</button></form>') == [])
+ok("...but a plain button beside one still is",
+   ink_pills('<nav></nav><form class="ui-seg"><button>A</button></form><button>Save</button>') == ["Save"])
 
 print("\n" + ("all good" if not _failed else f"{_failed} FAILED"))
 sys.exit(1 if _failed else 0)

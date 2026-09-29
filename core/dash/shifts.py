@@ -144,9 +144,10 @@ def _page(path: str, title: str, lede: str, body: str):
     return chrome(path, title=title, lede=lede, body=_CSS + body)
 
 
-# WHERE THE UPGRADE IS BOUGHT. The upgrade itself (§2.5) and all Stripe work are OSDev1's; until
-# that scope gives it an address of its own, this is where Ownbox's plans are compared.
-UPGRADE_URL = "https://www.ownbox.io/#pricing"
+# WHERE THE UPGRADE IS BOUGHT: the one upgrade sheet (docs/SCOPE_UPGRADE_TO_PRO.md §2.2, "The Settings
+# plan line and the Shifts screen's 'Coworkers come with Pro' link to it; they don't have buttons of
+# their own"). The sheet and its payment are core/dash/upgrade.py's; this screen only points there.
+UPGRADE_URL = "/dashboard/upgrade"
 FEATURE = "coworkers"
 
 
@@ -172,14 +173,16 @@ def _not_in_plan() -> str:
         return "this plan"
 
 
-def _upgrade_card(plan: str) -> str:
-    """Not in your plan: what coworkers are, and the way to them. Its link is the one ink pill."""
+def _upgrade_card(plan: str, *, owner: bool = True) -> str:
+    """Not in your plan: what coworkers are, and the way to them. For the owner, the link to the
+    upgrade sheet is the one ink pill; anyone else is told who can upgrade, since only the owner
+    can pay."""
     on = f"This box is on {plan}." if plan != "this plan" else ""
+    way = (f'<a class="btn" href="{_esc(UPGRADE_URL)}">Upgrade to Pro</a>' if owner else
+           '<p class="quiet">The owner of this box can upgrade it.</p>')
     return ('<div class="card"><h2>Coworkers come with Pro</h2>'
             f'<p>{_esc(on)} With Pro, you write a coworker\'s job in plain words and give it its '
-            'times. It starts on time, every time, and tells you what it did.</p>'
-            f'<a class="btn" href="{_esc(UPGRADE_URL)}" target="_blank" rel="noopener">'
-            'See Pro</a></div>')
+            f'times. It starts on time, every time, and tells you what it did.</p>{way}</div>')
 
 
 def _missing(owner: bool) -> list:
@@ -341,7 +344,7 @@ def shifts_home():
         return refuse
     lede = "Your AI coworkers, when they work, and what each one did."
     if not_in_plan:
-        return _page(HOME, "Shifts", lede, _upgrade_card(not_in_plan)), 200
+        return _page(HOME, "Shifts", lede, _upgrade_card(not_in_plan, owner=owner)), 200
     contract, hire, runner, _, _ = _cw()
     tz = runner.box_tz()
     good, bad = runner.discover()
@@ -448,7 +451,7 @@ def shifts_one(slug: str):
     if refuse is not None:
         return refuse
     if not_in_plan:
-        return _page(path, "Shifts", "", _upgrade_card(not_in_plan)), 200
+        return _page(path, "Shifts", "", _upgrade_card(not_in_plan, owner=owner)), 200
     contract, hire, runner, runs, _ = _cw()
     cw, why = _load(slug)
     if cw is None:
@@ -726,7 +729,7 @@ def _form(action: str, v: dict, *, cw=None, errors=()) -> str:
 
 @blueprint.route(NEW, methods=["GET", "POST"])
 def shifts_new():
-    title = "New coworker"
+    title = "New Coworker"
     lede = "Write its job in plain words, give it its times, and choose what it may touch."
     refuse, not_in_plan, _ = _gate(NEW, title, change=True)
     if refuse is not None:

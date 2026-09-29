@@ -71,6 +71,12 @@ def _client(theme: str = ""):
     from core.dispatch import app
     c = app.test_client()
     c.post("/dash/login", data={"token": settings.dash_token})
+    # EACH CASE STARTS FROM "NEVER CHOSE". The inbox now carries a phone's cookie over into the
+    # person's own setting once (core/dash/theme.py), and every client here is the same owner, so
+    # without this the first dark case would follow the owner into every case after it.
+    from core import box_settings, state
+    from core.dash import theme as _core_theme
+    box_settings.clear(_core_theme.MACHINE, _core_theme.KEY, user_id=str(state.owner_user()["id"]))
     if theme:
         c.set_cookie(_app.THEME_COOKIE, theme)
     return c

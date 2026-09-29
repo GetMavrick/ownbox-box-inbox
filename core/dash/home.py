@@ -147,8 +147,8 @@ color:var(--faint);font-size:12.5px;line-height:1.4}
 @media (max-width:820px){
  .scrim{display:block}
  .lay{display:block}
- .rail{position:fixed;top:0;bottom:0;left:0;width:86vw;max-width:340px;z-index:40;
-  border-right:1px solid var(--line);transform:translateX(-101%);transition:transform .22s ease;
+ .rail{position:fixed;top:0;bottom:0;right:0;width:86vw;max-width:340px;z-index:40;
+  border-left:1px solid var(--line);transform:translateX(101%);transition:transform .22s ease;
   overflow-y:auto;padding-top:env(safe-area-inset-top,0px);box-shadow:var(--drawer-flat)}
  .navtoggle:checked~.lay .rail{transform:none;box-shadow:var(--drawer-lift)}
  .navtoggle:checked~.scrim{opacity:1;pointer-events:auto}
@@ -162,13 +162,34 @@ align-items:center;gap:12px;height:52px;padding:0 6px 0 4px;background:var(--gro
 border-bottom:1px solid var(--hairline)}
 .navtoggle:focus-visible~.topbar .ham{outline:2px solid var(--accent);outline-offset:-2px}
 .mark{font-weight:600;letter-spacing:-.01em}
+/* THE HEADER IS THE CLIENT'S ICON, THE APP'S NAME, AND THE MENU ON THE RIGHT (owner, 2026-09-29, on
+   every screen so the button never changes sides). The drawer opens from the right to match: the
+   thumb that pressed it is on that side. */
+.topbar .appmark{width:32px;height:32px;margin-left:10px}
+/* the home's cards: one column on a mobile, a grid once there is room, as the owner's target draws */
+.dash-grid{display:grid;gap:16px;margin-bottom:16px}
+.dash-grid>.card{margin-bottom:0}
+@media (min-width:1000px){.dash-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.card h2.eyebrow{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);
+margin:0 0 12px}
+.state{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-weight:600;font-size:17px}
+.state .dot,.now .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-3);flex:none}
+.state.ok .dot,.now .dot{background:var(--ok-dot)}
+.state.stale .dot{background:var(--warn)}
+.mono{font-family:var(--mono);font-size:14px;overflow-wrap:anywhere}
+.now{display:flex;align-items:center;gap:8px;margin:14px 0 0;color:var(--ink-2)}
+.card .row .what{color:var(--ink-2)}
 .grow{flex:1}
 
 @media (max-width:820px){
  .topbar{display:flex}
 }
-.crumb{color:var(--dim);font-size:13px;margin-bottom:10px}
+/* the trail for a pointer; one link back for a thumb. Mobile first: the link is the base rule */
+.back{display:inline-flex;align-items:center;min-height:44px;margin:-8px 0 2px;
+color:var(--link);font-size:15px;font-weight:600}
+.crumb{display:none;color:var(--dim);font-size:13px;margin-bottom:10px}
 .crumb b{color:var(--ink);font-weight:600}
+@media (min-width:821px){.back{display:none}.crumb{display:block}}
 h1{margin:0 0 6px;font-size:var(--t-title);font-weight:600;letter-spacing:-.02em;line-height:1.1}
 .lede{margin:0 0 24px;color:var(--ink-2);font-size:16px}
 .card{background:var(--card);border:1px solid var(--card-edge);border-radius:var(--r-md);
@@ -529,29 +550,53 @@ def chrome(path: str, *, title: str, lede: str, body: str,
            who: str = "", email: str = "") -> str:
     """The buyer-facing page: rail, breadcrumb, one title, one plain sentence, then cards."""
     parts = shell.crumb(path)
+    sec, here = shell.current(path), shell.current_item(path)
+    # THE TRAIL, NEVER THE SECTION READING ITS OWN NAME BACK (owner, 2026-09-29). On a section's own
+    # address the menu row is "Overview" and the heading already names the section, so there is no
+    # trail to draw; everywhere else it stays, for a pointer, from 821px up.
+    on_index = sec is not None and here is not None and here.href == sec.href
     crumb = ""
-    if parts:
+    if parts and not on_index:
         crumb = ('<div class="crumb">'
                  + ' / '.join(_esc(p) for p in parts[:-1])
                  + (' / ' if len(parts) > 1 else '')
                  + f'<b>{_esc(parts[-1])}</b></div>')
+    # ON A MOBILE, ONE LINK BACK TO WHERE THIS SECTION BEGINS, as iOS does, in place of the trail.
+    # Never on that first screen itself: a section whose address forwards to its first row (the AEO
+    # Machine lands on Articles) would otherwise offer a link back to the screen it is.
+    landing = ""
+    if sec is not None and sec.items:
+        landing = next((i.href for i in sec.items if i.href == sec.href), sec.items[0].href)
+    # ONLY FROM A ROW OF THIS SECTION, AND NEVER TO THE PAGE ITSELF. The Base Machine's section has no
+    # rows, so there is no landing row to compare against, and an unguarded rule drew "‹ Base
+    # Machine" on the Base Machine (caught by test_the_dashboard_reads, 2026-09-29).
+    back = (f'<a class="back" href="{_esc(sec.href)}">&lsaquo; {_esc(sec.title)}</a>'
+            if sec is not None and here is not None and here in sec.items and here.href != landing
+            and sec.href.rstrip("/") != path.rstrip("/") else "")
+    # WHICH APP THIS SCREEN IS. A machine that registered one (core/dash/look.py) names every tab
+    # and every home-screen icon for itself; anything else is the Base Machine's.
+    app = look.app_for(sec.machine if sec is not None else None)
     # WHICH OF THE THREE SHAPES THIS PAGE IS, decided from the path like everything else here.
     # `crumb()` already answers it: two parts means an item inside a section, one part means the
     # section's own index, none means level 1. The stylesheet needs it and nothing else does.
     shape = "lvl1" if not parts else ("lvl2-item" if len(parts) > 1 else "lvl2-index")
     name = who or brand()
-    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+    # THIS PERSON'S APPEARANCE, stamped before the first paint (core/dash/theme.py). White until
+    # they choose; System carries the one-line script the server can't do for it.
+    from core.dash import theme
+    th = theme.for_request()
+    return f"""<!doctype html><html lang="en"{theme.html_attr(th)}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
-<meta name="theme-color" content="#f6f4ef">
-<title>{_esc(name)} · {_esc(title)}</title>{look.head_tags()}{look.app_tags()}<style>{CSS}</style></head><body>
+{theme.head_tags(th)}
+<title>{_esc(name)} · {_esc(app["name"] if app else title)}</title>{look.head_tags()}{look.app_tags(app)}<style>{CSS}</style></head><body>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
-<div class="topbar">
-<label class="ham" for="navtoggle" role="button" aria-label="Menu">{_HAM}</label>
-<span class="mark">{_esc(name)}</span><span class="grow"></span></div>
+<div class="topbar">{look.header_mark()}
+<span class="mark">{_esc(app["name"] if app else "Base Machine")}</span><span class="grow"></span>
+<label class="ham" for="navtoggle" role="button" aria-label="Menu">{_HAM}</label></div>
 <label class="scrim" for="navtoggle" aria-label="Close menu"></label>
 <div class="lay {shape}">{rail_html(path, who=who, email=email)}
-<main class="main">{crumb}<h1>{_esc(title)}</h1><p class="lede">{_esc(lede)}</p>
+<main class="main">{back}{crumb}<h1>{_esc(title)}</h1><p class="lede">{_esc(lede)}</p>
 {body}</main></div></body></html>"""
 
 
@@ -622,11 +667,167 @@ def _segments(view: dict) -> str:
         if seg.get("error"):
             # A SOURCE THAT FAILED MUST NOT LOOK LIKE A SOURCE WITH NOTHING TO SAY (report §1.11).
             rows.append(f'<div class="row"><span class="quiet">{_esc(seg["error"])}</span></div>')
+        # THE MACHINE'S OWN FIGURES, up to four, as the owner's target dashboard draws them (2026-09-29):
+        # each a number over the words its machine chose. Only figures with a value: an empty one is a
+        # promise of data, which this page does not make.
+        figs = [f for f in (seg.get("figures") or {}).values()
+                if isinstance(f, dict) and f.get("value") not in (None, "", "—") and f.get("label")][:4]
+        if figs:
+            rows.append('<div class="ui-metrics">' + "".join(
+                f'<div class="ui-metric"><b>{_esc(f["value"])}</b><span>{_esc(f["label"])}</span></div>'
+                for f in figs) + '</div>')
         if not rows:
             continue
-        out.append(f'<div class="card"><h2>{_esc(seg.get("title") or "")}</h2>'
+        out.append(f'<div class="card"><h2 class="eyebrow">{_esc(seg.get("title") or "")}</h2>'
                    + "".join(rows) + '</div>')
     return "".join(out)
+
+
+# ── THE BOX'S OWN CARDS: the machine, its work, what is connected to it, and its AI ─────────────
+# Owner, 2026-09-29, his target dashboard. Every figure here is read from something the box already
+# records — core.box_tools.health() (the reading the box's own MCP tool gives), the jobs table, the
+# connector's seats, the nightly database copy, the disk — and a figure the box does not record is
+# not drawn. Money is left out on purpose: test_a_member_has_a_home holds this page to none,
+# because members read it too; spend stays on the owner-only Morning Review.
+def _host() -> str:
+    from flask import request as _rq
+    try:
+        from core import claim
+        return claim.provisioned_host() or _rq.host
+    except Exception:                        # noqa: BLE001 — a card, never a 500
+        return _rq.host
+
+
+def _ago_short(iso: str) -> str:
+    from datetime import datetime, timezone
+    try:
+        then = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        s = max(0, int((datetime.now(timezone.utc) - then).total_seconds()))
+    except (TypeError, ValueError):
+        return ""
+    return f"{s}s" if s < 60 else (f"{s // 60}m" if s < 3600 else f"{s // 3600}h")
+
+
+def _this_machine_card() -> str:
+    import shutil
+    from core import box_tools
+    try:
+        h = box_tools.health()
+    except Exception:                        # noqa: BLE001
+        return ""
+    worker = h.get("worker") or {}
+    if pause.is_paused():
+        word, tone = "Stopped by you", "stale"
+    elif (h.get("alerts") or {}).get("failing"):
+        word, tone = "Needs attention", "stale"
+    elif worker.get("ok"):
+        word, tone = "Running", "ok"
+    elif worker.get("state") == "no_beat_yet":
+        word, tone = "Starting", "quiet"
+    else:
+        word, tone = "Not running", "stale"
+    rows = [f'<div class="row"><span class="what">Address</span><span class="mono">{_esc(_host())}</span></div>']
+    # LAST BACKUP: the newest nightly copy, as scripts/backup_db.py writes it (aios-backup.timer, 03:00
+    # owner time, <db dir>/backups/aios-YYYY-MM-DD.db, seven kept). Litestream also carries the database
+    # off the box as it changes; the nightly copy is the one with a time a person can read.
+    last = _last_backup()
+    rows.append('<div class="row"><span class="what">Last backup</span>'
+                f'<span>{_esc(last) if last else "No nightly copy yet"}</span></div>')
+    try:
+        du = shutil.disk_usage("/")
+        rows.append(f'<div class="row"><span class="what">Disk</span>'
+                    f'<span>{du.used / 1e9:.1f} GB of {du.total / 1e9:.0f} GB</span></div>')
+    except OSError:
+        pass
+    return ('<div class="card"><h2 class="eyebrow">This machine</h2>'
+            f'<p class="state {tone}"><span class="dot"></span>{_esc(word)}</p>' + "".join(rows) + '</div>')
+
+
+def _last_backup() -> str:
+    """When the newest nightly database copy was taken, in the box's own time, or "" when none is."""
+    from datetime import datetime
+    from pathlib import Path
+    try:
+        from core.config import settings
+        found = sorted(Path(settings.db_path).resolve().parent.joinpath("backups").glob("aios-????-??-??.db"))
+        if not found:
+            return ""
+        when = datetime.fromtimestamp(found[-1].stat().st_mtime, report.tz())
+        today = report.today()
+        day = ("Today" if when.date() == today else
+               "Yesterday" if (today - when.date()).days == 1 else when.strftime("%a %-d %b"))
+        return f"{day} {when:%H:%M}"
+    except Exception:                        # noqa: BLE001 — a row, never a 500
+        return ""
+
+
+def _queue_card() -> str:
+    from core import box_tools, state
+    try:
+        q = (box_tools.health().get("queue") or {})
+        start = report.window(report.today())[0]
+        with state.connect() as c:
+            done = c.execute("SELECT COUNT(*) FROM jobs WHERE status = 'done' AND updated_at >= ?",
+                             (start,)).fetchone()[0]
+            now = c.execute("SELECT intent, id, updated_at FROM jobs WHERE status = 'running' "
+                            "ORDER BY updated_at DESC LIMIT 1").fetchone()
+    except Exception:                        # noqa: BLE001
+        return ""
+    figs = [("Running", q.get("running", 0)), ("Waiting", q.get("queued", 0)), ("Done today", done)]
+    body = ('<div class="ui-metrics">' + "".join(
+        f'<div class="ui-metric"><b>{int(v or 0)}</b><span>{k}</span></div>' for k, v in figs) + '</div>')
+    if now:
+        body += (f'<p class="mono now"><span class="dot"></span>{_esc(now[0] or "work")} · '
+                 f'{_esc(str(now[1])[:4])} · {_esc(_ago_short(now[2]))}</p>')
+    if q.get("failed_24h"):
+        n = int(q["failed_24h"])
+        body += f'<p class="stale">{n} {"job" if n == 1 else "jobs"} failed in the last day</p>'
+    return f'<div class="card"><h2 class="eyebrow">Queue</h2>{body}</div>'
+
+
+def _mcp_card() -> str:
+    """OWNER ONLY: which assistants hold a key to this box is the owner's business."""
+    if not _is_owner():
+        return ""
+    from flask import request as _rq
+    try:
+        from core.connector import seats
+        live = [s for s in seats.all_seats(include_revoked=False) if s.get("last_seen_at")]
+    except Exception:                        # noqa: BLE001
+        return ""
+    address = f"{_rq.scheme}://{_host()}/mcp"
+    if live:
+        names = ", ".join(sorted({str(s.get("label") or "a client") for s in live}))
+        said = (f'<p class="state ok"><span class="dot"></span>{len(live)} '
+                f'{"client" if len(live) == 1 else "clients"} connected · {_esc(names)}</p>')
+    else:
+        go = "/settings/agent" if "/settings/agent" in _serving() else ""
+        said = ('<p class="quiet">Nothing connected yet.'
+                + (f' <a href="{go}">Connect an assistant &rarr;</a>' if go else "") + '</p>')
+    return (f'<div class="card"><h2 class="eyebrow">MCP</h2>'
+            f'<p class="mono">{_esc(address)}</p>{said}</div>')
+
+
+def _ai_card() -> str:
+    """OWNER ONLY, like the setting it reports: the AI account is the owner's to connect."""
+    if not _is_owner():
+        return ""
+    from core import box_secrets
+    try:
+        e = next((x for x in box_secrets.setup_state() if x.get("key") == "anthropic"), None)
+    except Exception:                        # noqa: BLE001
+        return ""
+    if e is None:
+        return ""
+    said, tone = _BOX_SAID.get(str(e.get("status")), _BOX_SAID["not_connected"])
+    press = "Change" if e.get("status") == "connected" else "Set up"
+    go = "/settings/ai" if "/settings/ai" in _serving() else ""
+    return ('<div class="card"><h2 class="eyebrow">Your AI</h2>'
+            f'<p class="state {"ok" if e.get("status") == "connected" else tone}"><span class="dot"></span>'
+            f'{_esc(said)}</p>'
+            + (f'<p><a href="{go}">{press} your AI account &rarr;</a></p>' if go else "") + '</div>')
 
 
 def _stop_card() -> str:
@@ -899,7 +1100,12 @@ def _home() -> str:
         note = (f'<div class="card"><span class="stale">No report since {_esc(stale)} — '
                 'the numbers below are the last ones written, not this minute\'s.</span></div>'
                 if stale else "")
-        body = note + _needs_card(view) + _segments(view)
+        body = note + _needs_card(view) + '<div class="dash-grid">' + _segments(view)
+    # THE BOX'S OWN CARDS JOIN THE GRID whether or not a report exists yet: a box minutes old still
+    # has a machine, a queue and a connection worth seeing.
+    if '<div class="dash-grid">' not in body:
+        body += '<div class="dash-grid">'
+    body += _this_machine_card() + _queue_card() + _mcp_card() + _ai_card() + '</div>'
     # THE WAY IN GOES FIRST, ABOVE THE NUMBERS, and only while there is set-up left to do. A box
     # with nothing connected has no numbers worth reading — "Nothing to report yet" is the whole
     # of what the section above can say — so the first thing on the page should be the thing that
@@ -1096,6 +1302,12 @@ def settings():
             '<p class="sub">What every machine on this box shares. Each machine keeps its own '
             'settings in its own menu.</p>'
             + _box_rows(owner=_is_owner()) + '</div>')
+    # APPEARANCE IS EACH PERSON'S, SO IT IS FOR EVERYBODY and sits in the same place whoever looks.
+    # Owner, 2026-09-27: dark mode and "system default", modelled on ownbox.io's dark half.
+    from core.dash import theme as _theme
+    body += ('<div class="card"><h2>Appearance</h2>'
+             '<p class="sub">Light is the box\'s own look. Automatic follows your device, and '
+             'changes when it does.</p>' + _theme.control("/settings") + '</div>')
     # THE MACHINE ITSELF, and it is the owner's alone. A key added there is root on the server —
     # strictly more than this dashboard grants anybody — so the row is drawn only for the owner,
     # who is the only person the screen behind it admits. Offering it to a member would be the
@@ -1155,16 +1367,22 @@ _MACHINE_SHOP_ASK = "https://www.ownbox.io/contact"
 def _custom_machine_rows() -> str:
     """One row per folder in my/machines/, and whether it started. Read-only: the loader owns this."""
     try:
-        from core import custom_machines
+        from core import custom_machines, machine_breaks
         seen = custom_machines.status()
+        by_update = machine_breaks.stopped()
     except Exception:                            # noqa: BLE001 — the page must not 500 on a reader
-        seen = []
+        seen, by_update = [], {}
     if not seen:
         return '<p class="quiet">None yet.</p>'
     rows = []
     for m in seen:
+        # R4: A MACHINE AN UPDATE STOPPED SAYS WHICH UPDATE, so the owner (or whoever they ask to
+        # fix it) knows it was working before and what changed underneath it.
+        hit = by_update.get(m.get("slug")) if not m.get("ok") else None
         said = ("Running" if m.get("ok") else
-                "Not started — " + str(m.get("reason") or "see the box's log"))
+                ("Stopped by the update to " + str(hit.get("release") or "a new release")
+                 .replace("release/", "") + " — " if hit else "Not started — ")
+                + str(m.get("reason") or "see the box's log"))
         tone = "" if m.get("ok") else "stale"
         rows.append('<div class="row"><b style="flex:1;min-width:0">' + _esc(m.get("slug"))
                     + f'</b><span class="{tone}">{_esc(said)}</span></div>')
@@ -1254,22 +1472,22 @@ shell.register_section("add_machine", order=1000, machine="core", title="Add a M
 shell.register_section("settings", order=10, machine="core", title="System Settings",
                        href="/settings", icon=_GEAR_ICON, items=[
                            {"key": "overview", "label": "Overview", "href": "/settings"},
-                           {"key": "ai", "label": "AI account", "href": "/settings/ai",
+                           {"key": "ai", "label": "AI Account", "href": "/settings/ai",
                             "owner_only": True},
-                           {"key": "mobile", "label": "Mobile app", "href": "/settings/mobile"},
+                           {"key": "mobile", "label": "Mobile App", "href": "/settings/mobile"},
                            # OUTBOUND EMAIL, owner 2026-09-24: this is the email the box SENDS
                            # (Morning Review, alerts), not the inbox it reads.
                            {"key": "email", "label": "Outbound Email", "href": "/settings/email",
                             "owner_only": True},
-                           {"key": "agent", "label": "AI coworkers", "href": "/settings/agent",
+                           {"key": "agent", "label": "AI Coworkers", "href": "/settings/agent",
                             "owner_only": True},
                            # SHIFTS: coworkers that work on a schedule (Pro). Beside AI coworkers
                            # because both are AI working on the box; open to a member to look at.
                            {"key": "shifts", "label": "Shifts", "href": "/settings/shifts"},
                            {"key": "updates", "label": "Updates", "href": "/settings/updates"},
-                           {"key": "access", "label": "Server access",
+                           {"key": "access", "label": "Server Access",
                             "href": "/settings/access", "owner_only": True},
-                           {"key": "move", "label": "Move your box", "href": "/settings/move",
+                           {"key": "move", "label": "Move Your Box", "href": "/settings/move",
                             "owner_only": True},
                            # PEOPLE HAD NO DOOR. The page existed and nothing on a box linked to
                            # it, so inviting a colleague meant knowing the address.

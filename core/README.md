@@ -25,7 +25,7 @@ logic lives here.
 ```bash
 pip install -e .
 cp .env.example .env          # fill ANTHROPIC_API_KEY + DISPATCH_BEARER_TOKEN at minimum
-python scripts/smoke_test.py  # no cost, no network — verifies the spine
+python tests/smoke_test.py  # no cost, no network — verifies the spine
 python tests/test_kernel.py # no cost — idempotency, atomic claim, budget-pause requeue
 python scripts/init_db.py     # create the real DB
 # /dispatch ingress — production: gunicorn behind a TLS proxy (Caddy/nginx), not `flask run`:

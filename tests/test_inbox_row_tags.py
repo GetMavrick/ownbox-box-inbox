@@ -172,20 +172,21 @@ def test_a_conversation_with_no_messages_is_not_new():
 
 
 def test_the_menu_offers_reply_on_exactly_the_rows_that_can_be_replied_to():
-    """THE INVARIANT, and the reason the menu is worth having at all: a Reply that lands on a
-    thread with nowhere to type is the same broken promise as a greyed-out button, just further
-    away. Checked on every seeded row in both directions, so neither side can drift alone."""
+    """THE INVARIANT WAS: a Reply that lands on a thread with nowhere to type is the same broken
+    promise as a greyed-out button, just further away. THE MENU IS GONE (owner, 2026-09-29: the
+    row opens the thread, the logos filter), so the list makes no Reply promise at all — and the
+    thread still shows its box on exactly the conversations that can be answered, which is the
+    half a person meets. Both are checked, so neither can drift alone."""
     c = _seeded()
-    seen = _rows(c.get("/inbox/inbox").get_data(as_text=True))
+    page = c.get("/inbox/inbox").get_data(as_text=True)
+    seen = _rows(page)
+    ok("no row carries a menu, so no row promises a Reply", 'class="acts"' not in page
+       and not any(v[1] for v in seen.values()))
+    boxes = {}
     for zcid, who, _p, _h, _ad, _a, _n, _o, _t in SEED:
-        offered = "Reply" in seen[who][1]
-        thread = c.get(f"/inbox/inbox/{zcid}").get_data(as_text=True)
-        has_box = 'id="reply"' in thread
-        ok(f"{who}: menu offers Reply ({offered}) iff the thread has a box ({has_box})",
-           offered == has_box)
-    ok("...and it is not vacuous: some rows offer it",
-       any("Reply" in v[1] for v in seen.values()))
-    ok("...and some rows do not", any("Reply" not in v[1] for v in seen.values()))
+        boxes[who] = 'id="reply"' in c.get(f"/inbox/inbox/{zcid}").get_data(as_text=True)
+    ok("...and it is not vacuous: some threads offer a box", any(boxes.values()), str(boxes))
+    ok("...and some do not", not all(boxes.values()), str(boxes))
 
 
 def test_a_channel_with_no_written_policy_gets_no_reply_box():
@@ -283,8 +284,40 @@ def test_the_row_is_still_one_link_with_the_menu_beside_it():
         if anchor:
             ok("...and contains no nested anchor", "<a " not in anchor.group(0)[3:])
         break
-    ok("the menu sits outside the row link",
-       html.count('</a><details class="acts"') + html.count('</a></div>') > 0)
+    # THE MENU THAT SAT BESIDE IT IS GONE (owner, 2026-09-29). What stays true, and still matters,
+    # is that the row is one link with nothing nested in it: a later control added inside the <a>
+    # would split it exactly as described above.
+
+
+def test_a_waiting_draft_is_said_on_its_row_and_in_the_count():
+    """OWNER, 2026-09-29, choosing his target composition: a "Draft waiting" chip on the rows whose
+    reply the box has written and nobody has sent, and "· N drafts ready to send" in the line
+    above the list. On exactly those rows, and counted from the same store the Drafts screen
+    reads, so the chip, the count and that screen cannot disagree."""
+    import re
+    from core import spaces
+    from marketing.customer_voice.drafter import store as drafts
+    c = _seeded()
+    zcid, who = SEED[0][0], SEED[0][1]
+    before = c.get("/inbox/inbox").get_data(as_text=True)
+    ok("with no draft, no row says one is waiting and the count stays silent",
+       "Draft waiting" not in before and "ready to send" not in before)
+    # A REAL DRAFT: in reply to the newest message the customer actually sent on that row.
+    last = drafts.newest_inbound(spaces.DEFAULT, zcid)
+    ok("the drafted row has a message to answer", bool(last), str(last))
+    drafts.put(space=spaces.DEFAULT, zcid=zcid, in_reply_to=str((last or {}).get("id") or ""),
+               body="Yes, Thursday works. See you at 9.")
+    after = c.get("/inbox/inbox").get_data(as_text=True)
+    seen = _rows(after)
+    n = drafts.waiting_count(spaces.DEFAULT)
+    marked = sorted(w for w, v in seen.items() if "Draft waiting" in v[0])
+    ok("the drafted row says Draft waiting, and no other row does",
+       marked == ([who] if n else []), f"{marked} (store says {n} waiting)")
+    said = re.search(r"· <b>(\d+) drafts?</b> ready to send", after)
+    ok("...and the line above the list counts what the store counts",
+       (said and int(said.group(1)) == n) if n else "ready to send" not in after,
+       f"said={said.group(0) if said else None} store={n}")
+    ok("...and the test is not vacuous: the store holds the draft", n >= 1, str(n))
 
 
 def test_ci_actually_runs_this_file():
@@ -315,6 +348,7 @@ if __name__ == "__main__":
                test_the_rule_probe_answers_from_window_and_not_from_a_second_table,
                test_no_row_can_say_two_things_that_contradict_each_other,
                test_the_row_is_still_one_link_with_the_menu_beside_it,
+               test_a_waiting_draft_is_said_on_its_row_and_in_the_count,
                test_ci_actually_runs_this_file):
         print(fn.__name__)
         fn()

@@ -124,7 +124,7 @@ def box_ai():
 
     who = _who()
     if (who.get("role") or "") != "owner":
-        return chrome("/settings/ai", title="Your AI account",
+        return chrome("/settings/ai", title="AI Account",
                       lede="This one is the owner's.",
                       body='<div class="card"><p>Only the owner of this box can connect an AI '
                            'account: it bills their subscription and every machine on the box '
@@ -200,7 +200,7 @@ def box_ai():
             lede = "What writes your drafts, and how to change it."
         else:
             parts = parts + [_back()]
-        return chrome("/settings/ai", title="Your AI account", lede=lede,
+        return chrome("/settings/ai", title="AI Account", lede=lede,
                       body="".join(parts)), 200
 
     body = ['<div class="card"><p>' + _esc(e.get("why") or
@@ -307,7 +307,7 @@ def box_chatgpt():
     if refuse is not None:
         return refuse
     if not _is_owner():
-        return chrome("/settings/ai", title="Your AI account",
+        return chrome("/settings/ai", title="AI Account",
                       body='<div class="card"><p>Only the owner of this box can connect an AI '
                            'account.</p></div>' + _back()), 403
     from core import codex_login
@@ -383,7 +383,7 @@ def box_chatgpt():
             'in ChatGPT under Settings &rarr; Security (a work account needs an admin to allow '
             'it), then press Connect again.</p></div>')
     body.append(_back())
-    page = chrome("/settings/ai", title="Your AI account",
+    page = chrome("/settings/ai", title="AI Account",
                   lede="Sign in with ChatGPT — a one-time code, no key.", body="".join(body))
     if refresh and "</head>" in page:
         page = page.replace("</head>", refresh + "</head>", 1)
@@ -762,7 +762,7 @@ def box_mobile():
                 '<p><a href="/settings/mobile/print">Print this for a colleague &rarr;</a></p>'
                 '</div>')
     body.append(_back())
-    return chrome("/settings/mobile", title="Your mobile app",
+    return chrome("/settings/mobile", title="Mobile App",
                   lede="Install the box as an app and it can notify you when a customer writes.",
                   body="".join(body)), 200
 
@@ -1050,7 +1050,7 @@ def box_agent():
     from core.connector import seats
 
     if not _is_owner():
-        return chrome("/settings/agent", title="AI coworkers",
+        return chrome("/settings/agent", title="AI Coworkers",
                       lede="This one is the owner's.",
                       body='<div class="card"><p>Only the owner of this box can connect an AI '
                            'coworker, because the connection can read every message on it.</p>'
@@ -1076,7 +1076,7 @@ def box_agent():
             # NEVER A REDIRECT AND NEVER A QUERY STRING. The credential is rendered into this one
             # response and then it is gone: a redirect would put it in a URL, and gunicorn logs
             # raw query stnotifies.
-            return chrome("/settings/agent", title="AI coworkers",
+            return chrome("/settings/agent", title="AI Coworkers",
                           lede="Copy the key now — it is shown once.",
                           # ONE ADDRESS, THE SHORT ONE — carried across from #1417 (OSDev1),
                           # which landed on main while this screen was being moved into core.
@@ -1133,7 +1133,7 @@ def box_agent():
             + '</details>'
             + _seat_rows(seats.all_seats())
             + _back())
-    return chrome("/settings/agent", title="AI coworkers",
+    return chrome("/settings/agent", title="AI Coworkers",
                   lede="Let an assistant you already pay for read this box.",
                   body=body), 200
 
@@ -1246,7 +1246,7 @@ def box_access_screen():
     from core import box_access
 
     if not _is_owner():
-        return chrome("/settings/access", title="Server access",
+        return chrome("/settings/access", title="Server Access",
                       lede="This one is the owner's.",
                       body='<div class="card"><p>Only the owner of this box can add a key to it, '
                            'because a key here is full control of the machine — more than this '
@@ -1365,7 +1365,7 @@ def box_access_screen():
     connect = _connect_card(where, has, box_access.host_key_fingerprint())
     # SAID ONCE: with a command showing, the connect card already reports the empty state.
     rows = _key_rows(keys) if keys or not where.get("command") else ""
-    return chrome("/settings/access", title="Server access",
+    return chrome("/settings/access", title="Server Access",
                   lede=("Add your key, then the machine is yours from your own terminal."
                         if not has else
                         "Put your own key on this box, and the machine is yours from your own terminal."),
@@ -1565,7 +1565,7 @@ def box_move_screen():
     from core import box_move
 
     if not _is_owner():
-        return chrome("/settings/move", title="Move your box",
+        return chrome("/settings/move", title="Move Your Box",
                       lede="This one is the owner's.",
                       body='<div class="card"><p>Only the owner of this box can move it, because a '
                            'copy of it carries every conversation on it.</p></div>' + _back()), 403
@@ -1604,7 +1604,7 @@ def box_move_screen():
             body += _move_form()
     else:
         body = _move_explainer() + _move_form()
-    return chrome("/settings/move", title="Move your box",
+    return chrome("/settings/move", title="Move Your Box",
                   lede="Move a full copy of this box into your own DigitalOcean account.",
                   body=note + body + _back()), 200
 

@@ -113,12 +113,18 @@ def sanity_state() -> dict:
 AIRTABLE_KEY = "AIRTABLE_API_KEY_SEO"   # storage name kept: see settings.MACHINE
 _API = "https://api.airtable.com/v0"
 
-# THE FIELDS THE MACHINE READS AND WRITES, BY NAME. A proposal until the owner's template lands
-# (owner, 2026-09-25: "we are going to provide them a template table and that's on me"). When it
-# does, this tuple follows the template, and the check below names any field a table is missing.
-TEMPLATE_FIELDS = ("Question", "Status", "URL")
-# Shown as "Copy our template" once the owner supplies it. Empty means no link is drawn.
-TEMPLATE_URL = ""
+# THE FIELDS THE MACHINE READS AND WRITES, IN THE OWNER'S OWN NAMES (owner, 2026-09-27, via OSDev1:
+# his table has Seed Idea, Status and URL). The question each article answers is read from Seed
+# Idea; the machine writes back Status and URL. A buyer never renames a column to suit us, and any
+# other field or table in the base is left alone and passes the check below.
+QUESTION_FIELD = "Seed Idea"
+STATUS_FIELD = "Status"
+URL_FIELD = "URL"
+TEMPLATE_FIELDS = (QUESTION_FIELD, STATUS_FIELD, URL_FIELD)
+# THE SAMPLE TABLE, shared by the owner. Owner, 2026-09-26: "On the Airtable settings page in the
+# dashboard, put this link so people can go ahead and download a sample Airtable that works."
+# Empty would mean no link is drawn.
+TEMPLATE_URL = "https://airtable.com/appz62YGuLOjSjtCT/shrdiTKtdQvsvKtNz"
 
 # What a token needs, in Airtable's own names, so the owner can match them on Airtable's screen.
 SCOPES = ("data.records:read", "data.records:write", "schema.bases:read")
@@ -237,7 +243,7 @@ def check_airtable(key: str, base: str, table: str, view: str = "") -> str | Non
     if lacking:
         return ("Your table is missing " + ("the field " if len(lacking) == 1 else "the fields ")
                 + ", ".join(lacking) + ". Add " + ("it" if len(lacking) == 1 else "them")
-                + " with exactly that name, or start from our template.")
+                + " with exactly that name, or start from our sample table.")
 
     query = {"maxRecords": "1"}
     if view:

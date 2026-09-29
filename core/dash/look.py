@@ -260,11 +260,52 @@ def ui_icon_png(size: int):
     return Response(mark_png(size), mimetype="image/png", headers={"Cache-Control": _ICON_CACHE})
 
 
-def app_tags() -> str:
-    """What makes a core screen installable as the Base Machine's app. Core screens only: a
-    machine that is an app of its own links its own manifest instead, and a page carries one."""
-    return ('<link rel="manifest" href="/ui/manifest.webmanifest">'
-            f'<meta name="apple-mobile-web-app-title" content="{APP_NAME}">')
+# ONE HOME-SCREEN APP PER MACHINE, AND EVERY SCREEN OF THE MACHINE INSTALLS AS IT. Owner, 2026-09-29:
+# "We want every screen of the unified inbox to bookmark the same way" and "All the screens on AEO
+# machine need to reflect AEO machine." A machine that draws its screens through core's chrome()
+# registers its name and manifest here once; chrome() finds the machine from the menu the page sits
+# in (core.shell), so a core screen filed in a machine's menu wears that machine too, and core never
+# names a machine. A machine that draws its own page (the Unified Inbox) carries its own tags.
+_APPS: dict[str, dict] = {}
+
+
+def register_app(machine: str, *, name: str, manifest: str) -> None:
+    """`machine` is the shell section's `machine`; `name` is what the home screen and the tab say."""
+    _APPS[machine] = {"name": name, "manifest": manifest}
+
+
+def app_for(machine: str | None) -> dict | None:
+    """The registered app for a machine, or None: its screens are the Base Machine's."""
+    return _APPS.get(machine or "")
+
+
+def client_icon() -> str:
+    """Where the header's icon comes from: the CLIENT'S, once they have uploaded one, and until then
+    the box's own mark. One function, so the upload (docs/SCOPE_MOBILE_APP_REDESIGN.md, the install
+    phase) changes one line and every header follows. Owner, 2026-09-27: "we are going to keep the
+    name of the client and give them the ability to upload their icon"."""
+    return "/ui/icon.svg"
+
+
+def header_mark() -> str:
+    """The client's icon on a white disc, for a header: whatever they upload reads on both grounds."""
+    return f'<span class="ui-disc appmark"><img src="{client_icon()}" alt=""></span>'
+
+
+def app_tags(app: dict | None = None) -> str:
+    """What makes a screen installable, and under which name. Without `app`, the Base Machine's."""
+    href, name = (app["manifest"], app["name"]) if app else ("/ui/manifest.webmanifest", APP_NAME)
+    return (f'<link rel="manifest" href="{_html.escape(href)}">'
+            f'<meta name="apple-mobile-web-app-title" content="{_html.escape(name)}">')
+
+
+def manifest_for(app: dict, *, start_url: str, scope: str) -> dict:
+    """A machine's manifest: its own name, its own address space, the box's mark and colours. The
+    mark is drawn to the edge with the cream square inside the safe zone, so it is `maskable` too."""
+    return {"name": app["name"], "short_name": app["name"], "start_url": start_url, "scope": scope,
+            "display": "standalone", "background_color": _GROUND_HEX, "theme_color": _GROUND_HEX,
+            "icons": [{"src": f"/ui/icon-{n}.png", "sizes": f"{n}x{n}", "type": "image/png",
+                       "purpose": "any maskable"} for n in _APP_SIZES]}
 
 
 @blueprint.get("/ui/icon.svg")

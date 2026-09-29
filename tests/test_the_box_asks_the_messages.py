@@ -131,8 +131,10 @@ def test_the_row_offers_reply_on_that_same_thread():
     _conv("nullclock", clock=None)
     _msg("nullclock", "in", "Can you come out Thursday?")
     html_ = _inbox()
-    ok("the hover menu offers Reply", ">Reply<" in html_)
-    ok("...pointing at the thread's own box", "#reply" in html_)
+    # THE ROW ITSELF IS THE WAY TO REPLY NOW (owner, 2026-09-29): it opens this thread, and the
+    # thread shows its box — the same fact the menu's Reply used to point at, one tap sooner.
+    ok("the row opens that same thread", 'href="/inbox/inbox/nullclock"' in html_)
+    ok("...where the box is", 'class="compose"' in _page("nullclock"))
 
 
 def test_the_row_does_not_tag_her_thread_no_inbound_yet():
@@ -336,7 +338,9 @@ def test_the_row_and_the_thread_agree_on_every_shape():
         box = 'class="compose"' in _page(zcid)
         reply = ">Reply<" in _inbox()
         ok(f"{zcid}: the box is {'there' if expect else 'absent'}", box is expect)
-        ok(f"{zcid}: and the row's Reply item matches it", reply is box,
+        # THE ROW NO LONGER OFFERS REPLY (owner, 2026-09-29: the "…" menu is gone), so the list can
+        # never promise a box the thread will not show.
+        ok(f"{zcid}: and the list promises no Reply of its own", not reply,
            f"box={box} reply={reply}")
 
 

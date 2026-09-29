@@ -166,10 +166,31 @@ got = air(gets={f"/meta/bases/{BASE}/tables": (200, json.dumps({"tables": []}))}
 ok("a table that is not in the base", got and "no table at that address" in got, got)
 got = air(view="viw" + "D" * 14)
 ok("a view that is not in the table", got and "no view at that address" in got, got)
-thin = {"tables": [{"id": TABLE, "fields": [{"name": "Question"}], "views": []}]}
+thin = {"tables": [{"id": TABLE, "fields": [{"name": "Seed Idea"}], "views": []}]}
 got = air(gets={f"/meta/bases/{BASE}/tables": (200, json.dumps(thin))}, view="")
 ok("a table missing the template's fields names each one",
-   got and "Status" in got and "URL" in got and "Question" not in got.split("missing", 1)[1], got)
+   got and "Status" in got and "URL" in got and "Seed Idea" not in got.split("missing", 1)[1], got)
+
+print("\ntest_the_owners_own_field_names")
+# OWNER, 2026-09-27, via OSDev1: his table has Seed Idea, Status and URL, and nobody is asked to
+# rename a column. Extra fields and extra tables are his business and pass.
+ok("the fields are exactly the owner's names", sources.TEMPLATE_FIELDS == ("Seed Idea", "Status", "URL"),
+   sources.TEMPLATE_FIELDS)
+ok("...and the question is read from Seed Idea", sources.QUESTION_FIELD == "Seed Idea"
+   and sources.STATUS_FIELD == "Status" and sources.URL_FIELD == "URL")
+his = {"tables": [
+    {"id": "tbl" + "E" * 14, "name": "Reels", "fields": [{"name": "Seed"}, {"name": "Hook"}], "views": []},
+    {"id": TABLE, "name": "Articles", "views": [{"id": VIEW}], "fields": [
+        {"name": "Title"}, {"name": "Seed Idea"}, {"name": "Angle"}, {"name": "Category"},
+        {"name": "Status"}, {"name": "Publish Date"}, {"name": "URL"}, {"name": "Notes"}]}]}
+got = air(gets={f"/meta/bases/{BASE}/tables": (200, json.dumps(his))})
+ok("a table with his fields plus unrelated extras, in a base with other tables, connects",
+   got is None, got)
+old = {"tables": [{"id": TABLE, "fields": [{"name": "Question"}, {"name": "Status"}, {"name": "URL"}],
+                   "views": [{"id": VIEW}]}]}
+got = air(gets={f"/meta/bases/{BASE}/tables": (200, json.dumps(old))})
+ok("a table with our old placeholder name is refused, naming Seed Idea",
+   got and "Seed Idea" in got and "sample table" in got, got)
 ok("a key that can see the schema but not the rows",
    air(gets={f"/v0/{BASE}/{TABLE}?": (403, "")}) == sources.AIRTABLE_NO_READ)
 ok("no answer at all", air(gets={"/meta/whoami": (0, "")}) == sources.AIRTABLE_UNREACHABLE)
@@ -198,7 +219,7 @@ OWNER = state.owner_user()["id"]
 MEMBER = state.add_user("sam@northwind-consulting.com", name="Sam")["id"]
 owner, member = client(OWNER), client(MEMBER)
 
-ok("Data sources is a menu inside AEO", shell.crumb("/aeo/sources/sanity") == ("Data sources", "Sanity")
+ok("Data sources is a menu inside AEO", shell.crumb("/aeo/sources/sanity") == ("Data Sources", "Sanity")
    and shell.rail("/aeo/sources/airtable").back == "/aeo", str(shell.crumb("/aeo/sources/sanity")))
 ok("...and a row in AEO's own menu", any(i.href == "/aeo/sources" for i in shell.rail("/aeo/topics").items))
 page = owner.get("/aeo/sources").get_data(as_text=True)
@@ -271,6 +292,12 @@ ok("...with its key in box_secrets, apart from the box's other Airtable key",
 page = owner.get("/aeo/sources/airtable").get_data(as_text=True)
 ok("the key is never shown back", AIR_KEY not in page and "Leave blank to keep it" in page)
 ok("the screen lists the fields the table needs", all(fl in page for fl in sources.TEMPLATE_FIELDS))
+ok("...and says his other fields can stay", "Any other fields and tables can stay as they are." in page)
+# THE OWNER'S SAMPLE TABLE (owner, 2026-09-26: "put this link so people can go ahead and download a
+# sample Airtable that works"), offered under the table address and opening in a new tab.
+ok("the owner's sample table is offered, in a new tab",
+   'href="https://airtable.com/appz62YGuLOjSjtCT/shrdiTKtdQvsvKtNz" target="_blank"' in page
+   and "No table yet?" in page and "Copy our sample table" in page)
 use(Net(gets=AIR_OK))
 owner.post("/aeo/sources/airtable", data={"table_url": f"https://airtable.com/{BASE}/{TABLE}", "api_key": ""})
 ok("saving without a view clears the old one", settings.get()["airtable_view"] == "")

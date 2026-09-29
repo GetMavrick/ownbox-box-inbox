@@ -265,6 +265,21 @@ ok("...and no screen a member can reach offers them a door they are refused at",
    "; ".join(f"{p} (linked from {mem_from.get(p, '?')})" for p in sorted(forbidden)))
 
 
+# ── 3b. the box a paying client runs: Base Machine Pro ────────────────────────────────────
+print("\ntest_a_pro_box_meets_no_dead_ends_either")
+
+# THE WALKS ABOVE RUN ON A BASE BOX, WHICH HIDES PRO'S SCREENS. Coworkers are a Pro feature, so on
+# Base the Shifts page draws an upgrade card instead of its "New coworker" link, and that screen
+# was unreachable to every walk in this file. Found by section 5's first run (WebDev2, 2026-09-29).
+from core import tiers  # noqa: E402
+
+tiers.set_plan({"seq": 1, "tier": "pro"})
+pro, pro_from = walk(owner())
+report("a Pro box", pro, pro_from)
+print(f"       (Pro opened {len(set(pro) - set(done))} screens a Base box doesn't: "
+      f"{', '.join(sorted(set(pro) - set(done))[:6])})")
+
+
 # ── 4. the screens BEFORE the dashboard — where the owner's film actually starts ─────────
 print("\ntest_the_way_in_from_the_welcome_email_answers_too")
 
@@ -314,6 +329,207 @@ if r.status_code == 200 and "html" in (r.headers.get("Content-Type") or "").lowe
 else:
     print(f"  --   /claim redirected ({r.status_code}): this box is already claimed, so the "
           f"unclaimed form is not on screen here. tests/test_box_first_login covers that state.")
+
+
+# ── 5. every screen a client can open has a way in ──────────────────────────────────────
+print("\ntest_every_screen_a_client_can_open_has_a_way_in")
+
+# THE WALKS ABOVE PROVE EVERY LINK GOES SOMEWHERE. This proves the converse: every screen is
+# reached by SOME link, in one of the four states walked, or is a door with a stated way in.
+# #1374 and #1359 were both screens that answered perfectly and that nobody could reach; a
+# crawler that starts from the dashboard can never report a screen it never finds. So this lists
+# the screens from the app itself and asks, of each one it did not find, how a person gets there.
+# (WebDev2, PR #1659 plan v3 §15, Phase 2a.)
+#
+# ONLY WHAT SHIPS TO A CLIENT. A machine's screens reach a client only when the machine is sold
+# (scripts/export_box.sh ships a machine's web_modules with it), so this covers core and the two
+# add-on machines every plan names. The Reel and Lead Machines are the owner's own until sold.
+_CLIENT_MODULES = ("core.", "marketing.customer_voice.", "marketing.aeo_machine.",
+                   "marketing.seo_machine.")
+
+# DOORS: screens nothing inside the box links to, ON PURPOSE, each with how a person arrives.
+# An entry must name a route that exists and that the walk did NOT reach — both are checked
+# below, so this list cannot quietly outlive the screen it excuses or hide one that got a link.
+DOORS: dict[str, str] = {
+    "/claim": "the welcome email's link, on a box nobody has signed in to yet (section 4 above)",
+    "/dash/login": "where require_session() sends anyone signed out (core/dash/__init__.py)",
+    "/join": "the invite link People sends, /join?t=<token> (core/dash/__init__.py)",
+    "/app/review": "the Morning Review: its daily email and notification open /app/review/<day> "
+                   "(core/report.py). Owner-only, and not in the menu",
+    "/dash/managed": "the Base Machine's Managed card, drawn only on a box sold as Managed",
+    "/dash/people": "the older address of /settings/people, still answering for saved links",
+    "/tls/ask": "asked by the box's web server on the loopback before it issues a certificate, "
+                "never by a person",
+    "/ui": "the design specimen, typed by whoever maintains the box's look "
+           "(docs/BOX_DESIGN_REFERENCE.md); signed-in only",
+}
+
+_reached = set(fresh) | set(done) | set(mem) | set(pro)
+_c5 = owner()
+_unexplained, _landed_nowhere, _screens = [], [], 0
+for _rule in app.url_map.iter_rules():
+    _path = str(_rule.rule)
+    if "GET" not in (_rule.methods or ()) or "<" in _path or _path in SKIP:
+        continue
+    _mod = getattr(app.view_functions.get(_rule.endpoint), "__module__", "") + "."
+    if not _mod.startswith(_CLIENT_MODULES):
+        continue
+    if _path in _reached or _path.rstrip("/") in _reached or _path + "/" in _reached:
+        _screens += 1
+        continue
+    _r = _c5.get(_path)
+    if 300 <= _r.status_code < 400:
+        # AN OLD ADDRESS KEPT FOR BOOKMARKS is fine only if it lands on a screen people can reach.
+        _to = _r.headers.get("Location", "").split("?")[0].split("#")[0]
+        if _to.startswith("/") and (_to in _reached or _to.rstrip("/") in _reached
+                                     or _to + "/" in _reached or _to in DOORS):
+            continue
+        _landed_nowhere.append(f"{_path} -> {_to or '(off the box)'}")
+        continue
+    if "html" not in (_r.headers.get("Content-Type") or "").lower():
+        continue                          # a key, a manifest, a feed: read by software, not a screen
+    _screens += 1
+    if _path not in DOORS:
+        _unexplained.append(_path)
+ok(f"every screen a client can open is linked from somewhere or is a named door ({_screens} screens)",
+   not _unexplained, "no way in: " + ", ".join(sorted(_unexplained)))
+ok("...and every old address kept for bookmarks lands on a screen people can reach",
+   not _landed_nowhere, "; ".join(sorted(_landed_nowhere)))
+_routes = {str(r.rule) for r in app.url_map.iter_rules()}
+ok("...and every named door is still a route", all(d in _routes for d in DOORS),
+   str(sorted(d for d in DOORS if d not in _routes)))
+ok("...and no named door has since been given a link (then it is not a door; take it off the list)",
+   not (set(DOORS) & _reached), str(sorted(set(DOORS) & _reached)))
+ok("...and the count is real: the app has screens to check", _screens >= 20, str(_screens))
+
+
+# ── 6. no screen carries a reserved noun, including in what it inlines ────────────────────
+print("\ntest_no_screen_a_buyer_opens_carries_a_reserved_noun")
+
+# Owner, 2026-09-22 (CLAUDE.md, "Mobile first"): phone, ring, dial, voice and call are reserved for
+# the receptionist machine, and banned in anything a buyer reads — CSS comments included, because a
+# screen's stylesheet is inlined into its HTML. test_core_css_keeps_the_vocabulary reads core's
+# stylesheet; nothing read the inbox's, which carried 18 of them in comments on every inbox page
+# (found 2026-09-29, WebDev2). So this reads what a buyer actually receives: the HTML of every
+# screen the four walks opened. Scripts are left out, since code is not read; `iPhone` and a path
+# like /settings/phone (an old address kept for bookmarks) are not the noun.
+_RESERVED = re.compile(r"(?<![\w/-])(?<!i)(phone|phones|ring|dial|voice|call)(?![\w-])", re.I)
+_said: dict[str, set] = {}
+for _p, _html in READ.items():
+    _text = re.sub(r"(?is)<script\b.*?</script>", " ", _html)
+    for _m in _RESERVED.finditer(_text):
+        _said.setdefault(re.sub(r"\s+", " ", _text[max(0, _m.start() - 40):_m.end() + 30]), set()).add(_p)
+ok(f"no screen a buyer opens says a reserved noun ({len(READ)} screens read)",
+   not _said, "; ".join(f"{sorted(ps)[0]}: …{ctx}…" for ctx, ps in sorted(_said.items())[:4]))
+ok("...and the read is real: the walks read the inbox too", any(p.startswith("/inbox") for p in READ))
+
+
+# ── 7. every screen of a machine installs as that machine ─────────────────────────────────
+print("\ntest_every_screen_of_a_machine_installs_as_that_machine")
+
+# Owner, 2026-09-29: "We want every screen of the unified inbox to bookmark the same way", "we don't
+# want every screen titled to be different", and "All the screens on AEO machine need to reflect AEO
+# machine". So whichever screen a person is on when they add it to a home screen, the icon is named
+# for the machine, and every tab of that machine reads the same. Written as the expectation, by
+# address, not by asking the code which machine it thinks a page is: a test that agreed with the
+# lookup could never catch the lookup being wrong. Google Search Console is core's screen filed in
+# the AEO Machine's menu, and wears the AEO Machine for that reason.
+def _expected_app(path: str) -> tuple[str, str]:
+    if path.startswith("/inbox"):
+        return "Unified Inbox", "/inbox/manifest.webmanifest"
+    if path.startswith(("/aeo", "/settings/aeo/")):
+        return "AEO Machine", "/aeo/manifest.webmanifest"
+    return "Ownbox", "/ui/manifest.webmanifest"
+
+
+_wrong, _by_app = [], {}
+for _p, _html in READ.items():
+    if _p.startswith(("/dash", "/app", "/ui")) or 'rel="manifest"' not in _html:
+        continue                     # the owner's own machines, the specimen, the printed sheet
+    _name, _man = _expected_app(_p)
+    _head = _html.split("</head>")[0]
+    _title = (re.search(r"<title>(.*?)</title>", _head, re.S) or [None, ""])[1]
+    _got = (re.findall(r'rel="manifest" href="([^"]+)"', _head),
+            re.findall(r'apple-mobile-web-app-title" content="([^"]+)"', _head))
+    _by_app.setdefault(_name, set()).add(_p)
+    if _got != ([_man], [_name]):
+        _wrong.append(f"{_p}: manifest {_got[0]} home-screen name {_got[1]}")
+    elif _name != "Ownbox" and not _title.endswith("· " + _name):
+        _wrong.append(f"{_p}: tab reads {_title!r}")
+ok("every screen installs as its machine, and a machine's tabs all read its name",
+   not _wrong, "; ".join(sorted(_wrong)[:4]))
+ok("...and the walks reached screens of all three apps",
+   {"Unified Inbox", "AEO Machine", "Ownbox"} <= set(_by_app), str(sorted(_by_app)))
+_aeo_m = owner().get("/aeo/manifest.webmanifest")
+_aeo = json.loads(_aeo_m.get_data(as_text=True)) if _aeo_m.status_code == 200 else {}
+ok("the AEO Machine's manifest is public and names it", _aeo_m.status_code == 200
+   and anon.get("/aeo/manifest.webmanifest").status_code == 200
+   and _aeo.get("name") == _aeo.get("short_name") == "AEO Machine", str(_aeo)[:160])
+ok("...and it opens inside its own scope, on a screen that answers",
+   str(_aeo.get("start_url", "")).startswith(str(_aeo.get("scope", "-")))
+   and owner().get(_aeo.get("start_url", "/nope")).status_code == 200,
+   f"{_aeo.get('start_url')} in {_aeo.get('scope')}")
+
+
+# ── 8. the way back: a link for a thumb, the trail for a pointer ─────────────────────────
+print("\ntest_the_way_back_is_one_link_on_a_mobile")
+
+# Owner, 2026-09-29: on a mobile, one link back to the parent, as iOS does; on a desktop the trail
+# stays, without the word "Overview". box.css shows `.back` below 821px and `.crumb` from it.
+def _nav(path: str) -> tuple[list, bool]:
+    h = owner().get(path, follow_redirects=True).get_data(as_text=True)
+    main = h.split('<main class="main">', 1)[-1].split("<h1", 1)[0]
+    return (re.findall(r'<a class="back" href="([^"]+)">&lsaquo; ([^<]+)</a>', main),
+            'class="crumb"' in main)
+
+
+_s, _s_crumb = _nav("/settings")
+ok("a section's own screen offers no way back and no trail: its heading already names it",
+   _s == [] and not _s_crumb, f"{_s} crumb={_s_crumb}")
+_pp, _pp_crumb = _nav("/settings/people")
+ok("a screen inside it offers one link back to the section, and the trail for a pointer",
+   _pp == [("/settings", "System Settings")] and _pp_crumb, f"{_pp} crumb={_pp_crumb}")
+_at, _ = _nav("/aeo/topics")
+ok("...and never a link back to the screen it is (the AEO Machine lands on Articles)", _at == [], str(_at))
+_ap, _ = _nav("/aeo/performance")
+ok("...while the AEO Machine's other screens link back to it", _ap == [("/aeo", "AEO Machine")], str(_ap))
+# AND NOWHERE, ON ANY SCREEN WALKED, A LINK BACK TO THE SCREEN ITSELF. The four above were chosen
+# by hand and missed the Base Machine, whose section has no rows (found by test_the_dashboard_reads).
+_self = []
+for _p, _html in READ.items():
+    for _to in re.findall(r'<a class="back" href="([^"]+)"', _html):
+        _land = owner().get(_to, follow_redirects=True).request.path
+        if _to.rstrip("/") == _p.rstrip("/") or _land.rstrip("/") == _p.rstrip("/"):
+            _self.append(f"{_p} -> {_to}")
+ok(f"no screen offers a link back to itself ({len(READ)} read)", not _self, "; ".join(_self[:4]))
+ok("no trail anywhere says Overview",
+   not any(re.search(r'class="crumb"[^>]*>[^<]*(<b>)?Overview', h) for h in READ.values()))
+
+
+# ── 9. every header: the client's icon, the app's name, the menu on the right ────────────
+print("\ntest_every_header_is_icon_name_then_menu")
+
+# Owner, 2026-09-29, choosing his target header: the client's icon, the machine's name, and the
+# menu button on the right — on every screen, so the button never changes sides between them.
+from core.dash import look as _look  # noqa: E402
+
+_bad = []
+for _p, _html in READ.items():
+    _bar = re.search(r'<div class="(?:topbar|bar)">(?:<div class="bar-in">)?(.*?)</div>', _html, re.S)
+    if not _bar:
+        continue
+    _b = _bar.group(1)
+    _order = [m for m in re.findall(r'class="(ui-disc appmark|mark|brand|ham)"', _b)]
+    _name = re.sub(r"<[^>]+>", "", (re.search(r'class="(?:mark|brand)">(.*?)</span>', _b, re.S)
+                                     or [None, ""])[1]).strip()
+    if (_order[:1] != ["ui-disc appmark"] or _order[-1:] != ["ham"]
+            or f'src="{_look.client_icon()}"' not in _b
+            or _name != _expected_app(_p)[0].replace("Ownbox", "Base Machine")):
+        _bad.append(f"{_p}: {_order} {_name!r}")
+ok(f"every header is the client's icon, the app's name, then the menu ({len(READ)} read)",
+   not _bad, "; ".join(_bad[:3]))
+ok("...and the drawer opens from the right, where the button is",
+   "transform:translateX(101%)" in READ.get("/dashboard", ""))
 
 
 print("\n— and this file cannot silently fall out of CI —")

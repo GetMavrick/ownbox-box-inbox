@@ -125,7 +125,7 @@ print("\ntest_the_menu_has_a_shifts_row")
 sec = next((s for s in shell.sections() if s.key == "settings"), None)
 labels = [i.label for i in sec.items] if sec else []
 ok("Shifts is in System Settings, right after AI coworkers",
-   "Shifts" in labels and labels.index("Shifts") == labels.index("AI coworkers") + 1, str(labels))
+   "Shifts" in labels and labels.index("Shifts") == labels.index("AI Coworkers") + 1, str(labels))
 ok("...open to a member, who may look", not next(i for i in sec.items if i.label == "Shifts").owner_only)
 ok("the top of the menu is unchanged: no row of its own", "shifts" not in [s.key for s in shell.sections()])
 
@@ -134,8 +134,12 @@ plan("ownbox")
 page = owner.get("/settings/shifts").get_data(as_text=True)
 ok("a Base box reads Coworkers come with Pro, and which plan it is on",
    "Coworkers come with Pro" in page and "This box is on Base" in page)
-ok("...with the upgrade as the one ink pill", ink_pills(page) == ["See Pro"]
-   and 'href="https://www.ownbox.io/#pricing"' in page, str(ink_pills(page)))
+ok("...with the way to the upgrade sheet as the one ink pill",
+   ink_pills(page) == ["Upgrade to Pro"] and 'href="/dashboard/upgrade"' in page,
+   str(ink_pills(page)))
+mpage = member.get("/settings/shifts").get_data(as_text=True)
+ok("a member is told the owner can upgrade, and given no way to pay",
+   "The owner of this box can upgrade it." in mpage and "/dashboard/upgrade" not in main(mpage))
 ok("...and no way to make one", "New coworker" not in main(page))
 r = owner.post("/settings/shifts/new",
                data={"title": "X", "job": "y", "start0": "07:30", "days0": "Mon-Fri"})

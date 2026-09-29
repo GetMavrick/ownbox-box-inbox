@@ -333,7 +333,10 @@ def test_the_phone_gets_a_drawer_not_a_stack():
        'class="scrim"' in html_ and html_.count('for="navtoggle"') == 2)
     ok("...driven by a control a keyboard can reach, not a hidden input",
        ".navtoggle{position:absolute" in html_ and 'type="checkbox" id="navtoggle"' in html_)
-    ok("the drawer is off-canvas until asked for", "transform:translateX(-101%)" in html_)
+    # FROM THE RIGHT since 2026-09-29: the menu button moved to the top right (owner), and the drawer
+    # comes out from the side the thumb pressed.
+    ok("the drawer is off-canvas until asked for, on the right where the button is",
+       "transform:translateX(101%)" in html_ and "top:0;bottom:0;right:0" in html_)
     ok("...and opening it is what brings it back",
        ".navtoggle:checked~.lay .rail{transform:none" in html_)
     ok("...with motion respected", "prefers-reduced-motion" in html_)
@@ -521,6 +524,75 @@ def test_a_box_shows_the_areas_of_the_machines_it_carries_and_no_others():
     src = (pathlib.Path(__file__).resolve().parents[1] / "core" / "dash" / "home.py").read_text()
     ok("and the page names no machine to do it",
        not any(m in src for m in ("customer_voice", "lead_machine", "content_machine")))
+
+
+def test_the_boxs_own_cards_read_what_the_box_records():
+    """Owner, 2026-09-29, his target dashboard: the machine, its queue, what is connected, its AI.
+    Every figure comes from something the box records, so this puts known work in the jobs table and
+    reads it back off the page — a card that drew a constant would fail here."""
+    _restore()
+    with state.connect() as c:
+        c.execute("DELETE FROM jobs")
+    ids = []
+    for key, st in (("q-run", "running"), ("q-d1", "done"), ("q-d2", "done")):
+        got = state.create_job(idempotency_key=key, intent="draft_reply", raw_text="x")
+        jid = got[0] if isinstance(got, tuple) else got
+        jid = jid["id"] if isinstance(jid, dict) else jid
+        state.update_job(jid, status=st)
+        ids.append(jid)
+    body = _page()
+    words = _text(body)
+    ok("the machine's card says what state it is in, where it lives and how full it is",
+       "This machine" in words and "Address" in words and " GB of " in words, words[:200])
+    ok("...and says when the last nightly backup was, or that none has been taken yet",
+       "Last backup" in words, words[:200])
+    q = dict((lbl, int(v)) for v, lbl in re.findall(
+        r'<div class="ui-metric"><b>(\d+)</b><span>(Running|Waiting|Done today)</span></div>', body))
+    ok("the queue counts the work actually in the jobs table", q == {"Running": 1, "Waiting": 0, "Done today": 2},
+       str(q))
+    ok("...and names what is running now, by its intent and id",
+       re.search(r'class="mono now">.*draft_reply · ' + re.escape(str(ids[0])[:4]), body) is not None)
+
+
+def test_last_backup_is_the_newest_nightly_copy():
+    """scripts/backup_db.py writes aios-YYYY-MM-DD.db beside the database each night; the row reads
+    the newest one's time. Put one there, and the row must say today, not "No nightly copy yet"."""
+    _restore()
+    from pathlib import Path
+    from core.config import settings
+    d = Path(settings.db_path).resolve().parent / "backups"
+    d.mkdir(exist_ok=True)
+    f = d / "aios-2026-09-29.db"
+    f.write_bytes(b"SQLite format 3\x00")
+    try:
+        words = _text(_page())
+        ok("the row reads the newest nightly copy's time", re.search(r"Last backup Today \d\d:\d\d", words)
+           is not None, words[words.find("Last backup"):][:60])
+    finally:
+        f.unlink()
+    ok("...and with none there it says so plainly", "No nightly copy yet" in _text(_page()))
+
+
+def test_the_owners_cards_are_the_owners():
+    """What is connected to the box, and its AI account, are the owner's to see and to change; a
+    member's home carries neither (the connection list names assistants holding a key)."""
+    _restore()
+    from core.connector import seats
+    sid, _ = seats.mint("Claude Code", "act")
+    seats.touch(sid)
+    owner = _text(_page())
+    ok("the owner sees what is connected, named", "MCP" in owner and "1 client connected" in owner
+       and "Claude Code" in owner, owner[:240])
+    ok("...and the AI account's state", "Your AI" in owner)
+    member = state.add_user("rosa@northwind.example", role="member")["id"]
+    from core import dash as _dash
+    from core.dispatch import app as _app
+    mc = _app.test_client()
+    mc.set_cookie(_dash.COOKIE, _dash.new_session(member))
+    theirs = _text(mc.get("/dashboard").get_data(as_text=True))
+    ok("a member's home carries neither", "Claude Code" not in theirs and "Your AI" not in theirs
+       and "This machine" in theirs, theirs[:240])
+    seats.revoke(sid)
 
 
 def test_the_suite_is_named_in_ci():

@@ -80,8 +80,8 @@ if _inbox.is_file():
     c = app.test_client()
     c.set_cookie(dash.COOKIE, dash.new_session(state.owner_user()["id"]))
     rows = {"/inbox/settings": "Overview", "/inbox/mailbox": "Mailbox",
-            "/inbox/connect": "Social accounts", "/inbox/drafts": "AI and drafts",
-            "/inbox/install": "Home screen"}
+            "/inbox/connect": "Social Accounts", "/inbox/drafts": "AI and Drafts",
+            "/inbox/install": "Home Screen"}
     r = shell.rail("/inbox/mailbox")
     ok("the inbox's Settings is a menu with a row per setting home",
        r.level == 2 and r.title == "Settings" and [i.label for i in r.items] == list(rows.values()),

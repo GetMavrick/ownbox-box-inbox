@@ -339,22 +339,33 @@ ok("no two rails prompt with the same sentence", not _dupes, str(_dupes))
 ok("...and every prompt says something", all(p.strip() for p in _prompts))
 
 
-# ── EVERY SEGMENT ON THE APPEARANCE SWITCH HAS TO BE TRUE ─────────────────────────────────────
+# ── EVERY SEGMENT ON THE APPEARANCE SWITCH HAS TO BE TRUE ──────────────────────────────────
 print("\ntest_the_appearance_switch_offers_only_states_it_has")
 # It shipped three segments over two states. The third said "System", was the one SELECTED on an
 # untouched box, and could not follow the system: `?to=system` merely deleted the cookie, and the
 # prefers-color-scheme block had been removed (correctly) on 2026-09-16 to honour "white screens
 # first and foremost". So it rendered white on a dark phone while claiming to follow it, and was
 # byte-for-byte the same state as Light. Owner, 2026-09-18: drop it.
+# THE THIRD SEGMENT IS BACK AND IS NOW TRUE (owner, 2026-09-27: "system default"; PR #1659).
+# core/dash/theme.py stamps the page before paint, and for Automatic writes the script that reads
+# the device. So the rule this section holds is unchanged — a segment may only offer a state the
+# app can render — and it is now proved for Automatic by the script actually arriving.
+from core.dash import theme as _core_theme  # noqa: E402
 _sw = _c().get("/inbox/settings").get_data(as_text=True)
-_segs = re.findall(r'<a class="([^"]*)" href="/inbox/theme\?to=([a-z]+)">([^<]+)</a>', _sw)
-ok("the switch offers exactly the states this app has", len(_segs) == 2, str([x[2] for x in _segs]))
-ok("...which are Light and Dark", [x[2] for x in _segs] == ["Light", "Dark"], str(_segs))
-ok("...and nothing claims to follow the operating system",
-   not any("system" in x[1].lower() or "System" in x[2] for x in _segs), str(_segs))
+_form = re.search(r'<form class="ui-seg"[^>]*action="' + re.escape(_core_theme.ROUTE) + r'".*?</form>', _sw, re.S)
+_segs = re.findall(r'value="([a-z]+)" aria-pressed="(true|false)">([^<]+)</button>',
+                   _form.group(0)) if _form else []
+ok("the switch offers exactly the states this app has", len(_segs) == 3, str([x[2] for x in _segs]))
+ok("...which are Light, Dark and Automatic", [x[2] for x in _segs] == ["Light", "Dark", "Automatic"],
+   str(_segs))
 ok("an untouched box shows LIGHT selected, which is what it renders",
-   [lbl for cls, to, lbl in _segs if "on" in cls] == ["Light"],
-   str([(lbl, cls) for cls, to, lbl in _segs]))
+   [lbl for v, pressed, lbl in _segs if pressed == "true"] == ["Light"], str(_segs))
+_auto_c = _c()
+_auto_c.post(_core_theme.ROUTE, data={"theme": "system", "next": "/inbox/settings"})
+_auto_head = _auto_c.get("/inbox/settings").get_data(as_text=True).split("</head>")[0]
+ok("...and Automatic is TRUE: choosing it sends the script that follows the device, before paint",
+   "matchMedia('(prefers-color-scheme: dark)')" in _auto_head, "no device script in <head>")
+_auto_c.post(_core_theme.ROUTE, data={"theme": "light"})   # leave the person as they were found
 # THE OLD URL STILL LANDS SOMEWHERE SAFE. A bookmark or a restored tab must not wedge the app.
 _old = _c().get("/inbox/theme?to=system")
 ok("a stale ?to=system clears the cookie rather than 500ing", _old.status_code == 303,

@@ -188,7 +188,7 @@ def test_a_search_and_a_channel_narrow_each_other():
     import re as _re
     from urllib.parse import urlparse as _up, parse_qs as _pq
     chips = [_pq(_up(h.replace("&amp;", "&")).query)
-             for h in _re.findall(r'<a class="chip[^"]*" href="([^"]+)"', both)]
+             for h in _re.findall(r'<a class="chip[^"]*"[^>]*? href="([^"]+)"', both)]
     ok("...and the chips carry the query, so tapping one does not throw it away",
        chips and all(c.get("q") == ["leak"] for c in chips), str(chips))
     ok("...and All keeps it too",
@@ -203,9 +203,13 @@ def test_a_count_for_the_whole_inbox_is_never_shown_beside_a_handful_of_matches(
     have — so the count comes off rather than being answered incorrectly."""
     c = _seeded()
     plain = c.get("/inbox/inbox").get_data(as_text=True)
-    ok("the chips count when he is NOT searching", '<span class="n">' in plain)
+    # THE COUNT IS SPOKEN, NOT DRAWN, since the channels became logos (owner, 2026-09-29): it rides
+    # in each logo's name — "Instagram, 2" — and comes off the same way while he is searching.
+    import re as _re
+    counted = _re.compile(r'class="vh">[^<]+, \d+</span>')
+    ok("the chips count when he is NOT searching", bool(counted.search(plain)))
     hit = c.get("/inbox/inbox?q=leak").get_data(as_text=True)
-    ok("...and drop the number the moment he is", '<span class="n">' not in hit)
+    ok("...and drop the number the moment he is", not counted.search(hit))
     ok("...while still offering the channels themselves", "channel=instagram" in hit)
 
 

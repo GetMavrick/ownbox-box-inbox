@@ -154,10 +154,12 @@ def test_the_two_rows_do_not_both_say_All():
     _talk("b", "Sam", [("in", "two")], platform="instagram")
     app, c = _c()
     html_ = c.get("/inbox/inbox").get_data(as_text=True)
-    ok("both rows are on the screen",
-       'class="chips pills"' in html_ and 'class="chips">' in html_)
+    # ONE ROW NOW (owner, 2026-09-29): the channels are logos inside the filter row, so there is no
+    # second "All" to collide with — and no "Every channel" either; All clears everything.
+    ok("the filters are one row, with the channel logos in it",
+       html_.count('class="chips') == 1 and 'class="chip mkchip' in html_)
     ok("...and only one control says 'All'", html_.count(">All<") == 1, str(html_.count(">All<")))
-    ok("...the other says what it actually clears", ">Every channel<" in html_)
+    ok("...and no chip says 'Every channel' beside it", ">Every channel<" not in html_)
 
 
 def test_one_destination_is_called_one_thing():
@@ -171,7 +173,10 @@ def test_one_destination_is_called_one_thing():
     app, c = _c()
     # ON A FILTERED VIEW, because the menu only offers the way out when there is one to offer.
     html_ = c.get("/inbox/inbox?channel=instagram").get_data(as_text=True)
-    ok("the menu offers the way back to every channel", ">Every channel<" in html_)
+    # THE ROW MENU IS GONE (owner, 2026-09-29), so the way back is All, and the chosen logo itself.
+    ok("All is the way back to every channel", 'href="/inbox/inbox">All<' in html_)
+    ok("...and so is tapping the chosen logo again",
+       'aria-pressed="true" href="/inbox/inbox"><span class="ui-disc">' in html_)
     ok("...and nothing on the screen calls it anything else", "All channels" not in html_,
        html_[max(0, html_.find("All channels") - 80):][:160])
 

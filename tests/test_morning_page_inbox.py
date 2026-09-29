@@ -229,6 +229,32 @@ finally:
 
 # ── never raises, whatever the store does ────────────────────────────────────────────────────
 print("\n— a count is never worth taking the morning page down for —")
+# ── what the box has ready, and how long the oldest has waited ─────────────────────────────
+# Owner, 2026-09-29, his target dashboard: "drafts ready" and "oldest waiting" beside the inbox's
+# other figures, and the ready replies as the first thing waiting on him. Both are facts the inbox
+# already held; this proves the reporter says them, from the same stores the screens read.
+print("\ntest_drafts_ready_and_the_oldest_waiting_are_reported")
+import re as _re  # noqa: E402
+from marketing.customer_voice.drafter import store as _drafts  # noqa: E402
+_conv("dr-old", "Nadia Okoro", [("in", _before_window(2))])
+_last = _drafts.newest_inbound(SPACE, "dr-old")
+ok("the waiting conversation has a message to answer", bool(_last), str(_last))
+_drafts.put(space=SPACE, zcid="dr-old", in_reply_to=str((_last or {}).get("id") or ""),
+            body="Yes, we still have Saturday at 10. Shall I hold it for you?")
+_seg = voice_report.report(TODAY)
+_figs = _seg.get("figures") or {}
+_ready = _drafts.waiting_count(SPACE)
+ok("drafts ready is the Drafts screen's own count",
+   _ready >= 1 and (_figs.get("inbox_drafts") or {}).get("value") == _ready, str(_figs.get("inbox_drafts")))
+ok("...and they lead what is waiting on him, linked to where they are sent",
+   any("written and ready to send" in x.get("text", "") and x.get("href") == "/inbox/waiting"
+       for x in _seg.get("needs_you") or []), str(_seg.get("needs_you")))
+ok("the oldest waiting is said in the fewest characters a person reads at a glance",
+   bool(_re.fullmatch(r"\d+[mhd]", str((_figs.get("inbox_oldest") or {}).get("value") or ""))),
+   str(_figs.get("inbox_oldest")))
+ok("...and a two-day-old message reads in days, not hours",
+   str((_figs.get("inbox_oldest") or {}).get("value") or "").endswith("d"), str(_figs.get("inbox_oldest")))
+
 voice_report._space_name = _REAL_SPACE_NAME       # type: ignore[assignment]
 _vr = voice_report
 

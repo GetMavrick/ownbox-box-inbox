@@ -183,7 +183,11 @@ ok("a script tag in a header does not reach the page as markup",
 # is inert — it is an attribute only if a `<` opened a tag, and every one of those is escaped.
 # The first cut of this asserted the bare word and failed on its own escaped output, which is a
 # test reporting a hole that does not exist.
-ok("...nor does an image tag it could hang off", "<img" not in evil)
+# THE INJECTED TAG, NOT ANY IMAGE. Every inbox page carries the client's icon in its header since
+# 2026-09-29 (owner), so "no <img at all" became a test of the header; what matters is that the
+# attacker's own tag never arrives as markup.
+ok("...nor does an image tag it could hang off", "<img src=x" not in evil and "onerror=alert" not in
+   evil.replace("onerror=alert(1)&gt;", ""))
 ok("...and it is escaped rather than silently dropped", "&lt;script&gt;" in evil)
 
 

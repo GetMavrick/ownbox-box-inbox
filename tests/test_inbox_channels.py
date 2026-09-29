@@ -92,8 +92,10 @@ ok("...and the mark is a shape, drawn as a path rather than a coloured blob",
 store.upsert_conversation(space=SPACE, zcid="i1", platform="instagram",
                           participant="Sam", account_id="a2", last_inbound_at="2026-09-15T07:00:00Z")
 _, html = _page(c, "/inbox/inbox")
-ok("a second channel brings the chip row with it", 'class="chips">' in html)
-ok("...with a chip that clears the channel filter", ">Every channel<" in html)
+# ONE ROW SINCE 2026-09-29 (owner): All · Unanswered · a logo per channel. "Every channel" went with
+# the second row; All clears every filter, the channel included.
+ok("a second channel brings its logos into the filter row", 'class="chip mkchip' in html)
+ok("...with All, which clears the channel filter", 'href="/inbox/inbox">All<' in html)
 ok("...and one chip per channel present", "Messenger" in html and "Instagram" in html)
 ok("...and NO chip for a channel this box has never received",
    "WhatsApp" not in html and "Reviews" not in html and "SMS" not in html)

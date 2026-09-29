@@ -100,7 +100,15 @@ tiles = re.findall(r'<a href="([^"]+)"><img src="([^"]+)"[^>]*><span>([^<]+)</sp
 names = [t[2] for t in tiles]
 ok("the Base Machine is first, as Ownbox, opening the box", bool(tiles) and tiles[0][:1] == ("/",)
    and names[0] == "Ownbox", str(tiles[:1]))
-want = ["Ownbox"] + (["Unified Inbox"] if HAS_INBOX else [])
+# THE AEO MACHINE IS ITS OWN APP TOO (owner, 2026-09-29: "All the screens on AEO machine need to
+# reflect AEO machine"), so a box that ships it offers its tile beside the inbox's.
+try:
+    import marketing.aeo_machine.app  # noqa: F401
+    HAS_AEO = True
+except ImportError:
+    HAS_AEO = False
+want = (["Ownbox"] + (["AEO Machine"] if HAS_AEO else [])
+        + (["Unified Inbox"] if HAS_INBOX else []))
 ok(f"one tile per app the box serves: {want}", names == want, str(names))
 for href, src, name in tiles:
     ok(f"{name}: its icon is a real image", owner.get(src).data[:4] == b"\x89PNG", src)

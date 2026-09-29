@@ -183,7 +183,7 @@ def test_the_query_and_the_channel_survive_a_page_turn_and_the_page_does_not_sur
         got = parse_qs(urlparse(url).query)
         ok(f"{label.strip()} keeps the channel", got.get("channel") == ["messenger"], str(got))
     chips = [parse_qs(urlparse(h.replace("&amp;", "&")).query)
-             for h in re.findall(r'<a class="chip[^"]*" href="([^"]+)"', paged)]
+             for h in re.findall(r'<a class="chip[^"]*"[^>]*? href="([^"]+)"', paged)]
     ok("no chip carries a page", chips and not any("page" in ch for ch in chips), str(chips))
     ok("...and the search form posts no page either",
        'name="page"' not in paged, "a hidden page field would pin a new search to page 2")

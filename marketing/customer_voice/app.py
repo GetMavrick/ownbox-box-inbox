@@ -282,20 +282,19 @@ CSS = """
   --orb-floor:rgba(138,44,13,.34);
 }
 :root[data-theme="dark"]{
-  --bg:#0d0d0d; --surface:#171717; --raised:#1f1f1f;
-  /* Dark had the same hole, smaller: --dimmer was 3.35:1. Same rule, same test. */
-  --ink:#f5f3f1; --dim:#a6a2a0; --dimmer:#85817f;
-  --line:#262523; --hair:rgba(255,255,255,.08);
-  --accent:#f08a5d; --accent-ink:#1a1008; --accent-soft:#2a1a12; --accent-line:rgba(240,138,93,.5);
-  --bubble-in:#1f1f1f; --bubble-out:#f08a5d; --bubble-out-ink:#1a1008;
-  --href:#f08a5d;
-  --bad:#f0857a; --bad-soft:#2a1613;
+  /* ONE DARK, AND IT IS box.css's (WebDev2, PR #1659 §14, 2026-09-28). Until now this block was a
+     second dark theme: its own greys, its own ink, and coral for every action and sent message.
+     box.css now carries the homepage's dark half under the same names, and the light block above
+     already points every name this page reads at those names, so the ground, the card, the ink,
+     the lines, the pill and rust links all arrive from there with nothing redeclared. Coral is
+     gone: the one action is the pill in both themes, and a sent message wears the pill's two
+     colours, as it does in light. What is left here is only what box.css has no name for. */
+  --accent-soft:#262625; --bad-soft:#2a1613;
   --lift:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
-  --tab-bg:rgba(13,13,13,.88);
-  /* The same eleven, this theme's values. --rail is one step LIGHTER than the page so the
-     drawer reads as lifted over it, which is the job the shadow does in light. */
-  --card:var(--surface); --rail:var(--raised); --hover:var(--raised);
-  --sel:var(--accent-soft); --nav-ink:var(--dim); --faint:var(--dimmer); --danger:var(--bad);
+  --tab-bg:rgba(17,17,17,.88);
+  /* The drawer is the card's colour over the ground, lifted by the scrim: the job the shadow does
+     in light, which a dark shadow on a dark ground cannot. */
+  --rail:var(--card); --sel:var(--accent-soft);
   --av-ink:#7a5a14; --av-a:#ffe4a3; --av-b:#f7c7a8;
   --drawer-flat:none; --drawer-lift:var(--lift);
   --scrim:rgba(0,0,0,.62);
@@ -345,13 +344,14 @@ a{color:inherit;text-decoration:none}
    carrying nothing but a date, and a rail pushed down by its height so the box's crest sat
    lower here than on the dashboard he had just come from. Two screens, one click apart,
    disagreeing about where the box's name lives. Hidden at desktop width, the machine's chrome
-   and the dashboard's are the same chrome. The phone keeps its bar, which is where it earns
+   and the dashboard's are the same chrome. The mobile keeps its bar, which is where it earns
    its place: the drawer is shut there and this is the only thing carrying the way out. */
 .bar{display:none;position:sticky;top:env(safe-area-inset-top,0px);z-index:10;
   background:var(--tab-bg);
   backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid var(--hair)}
 @media (max-width:820px){ .bar{display:block} }
-.bar-in{display:flex;align-items:baseline;gap:10px;padding:13px 16px;max-width:620px;margin:0 auto}
+.bar-in{display:flex;align-items:center;gap:10px;padding:9px 16px;max-width:620px;margin:0 auto}
+.bar-in .appmark{width:32px;height:32px}
 .brand{font-weight:var(--w-strong);letter-spacing:-.015em}
 .day{margin-left:auto;font-size:13px;color:var(--dimmer)}
 /* THE DATE, NOW ON THE SCREEN INSTEAD OF IN THE CHROME. Owner, 2026-09-22: *"That date in the
@@ -372,7 +372,7 @@ h1 .chan{vertical-align:middle}
 .sub{color:var(--dim);font-size:15px;margin:0 0 14px}
 
 /* ── the briefing ──────────────────────────────────────────────────────────────────────────
-   KINSO'S PHONE SCREEN IS A BRIEFING — "Good morning, Sarah. You've got 4 new and 9 active
+   KINSO'S MOBILE SCREEN IS A BRIEFING — "Good morning, Sarah. You've got 4 new and 9 active
    conversations." Ours already was one; this gives it their shape: a sentence, not a dashboard,
    with the numbers carried in the accent inside running text rather than parked in tiles. */
 /* ── the greeting Today opens with ───────────────────────────────────────────────────────────
@@ -465,7 +465,7 @@ a.row:active{background:var(--hair);border-radius:10px}
    distance the eye actually resolves at 15px.
 
    TWO CHANNELS ON THE MESSAGE, NOT ONE: weight AND ink. Weight alone is a fine signal on a
-   desktop and a poor one on a phone at arm's length, and both tokens here are already measured
+   desktop and a poor one on a mobile at arm's length, and both tokens here are already measured
    against both grounds this app draws on.
 
    AND A WORD FOR THE PEOPLE WHO CANNOT SEE IT AT ALL. Bold is invisible to a screen reader, so
@@ -535,10 +535,9 @@ a.row:active{background:var(--hair);border-radius:10px}
    Owner, 2026-09-16: "we're also going to add some different tags on each conversation and an
    action button menu on hover."
 
-   THE ROW IS STILL ONE LINK AND THE MENU IS ITS SIBLING, never its child. An <a> inside an <a>
-   is invalid, and browsers recover from it by SPLITTING the outer one — which is how a "Reply"
-   button silently starts opening the thread instead. The wrapper carries the hairline so the
-   two of them read as a single row. */
+   ONE LINK PER ROW. It carried a "…" menu (Reply, and one channel) until the owner removed it on
+   2026-09-29: the row itself opens the thread with its reply box, and the channel logos above the
+   list filter. The wrapper stays because it carries the hairline. */
 .convrow{position:relative;display:flex;align-items:center;gap:4px;
   border-bottom:1px solid var(--hair)}
 .convrow:last-child{border-bottom:0}
@@ -553,27 +552,7 @@ a.row:active{background:var(--hair);border-radius:10px}
 .tag.stop{color:var(--bad);background:var(--bad-soft);border-color:var(--bad-soft)}
 .tag.warn{color:var(--dim);background:var(--bg);border-color:var(--accent-line)}
 .tag.ad{color:var(--dim);background:var(--bg);border-color:var(--line)}
-
-/* A <details> IS THE MENU. No library, no state in JS, keyboard-operable and open-able before
-   any script has run — the same reason the rest of this app is links and forms. */
-.acts{flex:none;position:relative}
-.acts>summary{list-style:none;display:flex;align-items:center;justify-content:center;
-  width:34px;height:34px;border-radius:9px;color:var(--dimmer);cursor:pointer}
-.acts>summary::-webkit-details-marker{display:none}
-.acts[open]>summary{background:var(--bg);color:var(--ink)}
-/* HOVER IS THE ENHANCEMENT, NOT THE DOOR. A phone has no hover at all and this is a phone app
-   first, so the button is permanently there on touch and only fades in on a real pointer. */
-@media (hover:hover) and (pointer:fine){
-  .acts>summary{opacity:0;transition:opacity .12s ease}
-  .convrow:hover .acts>summary,.acts[open]>summary,.acts>summary:focus-visible{opacity:1}
-}
-@media (prefers-reduced-motion:reduce){.acts>summary{transition:none}}
-.acts .menu{position:absolute;right:0;top:calc(100% + 4px);z-index:30;min-width:186px;
-  background:var(--raised);border:1px solid var(--line);border-radius:12px;padding:5px;
-  box-shadow:var(--lift);display:flex;flex-direction:column}
-.acts .menu a{padding:9px 11px;border-radius:8px;font-size:14.5px;font-weight:var(--w-regular);
-  white-space:nowrap}
-.acts .menu a:hover,.acts .menu a:focus-visible{background:var(--bg)}
+.tag.draft{color:var(--ink);background:var(--bg);border-color:var(--hair)}
 
 /* The channel mark. Why it is a logo and not a word: see `_mark`. */
 .mk svg{display:block}
@@ -594,7 +573,7 @@ a.row:active{background:var(--hair);border-radius:10px}
 
    16px ON THE INPUT IS NOT A STYLE CHOICE. Mobile Safari zooms the whole page when a field
    smaller than 16px takes focus, and it does not zoom back out — so a 15px search box leaves a
-   person on a phone looking at a magnified inbox they have to pinch their way out of. */
+   person on a mobile looking at a magnified inbox they have to pinch their way out of. */
 .find{display:flex;align-items:center;gap:9px;margin:12px 0 2px;background:var(--surface);
   border-radius:13px;padding:0 13px;box-shadow:var(--lift)}
 .find svg{flex:none;display:block;color:var(--dimmer)}
@@ -610,7 +589,7 @@ a.row:active{background:var(--hair);border-radius:10px}
 .find button{flex:none;border:0;background:transparent;color:var(--accent);font:inherit;
   font-size:14.5px;font-weight:var(--w-strong);padding:8px 0 8px 4px;cursor:pointer}
 /* QUIETER THAN THE RESULTS IT COUNTS. Set at 14.5px first and the "Show everything" link wrapped
-   onto its own line reading like a call to action — the loudest thing on a screen whose job is
+   onto its own line reading like the next thing to do — the loudest thing on a screen whose job is
    the rows underneath it. */
 .found{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:11px 2px 0;
   color:var(--dim);font-size:13.5px;font-variant-numeric:tabular-nums}
@@ -634,7 +613,7 @@ a.row:active{background:var(--hair);border-radius:10px}
 .pg:focus-visible{outline:2px solid var(--accent-line);outline-offset:2px}
 
 /* ── channel chips ─────────────────────────────────────────────────────────────────────────
-   Kinso's LEFT RAIL is a desktop idiom; on a phone the same job is a scrolling row. */
+   Kinso's LEFT RAIL is a desktop idiom; on a mobile the same job is a scrolling row. */
 .chips{display:flex;gap:8px;margin:12px 0 2px;overflow-x:auto;padding:2px 0 6px;
   -webkit-overflow-scrolling:touch;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
@@ -648,33 +627,37 @@ a.row:active{background:var(--hair);border-radius:10px}
    control that wrapped. The filter row asks WHAT STATE; the channel row asks WHERE FROM. So the
    filter row sits tighter to the header it qualifies, and the channel row keeps its own space. */
 .chips.pills{margin:12px 0 0}
-.chips.pills + .chips{margin-top:8px}
+/* A LOGO CHIP IS THE DISC ITSELF, 44px so a thumb finds it; chosen, it wears the ink edge. */
+.chip.mkchip{padding:0;background:transparent;border:0}
+.chip.mkchip .ui-disc{width:44px;height:44px}
+.chip.mkchip.on{background:transparent}
+.chip.mkchip.on .ui-disc{box-shadow:0 0 0 2px var(--ink)}
 
 /* ── the inbox on a screen with room ───────────────────────────────────────────────────────
    Owner, 2026-09-17: "With the social media channels on the left, and they move horizontally at
    the top on Mobile as you have it."
 
-   THE PHONE IS UNTOUCHED. Everything above this line is the layout he already approved, and it
+   THE MOBILE IS UNTOUCHED. Everything above this line is the layout he already approved, and it
    stays the default — this block only runs where there is width to spend, which is the one place
    a 620px column was throwing it away. `.ib` is set by the inbox page alone, so no other screen
    in the app widens by accident.
 
    THE CHIPS BECOME THE RAIL RATHER THAN BEING REPLACED BY ONE. Same links, same counts, same
    current-chip rule — a second markup for the same list is how the two stop agreeing, and the
-   filter that works on a phone has to be the filter that works on a laptop. Only the axis changes.
+   filter that works on a mobile has to be the filter that works on a laptop. Only the axis changes.
 
    IT STICKS, because the list it filters is the thing that scrolls. A channel rail that scrolls
    away with 200 conversations is a rail you have to go back up to use. */
 @media (min-width:821px){
   /* THE BAR SPANS THE RAIL AND THE LIST, so its content starts at the left edge like any app
-     header rather than floating in the old 620px phone centre. Measured at 1280px: centred, the
+     header rather than floating in the old 620px mobile centre. Measured at 1280px: centred, the
      brand sat 190px in while the rail beneath it started at 0 and the list at 272px — three left
      edges on one screen.
      THE FILTER COLUMN IS GONE, and this is the change the rail paid for. It was a 224px column
      holding two chips with 600px of empty grey under it (rendered at 1280x820 before this), and
      it only ever existed because this screen had no other left edge to use. It has one now, and
      it holds the box's sections — two stacked rails are two answers to "where am I". So the
-     chips keep the phone's shape at every width: a row, above the list they filter, which is
+     chips keep the mobile's shape at every width: a row, above the list they filter, which is
      also where a filter belongs. The 900px grid and the chip-as-list-row styling it needed are
      deleted rather than overridden — an overridden rule for a layout nobody renders is the dead
      code the next person has to reason about. */
@@ -695,7 +678,7 @@ a.row:active{background:var(--hair);border-radius:10px}
   .ib .wrap{max-width:780px;margin:0;padding:0 24px}
   nav.tabs{display:none}
   /* THE TAB BAR'S HEIGHT WAS PADDING AT THE FOOT OF THE PAGE, and with the bar gone that padding
-     is a blank strip. A phone's bottom bar pinned to the foot of a desktop window is the single
+     is a blank strip. A mobile's bottom bar pinned to the foot of a desktop window is the single
      thing that made this screen read as unfinished. */
   .wrap{padding-bottom:28px}
   /* ...AND THE SAME PADDING ON THE BODY SHORTENED THE RAIL. `.lay` is min-height:100% of the body's
@@ -829,7 +812,7 @@ iframe.mail{display:block;width:100%;border:0}
 .det[open] summary::after{content:" ▴"}
 .dt{margin-top:6px;padding:10px 12px;background:var(--surface);border:1px solid var(--line);
   border-radius:12px}
-/* LABEL OVER VALUE ON A PHONE, two columns once there is room. A 90px label column next to a
+/* LABEL OVER VALUE ON A MOBILE, two columns once there is room. A 90px label column next to a
    long From line leaves about eleven characters per row at 390px, which is not a table, it is
    a stack of fragments. */
 .dr{display:block;padding:3px 0;font-size:13px;line-height:1.35}
@@ -870,7 +853,7 @@ button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
 
 /* ── the tab bar ───────────────────────────────────────────────────────────────────────────
    THE PWA DECISION. Installed to a home screen there is no browser chrome, so the app supplies
-   its own furniture, and on a phone that furniture is a bottom bar — thumb-reachable, the idiom
+   its own furniture, and on a mobile that furniture is a bottom bar — thumb-reachable, the idiom
    every native app on the device already uses. It clears the home indicator with the safe-area
    inset rather than a guessed margin. */
 .tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--tab-bg);
@@ -886,8 +869,8 @@ button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
    POSITIONED OFF THE CENTRE LINE, not off the tab's edge: the tab is a flex column with the
    icon centred, so `left:50%` plus a small offset lands the dot on the icon's shoulder at every
    tab width, where anchoring to `right` drifts as the bar divides by three or by four.
-   THE RING IS NOT DECORATION. The bar is translucent (`--tab-bg`) over whatever scrolls beneath
-   it, so an accent dot can land on accent-coloured content and vanish; a 2px ring in the bar's
+   THE OUTLINE IS NOT DECORATION. The bar is translucent (`--tab-bg`) over whatever scrolls beneath
+   it, so an accent dot can land on accent-coloured content and vanish; a 2px outline in the bar's
    own colour keeps its edge on any background.
    AND IT CLEARS THE TWO STROKES, which cost one iteration to get right. Built at 6px/6px the dot
    sat ON the tray icon's upper-right stroke — and the comment above `_TABS` argues those two
@@ -929,14 +912,11 @@ button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
   border-radius:50%;background:var(--href);box-shadow:0 0 0 2px var(--tab-bg)}
 
 /* ── settings ──────────────────────────────────────────────────────────────────────────────
-   Where the light/dark switch lives. Server-rendered like everything else: the switch is a LINK
-   that sets a cookie, because this app runs its screens without client JavaScript and a theme
-   that needs a script is a theme that flashes the wrong one first. */
+   The appearance switch is core's now (core/dash/theme.py control(), drawn by box.css .ui-seg), a
+   form whose three buttons each save a choice, so it still needs no client JavaScript.
+   .seg BELOW IS NOT THAT SWITCH. It survives because the set-up wizard's progress bar reuses the
+   name (.wiz-bar .seg) and inherits this padding and margin; removing it would move that bar. */
 .seg{display:flex;gap:4px;background:var(--bg);border-radius:12px;padding:4px;margin-top:4px}
-.seg a{flex:1;text-align:center;padding:9px 0;border-radius:9px;font-size:14.5px;
-  font-weight:var(--w-regular);color:var(--dim);min-height:44px;display:flex;align-items:center;
-  justify-content:center}
-.seg a.on{background:var(--surface);color:var(--ink);box-shadow:var(--lift)}
 .setrow{display:flex;flex-direction:column;gap:2px;padding:14px 0;border-bottom:1px solid var(--hair)}
 .setrow:last-child{border-bottom:0}
 .setrow b{font-weight:var(--w-regular);font-size:15.5px}
@@ -969,7 +949,7 @@ button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
    app's bar is visible at every width because it carries the brand and the date.
    SO THE BUTTON HIDES, NOT THE BAR — above 820px the rail is on screen and a button that opens
    what you can already see is the dead control this codebase keeps deleting. */
-.bar-in .ham{display:none;margin-left:-6px}
+.bar-in .ham{display:none;margin-left:auto;margin-right:-6px}
 .navtoggle:focus-visible~.bar .ham{outline:2px solid var(--accent);outline-offset:-2px}
 
 /* THE MENU BUTTON SHOWS ONLY WHERE THE RAIL IS HIDDEN — above the breakpoint the rail is on
@@ -983,7 +963,7 @@ button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
    is emptied of both rather than fought with. Specificity, not order — core's rule is `.main`
    and this is `.lay .main`, so it wins wherever the stylesheets end up concatenated.
    AND THE RAIL'S HEAD IS A STUTTER ON A DESKTOP, where the bar directly above it already says
-   whose box this is. On a phone the drawer covers that bar, so there it is the only thing naming
+   whose box this is. On a mobile the drawer covers that bar, so there it is the only thing naming
    the box and it stays. */
 .lay .main{padding:0;max-width:none}
 /* AND THE RAIL RUNS THE HEIGHT OF THE WINDOW. Core's `.lay{min-height:100%}` resolves against a
@@ -1221,7 +1201,7 @@ shell.register_section(
         # keyed `setup` rather than learning this machine's URL, so the card it draws works on any
         # box that has a set-up screen and draws nothing on one that does not. This line is what
         # makes this box one of the former.
-        {"key": shell.SETUP_KEY, "label": "Set up", "href": "/inbox/setup",
+        {"key": shell.SETUP_KEY, "label": "Set Up", "href": "/inbox/setup",
          "icon": _TAB_ICON.get("/inbox/settings", "")},
     ])
 
@@ -1236,9 +1216,9 @@ shell.register_section(
     items=[
         {"key": "overview", "label": "Overview", "href": "/inbox/settings"},
         {"key": "mailbox", "label": "Mailbox", "href": "/inbox/mailbox"},
-        {"key": "channels", "label": "Social accounts", "href": "/inbox/connect"},
-        {"key": "drafts", "label": "AI and drafts", "href": "/inbox/drafts"},
-        {"key": "install", "label": "Home screen", "href": "/inbox/install"},
+        {"key": "channels", "label": "Social Accounts", "href": "/inbox/connect"},
+        {"key": "drafts", "label": "AI and Drafts", "href": "/inbox/drafts"},
+        {"key": "install", "label": "Home Screen", "href": "/inbox/install"},
     ])
 
 
@@ -1333,11 +1313,19 @@ def _tabbar(here: str) -> str:
             f'<div class="tabs-in">{"".join(out)}</div></nav>')
 
 
+# THE APP'S ONE NAME. Every inbox screen installs as this and titles its tab with it (owner,
+# 2026-09-29: "We want every screen of the unified inbox to bookmark the same way"). The manifest's
+# short_name and the iOS title tag both read it, so the two cannot drift.
+APP_TITLE = "Unified Inbox"
+
 THEME_COOKIE = "aios_voice_theme"
 # THE BAR BEHIND THE CLOCK IS THE PAGE'S GROUND. Light was the grey-blue of the inbox
 # before it took box.css; the page is the box's cream now (core/dash/static/box.css --ground,
 # the value core's own screens send), so an installed app showed a blue-grey band over cream.
-_THEME_BG = {"light": "#f6f4ef", "dark": "#0d0d0d"}
+# ONE TABLE, core's: this was a copy, and its dark half went stale the day box.css took the
+# homepage's dark ground (PR #1659). tests/test_the_box_wears_one_look.py holds theme.GROUND to
+# box.css --ground, so pointing here keeps the bar and the page the same colour in both themes.
+from core.dash.theme import GROUND as _THEME_BG  # noqa: E402
 
 
 def _theme() -> str:
@@ -1348,11 +1336,26 @@ def _theme() -> str:
     sentence outliving the behaviour is how the Settings screen came to offer a "System" segment
     that could not follow the system.
     """
+    # THE PERSON'S CHOICE FIRST (core/dash/theme.py), so one switch governs every screen; the
+    # cookie is only what a phone remembers from before that existed.
+    from core.dash import theme as _core_theme
+    uid = _core_theme._user_id()
+    mine = _core_theme.chosen(uid)
+    if mine:
+        return mine
     try:
         v = (request.cookies.get(THEME_COOKIE) or "").strip().lower()
     except Exception:                            # noqa: BLE001 — no request, no cookie
         return ""
-    return v if v in ("light", "dark") else ""
+    v = v if v in ("light", "dark") else ""
+    if v and uid:
+        # CARRIED OVER ONCE (WebDev2, §14.4): a phone's old choice becomes the person's setting the
+        # first time they're seen signed in, and from then on the setting is the answer.
+        try:
+            _core_theme.put(uid, v)
+        except Exception:                        # noqa: BLE001 — the page still renders their choice
+            pass
+    return v
 
 
 # ── the box's menu, on the one screen that never had it ──────────────────────────────────────
@@ -1412,12 +1415,14 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
     # HIS CHOICE IS STAMPED ON <html>. No stamp means he has never chosen, and that renders
     # WHITE — the OS is not consulted (owner, 2026-09-16: white screens first and foremost).
     th = _theme()
-    stamp = f' data-theme="{th}"' if th else ""
+    from core.dash import theme as _core_theme
+    stamp = _core_theme.html_attr(th) if th else ""
     # THE STATUS BAR HAS TO MOVE TOO. Installed, iOS paints the area behind the clock with
     # theme-color; leaving it at the dark value puts a black band above a white app. Unstamped,
     # both are declared with a media attribute and the OS picks.
     if th:
-        tc = f'<meta name="theme-color" content="{_THEME_BG[th]}">'
+        # System carries two media-matched colours and the script that picks before paint.
+        tc = _core_theme.head_tags(th)
     else:
         # UNSTAMPED IS WHITE, not "ask the OS". Declaring the dark variant here would paint a
         # black band above a white app on an installed iOS home-screen icon — the status bar
@@ -1428,16 +1433,17 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
 <meta name="robots" content="noindex,nofollow">
 {tc}
 <link rel="manifest" href="/inbox/manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="{APP_TITLE}">
 <!-- APPLE STILL READS ITS OWN META. The manifest's `display` is what MDN says iOS requires before
      `Notification` even exists, and this legacy pair is what older iOS reads for the same thing.
      Both cost one line and the failure they prevent is silent. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>{_esc(brand)} · Unified Inbox</title>{_look.head_tags()}<style>{CSS}</style></head>
+<title>{_esc(brand)} · {APP_TITLE}</title>{_look.head_tags()}<style>{CSS}</style></head>
 <body{' class="ib"' if wide else ''}>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
-<div class="bar"><div class="bar-in">{_menu_button()}
-<span class="brand">{_esc(brand)}</span></div></div>
+<div class="bar"><div class="bar-in">{_look.header_mark()}
+<span class="brand">{APP_TITLE}</span>{_menu_button()}</div></div>
 <label class="scrim" for="navtoggle" aria-label="Close menu"></label>
 <div class="lay">{_rail(here or request.path)}
 <main class="main"><div class="wrap">{body}</div></main></div>
@@ -2124,66 +2130,10 @@ def _tag_list(k: dict) -> list:
 # land on /inbox/inbox with no channel; two spellings of the same idea is how a reader concludes
 # they must do different things. It is "Every channel" and not "All", because the UNANSWERED filter
 # row above it already opens with "All" and means something else entirely.
-_EVERY_CHANNEL = "Every channel"
 
 
 def _tags(k: dict) -> str:
     return "".join(f'<span class="tag {c}">{_esc(t)}</span>' for t, c in _tag_list(k))
-
-
-def _acts(k: dict, *, who: str, channel: str) -> str:
-    """The hover menu on a row. EVERY ITEM GOES SOMEWHERE THIS BOX ALREADY SERVES.
-
-    Reply is the thread's own compose box; the channel item is the chip row the reader may never
-    have scrolled to. Nothing in here is a control that cannot succeed, which is the thing this
-    codebase keeps deleting by name — so the two obvious extras are NOT drawn in grey:
-
-    · "Mark as done" has no column to write to. Inventing one from the screen would make the
-      inbox's idea of finished disagree with the poller's the first time a message arrived on a
-      thread he had closed.
-    · An owner-side "Do not contact" would write the SAME `opted_out` flag a CONTACT sets by
-      saying STOP — quietly turning his mute into their refusal, in a field the send path trusts
-      and nothing can undo. Both are on the wall for OSDev4, whose machine owns that column.
-
-    REPLY APPEARS ON EXACTLY THE ROWS WHERE THE THREAD WILL SHOW A BOX, because it asks the two
-    fields `_compose` asks and no others. A menu item that lands on a thread with nowhere to type
-    is the same broken promise as a greyed-out one, just further away.
-    """
-    href = _thread_href(k.get("zernio_conversation_id"))
-    plat = str(k.get("platform") or "")
-    items = []
-    # THE SAME FOUR QUESTIONS `_compose` ASKS, IN THE SAME ORDER. `_no_send_lane` is the newest
-    # of them and it arrived with email: a channel whose rule is written and says the send happens
-    # in the person's own mail app shows no box, so it must offer no Reply either. Adding a gate
-    # to `_compose` and not to this list is precisely the drift the suite beside this catches.
-    #
-    # `has_inbound` IS THE ROW'S HALF OF THE SAME FACT the thread reads off its own messages. It
-    # had to come from the store because a list of fifty rows cannot afford a query each, and it
-    # replaced `last_inbound_at` here for the reason `_compose` gives at length: that column is an
-    # inference a poller fills and it is NULL on threads the customer demonstrably wrote on.
-    if (not k.get("opted_out") and not _no_send_lane(plat) and _has_send_rule(plat)
-            and k.get("has_inbound")
-            and (k.get("account_id") or "").strip()):
-        items.append((f"{href}#reply", "Reply"))
-    if plat and channel:
-        # THE SAME WORDS AS THE CHIP IT DUPLICATES. This menu item and the first chip in the
-        # channel row go to the same place; calling one "All channels" and the other "Every
-        # channel" makes a reader wonder what the difference is, and there is none.
-        items.append(("/inbox/inbox", _EVERY_CHANNEL))
-    elif plat:
-        from urllib.parse import quote as _q
-        items.append((f'/inbox/inbox?channel={_esc(_q(plat, safe=""))}',
-                      f"Only {_channel(plat)}"))
-    if not items:
-        # NO BUTTON AT ALL rather than a button that opens an empty card.
-        return ""
-    links = "".join(f'<a href="{h}">{_esc(t)}</a>' for h, t in items)
-    return ('<details class="acts"><summary role="button" '
-            f'aria-label="Actions for {_esc(who)}">'
-            '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" '
-            'aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/>'
-            '<circle cx="19" cy="12" r="1.7"/></svg></summary>'
-            f'<div class="menu">{links}</div></details>')
 
 
 def _live(*paths: str) -> str:
@@ -2260,51 +2210,41 @@ def _nothing_arrives_yet() -> bool:
         return False                             # say nothing rather than say something wrong
 
 
-def _chips(space: str, current: str, *, q: str = "", waiting: bool = False,
+def _logos(space: str, current: str, *, q: str = "", waiting: bool = False,
            from_ad: bool = False) -> str:
-    """All, then one chip per channel THIS BOX ACTUALLY HAS. Never a menu of hopes.
+    """One round logo per channel THIS BOX ACTUALLY HAS, on a white disc. Never a menu of hopes.
 
-    ONE CHANNEL IS NOT A CHOICE, so a box with only Messenger renders no chip row at all — a
-    filter offering a single option is a control that cannot change anything, and this app keeps
-    deleting those rather than shipping them greyed out.
+    ONE ROW WITH THE STATUS PILLS (owner, 2026-09-29, choosing his target composition): All ·
+    Unanswered · then the logos. So there is no "Every channel" chip any more — All clears every
+    filter — and tapping the chosen logo again turns it off.
 
-    THE CHIPS CARRY THE QUERY, because a filter that silently throws away what he typed is worse
-    than no filter: he taps Instagram to narrow a search and gets the whole Instagram inbox back.
+    ONE CHANNEL IS NOT A CHOICE, so a box with only Messenger draws no logos at all.
 
-    AND THE COUNT COMES OFF WHILE HE IS SEARCHING. `platforms_present` counts the WHOLE inbox,
-    not the matches, so "Messenger 4" beside a search that found one is simply a wrong number on
-    the screen. Scoping it needs a store this screen does not have, and the honest move is to
-    stop answering a question nobody asked mid-search rather than answer it incorrectly.
+    THE LOGOS CARRY THE QUERY, because a filter that silently throws away what he typed is worse
+    than no filter. THE COUNT RIDES IN THE SPOKEN NAME ONLY, and not while searching: the count is
+    the whole inbox's, not the matches'.
+
+    ON A WHITE DISC IN BOTH THEMES (docs/SCOPE_MOBILE_APP_REDESIGN.md §11): the blue marks fail on
+    the dark ground and the green ones on the cream, and none of them is ours to recolour.
     """
     try:
         from marketing.customer_voice.inbox import store as _store
         present = _store.platforms_present(space)
-    except Exception as e:                       # noqa: BLE001 — a missing chip row is not a 500
+    except Exception as e:                       # noqa: BLE001 — a missing logo row is not a 500
         log.warning("voice.chips_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
         return ""
     if len(present) < 2:
         return ""
-    # NO `page` ON A CHIP, and that is the whole reason these go through `_url`. Changing the
-    # channel changes WHICH conversations there are, so page 7 of the old filter is not page 7
-    # of the new one — it is a page that may not exist. Every chip lands on page one.
-    # "EVERY CHANNEL", NOT "ALL". The filter row above this one also opens with "All", and two
-    # adjacent controls carrying the same word mean two different things to the app and one thing
-    # to the person reading them. Found by rendering the screen with both rows on it for the first
-    # time; the word that has to be specific is this one, because the other row's "All" is about
-    # the conversations themselves.
-    out = [f'<a class="chip{"" if current else " on"}" '
-           f'href="{_esc(_url(q=q, waiting=waiting, from_ad=from_ad))}">{_EVERY_CHANNEL}</a>']
+    out = []
     for row in present:
         pid = str(row["platform"] or "")
-        on = " on" if pid == current else ""
-        # AND THE COUNT COMES OFF UNDER THE UNANSWERED FILTER, for the reason the docstring gives
-        # about search: `platforms_present` counts the WHOLE channel, so "Messenger 9" beside a
-        # filtered list of two is a wrong number, not a smaller one.
-        n = "" if (q or waiting or from_ad) else f' <span class="n">{row["n"]}</span>'
-        out.append(f'<a class="chip{on}" '
-                   f'href="{_esc(_url(q=q, channel=pid, waiting=waiting, from_ad=from_ad))}">'
-                   f'{_esc(_channel(pid))}{n}</a>')
-    return f'<div class="chips">{"".join(out)}</div>'
+        on = pid == current
+        said = _channel(pid) + ("" if (q or waiting or from_ad) else f", {row['n']}")
+        href = _url(q=q, channel="" if on else pid, waiting=waiting, from_ad=from_ad)
+        out.append(f'<a class="chip mkchip{" on" if on else ""}" aria-pressed="{"true" if on else "false"}" '
+                   f'href="{_esc(href)}"><span class="ui-disc">{_mark(pid, 20)}</span>'
+                   f'<span class="vh">{_esc(said)}</span></a>')
+    return "".join(out)
 
 
 def _counts(space: str) -> dict:
@@ -2325,8 +2265,22 @@ def _counts(space: str) -> dict:
         return {"waiting": -1, "from_ad": -1}
 
 
-def _head(n: int) -> str:
+def _drafts_ready(space: str) -> int:
+    """Replies the box has written and nobody has sent yet, or -1 when the box cannot say."""
+    try:
+        from marketing.customer_voice.drafter import store as _drafts
+        return _drafts.waiting_count(space)
+    except Exception as e:                       # noqa: BLE001 — a missing number is not a 500
+        log.warning("voice.drafts_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
+        return -1
+
+
+def _head(n: int, drafts: int = -1) -> str:
     """The inbox title, carrying the only number this product exists to produce.
+
+    THE WORD "Inbox" IS FOR A SCREEN READER ONLY since 2026-09-29: the owner chose a header that
+    reads "Unified Inbox" with the summary straight under it, so a visible "Inbox" repeated it. The
+    page keeps its one heading, read aloud, and the sentence under the header does the work.
 
     THE NUMBER IS A SENTENCE, NOT A BADGE. "3" beside the word Inbox is a notification dot, and a
     notification dot means "something happened". This number means something DIFFERENT and more
@@ -2336,16 +2290,21 @@ def _head(n: int) -> str:
     both places is the stutter this file removed from the set-up screen an hour ago.
     """
     if n < 0:
-        return '<h1>Inbox</h1>'
+        return '<h1 class="vh">Inbox</h1>'
     if n == 0:
-        return ('<h1>Inbox</h1>'
+        return ('<h1 class="vh">Inbox</h1>'
                 '<p class="quiet" style="margin:2px 0 0">Nobody is waiting on you.</p>')
     who = "1 person is" if n == 1 else f"{n} people are"
-    return (f'<h1>Inbox</h1><p class="quiet" style="margin:2px 0 0">'
-            f'<b class="warn">{who}</b> waiting on a reply.</p>')
+    # AND WHAT THE BOX HAS READY FOR THEM (owner, 2026-09-29, his target composition): "4 people are
+    # waiting on a reply · 6 drafts ready to send". Said only when there is at least one.
+    ready = ("" if drafts < 1 else
+             f' · <b>{"1 draft" if drafts == 1 else f"{drafts} drafts"}</b> ready to send')
+    return (f'<h1 class="vh">Inbox</h1><p class="quiet" style="margin:2px 0 0">'
+            f'<b class="warn">{who}</b> waiting on a reply{ready}.</p>')
 
 
-def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: str = "") -> str:
+def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: str = "",
+           space: str = "") -> str:
     """All / Unanswered / Leads — and each one only when it can change the screen.
 
     A FILTER THAT CANNOT CHANGE THE SCREEN IS NOT SHIPPED HERE, which is the same rule `_chips`
@@ -2367,7 +2326,8 @@ def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: 
     """
     show_wait = counts.get("waiting", 0) > 0 or waiting
     show_ad = counts.get("from_ad", 0) > 0 or from_ad
-    if not show_wait and not show_ad:
+    logos = _logos(space, channel, q=q, waiting=waiting, from_ad=from_ad) if space else ""
+    if not show_wait and not show_ad and not logos:
         return ""
 
     def pill(label: str, on: bool, **flip) -> str:
@@ -2382,12 +2342,15 @@ def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: 
         return (f'<a class="chip{" on" if on else ""}" aria-pressed="{"true" if on else "false"}" '
                 f'href="{_esc(_url(q=q, channel=channel, **flip))}">{label}</a>')
 
-    out = [pill("All", not (waiting or from_ad))]
+    # ALL CLEARS EVERY FILTER, the channel included, now that it leads the one row.
+    out = [f'<a class="chip{" on" if not (waiting or from_ad or channel) else ""}" '
+           f'aria-pressed="{"false" if (waiting or from_ad or channel) else "true"}" '
+           f'href="{_esc(_url(q=q))}">All</a>']
     if show_wait:
         out.append(pill("Unanswered", waiting, waiting=not waiting, from_ad=from_ad))
     if show_ad:
         out.append(pill("Leads", from_ad, waiting=waiting, from_ad=not from_ad))
-    return f'<div class="chips pills">{"".join(out)}</div>'
+    return f'<div class="chips pills">{"".join(out)}{logos}</div>'
 
 
 def _find(q: str, channel: str, waiting: bool = False, from_ad: bool = False) -> str:
@@ -2683,7 +2646,7 @@ def r_inbox():
         convs = convs[:PAGE]
     except Exception as e:                       # noqa: BLE001 — a page, never a stack trace
         log.warning("voice.inbox_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:160]})
-        return _shell('<h1>Inbox</h1><div class="quiet">The inbox could not be read on this box. '
+        return _shell('<h1 class="vh">Inbox</h1><div class="quiet">The inbox could not be read on this box. '
                       'Nothing has been lost.</div>'), 200
 
     if not convs:
@@ -2714,8 +2677,8 @@ def r_inbox():
         # needed is the same bug as one that was never there.
         _n = _counts(space)
         top = (_head(_n["waiting"]) + _find(q, channel, waiting, from_ad)
-               + _pills(_n, waiting, from_ad, q=q, channel=channel))
-        rail = _chips(space, channel, q=q, waiting=waiting, from_ad=from_ad)
+               + _pills(_n, waiting, from_ad, q=q, channel=channel, space=space))
+        rail = ""
         if page > 1:
             body = (f'{top}{rail}'
                     f'<div class="quiet">There is no page {page}'
@@ -2753,14 +2716,14 @@ def r_inbox():
         elif channel:
             body = (f'{top}{rail}'
                     f'<div class="quiet">Nothing on {_esc(_channel(channel))} yet. '
-                    f'Other channels may have messages — tap <b>{_EVERY_CHANNEL}</b>.</div>')
+                    f'Other channels may have messages — tap <b>All</b>.</div>')
         elif _nothing_arrives_yet():
             # NOTHING IS LISTENING. "The first person who messages you appears here" is a promise,
             # and here it is one the box cannot keep: nobody is coming. This is the only empty
             # state with something for him to DO, so it is the only one carrying a button — and
             # the button appears only on a box that serves somewhere to send him.
             go = _connect_href()
-            body = ('<h1>Inbox</h1><div class="quiet">Nothing can reach you yet, because '
+            body = ('<h1 class="vh">Inbox</h1><div class="quiet">Nothing can reach you yet, because '
                     'nothing is connected. Connect your inbox and everything people send you '
                     'lands here.</div>'
                     # THE TITLE SAYS WHAT HE GETS, THE BUTTON SAYS WHAT HE DOES. Both read
@@ -2775,7 +2738,7 @@ def r_inbox():
         else:
             # NO SEARCH BOX ON A BOX THAT HAS NEVER RECEIVED ANYTHING. A field offering to search
             # an empty inbox is the control that cannot succeed this app keeps deleting.
-            body = ('<h1>Inbox</h1><div class="quiet">No conversations yet. '
+            body = ('<h1 class="vh">Inbox</h1><div class="quiet">No conversations yet. '
                     'The first person who messages you appears here, and you will get a '
                     'notification once this is installed as an app on your mobile.</div>')
         # WIDE ON THE EMPTIES TOO. Every branch above still draws the chip row, so a reader who
@@ -2783,6 +2746,12 @@ def r_inbox():
         # otherwise the layout moves under them at the exact moment they need to change filter.
         return _shell(_stopped_note() + body, wide=True), 200
 
+    # WHICH ROWS HAVE A REPLY READY — one query for the page, not one per row.
+    try:
+        from marketing.customer_voice.drafter import store as _drafts
+        drafted = {str(d.get("zcid")) for d in _drafts.waiting(space, limit=500)}
+    except Exception:                            # noqa: BLE001 — a missing chip is not a 500
+        drafted = set()
     rows = []
     for k in convs:
         who = (k.get("participant") or "").strip() or "Someone"
@@ -2808,6 +2777,8 @@ def r_inbox():
         # open it to read the newest one. `message_count` is still read, once, by `_tag_list`,
         # where exactly-one earns the New tag — a fact, not a tally.
         tags = _tags(k)
+        if str(k.get("zernio_conversation_id")) in drafted:
+            tags += '<span class="tag draft">Draft waiting</span>'
         # UNREAD IS A CLASS ON THE ROW, not a badge inside it. One word of markup, and it styles
         # the name, the clock and the message together — which is what makes the row read as one
         # object in two states rather than three elements that happen to agree.
@@ -2833,8 +2804,7 @@ def r_inbox():
                     # something, so a calm row is genuinely shorter than a busy one.
                     + (f'<span class="s">{tags}</span>' if tags else "")
                     + f'<span class="mk">{_mark(plat)}'
-                    f'<span class="vh">{_esc(_channel(plat))}</span></span></a>'
-                    f'{_acts(k, who=who, channel=channel)}</div>')
+                    f'<span class="vh">{_esc(_channel(plat))}</span></span></a></div>')
     # UNION, AND BOTH SIDES SHIP SOMETHING. This branch replaced the bare `<h1>Inbox</h1>` with
     # the header sentence and the filter pills; main (#1357) put `_stopped_note()` above
     # everything here, so a buyer whose box is stopped is told BEFORE he reads a list that
@@ -2842,9 +2812,8 @@ def r_inbox():
     # either side alone silently deletes a shipped feature.
     counts = _counts(space)
     return _shell(_stopped_note()
-                  + f'{_head(counts["waiting"])}{_find(q, channel, waiting, from_ad)}'
-                  f'{_pills(counts, waiting, from_ad, q=q, channel=channel)}'
-                  f'{_chips(space, channel, q=q, waiting=waiting, from_ad=from_ad)}'
+                  + f'{_head(counts["waiting"], _drafts_ready(space))}{_find(q, channel, waiting, from_ad)}'
+                  f'{_pills(counts, waiting, from_ad, q=q, channel=channel, space=space)}'
                   f'{_hits(q, channel, len(convs), page=page, more=more)}'
                   f'<div class="card">{"".join(rows)}</div>'
                   f'{_pager(q=q, channel=channel, page=page, more=more, waiting=waiting, from_ad=from_ad)}'
@@ -3467,25 +3436,14 @@ def r_settings():
     the flash every JS theme toggle on the web has to work around. A cookie read during render
     has neither failure.
     """
-    cur = _theme()
-    def seg(value, label):
-        on = " on" if cur == value else ""
-        return f'<a class="seg-a{on}" href="/inbox/theme?to={value}">{label}</a>'
-    # TWO SEGMENTS, BECAUSE THERE ARE TWO STATES. A third read "System" and was the one selected
-    # on an untouched box — while the app rendered WHITE on a dark phone, because the
-    # prefers-color-scheme block was removed on 2026-09-16 to honour "white screens first and
-    # foremost" and `?to=system` only deleted the cookie. So it could not follow the system, it
-    # was identical to Light, and it told a buyer his phone was being followed while he looked at
-    # a white screen. Owner, 2026-09-18, choosing between fixing it and dropping it: drop it.
-    #
-    # AN UNTOUCHED BOX SHOWS LIGHT SELECTED, which is what it actually renders. `?to=system` is
-    # not routed away or 404'd — anything that is not light or dark still clears the cookie and
-    # lands on white, so an old bookmark or a browser-restored URL cannot wedge anything.
-    switch = ('<div class="seg">'
-              + f'<a class="seg-a{" on" if cur in ("", "light") else ""}"'
-              ' href="/inbox/theme?to=light">Light</a>'
-              + seg("dark", "Dark")
-              + '</div>').replace("seg-a", "")
+    # THREE CHOICES AGAIN, AND THIS TIME THE THIRD IS TRUE. "System" was dropped on 2026-09-18
+    # because it could not follow the device: the page rendered white on a dark mobile while the
+    # control claimed otherwise. core/dash/theme.py now stamps the page before paint from the
+    # person's own choice, and for Automatic from the device, so the owner's 2026-09-27 ask for a
+    # "system default" can be met honestly. The control is core's, so this screen and System
+    # Settings offer one switch, not two. `/inbox/theme` below stays for old bookmarks.
+    from core.dash import theme as _core_theme
+    switch = _core_theme.control("/inbox/settings")
     # THE FIRST UNFINISHED ROW OWNS THE SCREEN'S ONE INK PILL; the drafts row below it defers.
     _mb = _mailbox_row()
     _above = _mb + _channels_row(primary='class="btn"' not in _mb)
@@ -3502,7 +3460,7 @@ def r_settings():
       '<div class="setrow"><b>Appearance</b>'
       # THE OLD SENTENCE DESCRIBED A "System" CHOICE THAT WAS DROPPED ON 2026-09-18 (see above),
       # and used a reserved noun (CLAUDE.md, mobile first). It says what the two choices are.
-      '<span>How the inbox looks on this device. Light is the box\'s own look.</span>'
+      '<span>How the box looks for you. Light is its own look; Automatic follows your device.</span>'
       f'{switch}</div>'
       # WALK #9: WHETHER THIS DEVICE IS CONNECTED, ANSWERED FROM INSIDE THE APP. The installed
       # app's scope is /inbox/, so this tab is the one place an iPhone can check its own
@@ -3541,6 +3499,14 @@ def r_theme():
     """
     to = (request.args.get("to") or "").strip().lower()
     resp = redirect("/inbox/settings", code=303)
+    # THE ONE HOME IS THE PERSON'S SETTING (core/dash/theme.py), so this switch writes there too.
+    # Only Light and Dark, the two this screen offers: System (owner, 2026-09-27) comes with the
+    # redesign's control, which posts to /settings/theme; an old `?to=system` bookmark stays white.
+    # The cookie below stays for a phone that isn't signed in.
+    from core.dash import theme as _core_theme
+    uid = _core_theme._user_id()
+    if uid and to in ("light", "dark"):
+        _core_theme.put(uid, to)
     if to in ("light", "dark"):
         resp.set_cookie(THEME_COOKIE, to, max_age=365 * 86400, samesite="Lax",
                         secure=request.is_secure, httponly=True, path="/inbox")
@@ -3575,8 +3541,8 @@ def r_manifest():
     import json
     from flask import Response
     m = {
-        "name": f"{dash.brand()} · Unified Inbox",
-        "short_name": "Unified Inbox",
+        "name": f"{dash.brand()} · {APP_TITLE}",
+        "short_name": APP_TITLE,
         "start_url": "/inbox/",
         "scope": "/inbox/",
         "display": "standalone",
@@ -3680,10 +3646,11 @@ self.addEventListener('notificationclick', function (event) {
   var to = (event.notification.data && event.notification.data.navigate) || '/inbox/inbox';
   // ONLY OUR OWN APP. The payload is authored by the box and encrypted to this subscription, so
   // this is defence in depth, not a fix — the same rule safe_next applies on the way in. The
-  // morning review (/app/review) and Shifts (/shifts/, where a coworker's report opens) are the
-  // doors outside the inbox a notification may open.
+  // morning review (/app/review), Shifts (/shifts/, where a coworker's report opens) and Add a
+  // Machine (/add-machine, where an update that stopped a machine the owner built is explained,
+  // core/machine_breaks.py) are the doors outside the inbox a notification may open.
   var door = typeof to === 'string' && (to === '/app/review' || to.indexOf('/app/review/') === 0
-      || to.indexOf('/shifts/') === 0);
+      || to.indexOf('/shifts/') === 0 || to === '/add-machine');
   if (typeof to !== 'string' || (to.indexOf('/inbox/') !== 0 && !door)) { to = '/inbox/inbox'; }
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     .then(function (list) {
@@ -3783,7 +3750,7 @@ def r_drafts():
         return redirect("/settings/ai" if _is_owner() else "/inbox/drafts", code=303)
     # ONE CARD, NOT TWO. The row already says whether drafts are on and carries the one door to
     # the account (a member reads whose it is instead); a second card repeating it was noise.
-    body = ('<h1>AI and drafts</h1>'
+    body = ('<h1>AI and Drafts</h1>'
             '<div class="card">' + _drafts_row() + '</div>'
             '<p class="quiet" style="margin-top:12px">The AI account lives in one place, System '
             'Settings, and every machine on this box drafts through it.</p>'
@@ -5040,10 +5007,10 @@ def r_search():
     body = (
         '<h1>Search</h1>'
         + _find("", channel)
-        # NARROW BEFORE YOU TYPE, on the boxes where that is a real choice. `_chips` draws
+        # NARROW BEFORE YOU TYPE, on the boxes where that is a real choice. `_logos` draws
         # nothing at all on a box with one channel, which is the rule this app applies to every
         # filter: a control with one option cannot change anything.
-        + _chips(space, channel, q="")
+        + ((f'<div class="chips">{_lg}</div>') if (_lg := _logos(space, channel)) else "")
         + '<div class="card"><div class="row"><span class="t">Search reads what people actually '
           'wrote, not just their names — so the word you remember from the message is '
           'usually enough to find it again.</span></div></div>'

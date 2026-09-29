@@ -127,7 +127,7 @@ def test_there_is_still_only_one_chip_list():
     # THE RAIL IS THE CHIP ROW ON ITS SIDE, not a second menu. Same links, same counts, same
     # current-chip rule — a second markup for the same list is how the phone's filter and the
     # laptop's filter start disagreeing about which channel you are looking at.
-    ok("one function builds the channel list", _SRC.count("def _chips(") == 1)
+    ok("one function builds the channel list", _SRC.count("def _logos(") == 1)
     # THE AXIS IS NO LONGER RESTYLED AT ALL, WHICH IS A STRONGER VERSION OF THE SAME GUARANTEE.
     # This read `.ib .wrap>.chips{` + `flex-direction:column` — the desktop turning the chip row
     # into a 224px left column. That column is gone (2026-09-18): the box's rail holds the left
@@ -142,8 +142,9 @@ def test_there_is_still_only_one_chip_list():
        ".ib .wrap>.chips{" not in _SRC)
     for label, wide in (("phone", False), ("desktop", True)):
         body = _client().get("/inbox/inbox").get_data(as_text=True)
+        # ONE ROW: the status pills and the channel logos share it since 2026-09-29 (owner).
         ok(f"exactly one chips block reaches the page ({label} markup is the same markup)",
-           body.count('class="chips"') == 1, str(body.count('class="chips"')))
+           body.count('class="chips') == 1, str(body.count('class="chips')))
 
 
 def test_the_phone_default_is_not_inside_the_desktop_query():

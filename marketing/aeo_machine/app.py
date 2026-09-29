@@ -67,8 +67,10 @@ _ICON = "M10.5 17a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13ZM15.5 15.5 20 20"
 # THE SECTION IS `/aeo`, NOT ITS FIRST SCREEN. `core.shell` gives a top-level section every page
 # under its own address and none outside it, so a section at /aeo/topics would leave /aeo/settings
 # with no menu and no breadcrumb. /aeo itself only redirects to Topics.
+# "AEO MACHINE", NOT "AEO". Owner, 2026-09-26: "Please call it AEO Machine in the dashboard." The
+# row beside it reads Unified Inbox: a machine is named in full, the way it is sold.
 shell.register_section(
-    "aeo", order=20, machine="aeo_machine", title="AEO", href=HOME, icon=_ICON,
+    "aeo", order=20, machine="aeo_machine", title="AEO Machine", href=HOME, icon=_ICON,
     # ONLY ROWS THAT WORK TODAY (OSDev1, 2026-09-25, on the owner's delegation: "a basic working
     # system by today"). Today, Search and AI answers join when their sources are live
     # (docs/SCOPE_AEO_APP.md); an empty row would be a menu promising a page that says nothing.
@@ -80,15 +82,37 @@ shell.register_section(
         # current performance numbers immediately"). A working row even before PostHog is
         # connected: the screen says how to connect it, in one tap.
         {"key": "performance", "label": "Performance", "href": PERFORMANCE},
-        {"key": "sources", "label": "Data sources", "href": SOURCES},
+        {"key": "sources", "label": "Data Sources", "href": SOURCES},
         {"key": "settings", "label": "Settings", "href": SETTINGS},
     ])
+
+# EVERY AEO SCREEN IS THE AEO MACHINE (owner, 2026-09-29: "All the screens on AEO machine need to
+# reflect AEO machine"). Its tab says so on every screen, and added to a home screen it is its own
+# app beside the Unified Inbox rather than a second copy of the box's. The heading still names the
+# screen, so a person knows where they are inside the machine.
+from core.dash import look as _look  # noqa: E402
+
+APP = {"name": "AEO Machine", "manifest": "/aeo/manifest.webmanifest"}
+_look.register_app("aeo_machine", **APP)
+
+
+@blueprint.get(APP["manifest"])
+def aeo_manifest():
+    """Public, as every manifest must be: a home screen fetches it without a session."""
+    import json
+    from flask import Response
+    # STARTS WHERE /aeo LANDS, INSIDE ITS OWN SCOPE. /aeo itself only forwards to Articles and has no
+    # trailing-slash twin, and a start_url outside the scope makes a browser throw the scope away.
+    m = _look.manifest_for(APP, start_url=TOPICS, scope=HOME + "/")
+    return Response(json.dumps(m), mimetype="application/manifest+json",
+                    headers={"Cache-Control": "public, max-age=3600"})
+
 
 # DATA SOURCES IS A MENU INSIDE AEO (owner, 2026-09-25: "a data sources menu item that has a sub menu
 # with things that are connected"), nested the way the Unified Inbox's Settings is, so its back
 # arrow returns to AEO and nothing is added to the top-level menu.
 shell.register_section(
-    "aeo_sources", order=10, machine="aeo_machine", title="Data sources", href=SOURCES,
+    "aeo_sources", order=10, machine="aeo_machine", title="Data Sources", href=SOURCES,
     parent="aeo", icon=_ICON,
     items=[
         {"key": "overview", "label": "Overview", "href": SOURCES},
@@ -560,7 +584,7 @@ def aeo_settings():
     refuse = _admit()
     if refuse is not None:
         return refuse
-    title = "AEO settings"
+    title = "AEO Settings"
     lede = "Your website, and what the writer may and may not say."
     if request.method == "POST":
         if not _is_owner():
@@ -664,7 +688,7 @@ def aeo_sources():
                  '<p>How your articles do in Google search.</p>'
                  f'<div class="foot"><a href="{GOOGLE}">Open Google Search Console &rarr;</a></div>'
                  '</div>')
-    return _page(SOURCES, "Data sources",
+    return _page(SOURCES, "Data Sources",
                  "Where your articles are planned and published, and how they are doing.", body), 200
 
 
@@ -758,14 +782,19 @@ def _airtable_form(typed=None) -> str:
             url = sources.table_url(*sources.parse_table_url(typed.get("table_url") or ""))
         except sources.BadTableUrl:
             url = ""
-    template = (f'<div class="foot"><a href="{_esc(sources.TEMPLATE_URL)}">Copy our template '
-                '&rarr;</a></div>') if sources.TEMPLATE_URL else ""
+    # THE SAMPLE TABLE, WHERE IT IS NEEDED: under the table address, for someone who has no table
+    # yet, and again beside the fields it already has. A new tab, so this form keeps its place.
+    sample = (f'<a href="{_esc(sources.TEMPLATE_URL)}" target="_blank" rel="noopener">'
+              'Copy our sample table &rarr;</a>') if sources.TEMPLATE_URL else ""
+    start = f'<p class="sub">No table yet? {sample}</p>' if sample else ""
+    template = f'<div class="foot">{sample}</div>' if sample else ""
     fields = ", ".join(sources.TEMPLATE_FIELDS)
     return (f'<form method="post" action="{AIRTABLE}"><div class="card">'
             + _text_input("table_url", "Table address", url,
                           "https://airtable.com/app.../tbl.../viw...", kind="url")
             + '<p class="sub">Open the table in Airtable, and the view you want the AEO Machine to '
               'follow, then copy the address from your browser.</p>'
+            + start
             + _secret_input("api_key", "Personal access token", st["key_saved"], "pat...")
             + '<button type="submit">Check and save</button></div></form>'
             '<div class="card"><h2>Making the token</h2>'
@@ -777,7 +806,8 @@ def _airtable_form(typed=None) -> str:
                      "Create it, copy the token and paste it above.")
             + '<p class="sub">The token is stored on this box and never shown again.</p></div>'
             f'<div class="card"><h2>Your table</h2><p>It needs these fields, with exactly these '
-            f'names: {_esc(fields)}.</p>{template}</div>')
+            f'names: {_esc(fields)}. Any other fields and tables can stay as they are.</p>'
+            f'{template}</div>')
 
 
 @blueprint.route(AIRTABLE, methods=["GET", "POST"])

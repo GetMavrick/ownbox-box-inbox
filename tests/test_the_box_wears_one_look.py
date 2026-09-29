@@ -52,28 +52,43 @@ def ok(label, cond, detail=""):
 
 CSS = open(os.path.join(ROOT, "core", "dash", "static", "box.css"), encoding="utf-8").read()
 _NO_COMMENTS = re.sub(r"/\*.*?\*/", "", CSS, flags=re.S)
-_TOKENS = re.search(r"@layer box\.tokens\s*\{(.*?)\n\}", _NO_COMMENTS, re.S)
-TOKENS = _TOKENS.group(1) if _TOKENS else ""
-REST = _NO_COMMENTS.replace(TOKENS, "") if TOKENS else _NO_COMMENTS
+# THE TOKENS ARE TWO BLOCKS, ONE PER THEME: `:root` is light, `html[data-theme="dark"]` is dark and
+# declares only what differs. There is no @layer to find them by any more (see
+# test_it_fails_gracefully_on_an_old_browser), so each is found by its selector.
+_LIGHT = re.search(r"^:root\s*\{(.*?)^\}", _NO_COMMENTS, re.S | re.M)
+_DARK = re.search(r'^html\[data-theme="dark"\]\s*\{(.*?)^\}', _NO_COMMENTS, re.S | re.M)
+LIGHT = _LIGHT.group(1) if _LIGHT else ""
+DARK = _DARK.group(1) if _DARK else ""
+TOKENS = LIGHT + DARK
+REST = _NO_COMMENTS
+for _m in (_LIGHT, _DARK):
+    if _m:
+        REST = REST.replace(_m.group(0), "")
 _COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch)\(")
 
 
-def token(name):
-    m = re.search(rf"--{name}:\s*([^;]+);", TOKENS)
+def token(name, block=None):
+    m = re.search(rf"--{name}:\s*([^;]+);", LIGHT if block is None else block)
     return m.group(1).strip().lower() if m else None
 
 
+def dark(name):
+    """A token's dark value: its own if the dark block declares it, else light's, as the cascade
+    resolves it on the page."""
+    return token(name, DARK) or token(name)
+
+
 print("\ntest_every_colour_is_a_token")
-ok("the file declares its tokens in their own layer", bool(TOKENS))
+ok("the file declares its tokens, light and dark", bool(LIGHT) and bool(DARK))
 stray = _COLOUR.findall(REST)
-ok("no colour appears outside the tokens layer", not stray, str(stray[:5]))
+ok("no colour appears outside the two token blocks", not stray, str(stray[:5]))
 ok("...and no font size is a bare pixel value outside it, except the mono copy box and the chip",
    sorted(set(re.findall(r"font-size:\s*(\d+px)", REST))) in ([], ["11px", "15px"], ["11px", "15px", "16px"]),
    str(sorted(set(re.findall(r"font-size:\s*(\d+px)", REST)))))
 
 print("\ntest_the_tokens_are_the_sites")
 for name, want in (("ground", "#f6f4ef"), ("ink", "#111111"), ("ink-2", "#3c3c3c"),
-                   ("ink-3", "#6b6b6b"), ("line", "hsla(0, 0%, 7%, 0.32)"),
+                   ("ink-3", "#6b6b6b"), ("line", "rgba(17, 17, 17, 0.46)"),  # NOT the site's .32: a control edge needs 3:1 (below)
                    ("hairline", "rgba(17, 17, 17, 0.08)"), ("card", "#ffffff"),
                    ("r-sm", "16px"), ("r-md", "22px"), ("r-pill", "999px"),
                    ("t-title", "clamp(24px, 2.4vw, 32px)"), ("control", "50px")):
@@ -107,6 +122,63 @@ for fg in ("ink", "ink-2", "ink-3", "link", "ok", "warn", "bad"):
         ok(f"--{fg} on --{bg}: {r:.2f}:1 (AA needs 4.5)", r >= 4.5)
 r = ratio(token("on-ink"), token("ink"))
 ok(f"button text on the ink pill: {r:.2f}:1", r >= 4.5)
+
+print("\ntest_every_text_colour_reads_in_dark")
+# Owner, 2026-09-27: dark mode, modelled on the homepage's dark half. Same rule, same pairs.
+for fg in ("ink", "ink-2", "ink-3", "link", "ok", "warn", "bad"):
+    for bg in ("ground", "card"):
+        r = ratio(dark(fg), dark(bg))
+        ok(f"dark --{fg} on --{bg}: {r:.2f}:1 (AA needs 4.5)", r >= 4.5)
+r = ratio(dark("on-ink"), dark("ink"))
+ok(f"dark: button text on the cream pill: {r:.2f}:1", r >= 4.5)
+
+
+def _over(value, ground):
+    """An rgba() token painted over a solid ground, as the eye sees the edge."""
+    n = [float(x) for x in re.findall(r"[\d.]+", value)]
+    g = [int(ground.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    return "#" + "".join(f"{round(n[3] * n[i] + (1 - n[3]) * g[i]):02x}" for i in range(3))
+
+
+print("\ntest_a_controls_edge_can_be_seen")
+# WCAG 1.4.11: the boundary of a control needs 3:1 against what it sits on. --line is the edge of
+# every field and every ghost button. Measured 2026-09-27 before this: 2.10 light, 1.50 dark, so a
+# field had no edge you could find in daylight.
+for label, get in (("light", token), ("dark", dark)):
+    for bg in ("ground", "card"):
+        r = ratio(_over(get("line"), get(bg)), get(bg))
+        ok(f"{label} --line on --{bg}: {r:.2f}:1 (needs 3.0)", r >= 3.0)
+
+print("\ntest_the_bar_behind_the_clock_matches_the_page")
+# An installed app paints its status bar from theme-color, which core/dash/theme.py writes from
+# its own GROUND table. If that table and --ground disagree, the bar is a band of another colour.
+from core.dash import theme as _theme                                # noqa: E402
+ok("theme.GROUND is --ground in each theme",
+   _theme.GROUND == {"light": token("ground"), "dark": dark("ground")},
+   f"{_theme.GROUND} vs light {token('ground')} dark {dark('ground')}")
+
+print("\ntest_it_fails_gracefully_on_an_old_browser")
+# A box goes home with its client and is opened on whatever they own. A browser that does not know
+# @layer drops the WHOLE block it wraps, every token included, and one that does not know
+# color-mix() drops the declaration: an unstyled screen, and nothing errors. Owner, 2026-09-27:
+# "something ultra durable". Modern CSS stays where failing costs one nicety.
+ok("no @layer: an old browser would drop every token inside it", "@layer" not in _NO_COMMENTS)
+ok("no color-mix(): an old browser would drop the colour", "color-mix(" not in _NO_COMMENTS)
+# AND NO BASE RULE MAY OUTRANK A SCREEN. @layer used to make this section lose to anything a screen
+# wrote; without it, specificity decides, and `input:not(..):not(..):not(..)` (0,3,1) beat the
+# inbox's `.find input` (0,1,1) and folded its search field (2026-09-29). Every base selector is
+# therefore `:where(...)`, which weighs nothing. The only exceptions cannot be wrapped or need not
+# be: the universal box-sizing reset, a pseudo-element, and the reduced-motion !important.
+_raw_base = CSS[CSS.index("/* ── base"):CSS.index("/* ── components")]
+_base = re.sub(r"/\*.*?\*/", "", _raw_base, flags=re.S)
+_base = re.sub(r"@media[^{]*\(prefers-reduced-motion[^{]*\{[^{}]*\{[^{}]*\}\s*\}", "", _base)
+_base = re.sub(r"@media[^{]*\{", "{", _base)          # a media query is a wrapper, not a selector
+_sels = [x.strip() for x in re.findall(r"([^{}]+)\{", _base) if x.strip()]
+_heavy = [x for x in _sels if not x.startswith(":where(")
+          and x not in ("*, *::before, *::after", "::placeholder")]
+ok(f"every base rule weighs nothing, so a screen always wins ({len(_sels)} rules)", not _heavy, str(_heavy))
+ok("color-scheme follows the theme, so fields and scrollbars do too",
+   "color-scheme: light" in LIGHT and "color-scheme: dark" in DARK)
 
 print("\ntest_the_box_serves_its_own_fonts_and_nothing_else")
 c = app.test_client()
@@ -152,8 +224,8 @@ print("\ntest_no_older_class_on_a_screen_is_restyled_by_accident")
 # Base Machine drew a second divider under every set-up row and broke Add a Machine's steps into
 # one-letter columns: those names were already in use on 118, 35 and 9 older elements. Found by
 # rendering, 2026-09-24.
-comp = CSS.split("@layer box.base", 1)[-1]
-bare = sorted({m for m in re.findall(r"(?<![\w-])\.([a-z][\w-]*)", re.sub(r"/\*.*?\*/", "", comp, flags=re.S))
+comp = REST
+bare = sorted({m for m in re.findall(r"(?<![\w-])\.([a-z][\w-]*)", comp)
                if not m.startswith("ui-") and m not in ("ok", "warn", "bad", "new")})
 ok("every class the stylesheet styles starts with ui- (only compound modifiers do not)", not bare, str(bare))
 mods = re.findall(r"(?<![\w-])(\.(?:ok|warn|bad|new))\b", comp)
@@ -165,8 +237,13 @@ RESERVED = (r"(?<!i)phone", r"\bphones\b", r"\bring\b", r"\bdial\b", r"\bvoice\b
 for pat in RESERVED:
     found = re.findall(pat, CSS, re.I)
     ok(f"no {pat!r} in the shipped stylesheet", not found)
-size = len(CSS.encode())
-ok(f"under 20 KB before compression ({size} bytes)", size < 20_000)
+# THE CAP COUNTS RULES, NOT COMMENTS (owner, 2026-09-29, D-B in docs/SCOPE_MOBILE_APP_REDESIGN.md
+# §15.4). The comments are what let a client's own developer maintain this file after it leaves
+# us, and a cap that counted them taxed exactly that. Rules stay under 20 KB; the whole file,
+# comments included, stays under a generous ceiling so nobody pastes a library into it.
+size = len(re.sub(r"\n\s*\n", "\n", re.sub(r"/\*.*?\*/", "", CSS, flags=re.S)).encode())
+ok(f"rules under 20 KB before compression ({size} bytes, comments not counted)", size < 20_000)
+ok(f"...and the whole file under 40 KB ({len(CSS.encode())} bytes)", len(CSS.encode()) < 40_000)
 ok("plain CSS: no preprocessor syntax a browser would not read",
    not re.search(r"^\s*(\$|@include|@mixin|@apply|@tailwind)", CSS, re.M))
 
@@ -175,11 +252,11 @@ print("\ntest_raw_colours_only_go_down")
 # screen lowers its number here; a PR that adds a raw colour to one of these files fails. Issue
 # numbers in comments (#879) are not colours and are not counted.
 BASELINE = {
-    "core/dash/home.py": 4,
+    "core/dash/home.py": 3,
     "core/dash/__init__.py": 27,        # the front door moved onto the tokens (OSDev1, 2026-09-24)
     "core/dash/review.py": 19,
     "core/dash/box_settings.py": 4,
-    "marketing/customer_voice/app.py": 31,   # step 6: the inbox on box.css (OSDev4)
+    "marketing/customer_voice/app.py": 14,   # step 6, then one dark (PR #1659 §14)
     "marketing/customer_voice/inbox/render.py": 3,
     "marketing/lead_machine/machine_app.py": 9,
 }

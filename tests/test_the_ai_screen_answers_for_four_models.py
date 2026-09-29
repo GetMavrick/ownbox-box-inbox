@@ -91,7 +91,7 @@ IDS = [m["id"] for m in MODELS]
 print("\ntest_the_picker_offers_the_four_the_contract_declares")
 
 html = body("/settings/ai")
-ok("the screen answers the owner", "Your AI account" in html)
+ok("the screen answers the owner", "AI Account" in html)
 ok("the contract still declares four models", len(MODELS) == 4, str(IDS))
 ok("...and they are Claude, ChatGPT, Gemini and Grok",
    set(IDS) == {"claude", "openai", "gemini", "grok"}, str(sorted(IDS)))

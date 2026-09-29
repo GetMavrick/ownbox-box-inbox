@@ -1,13 +1,13 @@
 """Smoke test the kernel spine WITHOUT spending a cent or hitting the network.
 
 Exercises state + queue + idempotency + the spend ledger using a throwaway DB.
-Run: python scripts/smoke_test.py   (expects to print PASS)
+Run: python tests/smoke_test.py   (expects to print PASS)
 """
 import os
 import sys
 import tempfile
 
-# Make `python scripts/smoke_test.py` work standalone (no pip install -e . needed).
+# Make `python tests/smoke_test.py` work standalone (no pip install -e . needed).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Point at a throwaway DB before importing anything that reads settings.
