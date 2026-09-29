@@ -22,7 +22,12 @@ set -euo pipefail
 # A CHECK-IN AFTER EVERY UPDATE ATTEMPT, whatever it decided (docs/PLAN_NO_GHOST_BOXES.md P1): installed,
 # up to date, refused, rolled back or off. So Ownbox hears how an update went without waiting six hours.
 # --no-block: the check-in runs as its own unit, after this script, and can never hold it up or fail it.
-trap 'systemctl start --no-block aios-checkin.service >/dev/null 2>&1 || true' EXIT
+# THE UNIT IS INSTALLED HERE TOO, on every run, not only after a new release is installed: a box built
+# from an image older than the check-in installs its first release with the image's own updater, which
+# never ran checkin_setup.sh, and every run after that finds the box current and exits before the
+# setup step below. Measured on a fresh box, 2026-09-29: it never checked in. checkin_setup.sh is
+# idempotent and never fails its caller.
+trap 'bash /opt/aios/scripts/checkin_setup.sh >/dev/null 2>&1 || true; systemctl start --no-block aios-checkin.service >/dev/null 2>&1 || true' EXIT
 # Serialize deploys: two overlapping runs would interleave git ff / pip install /
 # init_db / restart. flock auto-releases when fd 9 closes (remote shell exit).
 # >>> coworkers-first (tests/test_box_update_waits_for_coworkers.py runs this block)
