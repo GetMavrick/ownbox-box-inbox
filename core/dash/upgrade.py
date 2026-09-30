@@ -43,7 +43,9 @@ PRICE = "$1,100"
 # THE UPGRADE'S PAYMENT LINK. OSDev1's alone to set (all Stripe work is theirs, owner 2026-09-26):
 # the test-mode link for the rehearsal, then the live one after the owner says go. While it is
 # empty the sheet says the payment page is not open yet, and offers no button.
-UPGRADE_LINK = ""
+# LIVE since 2026-09-30 (owner: "You make it"): "Ownbox Pro upgrade", $1,100 once, plink_1ULUe59zPuayPezNPkEmsnjK,
+# the provisioner's STRIPE_UPGRADE_LINKS. A test-mode payment can only ever upgrade a rehearsal box.
+UPGRADE_LINK = "https://buy.stripe.com/6oU4gt9022YubK5gMu2Ry0u"
 
 # WHAT THE BUTTON UPGRADES TO. The one place a tier is named here, because the product is "Upgrade
 # to Pro"; what it ADDS is still read from the Tiers table, never listed by hand.

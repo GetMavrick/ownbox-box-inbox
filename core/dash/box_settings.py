@@ -1543,8 +1543,12 @@ def _checkin_card(owner: bool) -> str:
     """
     from core import checkin
     on, sent = checkin.enabled(), checkin.last()
+    # EVERY FIELD THE CHECK-IN CARRIES IS NAMED HERE (docs/PLAN_TIER_INTEGRITY.md rule 4), in the same
+    # change that adds it: the plan, and the people count with its limit, joined in step 2.
     what = ("This box tells Ownbox it is running, " + checkin.EVERY + ": which release it is on, "
-            "whether its last update worked, and which of its own health checks are failing, by name. "
+            "whether its last update worked, which of its own health checks are failing, by name, its "
+            "plan and the features it switches on, and how many people can sign in against its limit "
+            "(a count, never who). "
             "Your messages, contacts, leads, settings and keys are never part of it. If it goes quiet, "
             "we notice and get in touch.")
     out = ['<div class="card"><h2>Check-in with Ownbox</h2>', f'<p>{_esc(what)}</p>']

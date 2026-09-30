@@ -6,8 +6,10 @@ The done-when, each shown on the path a box takes:
   · an older seq is refused, and every answer carries the plan the box holds;
   · with Ownbox unreachable the last answer stands (nothing here calls out, so nothing switches off);
   · an unknown tier or feature is refused and never stored;
-plus: the door is the deploy token's alone, the table has display names, the seat limit only ever
-widens, and two messages at once cannot let an older seq win.
+plus: the door is the deploy token's alone, the table has display names, on a box Ownbox built the
+plan alone decides the seat limit (docs/PLAN_TIER_INTEGRITY.md step 1;
+tests/test_plan_decides_people.py is its own suite), and two messages at once cannot let an older
+seq win.
 
 Run: python tests/test_tiers.py
 """
@@ -55,8 +57,8 @@ def fresh(tier=None):
 print("the table")
 ok("every tier has a display name, and Base's id is not its name",
    tiers.TIERS["ownbox"]["name"] == "Base Machine" and tiers.TIERS["pro"]["name"] == "Base Machine Pro")
-ok("seats carry today's values: Base is the box's configured limit (3 as shipped), Pro unlimited",
-   tiers.TIERS["ownbox"]["people"] is None and tiers.TIERS["pro"]["people"] == 0
+ok("seats carry today's values: Base is three, Pro unlimited",
+   tiers.TIERS["ownbox"]["people"] == 3 and tiers.TIERS["pro"]["people"] == 0
    and tiers.current()["people"] == 3)
 # The add-on machines are the ones this box SHIPS (each found by its machine.yaml, #1665 §3.3):
 # the repository and a customer_voice box carry both, a lead box carries neither.
@@ -140,18 +142,18 @@ src = (ROOT / "core" / "tiers.py").read_text()
 ok("core/tiers.py makes no network call, so an unreachable Ownbox can switch nothing off",
    not any(w in src for w in ("requests", "urllib", "core.net", "http")))
 
-print("the seat limit only ever widens")
+print("on a box Ownbox built, the plan alone decides the seats")
 from core import config  # noqa: E402
 
 real = config.get_config
 fresh("ownbox")
 config.get_config = lambda: {**real(), "dash": {"max_users": 10}}
-ok("an owner who set more seats by hand keeps them on Base", state.max_users() == 10)
+ok("a hand-set line cannot raise Base past its plan", state.max_users() == 3)
 config.get_config = lambda: {**real(), "dash": {"max_users": 0}}
-ok("an unlimited overlay stays unlimited", state.max_users() == 0)
+ok("...and an 'unlimited' line does not make it unlimited", state.max_users() == 3)
 config.get_config = real
 config.get_config = lambda: {**real(), "dash": {"max_users": 2}}
-ok("a box configured for fewer on Base keeps its configured number", state.max_users() == 2)
+ok("a line configured for fewer does not decide it either", state.max_users() == 3)
 cl.post("/deploy/plan", json={"seq": 9, "tier": "pro"}, headers=H)
 ok("...and Pro makes it unlimited whatever the config says", state.max_users() == 0)
 fresh("ownbox")
@@ -159,9 +161,9 @@ config.get_config = real
 ok("and the shipped Base config gives three", state.max_users() == 3)
 real_people = tiers.TIERS["ownbox"]["people"]
 tiers.TIERS["ownbox"]["people"] = 5                  # a tier with a finite number, as one may be
-ok("a tier with a finite number raises a smaller configured limit", state.max_users() == 5)
+ok("a tier with a finite number is the limit, over the shipped three", state.max_users() == 5)
 config.get_config = lambda: {**real(), "dash": {"max_users": 10}}
-ok("...and never lowers a larger one", state.max_users() == 10)
+ok("...and a larger configured number does not raise it", state.max_users() == 5)
 config.get_config = real
 tiers.TIERS["ownbox"]["people"] = real_people
 real_current = tiers.current

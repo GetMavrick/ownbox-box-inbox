@@ -258,8 +258,12 @@ vendors:
 dash:
   # HOW MANY PEOPLE MAY SIGN IN TO THIS BOX. 0 or absent = unlimited.
   #
-  # THIS ONE LINE IS THE $499 / Pro DIFFERENCE (docs/PRICING_AND_PACKAGING_OWNBOX.md §6.1):
-  # $499 covers THREE people, Pro at $1,599 sells unlimited seats and custom roles.
+  # ON A BOX OWNBOX BUILT, THIS LINE NO LONGER DECIDES SEATS (docs/PLAN_TIER_INTEGRITY.md step 1,
+  # owner 2026-09-30): the plan does (core/tiers.py `_people`: Base 3, Pro unlimited), whatever this
+  # line or my/settings.yaml says. It still decides on a box nobody sold (the owner's own, a dev
+  # checkout).
+  # Before that: THIS ONE LINE WAS THE $499 / Pro DIFFERENCE (docs/PRICING_AND_PACKAGING_OWNBOX.md
+  # §6.1), and `my/settings.yaml` could override it — one line from Pro.
   #
   # OWNER, 2026-09-16: "We are going to change regular to three users and pro to unlimited" —
   # "Three users is plenty for the small operator." It was five, and Pro got five TOO, because

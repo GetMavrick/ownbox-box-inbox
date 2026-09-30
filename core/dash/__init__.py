@@ -1325,6 +1325,41 @@ def _note(text: str) -> str:
     return f'<div class="card notice"><p>{html.escape(text)}</p></div>'
 
 
+# WHERE WANTING MORE PEOPLE GOES (docs/PLAN_TIER_INTEGRITY.md step 1, owner 2026-09-30). The upgrade
+# sheet is core/dash/upgrade.py's; this screen only points there, the way the Shifts screen does.
+UPGRADE_URL = "/dashboard/upgrade"
+
+
+def _seat_limit() -> tuple[str, bool]:
+    """(the sentence, can this box upgrade) for a box at its people limit.
+
+    THE PLAN'S WORDS WHEN THE PLAN SET THE NUMBER: "Base Machine covers 3 people." A box Ownbox never
+    built (the owner's own, a dev checkout) has no plan to upgrade, so it keeps the old sentence and is
+    offered no button that could never work."""
+    cap = state.max_users()
+    try:
+        from core import tiers
+        from core.dash import upgrade as _up
+        cur = tiers.current()
+        sold = tiers.built_by_ownbox()
+        target = tiers.TIERS[_up.TARGET]["people"]
+        can = sold and cur.get("tier") != _up.TARGET and (target == 0 or target > cap)
+        planned = sold and cap == tiers.TIERS[cur["tier"]]["people"]
+        return ((f"{cur['name']} covers {cap} people." if planned else
+                 f"This box is set up for {cap} people."), can)
+    except Exception:                                # noqa: BLE001 — a settings screen never 500s
+        log.exception("people.plan_unreadable")
+        return f"This box is set up for {cap} people.", False
+
+
+def _seats_full() -> str:
+    """The notice when an invite or a restore meets the limit: upgrade first, removing second. Words
+    only: the Invite card below it carries the one Upgrade button, since the box is at its limit."""
+    said, can = _seat_limit()
+    return _note(f"{said} Upgrade to Pro for unlimited people, or remove someone first." if can else
+                 f"{said} Remove someone first.")
+
+
 def _people_list(notice: str = "") -> str:
     rows = []
     for u in state.list_users():
@@ -1350,9 +1385,20 @@ def _people_list(notice: str = "") -> str:
     cap = state.max_users()
     n = state.count_active_users()
     seats = f"{n} of {cap} people" if cap else f"{n} {'person' if n == 1 else 'people'}"
-    return f"""{notice}
+    listed = f"""{notice}
 <div class="card"><h2>People who can sign in</h2><p class="sub">{html.escape(seats)}</p>
-{''.join(rows)}</div>
+{''.join(rows)}</div>"""
+    # AT THE LIMIT, ON A BOX THAT CAN UPGRADE, THE INVITE FORM WOULD ONLY FAIL, so it gives way to the
+    # one thing that works, which is then the screen's one ink pill. Nobody already here is touched: the
+    # limit stops the next person, never a present one. A box nobody sold keeps the form, as before:
+    # its limit is its own setting, and there is nothing to buy.
+    if cap and n >= cap:
+        said, can = _seat_limit()
+        if can:
+            return listed + (f'\n<div class="card"><h2>Invite someone</h2><p>{html.escape(said)} Pro has no '
+                             f'limit on people, so everyone on your team gets their own sign-in.</p>'
+                             f'<a class="btn" href="{UPGRADE_URL}">Upgrade to Pro</a></div>')
+    return listed + f"""
 <div class="card"><h2>Invite someone</h2>
   <form method="post" action="/dash/people/invite">
     <label for="invite-email">Their email address</label>
@@ -1509,8 +1555,7 @@ def people_invite():
     try:
         person = state.add_user(email, role="member")
     except state.SeatsFull:
-        return _people_page(_people_list(_note(f"This box is set up for {state.max_users()} people. "
-                                               "Remove someone first.")), 409)
+        return _people_page(_people_list(_seats_full()), 409)
     except state.SharedPasswordRefused as e:
         return _people_page(_people_list(_note(str(e))), 409)
     except ValueError:
@@ -1538,8 +1583,7 @@ def people_action(uid: str, action: str):
         try:
             state.add_user(person["email"], role="member")   # reactivation goes through the seat check
         except state.SeatsFull:
-            return _people_page(_people_list(_note(f"This box is set up for {state.max_users()} people. "
-                                                   "Remove someone first.")), 409)
+            return _people_page(_people_list(_seats_full()), 409)
         log.info("auth.restored", user=uid, by=owner["id"])
         return _people_page(_people_list(_note(f"{person['email']} can sign in again.")))
     if not person.get("active"):

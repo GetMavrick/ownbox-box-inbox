@@ -13,7 +13,8 @@ its owner's own cloud account after it has been taken home.
 
 WHAT MAKES IT HONEST, NOT A BACKDOOR:
   * IT CARRIES NO CUSTOMER DATA. `FIELDS` is the whole of it: which box, what it runs, whether its last
-    update worked, which of its own health checks fail (by name only), and its plan. No mail, leads,
+    update worked, which of its own health checks fail (by name only), its plan, how many people can sign
+    in against its limit (a count, never who) and which features its plan switches on. No mail, leads,
     contacts, conversations, settings values or secrets. The receiver refuses any other field, and
     tests/test_box_checkin.py holds the same list, so adding one is a reviewed decision on both sides.
   * THE OWNER SEES IT. Settings → Updates shows the exact last message, when it went and where.
@@ -40,6 +41,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 import urllib.error
@@ -52,7 +54,13 @@ NAMESPACE = "ownbox-checkin"
 URL = os.environ.get("AIOS_CHECKIN_URL") or "https://orders.ownbox.app/checkin"
 MAX_BYTES = 8192                          # the receiver refuses anything larger
 FIELDS = frozenset({"v", "host", "order_id", "droplet_id", "release", "update", "doctor", "plan",
-                    "watchdog_ok", "enabled", "sent_at"})
+                    "watchdog_ok", "enabled", "sent_at",
+                    # A BASE BOX STAYS BASE (docs/PLAN_TIER_INTEGRITY.md step 2): how many people can sign
+                    # in against the limit the box enforces, and which features its plan switches on.
+                    # Counts and feature ids, never who. The receiver learned both first (#1720).
+                    "people", "features"})
+FEATURE_ID = re.compile(r"^[a-z0-9_:.-]{1,64}$")   # the receiver's shape (PLAN_TIER_INTEGRITY step 2)
+FEATURES_MAX = 50
 
 KEY = Path(os.environ.get("AIOS_UPDATE_KEY") or "/var/lib/aios/update_key")
 LAST = Path(os.environ.get("AIOS_CHECKIN_LAST") or "/var/lib/aios/checkin_last.json")
@@ -205,6 +213,27 @@ def _plan() -> dict:
     return out
 
 
+def _people() -> dict | None:
+    """{"count", "limit"}: the active people who can sign in (the owner included) and the limit this box
+    enforces, 0 for unlimited, counted the way `state.add_user` counts them. None if either can't be read,
+    which the receiver reads as absent: a wrong number would be worse than none."""
+    try:
+        from core import state
+        return {"count": int(state.count_active_users()), "limit": int(state.max_users())}
+    except Exception:                                    # noqa: BLE001 — never breaks the check-in
+        return None
+
+
+def _features() -> list | None:
+    """The feature ids this box's plan switches on, sorted, in the receiver's shape and at most
+    FEATURES_MAX of them. Ids only: which features are on, never what anyone did with them."""
+    try:
+        from core import tiers
+        return sorted(f for f in tiers.features() if FEATURE_ID.match(str(f)))[:FEATURES_MAX]
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
 def payload(*, on: bool | None = None) -> dict | None:
     """The whole check-in, or None on a box that is not a sold box (no host or order in provision.json):
     the operator's own box and a developer's checkout say nothing to anyone."""
@@ -216,7 +245,7 @@ def payload(*, on: bool | None = None) -> dict | None:
     out = {"v": FORMAT, "host": host, "order_id": order, "droplet_id": _droplet_id(),
            "release": _release(), "update": _update(), "doctor": doctor, "plan": _plan(),
            "watchdog_ok": watchdog_ok, "enabled": enabled() if on is None else bool(on),
-           "sent_at": _iso(_now())}
+           "sent_at": _iso(_now()), "people": _people(), "features": _features()}
     assert set(out) == FIELDS, "the check-in's fields changed without the list changing"
     return out
 

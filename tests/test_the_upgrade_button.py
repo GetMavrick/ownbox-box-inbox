@@ -137,6 +137,12 @@ r = member.get("/dashboard/upgrade")
 ok("...and is refused at the sheet, told it is the owner's", r.status_code == 403
    and "Only the owner" in r.get_data(as_text=True))
 
+print("\ntest_the_box_ships_the_live_link")
+SHIPPED = upgrade.UPGRADE_LINK
+ok("every box ships the LIVE upgrade link, never a test-mode one",
+   SHIPPED.startswith("https://buy.stripe.com/") and "/test_" not in SHIPPED, SHIPPED)
+upgrade.UPGRADE_LINK = ""                   # the sheet's "not open yet" state, which a box shows if it is ever unset
+
 print("\ntest_the_sheet_says_what_pro_adds_and_what_happens")
 page = owner.get("/dashboard/upgrade").get_data(as_text=True)
 ok("what Pro adds comes from the Tiers table: coworkers and unlimited people",

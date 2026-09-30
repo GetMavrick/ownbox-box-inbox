@@ -1981,8 +1981,9 @@ def max_users() -> int:
     count. A knob only a human can turn is not a tier; it is a bug with a comment on it.
     """
     # THE PLAN DECIDES THE SEATS (docs/SCOPE_TIERS.md §2.1), so an upgrade raises them at once, with
-    # no restart and no file rewritten. The plan only ever WIDENS the configured limit (Pro makes it
-    # unlimited; Base is the configured number), so a plan can never lock a paying customer out.
+    # no restart and no file rewritten. On a box Ownbox built the config has no say at all
+    # (docs/PLAN_TIER_INTEGRITY.md step 1); the limit is read only here, where a person is ADDED, so
+    # nobody who already has access ever loses it.
     from core import tiers
     try:
         return int(tiers.current()["people"])

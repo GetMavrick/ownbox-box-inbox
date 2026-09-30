@@ -13,6 +13,7 @@ its permission sheet (piece 5's sheet).
 Run: python tests/test_shifts_screen.py
 """
 import contextlib
+import dataclasses
 import html
 import json
 import os
@@ -299,6 +300,15 @@ def _held(shift_lock=None, deploy_lock=None):
 locks.shift = _held
 runner._load_machines = lambda: None
 runner._stop_agent = lambda cmd: None
+
+# This block is about the manual path only: Try it now, the run, the first report. Scheduled
+# work belongs to the runner suite, which pins its own clock for it (test_coworker_runner.py).
+# Left live here, a shift that falls due in this very minute takes the one claim ahead of the
+# trial run — the fixture above starts at 07:30 in the buyer timezone, so anyone who ran this
+# suite between 07:30 and 07:45 got "the runner runs it to Done — queued", and Saturdays
+# collided at 09:00 too. No scheduled shift is in play in this block.
+_real_plan = runner.schedule.plan
+runner.schedule.plan = lambda *a, **kw: dataclasses.replace(_real_plan(*a, **kw), due=(), missed=())
 runner.ROOT = pathlib.Path(tempfile.mkdtemp())
 box_mail.is_configured = lambda: True
 box_mail.to_box_people = lambda user_id=None: [{"id": user_id, "email": "owner@example.com"}]

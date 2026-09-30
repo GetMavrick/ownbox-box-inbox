@@ -22,6 +22,7 @@ licence or anti-tamper; money is enforced on Ownbox's side, where updates end wi
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 
@@ -31,9 +32,10 @@ log = get_logger(__name__)
 
 # THE ONE TABLE. `id` is what orders and boxes store and never changes (Base's id is "ownbox", the
 # brand); `name` is what a person reads: "Base Machine" and "Base Machine Pro" (owner, 2026-09-26,
-# matching the pricing page and the Stripe products). `people` is the seat limit, carrying today's values
-# unchanged (owner, 2026-09-16: Base is three people, Pro is unlimited): 0 is unlimited, and None
-# is "the box's configured limit", `dash.max_users`, which ships as 3 and which an owner may raise.
+# matching the pricing page and the Stripe products). `people` is the seat limit (owner, 2026-09-16:
+# Base is three people, Pro is unlimited), 0 is unlimited. ON A BOX OWNBOX BUILT THE PLAN DECIDES IT,
+# never the config (docs/PLAN_TIER_INTEGRITY.md step 1, owner 2026-09-30): `my/settings.yaml` may
+# override any setting, so a limit read from the config was one line away from Pro. See `_people`.
 # ADD-ON MACHINES ARE FEATURES TOO (SCOPE_TIERS §2.7), and they DESCRIBE THEMSELVES (core/machines.py,
 # #1665 §3.3): each machine's own machine.yaml names its feature `machine:<slug>`, the tiers that
 # include it and the modules that make it up, so this table names no machine and a new machine never
@@ -41,7 +43,7 @@ log = get_logger(__name__)
 from core import machines as _machines
 
 TIERS = {
-    "ownbox": {"name": "Base Machine", "features": frozenset() | _machines.in_tier("ownbox"), "people": None},
+    "ownbox": {"name": "Base Machine", "features": frozenset() | _machines.in_tier("ownbox"), "people": 3},
     "pro":    {"name": "Base Machine Pro", "features": frozenset({"coworkers"}) | _machines.in_tier("pro"),
                "people": 0},
 }
@@ -70,6 +72,19 @@ def _provisioned() -> str:
         return ""
 
 
+def built_by_ownbox() -> bool:
+    """Did Ownbox build this box? True once it holds a plan Ownbox sent, or has a provision.json
+    (every box the provisioner builds does, tier or not). False on the owner's own box, a dev
+    checkout or a box installed by hand: nobody sold those, so their config still decides seats."""
+    if _stored():
+        return True
+    try:
+        from core import claim
+        return os.path.exists(claim.PROVISION_JSON)
+    except Exception:                   # noqa: BLE001 — cannot tell: treat it as built, the safe side
+        return True
+
+
 def configured_people() -> int:
     """`dash.max_users` from the box's config, 0 or absent = unlimited. Read per call, never bound."""
     from core.config import get_config
@@ -80,13 +95,22 @@ def configured_people() -> int:
 
 
 def _people(tier: str) -> int:
-    """This tier's seat limit, 0 = unlimited. ONLY EVER WIDENS what the box is configured for: a
-    tier can make seats unlimited, and never takes seats away that an owner set by hand."""
-    configured = configured_people()
-    want = TIERS[tier]["people"]
-    if want is None or configured == 0:
-        return configured
-    return 0 if want == 0 else max(configured, want)
+    """This box's seat limit, 0 = unlimited.
+
+    ON A BOX OWNBOX BUILT, THE PLAN'S NUMBER AND NOTHING ELSE (PLAN_TIER_INTEGRITY step 1). A
+    `dash.max_users: 50` line in `my/settings.yaml` leaves Base at three. The config cannot even lower
+    it: the tracked config ships `3` to every box, so a "lower only" rule would hold a Pro box, or a
+    future five-person tier, at a number nobody chose.
+
+    NOBODY LOSES ACCESS. This number is read only where a person is ADDED (core/state.add_user), so
+    a box already carrying more people than its plan keeps every one of them, and only the next one
+    waits for the upgrade (rule 1: never cut anyone off).
+
+    A BOX NOBODY SOLD keeps its configured number, as before: the owner's own box and a dev checkout
+    have no plan, and must not find their team capped by a release."""
+    if not built_by_ownbox():
+        return configured_people()
+    return TIERS[tier]["people"]
 
 
 def _stored() -> dict | None:
