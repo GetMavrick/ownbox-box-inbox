@@ -83,15 +83,21 @@ ok("the file declares its tokens, light and dark", bool(LIGHT) and bool(DARK))
 stray = _COLOUR.findall(REST)
 ok("no colour appears outside the two token blocks", not stray, str(stray[:5]))
 ok("...and no font size is a bare pixel value outside it, except the mono copy box and the chip",
-   sorted(set(re.findall(r"font-size:\s*(\d+px)", REST))) in ([], ["11px", "15px"], ["11px", "15px", "16px"]),
+   # ONE PIXEL UP ACROSS THE APP (owner, 2026-09-29: "move all the text in the app up one point").
+   sorted(set(re.findall(r"font-size:\s*(\d+px)", REST))) in ([], ["12px", "16px"], ["12px", "16px", "17px"]),
    str(sorted(set(re.findall(r"font-size:\s*(\d+px)", REST)))))
 
 print("\ntest_the_tokens_are_the_sites")
-for name, want in (("ground", "#f6f4ef"), ("ink", "#111111"), ("ink-2", "#3c3c3c"),
-                   ("ink-3", "#6b6b6b"), ("line", "rgba(17, 17, 17, 0.46)"),  # NOT the site's .32: a control edge needs 3:1 (below)
+# THE GREYS ARE DARKER THAN THE SITE'S (owner, 2026-09-29: "The gray text is a little bit
+# unreadable"): --ink-3 is 6.7:1 on the cream where the site's #6b6b6b was 4.85, and --ink-2 12:1.
+for name, want in (("ground", "#f6f4ef"), ("ink", "#111111"), ("ink-2", "#2e2e2e"),
+                   ("ink-3", "#565656"), ("line", "rgba(17, 17, 17, 0.46)"),  # NOT the site's .32: a control edge needs 3:1 (below)
                    ("hairline", "rgba(17, 17, 17, 0.08)"), ("card", "#ffffff"),
                    ("r-sm", "16px"), ("r-md", "22px"), ("r-pill", "999px"),
-                   ("t-title", "clamp(24px, 2.4vw, 32px)"), ("control", "50px")):
+                   # THE TITLE FOLLOWS THE READER'S TEXT SIZE TOO (2026-09-29): the same 24px to
+                   # 32px at the default setting, measured in the box's --px.
+                   ("t-title", "clamp(calc(24 * var(--px, 1px)), 2.4vw, calc(32 * var(--px, 1px)))"),
+                   ("control", "50px")):
     ok(f"--{name} is {want}", token(name) == want, str(token(name)))
 ok("the text face is Inter, with the system stack behind it",
    (token("sans") or "").startswith('"inter"') and "-apple-system" in (token("sans") or ""))

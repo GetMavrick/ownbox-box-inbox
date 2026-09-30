@@ -294,10 +294,15 @@ def test_the_threads_offer_lands_where_the_thing_is_turned_on():
     # AND THE DESTINATION REALLY IS THE PLACE, rather than another signpost: it carries the field.
     dest = client().get("/settings/ai").get_data(as_text=True)
     ok("the page it lands on has the key field", 'name="key"' in dest)
-    # AND THE INBOX'S OWN AI PAGE NO LONGER CARRIES A SECOND ONE. Two forms for one credential is
-    # the thing the one-place ruling removes: they drift, and a buyer cannot tell which one counts.
-    inbox_ai = client().get("/inbox/drafts").get_data(as_text=True)
-    ok("/inbox/drafts has no key field of its own", 'name="key"' not in inbox_ai, inbox_ai[-400:])
+    # AND THE INBOX CARRIES NO SECOND ONE. Two forms for one credential is the thing the one-place
+    # ruling removes: they drift, and a buyer cannot tell which one counts. Its old AI page folded
+    # into its Settings on 2026-09-29 (IA D3), so the drafting row there is what is checked.
+    r_old = client().get("/inbox/drafts")
+    ok("the inbox's old AI page sends him to the inbox's Settings",
+       r_old.status_code == 302 and r_old.headers.get("Location", "").endswith("/inbox/settings"),
+       f"{r_old.status_code} {r_old.headers.get('Location')}")
+    inbox_ai = client().get("/inbox/settings").get_data(as_text=True)
+    ok("the inbox's Settings has no key field of its own", 'name="key"' not in inbox_ai, inbox_ai[-400:])
     ok("...and a door that says what it does, to the one home",
        'href="/settings/ai"' in inbox_ai and "Connect an AI account" in inbox_ai)
     # A MEMBER IS NEVER SENT TO A DOOR THEY ARE REFUSED AT. /settings/ai is the owner's; the
@@ -306,9 +311,9 @@ def test_the_threads_offer_lands_where_the_thing_is_turned_on():
     mem.set_cookie("aios_session", dash.new_session(_member_id()), domain="localhost")
     mhtml = mem.get("/inbox/inbox/conv-offer").get_data(as_text=True)
     ok("a member's offer goes to the page that says who can turn it on",
-       'href="/inbox/drafts"' in mhtml[mhtml.find("Drafts are off"):][:200],
+       'href="/inbox/settings"' in mhtml[mhtml.find("Drafts are off"):][:200],
        mhtml[mhtml.find("Drafts are off"):][:200])
-    mdest = mem.get("/inbox/drafts").get_data(as_text=True)
+    mdest = mem.get("/inbox/settings").get_data(as_text=True)
     ok("...which says it is the owner's, with no door the member is refused at",
        "Only the owner of this box" in mdest and 'href="/settings/ai"' not in mdest)
 
@@ -331,7 +336,7 @@ def test_the_key_is_never_rendered_back_anywhere():
     print("test_the_key_is_never_rendered_back_anywhere")
     box_secrets.put(box_secrets.ANTHROPIC, KEY)
     c = client()
-    for path in ("/inbox/settings", "/inbox/drafts", "/inbox/inbox"):
+    for path in ("/inbox/settings", "/inbox/inbox"):
         r = c.get(path)
         body = r.get_data(as_text=True)
         # THE PAGE HAS TO HAVE RENDERED BEFORE ITS SILENCE MEANS ANYTHING. Without this line the
@@ -363,13 +368,13 @@ def test_the_buyer_can_turn_it_on_and_off():
     ok("the old ?off=1 link changes nothing", _draft.enabled()
        and box_secrets.get(box_secrets.ANTHROPIC) == KEY)
     r = c.post("/inbox/drafts", data={"drafting": "off"})
-    ok("turning off is a POST that lands back on the drafts page",
-       r.status_code == 303 and r.headers.get("Location", "").endswith("/inbox/drafts"),
+    ok("turning off is a POST that lands back on the inbox's Settings, where the switch is",
+       r.status_code == 303 and r.headers.get("Location", "").endswith("/inbox/settings"),
        f"{r.status_code} {r.headers.get('Location')}")
     ok("...drafting is off", not _draft.enabled())
     ok("...and the AI account is exactly as it was", box_secrets.get(box_secrets.ANTHROPIC) == KEY)
     ok("...and the row says Off, with a way back on",
-       "Off. Ownbox is not writing replies" in c.get("/inbox/drafts").get_data(as_text=True))
+       "Off. Ownbox is not writing replies" in c.get("/inbox/settings").get_data(as_text=True))
     c.post("/inbox/drafts", data={"drafting": "on"})
     ok("turning it on again needs no sign-in", _draft.enabled()
        and box_secrets.get(box_secrets.ANTHROPIC) == KEY)
@@ -694,7 +699,7 @@ def test_a_refusal_days_later_reaches_both_screens_and_they_agree():
     # whose account it is. The owner's link, straight to /settings/ai, is checked on the thread
     # itself in test_the_threads_offer_lands_where_the_thing_is_turned_on.
     ok("...and sends them to where the account is connected again, not to a menu",
-       'href="/inbox/drafts"' in box and "Connect it again" in box, box[-260:])
+       'href="/inbox/settings"' in box and "Connect it again" in box, box[-260:])
     bs.note_anthropic_status("payment_required", "403")
     box = _app._compose("c9", conv, msgs)
     ok("an account out of credit is told so on the thread too",

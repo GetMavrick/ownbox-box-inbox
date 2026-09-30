@@ -85,7 +85,10 @@ page = owner.get("/settings/people").get_data(as_text=True)
 nav = page.split('<nav class="rail"', 1)[-1].split("</nav>", 1)[0]
 ok("People is a row of System Settings, lit while you stand on it",
    re.findall(r'<a href="([^"]*)"[^>]*aria-current="page"', nav) == ["/settings/people"])
-ok("...and the breadcrumb says where you are", "System Settings / <b>People</b>" in page)
+# THE TRAIL'S PARENT IS A RUST LINK NOW (owner, 2026-09-29: "those rust colored breadcrumbs ...
+# make them standard anytime you're drilled down to a sub menu page").
+ok("...and the breadcrumb says where you are, its parent a link back",
+   '<a href="/settings">System Settings</a> / <b>People</b>' in page)
 ok("one ink pill, and it is Create invite link", ink_pills(page) == ["Create invite link"],
    str(ink_pills(page)))
 ok("a person's own actions are outlines, and Remove is the danger one",

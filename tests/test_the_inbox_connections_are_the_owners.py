@@ -89,7 +89,8 @@ for path in ("/inbox/drafts?off=1", "/inbox/mailbox?off=1", "/inbox/connect?off=
     ok(f"the owner loading {path} changes nothing", intact())
 
 print("\ntest_no_screen_links_a_switch")
-for path in ("/inbox/settings", "/inbox/drafts", "/inbox/mailbox", "/inbox/connect"):
+# /inbox/drafts FOLDED INTO /inbox/settings on 2026-09-29 (IA D3); its switch is a row there.
+for path in ("/inbox/settings", "/inbox/mailbox", "/inbox/connect"):
     html = owner.get(path).get_data(as_text=True)
     ok(f"{path} links no ?off=1", "?off=1" not in html, re.findall(r'href="[^"]*off=1[^"]*"', html))
 
@@ -122,7 +123,7 @@ r = member.get("/inbox/connect/instagram")
 ok("a member cannot start connecting a social account", r.status_code == 403, str(r.status_code))
 
 print("\ntest_a_member_reads_the_state_and_whose_it_is")
-for path in ("/inbox/settings", "/inbox/drafts", "/inbox/mailbox", "/inbox/connect"):
+for path in ("/inbox/settings", "/inbox/mailbox", "/inbox/connect"):
     html = member.get(path).get_data(as_text=True)
     main = html.split("</nav>", 1)[-1]
     ok(f"{path} renders for a member", member.get(path).status_code == 200)

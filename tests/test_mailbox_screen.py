@@ -436,7 +436,7 @@ def test_the_button_says_what_the_screen_it_reaches_actually_offers():
     # THE TABLE IS WRITTEN OUT HERE ON PURPOSE, not read from the app. A test that asks the
     # helper what it says and then checks it said that proves nothing. So a new destination is a
     # deliberate line in this file — which is how the set-up screen's arrival was caught.
-    pairs = {"/inbox/setup": "Set up your box",
+    pairs = {"/inbox/setup": "Set up your inbox",
              "/inbox/connect": "Connect your social accounts",
              "/inbox/mailbox": "Connect your inbox"}
     for go, said in pairs.items():

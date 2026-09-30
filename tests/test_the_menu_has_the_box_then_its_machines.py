@@ -7,9 +7,10 @@ machines. Which would be unified inbox and then add a machine."* And of that sec
 subtle. Almost just like an extra space."*
 
 So this suite renders the real menu, the way a buyer's box draws it, and holds:
-  1. the rows, in order: Base Machine, Morning Review, System Settings, the add-on machines,
-     Add a Machine — and a member is not shown the Morning Review, which refuses them;
-  2. exactly one row opens a new group, and it is the first add-on machine;
+  1. the rows, in order: Base Machine, System Settings, then the Morning Review heading the add-on
+     machines, then Add a Machine — and a member is not shown the Morning Review, which refuses them;
+  2. exactly one row opens a new group: the Morning Review for the owner, the first add-on machine
+     for a member;
   3. the gap is space and nothing else: no heading, no rule, no extra words;
   4. a machine that registers a low `order` still cannot climb above the box's own rows,
      and Add a Machine stays last, below any machine a box gains later.
@@ -64,10 +65,10 @@ print("\ntest_the_rows_read_in_the_owners_order")
 html, nav = menu("/dashboard")
 rows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', nav, re.S)
 # THE ADD-ON MACHINES SIT BETWEEN THE BOX'S OWN ROWS AND ADD A MACHINE, in their registered order.
-# THE MORNING REVIEW JOINS THE BOX'S OWN ROWS (owner, 2026-09-29: "Add the Morning Review to the
-# menu"), beside Base Machine because both are read, where System Settings is changed.
-ok("Base Machine, Morning Review, System Settings, then the add-on machines and Add a Machine",
-   rows == ["Base Machine", "Morning Review", "System Settings", "AEO Machine", "Unified Inbox",
+# THE MORNING REVIEW HEADS THE ADD-ON MACHINES (owner, 2026-09-29: "move morning review down to the
+# top of the list of the add-on machines. That way it's sort of grouped with what it is related to").
+ok("Base Machine, System Settings, then the Morning Review heading the add-on machines, then Add a Machine",
+   rows == ["Base Machine", "System Settings", "Morning Review", "AEO Machine", "Unified Inbox",
             "Add a Machine"], str(rows))
 ok("...and the Morning Review row opens the review", '<a href="/app/review"' in nav)
 _rv = c.get("/app/review")
@@ -89,6 +90,10 @@ ok("a member's menu has no Morning Review row", "Morning Review" not in _m_rows
 ok("...and still has the rest, in the same order",
    _m_rows == ["Base Machine", "System Settings", "AEO Machine", "Unified Inbox", "Add a Machine"],
    str(_m_rows))
+# THE GAP IS CARRIED, not dropped with the row a member is not shown: it opens above their first machine.
+_m_grp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
+                    _m_nav, re.S)
+ok("...with the group's gap above their first add-on machine", _m_grp == ["AEO Machine"], str(_m_grp))
 try:
     shell.register_section("odd_home", order=2, machine="core", title="Odd", href="/odd-home",
                            home=True, owner_only=True)
@@ -104,8 +109,8 @@ ok("...while its address stays /dashboard, so installed apps still open it",
 print("\ntest_one_subtle_gap_before_the_add_on_machines")
 grp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
                  nav, re.S)
-ok("exactly one row opens a new group, and it is the first add-on machine",
-   grp == ["AEO Machine"], str(grp))
+ok("exactly one row opens a new group, and it is the Morning Review heading the add-on machines",
+   grp == ["Morning Review"], str(grp))
 css = home.CSS
 ok("the gap is extra room above that row", re.search(r"\.nav a\.grp\{margin-top:\d+px\}", css))
 ok("...and nothing else: no rule and no heading between the groups",

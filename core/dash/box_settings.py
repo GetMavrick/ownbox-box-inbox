@@ -355,7 +355,7 @@ def box_chatgpt():
             'rel="noopener noreferrer">Open ChatGPT &rarr;</a></p>'
             f'<p class="quiet" style="word-break:break-all">{_esc(live["url"])}</p>'
             '<p><b>2.</b> Enter this one-time code when it asks.</p>'
-            '<p style="font:600 28px/1.2 ui-monospace,Menlo,monospace;letter-spacing:0.08em;'
+            '<p style="font:600 calc(28 * var(--px, 1px))/1.2 ui-monospace,Menlo,monospace;letter-spacing:0.08em;'
             f'margin:10px 0 16px;user-select:all">{_esc(live["code"])}</p>'
             '<p class="quiet">The code lasts fifteen minutes. This page checks itself every few '
             'seconds and takes you back to settings when the sign-in is done.</p>'
@@ -1253,7 +1253,7 @@ def _connect_card(where: dict, has_keys: bool, host_fp: str) -> str:
     out.append('<p class="quiet">On a Mac, open Terminal (in Applications, then Utilities). On '
                'Windows 10 or 11, open PowerShell. On Linux, open your terminal. Then type this and '
                'press enter:</p>'
-               f'<p class="addr" style="font-size:16px">{_esc(cmd)}</p>'
+               f'<p class="addr" style="font-size:calc(17 * var(--px, 1px))">{_esc(cmd)}</p>'
                '<p class="quiet">Tap or click it once to select all of it.</p>')
     ip_cmd = f"ssh root@{box_ip}" if box_ip else ""
     pts = where.get("points_here")

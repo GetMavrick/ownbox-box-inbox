@@ -122,8 +122,13 @@ h = home()
 # machine. It should immediately get them their LLM connection and their progressive Web App."*
 _card = h[h.find("Finish setting up"):]
 _card = _card[:_card.find("</div></div>") if "</div></div>" in _card else 4000]
-ok("the card's headline link goes to System Settings",
-   '<a href="/settings">Set up your box' in h, _card[:400])
+# REVISED 2026-09-29 (owner, IA D2, "go with the lighter version"): the card IS the checklist, so its
+# rows do what the headline link did — the AI account first, straight to its page — and the link to
+# the settings overview, which is not a checklist, went.
+ok("the card is the checklist: no headline link to a settings page",
+   '<a href="/settings">Set up your box' not in h, _card[:400])
+ok("...and its first row goes straight to the AI account, as the owner asked on 2026-09-23",
+   re.search(r'<a class="row step" href="/settings/ai"', _card) is not None, _card[:400])
 ok("...and says how many things are waiting", "3 things to connect" in h, h[h.find("Finish"):][:160])
 # ONE HONEST COUNT. Walk #6: "3 things" sat over four rows. The fourth is the optional mobile app,
 # shown on purpose and not counted on purpose, and it now says so under its name.
@@ -232,11 +237,11 @@ try:
     # THE CARD NOW GOES TO THE BOX'S OWN SETTINGS, which every box serves, so there IS a way in
     # here and no 404 to protect anyone from. What this box lacks is a machine's channel screen,
     # so the card draws with the box's own rows and without the channel rows.
-    ok("...so the card still draws, because System Settings is on every box",
-       '<a href="/settings">Set up your box' in h)
+    ok("...so the card still draws, because the box's own steps are on every box",
+       "Finish setting up your box" in h)
     ok("...with the AI account row", 'href="/settings/ai"' in h)
     ok("...and no channel rows, because no machine offered a screen for them",
-       'Your inbox' not in h[h.find("Finish setting up"):h.find("Set up your box")])
+       'Your inbox' not in h[h.find("Finish setting up"):h.find("Finish setting up") + 1500])
     ok("...and the page still renders rather than failing", len(h) > 500, f"{len(h)} bytes")
 finally:
     shell._SECTIONS.clear()
@@ -277,18 +282,13 @@ if _app_src:
   ok("...and the set-up route itself claims the set-up row, not Settings",
      'here="/inbox/settings"' not in _r_setup and 'here="/inbox/setup"' in _r_setup,
      "r_setup still tells the shell it is the Settings screen")
-  # DELIBERATELY NOT A SWEEP: the drafts screen belongs to Settings and must keep lighting it.
-  # OSDev5 paid for that revert once already. Since the inbox's Settings became a menu of its own
-  # (owner, 2026-09-24), drafts has a row there ("AI and drafts") and passes its own path; the
-  # section that row sits in is Settings, which is what this line has always protected.
+  # THE DRAFTS SCREEN FOLDED INTO SETTINGS (owner, 2026-09-29, IA D3), so it cannot light the
+  # wrong tab any more: its address now sends people to the inbox's Settings, where the drafting
+  # row is. What this line always protected — drafts belong to Settings — holds by construction.
   _r_drafts = _app_src[_app_src.find("def r_drafts("):]
   _r_drafts = _r_drafts[:_r_drafts.find("\ndef ", 10)]
-  _drafts_sec = shell.current("/inbox/drafts")
-  ok("...while the drafts screen still lights Settings, which is its true home",
-     'here="/inbox/settings"' in _r_drafts
-     or ('here="/inbox/drafts"' in _r_drafts and _drafts_sec is not None
-         and _drafts_sec.title == "Settings"),
-     f"section {getattr(_drafts_sec, 'key', None)!r}")
+  ok("...while the drafts address lands in Settings, which is its true home",
+     'return redirect("/inbox/settings", code=302)' in _r_drafts)
 
 # ── 7. OSDEV5'S GUARD, ON THE RENDERED PAGE ─────────────────────────────────────────
 # HIS TEST, TAKEN AS HE WROTE IT, because it holds something mine does not. Section 6 asks the

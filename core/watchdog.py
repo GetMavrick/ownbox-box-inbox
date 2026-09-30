@@ -1877,10 +1877,24 @@ def run_once() -> None:
     _retire_old_raws()
 
     notifier_ok = True
+    # A PROBE THAT CHANGES STATE IS TOLD TO OWNBOX NOW, not at the next six-hourly check-in
+    # (docs/PLAN_NO_GHOST_BOXES.md P1; OSDev1, 2026-09-30). Compared in the check-in's own words
+    # (ok / warn / fail), so a detail that changes inside `ok:` is not a change.
+    from core import checkin as _checkin
+    try:
+        _was = {b["component"]: _checkin.word(b.get("status")) for b in state.get_heartbeats()}
+    except Exception:                                    # noqa: BLE001 — never block the probes
+        _was = None
+    _turned = False
     for key, (ok, detail) in probes.items():
         state.heartbeat(f"probe:{key}", _beat(ok, detail))
+        if _was is not None and _was.get(f"probe:{key}") != _checkin.word(_beat(ok, detail)):
+            _turned = True
         if not _alert(key, ok, detail):
             notifier_ok = False  # an alert we NEEDED to send did not reach Slack
+
+    if _turned:
+        _checkin.nudge()
 
     _paged, _fresh_sent_ok = _page_new_stuck_produce(_stuck_was_failing)
     if not _fresh_sent_ok:

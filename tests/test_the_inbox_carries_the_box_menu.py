@@ -83,8 +83,13 @@ def _page(path: str = "/inbox/inbox") -> str:
 print("test_the_menu_is_on_the_page_and_opens")
 _b = _page()
 ok("the offscreen checkbox is there", 'class="navtoggle" type="checkbox" id="navtoggle"' in _b)
-ok("...and a hamburger label points at it",
+ok("...and the menu button points at it",
    'class="ham" for="navtoggle"' in _b)
+# THE CLIENT'S ICON IS THE MENU BUTTON (owner, 2026-09-29, option B): the icon sits inside the
+# control, with the three-line badge on its corner, and no separate three-line button remains.
+_btn = _b.split('class="ham" for="navtoggle"', 1)[-1].split("</label>", 1)[0]
+ok("...and it is the client's icon, badged as the menu",
+   'class="ui-disc appmark"' in _btn and 'class="menubadge"' in _btn and "M4 7h16" not in _b)
 # TAPPING OUTSIDE HAS TO CLOSE IT. A drawer you can only shut with the button that opened it is a
 # drawer people close by reloading the page.
 ok("...and the scrim closes it, from the same checkbox",
@@ -120,8 +125,8 @@ for _sel in (".rail", ".ham", ".scrim", ".navtoggle", ".nav a", ".who", ".back",
        f"{_sel} is declared outside core's stylesheet")
 ok("...while core's stylesheet is where they all come from",
    all(f"{s}{{" in _home.RAIL_CSS for s in (".rail", ".ham", ".scrim", ".navtoggle")))
-ok("the hamburger glyph is core's, not a third drawing of three lines",
-   "_HAM" in _SRC and _SRC.count("M4 7h16") == 0)
+ok("the menu button is core's, not a second drawing of it",
+   "_look.menu_button()" in _SRC and _SRC.count("M5 7h14") == 0 and _SRC.count("M4 7h16") == 0)
 ok("the rows come from the renderer, not from a list in this file",
    "rail_html" in _SRC)
 
@@ -160,9 +165,12 @@ ok("...and no two share a name", len(set(_names)) == len(_names), str(_names))
 print("\ntest_one_navigation_at_a_time")
 # The drawer and the bar swap at ONE number, so no width can show two menus or none. Core's
 # drawer query is `max-width:820px`; this app's is the width immediately above it.
-ok("the menu button is shown only where the rail is hidden",
-   "@media (max-width:820px){ .bar-in .ham{display:flex} }" in _app.CSS)
-ok("...and it is hidden by default", ".bar-in .ham{display:none" in _app.CSS)
+# THE BUTTON IS THE CLIENT'S ICON NOW (owner, 2026-09-29, option B), so where the rail is on screen
+# the icon stays as the bar's brand mark and stops being a menu: nothing to press, no badge. Still
+# one navigation at every width, switched at the same number.
+ok("the menu button stops being one where the rail is on screen",
+   "@media (min-width:821px){ .bar-in .ham{pointer-events:none} .bar-in .menubadge{display:none} }" in _app.CSS)
+ok("...and the icon stays in the bar at every width", ".bar-in .ham{display:none" not in _app.CSS)
 ok("the tab bar stands down where the rail stands up",
    re.search(r"@media \(min-width:821px\)\{[^@]*nav\.tabs\{display:none\}", _app.CSS,
              re.S) is not None)

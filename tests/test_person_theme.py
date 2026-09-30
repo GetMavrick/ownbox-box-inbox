@@ -154,9 +154,12 @@ ok("...and Settings then shows Automatic chosen", _pressed(page(owner, "/setting
 ok("a member gets the same switch: appearance is each person's, not the owner's",
    'class="ui-seg"' in page(member, "/settings"))
 if _inbox.is_file():
+    # ONE SWITCH, ONE HOME (owner, 2026-09-29, IA D3): Appearance is each person's and the whole
+    # box's, so it lives in System Settings. The inbox's Settings carries no second copy — it
+    # says where Appearance is, and links there.
     i = page(owner, "/inbox/settings")
-    ok("the inbox offers the same switch, coming back to its own settings",
-       'class="ui-seg"' in i and 'name="next" value="/inbox/settings"' in i and _pressed(i) == ["system"],
+    ok("the inbox carries no second switch, and says where Appearance is",
+       'class="ui-seg"' not in i and "Appearance" in i and 'href="/settings"' in i,
        str(_pressed(i)))
 
 print("\nthe iPhone's clock — (WebDev2, PR #1659 install phase: white over a dark app)")

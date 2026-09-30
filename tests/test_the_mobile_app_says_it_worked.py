@@ -93,9 +93,12 @@ ok("without JavaScript it says what it cannot know, not nothing",
 _inbox = ROOT / "marketing" / "customer_voice" / "app.py"
 if _inbox.is_file():
     ib = client(owner).get("/inbox/settings").get_data(as_text=True)
-    ok("the inbox's own Settings tab has it too, where the installed app can see itself",
-       'id="ownbox-device"' in ib and "getElementById('ownbox-device')" in ib)
-    ok("...with a way to the install steps", 'href="/settings/mobile"' in ib)
+    # ONE HOME: System Settings > Mobile App (owner, 2026-09-29, IA D3). The inbox's tab carried a
+    # second device sentence because the installed app's scope was /inbox/ and could not open
+    # /settings/mobile; since Phase 4 the scope is the whole box, so the one home is reachable from
+    # inside the installed app, and a second copy is only a second thing to drift.
+    ok("the inbox's own Settings carries no second device sentence", 'id="ownbox-device"' not in ib)
+    ok("...and says where the mobile app is set up", 'href="/settings"' in ib and "mobile app" in ib)
     ok("the stale 'System follows' sentence is gone", "System follows" not in ib)
 else:
     print("  --   no inbox machine ships on this box, so there is no inbox Settings tab to check")

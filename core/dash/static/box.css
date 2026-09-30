@@ -28,12 +28,14 @@
 /* ── tokens ─────────────────────────────────────────────────────────────────────────────────── */
 :root {
   color-scheme: light;
-  /* colour: the site's cream and ink, and nothing louder */
+  /* colour: the site's cream and ink, and nothing louder. The greys were darkened on 2026-09-29
+     (owner: "The gray text is a little bit unreadable"): --ink-3 is 6.7:1 on the cream and 7.3:1
+     on white, AAA for small text, and --ink-2 12:1; dark mode is lifted to match. */
   --ground: #f6f4ef;
   --card: #ffffff;
   --ink: #111111;
-  --ink-2: #3c3c3c;
-  --ink-3: #6b6b6b;
+  --ink-2: #2e2e2e;
+  --ink-3: #565656;
   /* --line draws the edge of every field and ghost button, so it is a control's boundary and
      needs 3:1 against what it sits on (WCAG 1.4.11). The site's 32% measured 2.10; 46% is 3.06
      on the cream and 3.11 on white. */
@@ -61,15 +63,22 @@
   --bad: #b3261e;
 
   /* type */
+  /* THE TEXT FOLLOWS THE READER'S OWN TEXT SIZE (owner, 2026-09-29; docs/SCOPE_SYSTEM_TEXT_SIZE.md).
+     Every text size on the box is N * --px, so at the default setting nothing moves by a pixel.
+     Here --px is the browser's base size over 16, so a larger default font makes a larger box; on
+     iOS the block after the dark theme hands the root the device's own text size. Capped at 150%
+     (owner, 2026-09-29): past that the cards and menus stop working on a mobile, and pinch-to-zoom
+     is still there. */
+  --px: min(calc(1rem / 16), 1.5px);
   --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --mono: "Geist Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-  --t-title: clamp(24px, 2.4vw, 32px);
-  --t-lede: 19px;
-  --t-body: 17px;
-  --t-body-2: 16px;
-  --t-label: 14px;
-  --t-small: 13px;
-  --t-eyebrow: 12px;
+  --t-title: clamp(calc(24 * var(--px, 1px)), 2.4vw, calc(32 * var(--px, 1px)));
+  --t-lede: calc(20 * var(--px, 1px));
+  --t-body: calc(18 * var(--px, 1px));
+  --t-body-2: calc(17 * var(--px, 1px));
+  --t-label: calc(15 * var(--px, 1px));
+  --t-small: calc(14 * var(--px, 1px));
+  --t-eyebrow: calc(13 * var(--px, 1px));
   --w-regular: 400;
   --w-strong: 600;
 
@@ -116,8 +125,8 @@ html[data-theme="dark"] {
   --ground: #111111;
   --card: #1c1c1c;              /* the homepage's 5% cream wash over the ground, made solid */
   --ink: #f6f4ef;
-  --ink-2: #a9a9a9;
-  --ink-3: #8c8c8c;             /* the homepage's #6e6e6e is 3.34 on the card; this is 5.07 */
+  --ink-2: #c4c4c4;
+  --ink-3: #a3a3a3;             /* 6.76 on the card, 7.49 on the ground */
   --line: rgba(246, 244, 239, 0.36);
   --hairline: rgba(246, 244, 239, 0.10);
   --card-edge: rgba(246, 244, 239, 0.10);
@@ -133,6 +142,15 @@ html[data-theme="dark"] {
   --scrim: rgba(0, 0, 0, 0.6);
 }
 
+
+/* IPHONE AND IPAD FOLLOW DYNAMIC TYPE, and only they. Apple's body text style is the device's
+   text-size setting (17px at the default, Large). macOS knows the same style at 13px, so the
+   touch-callout test keeps a Mac out: it exists only on iOS. The root takes the size; the family
+   and weight are the box's own again at <body>. */
+@supports (font: -apple-system-body) and (-webkit-touch-callout: none) {
+  :where(html) { font: -apple-system-body; }
+  :root { --px: min(calc(1rem / 17), 1.5px); }
+}
 
 /* ── base: plain elements look right with no class ──────────────────────────────────────────── */
 /* EVERY RULE HERE IS :where(), SO IT WEIGHS NOTHING: a screen's own rule for the same property always
@@ -189,7 +207,7 @@ html[data-theme="dark"] {
   margin-top: var(--s-2);
   padding: 12px 14px;
   font: inherit;
-  font-size: 16px;
+  font-size: max(16px, calc(17 * var(--px, 1px)));
   font-weight: var(--w-regular);
   color: var(--ink);
   background: var(--card);
@@ -375,7 +393,7 @@ a.ui-row:hover { text-decoration: none; background: linear-gradient(var(--wash),
   align-items: center;
   gap: 6px;
   padding: 4px 9px;
-  font-size: 11px;
+  font-size: calc(12 * var(--px, 1px));
   font-weight: var(--w-strong);
   line-height: 1.4;
   color: var(--ink-2);
@@ -442,7 +460,7 @@ ol.ui-steps > li::before {
   border: 1px solid var(--hairline);
   border-radius: var(--r-xs);
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: calc(16 * var(--px, 1px));
   font-variant-ligatures: none;
   overflow-x: auto;
   white-space: nowrap;

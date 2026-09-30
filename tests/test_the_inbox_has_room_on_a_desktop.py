@@ -109,7 +109,8 @@ def test_the_flag_is_carried_in_exactly_one_place():
     # stayed centred in the old 620px band while everything under it started 116px from the left.
     # Two elements carrying the same flag would have been two things to keep in step.
     ok("the shell sets it on the body", "<body{' class=\"ib\"' if wide else ''}>" in _SRC)
-    ok("...and the column is left plain", '<div class="wrap">{body}</div>' in _SRC)
+    # THE WAY BACK SITS AT THE TOP OF THE COLUMN (2026-09-29), not a class on it: still plain.
+    ok("...and the column is left plain", '<div class="wrap">{_trail(here or request.path)}{body}</div>' in _SRC)
     # THE WIDTH IT WIDENS TO CHANGED WHEN THE RAIL ARRIVED (2026-09-18). It was 1080px, the
     # width of a two-column grid whose left column held the filters; the box's own rail now
     # holds the left edge, so the bar spans the whole window and starts at its left like any

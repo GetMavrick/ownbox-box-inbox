@@ -380,7 +380,29 @@ def _reap(why: str, machine: str | None = None) -> None:
     log.info("claude_login.reaped", why=why)
 
 
+def _real_cli_under_test() -> bool:
+    """True when a test is running and `claude` on PATH is the REAL, installed program.
+
+    A TEST NEVER STARTS THE REAL SIGN-IN. On a developer's Mac the real `claude` is on PATH, and
+    `claude setup-token` opens the owner's browser at a Claude authorize page, once per local test
+    run: twenty to thirty windows a day (owner, 2026-09-30). CI has no `claude`, so it never showed
+    there. A test that exercises the login writes a FAKE `claude` into a temporary folder and puts it
+    first on PATH (tests/test_a_machine_signs_in_to_its_own_account.py); that one may run, and only
+    that one."""
+    if not os.environ.get("AIOS_HERMETIC_TEST"):
+        return False
+    import shutil
+    import tempfile
+    found = shutil.which("claude")
+    if not found:
+        return False
+    tmp = os.path.realpath(tempfile.gettempdir())
+    return not os.path.realpath(found).startswith(tmp + os.sep)
+
+
 def cli_present() -> bool:
+    if _real_cli_under_test():
+        return False                                    # a test sees what CI sees: no CLI
     import shutil
     return bool(shutil.which("claude"))
 
@@ -657,6 +679,11 @@ def _serve(d: pathlib.Path) -> int:
     # The box's own token must not be inherited into a process whose whole job is to mint a new
     # one for somebody else — that is how a login "succeeds" without the person ever signing in.
     env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    # BELT AND BRACES: the worker never starts the real CLI under a test either, whatever called it.
+    if _real_cli_under_test():
+        os.close(master)
+        os.close(slave)
+        return fail("This box could not start the Claude sign-in (not during a test).")
     try:
         proc = subprocess.Popen(["claude", "setup-token"], stdin=slave, stdout=slave, stderr=slave,
                                 env=env, close_fds=True)

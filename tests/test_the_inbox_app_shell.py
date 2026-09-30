@@ -154,7 +154,7 @@ ok("the inbox page links the box's stylesheet", "/ui/box.css?v=" in _b)
 ok("...and the box's text face is preloaded, so the first paint is already Inter",
    'href="/ui/font/sans.woff2"' in _b)
 ok("the inbox's type is the box's sans, never its own family",
-   "font:16px/1.5 var(--sans)" in _app.CSS and "Archivo" not in re.sub(r"(?s)/\*.*?\*/", "", _app.CSS)
+   "font:calc(17 * var(--px, 1px))/1.5 var(--sans)" in _app.CSS and "Archivo" not in re.sub(r"(?s)/\*.*?\*/", "", _app.CSS)
    and "Public Sans" not in re.sub(r"(?s)/\*.*?\*/", "", _app.CSS))
 ok("text is never invisible while a face loads", _box_css.count("font-display: swap") >= 2)
 ok("the fallback stack survives the first family",
@@ -266,7 +266,8 @@ print("\ntest_the_appearance_switch_offers_only_states_it_has")
 # the device. So the rule this section holds is unchanged — a segment may only offer a state the
 # app can render — and it is now proved for Automatic by the script actually arriving.
 from core.dash import theme as _core_theme  # noqa: E402
-_sw = _c().get("/inbox/settings").get_data(as_text=True)
+# ITS ONE HOME IS SYSTEM SETTINGS (owner, 2026-09-29, IA D3); the inbox's Settings links there.
+_sw = _c().get("/settings").get_data(as_text=True)
 _form = re.search(r'<form class="ui-seg"[^>]*action="' + re.escape(_core_theme.ROUTE) + r'".*?</form>', _sw, re.S)
 _segs = re.findall(r'value="([a-z]+)" aria-pressed="(true|false)">([^<]+)</button>',
                    _form.group(0)) if _form else []
@@ -277,6 +278,7 @@ ok("an untouched box shows LIGHT selected, which is what it renders",
    [lbl for v, pressed, lbl in _segs if pressed == "true"] == ["Light"], str(_segs))
 _auto_c = _c()
 _auto_c.post(_core_theme.ROUTE, data={"theme": "system", "next": "/inbox/settings"})
+# THE INBOX STILL FOLLOWS THE CHOICE, wherever it was made: every screen is stamped before paint.
 _auto_head = _auto_c.get("/inbox/settings").get_data(as_text=True).split("</head>")[0]
 ok("...and Automatic is TRUE: choosing it sends the script that follows the device, before paint",
    "matchMedia('(prefers-color-scheme: dark)')" in _auto_head, "no device script in <head>")

@@ -104,8 +104,11 @@ why = refused(manifest(needs=["pro"]))
 ok("a tier is refused, naming it, and saying to name the feature", "'pro'" in why and "tier" in why, why)
 why = refused(manifest(needs=["coworkers", "teleport"]))
 ok("an unknown feature is refused, naming it", "'teleport'" in why, why)
-ok("a string, an empty list or a non-string entry is refused",
-   all(refused(manifest(needs=v)) for v in ("coworkers", [], [1])))
+ok("a string or a non-string entry is refused",
+   all(refused(manifest(needs=v)) for v in ("coworkers", [1])))
+# `needs: []` SAYS "EVERY PLAN RUNS THIS" (SDK v0, docs/SCOPE_MACHINE_MARKETPLACE.md §9.3): `ownbox
+# check` asks every machine to say what it needs, so "nothing" has to be sayable. Same as absent.
+ok("an empty list is accepted, and means every plan runs it", refused(manifest(needs=[])) == "")
 why = refused(manifest(needs=["coworkers"], requires_foundation="1.1"))
 ok("needs: with requires_foundation below 1.2 is refused, so an older box refuses the machine outright",
    "1.2" in why and "requires_foundation" in why, why)

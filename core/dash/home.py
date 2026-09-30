@@ -39,7 +39,7 @@ _BASE = """
    still read, each pointed at the token that replaced it */
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:calc(17 * var(--px, 1px));
 line-height:1.5;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
 svg{flex:none}
@@ -78,6 +78,11 @@ RAIL_CSS = """/* the checkbox that opens the drawer — focusable, never visible
 .ham{display:flex;align-items:center;justify-content:center;width:42px;height:42px;
 border-radius:10px;cursor:pointer;color:var(--ink)}
 .ham:hover{background:var(--hover)}
+.ham{position:relative}
+.menubadge{position:absolute;right:0;bottom:2px;width:17px;height:17px;border-radius:50%;
+background:var(--ink);color:var(--on-ink);display:flex;align-items:center;justify-content:center;
+box-shadow:0 0 0 2px var(--ground)}
+.menubadge svg{width:11px;height:11px}
 .scrim{display:none;position:fixed;inset:0;z-index:35;background:var(--scrim);opacity:0;
 pointer-events:none;transition:opacity .2s ease}
 
@@ -92,14 +97,14 @@ pointer-events:none;transition:opacity .2s ease}
    depending on the room it is standing in. A machine's own content keeps its own font. */
 .rail{width:272px;flex:0 0 272px;background:var(--rail);border-right:1px solid var(--hairline,var(--line));
 padding:0 10px 14px;display:flex;flex-direction:column;
-font:15px/1.5 var(--sans,-apple-system),-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+font:calc(17 * var(--px, 1px))/1.5 var(--sans,-apple-system),-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 .who{display:flex;align-items:center;gap:11px;padding:15px 8px 13px}
-.who .av{width:38px;height:38px;border-radius:11px;flex:none;display:flex;align-items:center;
-justify-content:center;font-weight:700;font-size:16px;color:var(--av-ink);
+.who .av{width:calc(38 * var(--px, 1px));height:calc(38 * var(--px, 1px));border-radius:11px;flex:none;display:flex;align-items:center;
+justify-content:center;font-weight:700;font-size:calc(18 * var(--px, 1px));color:var(--av-ink);
 background:linear-gradient(145deg,var(--av-a),var(--av-b))}
 .who .id{min-width:0;display:flex;flex-direction:column;line-height:1.25}
-.who b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.who span{color:var(--dim);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who b{font-size:calc(17 * var(--px, 1px));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who span{color:var(--dim);font-size:calc(15 * var(--px, 1px));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* A SUB-MENU'S TITLE BAR: the way out on the left, where you are in the middle, in bold. The
    empty third column balances the first so the title is centred on the drawer, not on what is
@@ -110,12 +115,12 @@ margin:0 0 6px}
 border-radius:9px;color:var(--ink)}
 .subhead a:hover{background:var(--hover)}
 .subhead a .ic{color:inherit}
-.subhead b{text-align:center;font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;
+.subhead b{text-align:center;font-size:calc(18 * var(--px, 1px));font-weight:700;white-space:nowrap;overflow:hidden;
 text-overflow:ellipsis}
 
 .nav{display:flex;flex-direction:column;gap:1px}
 .nav a{display:flex;align-items:center;gap:11px;min-height:44px;padding:8px 10px;
-border-radius:var(--r-sm,9px);color:var(--nav-ink);font-size:15px}
+border-radius:var(--r-sm,9px);color:var(--nav-ink);font-size:calc(17 * var(--px, 1px))}
 .nav a:hover{background:var(--hover)}
 .nav a[aria-current]{background:var(--sel);color:var(--ink);font-weight:600;
 box-shadow:inset 0 0 0 1px var(--hairline,transparent)}
@@ -129,9 +134,16 @@ box-shadow:inset 0 0 0 1px var(--hairline,transparent)}
 .nav a[aria-current] .ic{color:var(--ink)}
 
 .railfoot{margin-top:auto;padding:12px 10px 2px;border-top:1px solid var(--hairline,var(--line));
-color:var(--faint);font-size:12.5px;line-height:1.4}
-.railfoot b{display:block;color:var(--dim);font-weight:600;font-size:12.5px}
+color:var(--faint);font-size:calc(14.5 * var(--px, 1px));line-height:1.4}
+.railfoot b{display:block;color:var(--dim);font-weight:600;font-size:calc(14.5 * var(--px, 1px))}
 
+/* the way back, on every screen a menu leads into: one rust link for a thumb, the trail for a pointer */
+.back{display:inline-flex;align-items:center;min-height:44px;margin:-8px 0 2px;
+color:var(--link);font-size:calc(16 * var(--px, 1px));font-weight:600}
+.crumb{display:none;color:var(--dim);font-size:calc(14 * var(--px, 1px));margin-bottom:10px}
+.crumb b{color:var(--ink);font-weight:600}
+.crumb a{color:var(--link);font-weight:600}
+@media (min-width:821px){.back{display:none}.crumb{display:block}}
 .main{flex:1;min-width:0;padding:22px 26px 56px;max-width:1000px}
 @media (prefers-reduced-motion: reduce){.rail,.scrim{transition:none}}
 
@@ -163,7 +175,7 @@ color:var(--faint);font-size:12.5px;line-height:1.4}
 # menu over to the right side. In fact, I know it was. I think we should move it back to the left.
 # It has a better flow and feel."
 _PAGE = """.topbar{display:none;position:sticky;top:env(safe-area-inset-top,0px);z-index:30;
-align-items:center;gap:12px;height:52px;padding:0 6px 0 4px;background:var(--ground);
+align-items:center;gap:12px;min-height:52px;padding:0 6px 0 4px;background:var(--ground);
 border-bottom:1px solid var(--hairline)}
 .navtoggle:focus-visible~.topbar .ham{outline:2px solid var(--accent);outline-offset:-2px}
 .mark{font-weight:600;letter-spacing:-.01em}
@@ -172,13 +184,13 @@ border-bottom:1px solid var(--hairline)}
 .dash-grid{display:grid;gap:16px;margin-bottom:16px}
 .dash-grid>.card{margin-bottom:0}
 @media (min-width:1000px){.dash-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
-.card h2.eyebrow{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);
+.card h2.eyebrow{font-size:calc(13 * var(--px, 1px));font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);
 margin:0 0 12px}
-.state{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-weight:600;font-size:17px}
+.state{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-weight:600;font-size:calc(18 * var(--px, 1px))}
 .state .dot,.now .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-3);flex:none}
 .state.ok .dot,.now .dot{background:var(--ok-dot)}
 .state.stale .dot{background:var(--warn)}
-.mono{font-family:var(--mono);font-size:14px;overflow-wrap:anywhere}
+.mono{font-family:var(--mono);font-size:calc(15 * var(--px, 1px));overflow-wrap:anywhere}
 .now{display:flex;align-items:center;gap:8px;margin:14px 0 0;color:var(--ink-2)}
 .card .row .what{color:var(--ink-2)}
 .grow{flex:1}
@@ -186,32 +198,26 @@ margin:0 0 12px}
 @media (max-width:820px){
  .topbar{display:flex}
 }
-/* the trail for a pointer; one link back for a thumb. Mobile first: the link is the base rule */
-.back{display:inline-flex;align-items:center;min-height:44px;margin:-8px 0 2px;
-color:var(--link);font-size:15px;font-weight:600}
-.crumb{display:none;color:var(--dim);font-size:13px;margin-bottom:10px}
-.crumb b{color:var(--ink);font-weight:600}
-@media (min-width:821px){.back{display:none}.crumb{display:block}}
 h1{margin:0 0 6px;font-size:var(--t-title);font-weight:600;letter-spacing:-.02em;line-height:1.1}
-.lede{margin:0 0 24px;color:var(--ink-2);font-size:16px}
+.lede{margin:0 0 24px;color:var(--ink-2);font-size:calc(17 * var(--px, 1px))}
 .card{background:var(--card);border:1px solid var(--card-edge);border-radius:var(--r-md);
 padding:22px 22px;margin-bottom:16px}
-.card h2{margin:0 0 4px;font-size:17px;font-weight:600;letter-spacing:-.01em}
-.card .sub{color:var(--ink-2);font-size:15px;margin:0 0 12px}
+.card h2{margin:0 0 4px;font-size:calc(18 * var(--px, 1px));font-weight:600;letter-spacing:-.01em}
+.card .sub{color:var(--ink-2);font-size:calc(16 * var(--px, 1px));margin:0 0 12px}
 .card p,.card ul,.card ol{margin:0 0 12px}
 .card>:last-child,.card p:last-child{margin-bottom:0}
 .card ul,.card ol{padding-left:22px}
 .card li+li{margin-top:6px}
-.card h3{margin:22px 0 6px;font-size:16px;font-weight:600;letter-spacing:-.01em}
+.card h3{margin:22px 0 6px;font-size:calc(17 * var(--px, 1px));font-weight:600;letter-spacing:-.01em}
 .card h2+h3,.card h3:first-child{margin-top:8px}
 .card.notice{border-left:3px solid var(--warn)}
 .card details{margin:0 0 12px}
 .card summary{cursor:pointer;display:block;padding:11px 0;color:var(--link);font-weight:600;
-font-size:15px;list-style:none}
+font-size:calc(16 * var(--px, 1px));list-style:none}
 .card summary::-webkit-details-marker{display:none}
 .card summary::after{content:"+";margin-left:6px;font-weight:400}
 .card details[open]>summary::after{content:"−"}
-details.fold>summary{color:var(--link);font-weight:600;font-size:15px;list-style:none}
+details.fold>summary{color:var(--link);font-weight:600;font-size:calc(16 * var(--px, 1px));list-style:none}
 details.fold>summary::-webkit-details-marker{display:none}
 details.fold>summary::after{content:"+";margin-left:6px;font-weight:400}
 details.fold[open]>summary::after{content:"−"}
@@ -224,12 +230,12 @@ details.fold[open]>summary::after{content:"−"}
 background:var(--wash);padding:1px 5px;border-radius:6px;overflow-wrap:anywhere}
 .card a.step{align-items:center;flex-wrap:nowrap;min-height:48px;color:var(--ink)}
 .card a.step b{flex:1;min-width:0;font-weight:600}
-.card a.step b small{display:block;font-size:13px;font-weight:400;color:var(--ink-3)}
-.card a.step .go{color:var(--dim);flex:none;font-size:14px}
+.card a.step b small{display:block;font-size:calc(14 * var(--px, 1px));font-weight:400;color:var(--ink-3)}
+.card a.step .go{color:var(--dim);flex:none;font-size:calc(15 * var(--px, 1px))}
 .card a.step .fwd{color:var(--faint);flex:none}
 a.row:hover{color:var(--accent)}
 .n{font-variant-numeric:tabular-nums;font-weight:600;min-width:2.2em}
-.big{font-size:32px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.big{font-size:calc(33 * var(--px, 1px));font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .quiet{color:var(--dim)}
 .stale{color:var(--warn)}
 
@@ -244,7 +250,7 @@ a.row:hover{color:var(--accent)}
    colour from the same tokens the surface behind it does — no literal anywhere below. */
 label{display:block;font-size:var(--t-label);font-weight:600;margin:16px 0 8px}
 input[type=text],input[type=password],input[type=email],input[type=url],input[type=time],input:not([type]),
-select,textarea{width:100%;font:inherit;font-size:16px;font-weight:400;min-height:var(--control);
+select,textarea{width:100%;font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));font-weight:400;min-height:var(--control);
 padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);
 color:var(--ink)}
 input::placeholder{color:var(--faint)}
@@ -270,7 +276,7 @@ select option:disabled{color:var(--faint)}
    into every page the box serves, so a quotation in it is a quotation a buyer receives — and his
    phrasing that morning used the very noun the naming ruling below now reserves. The doctrine
    file is read by developers and served to nobody, which is where a verbatim quote belongs. */
-button{display:block;width:100%;min-height:var(--control);font:inherit;font-size:16px;
+button{display:block;width:100%;min-height:var(--control);font:inherit;font-size:calc(17 * var(--px, 1px));
 font-weight:600;padding:12px 26px;margin-top:16px;border:1px solid var(--accent);
 border-radius:var(--r-pill);background:var(--accent);color:var(--on-accent);cursor:pointer}
 button:hover{opacity:.88}
@@ -300,14 +306,14 @@ outline:2px solid var(--ink);outline-offset:2px}
 /* THE TICK IS NOT A FIELD AND MUST NOT WEAR A FIELD'S LABEL. Bold, block and 16px above a
    checkbox makes a consent line shout; it is a sentence somebody reads, beside a box. */
 label.consent{display:flex;gap:10px;align-items:flex-start;margin:16px 0 0;
-font-size:14px;font-weight:400;line-height:1.45;cursor:pointer}
+font-size:calc(15 * var(--px, 1px));font-weight:400;line-height:1.45;cursor:pointer}
 label.consent input{width:22px;height:22px;flex:none;margin:0;accent-color:var(--ink)}
 /* `a{color:inherit}` IS RIGHT FOR THE RAIL AND WRONG FOR PROSE. Every terms link, console link
    and "Sign in to Claude" on the settings screens rendered as plain text — unfindable unless you
    happened to drag the pointer over it. Scoped to paragraphs so rows and the rail keep theirs. */
 .card p a{color:var(--link)}
 .card p a:hover{text-decoration:underline}
-.foot{margin-top:18px;font-size:14px}
+.foot{margin-top:18px;font-size:calc(15 * var(--px, 1px))}
 .foot a{color:var(--link)}
 .foot a:hover{color:var(--link)}
 /* AN ADDRESS SOMEBODY HAS TO COPY BY HAND. It was unstyled prose; on a narrow screen it ran off
@@ -321,7 +327,7 @@ label.consent input{width:22px;height:22px;flex:none;margin:0;accent-color:var(-
    ruling of 2026-09-22, relayed by OSDev4 in #1426.
    `tests/test_core_css_keeps_the_vocabulary.py` measures this rather than trusting this comment,
    and it caught this very paragraph naming a reserved route while explaining the rule. */
-.addr{font:15px/1.5 var(--mono);font-variant-ligatures:none;
+.addr{font:calc(16 * var(--px, 1px))/1.5 var(--mono);font-variant-ligatures:none;
 background:var(--bg);border:1px solid var(--hairline);border-radius:var(--r-xs);
 padding:10px 12px;margin:10px 0 0;word-break:break-all;user-select:all}
 /* A ROW WHOSE TRAILING TEXT IS A SENTENCE, not a number. The coworkers screen puts four of
@@ -333,7 +339,7 @@ padding:10px 12px;margin:10px 0 0;word-break:break-all;user-select:all}
 .row{flex-wrap:wrap}
 .row.setting{flex-wrap:nowrap;align-items:center;padding:12px 0}
 .row.setting .what{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.row.setting .what>span{font-size:15px}
+.row.setting .what>span{font-size:calc(16 * var(--px, 1px))}
 .row.setting .act{color:var(--link);font-weight:600;white-space:nowrap;min-height:44px;
 display:flex;align-items:center}
 .row>.quiet{flex:1 1 320px;min-width:0}
@@ -343,7 +349,7 @@ display:flex;align-items:center}
 margin:4px 0 14px;border-radius:var(--r-md);
 background:linear-gradient(170deg,var(--ground),color-mix(in srgb,var(--link) 22%,var(--ground)))}
 .apps a{display:flex;flex-direction:column;align-items:center;gap:8px;width:84px;min-height:48px;
-color:var(--ink);font-size:13px;font-weight:600;text-align:center;line-height:1.2}
+color:var(--ink);font-size:calc(14 * var(--px, 1px));font-weight:600;text-align:center;line-height:1.2}
 .apps img{width:64px;height:64px;border-radius:15px;box-shadow:0 1px 3px rgba(17,17,17,.18)}
 /* A LINK THAT IS THE ACTION wears the ink pill, full width until a pointer exists. */
 .card a.btn{display:flex;align-items:center;justify-content:center;min-height:var(--control);
@@ -353,7 +359,7 @@ font-weight:600;text-decoration:none}
 /* A PERSON: who they are on top, their two outlines under it, side by side. */
 .row.person{display:block;padding:14px 0}
 .row.person .what{display:flex;flex-direction:column;gap:2px;overflow-wrap:anywhere}
-.row.person .what .quiet{font-size:14px}
+.row.person .what .quiet{font-size:calc(15 * var(--px, 1px))}
 .row.person .acts{display:flex;gap:10px;margin-top:10px}
 .row.person .acts form{flex:1}
 .row.person .acts button{margin-top:0}
@@ -422,15 +428,21 @@ _FWD_CHEVRON = ('<svg class="fwd" width="16" height="16" viewBox="0 0 24 24" fil
                 'stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>')
 # A PLUS, and nothing else. This row adds a machine to the box; the glyph is the verb.
 _ADD_ICON = "M12 5.5v13M5.5 12h13"
-# A SUNRISE for the Morning Review: the horizon, the sun half up, and the arrow of its rising.
-_SUNRISE_ICON = ("M2 20h20M7 20a5 5 0 0 1 10 0M12 4v8M9.5 6.5 12 4l2.5 2.5"
-                 "M5.6 13.6l1.4 1.4M18.4 13.6 17 15")
+# A SUN for the Morning Review, and nothing else (owner, 2026-09-29: "The morning review can just be
+# a sun instead of have the arrow"): a disc and eight even rays.
+_SUN_ICON = ("M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2"
+             "M5.28 5.28l1.42 1.42M17.3 17.3l1.42 1.42M5.28 18.72l1.42-1.42M17.3 6.7l1.42-1.42")
 # A GEAR. Two subpaths in one `d` — the cog outline and the hole — because `_svg` draws exactly
-# one path and a gear without its centre reads as a flower.
-_GEAR_ICON = ("M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"
-              "M20.4 13.6a8.6 8.6 0 0 0 0-3.2l2-1.5-2-3.5-2.4 1a8.6 8.6 0 0 0-2.8-1.6L14.9 2h-4"
-              "l-.3 2.8a8.6 8.6 0 0 0-2.8 1.6l-2.4-1-2 3.5 2 1.5a8.6 8.6 0 0 0 0 3.2l-2 1.5 2 3.5"
-              "2.4-1a8.6 8.6 0 0 0 2.8 1.6l.3 2.8h4l.3-2.8a8.6 8.6 0 0 0 2.8-1.6l2.4 1 2-3.5Z")
+# one path and a gear without its centre reads as a flower. REDRAWN 2026-09-29 (owner: "the System
+# Settings gear needs to be redrawn. It's kind of mangled"): the old one was hand-traced and its
+# teeth were uneven. This one is computed — six identical teeth on a 7.4 root and 9.4 tip radius,
+# joined along the root circle, around a 3-unit hole — and six teeth, not eight, because fewer,
+# larger teeth stay crisp at the menu's 19px, in the dark theme most of all.
+_GEAR_ICON = ("M9.71 4.96L10 2.61L14 2.61L14.29 4.96A7.4 7.4 0 0 1 16.95 6.5L19.13 5.58L21.13 9.03"
+              "L19.24 10.46A7.4 7.4 0 0 1 19.24 13.54L21.13 14.97L19.13 18.42L16.95 17.5"
+              "A7.4 7.4 0 0 1 14.29 19.04L14 21.39L10 21.39L9.71 19.04A7.4 7.4 0 0 1 7.05 17.5"
+              "L4.87 18.42L2.87 14.97L4.76 13.54A7.4 7.4 0 0 1 4.76 10.46L2.87 9.03L4.87 5.58"
+              "L7.05 6.5A7.4 7.4 0 0 1 9.71 4.96ZM15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0Z")
 
 
 def _svg(d: str, size: int = 19) -> str:
@@ -546,9 +558,44 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
             f'<div class="nav">{"".join(rows)}</div>{_foot()}</nav>')
 
 
-_HAM = ('<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-        'stroke-width="1.8" stroke-linecap="round" aria-hidden="true">'
-        '<path d="M4 7h16M4 12h16M4 17h16"/></svg>')
+
+def trail(path: str) -> str:
+    """The way back, drawn the same on every screen a menu leads into — or "" when there is none.
+
+    OWNER, 2026-09-29: "it's very helpful to have those rust colored breadcrumbs. It's not
+    consistent when they appear so we should make them standard anytime you're drilled down to a
+    sub menu page." They were drawn by this module's `chrome()` only, so a machine drawing its own
+    shell (the Unified Inbox) had none, and the desktop trail was grey text with nothing to press.
+
+    ONE RULE, EVERYWHERE: a screen that is a row of a menu, other than that menu's first screen,
+    gets one rust link back to where the menu begins (a thumb's, below 821px) and the trail with
+    its parent as a rust link (a pointer's, from 821px). Never on the menu's first screen, never
+    back to the page itself — a section whose address forwards to its first row (the AEO Machine
+    lands on Articles) would otherwise offer a link back to the screen it is.
+    """
+    sec, here = shell.current(path), shell.current_item(path)
+    if sec is None or here is None or not sec.items:
+        return ""
+    landing = next((i.href for i in sec.items if i.href == sec.href), sec.items[0].href)
+    # BY KEY: the rail hands back a grouped copy of a row (`shell._grouped`), the same row but not
+    # an equal object. The Base Machine's section has no rows, so it never gets here.
+    if not any(i.key == here.key for i in sec.items):
+        return ""
+    at_start = here.href == landing or sec.href.rstrip("/") == (path or "").rstrip("/")
+    if at_start:
+        # A MENU INSIDE A MENU IS ITSELF DRILLED INTO (the AEO Machine's Data Sources): its first
+        # screen goes back up one, to the menu it opened from. A top-level menu's first screen has
+        # nowhere above it but the main menu, which the header's button already opens.
+        up = next((s for s in shell.sections() if s.key == sec.parent), None) if sec.parent else None
+        return link_back(up.href, up.title, sec.title) if up is not None else ""
+    return link_back(sec.href, sec.title, here.label)
+
+
+def link_back(href: str, to: str, here: str) -> str:
+    """The way back itself: one rust link for a thumb, and the trail with its parent a rust link
+    for a pointer. Shared, so a machine's own screens draw it exactly as the box's do."""
+    return (f'<a class="back" href="{_esc(href)}">&lsaquo; {_esc(to)}</a>'
+            f'<div class="crumb"><a href="{_esc(href)}">{_esc(to)}</a> / <b>{_esc(here)}</b></div>')
 
 
 def chrome(path: str, *, title: str, lede: str, body: str,
@@ -556,31 +603,8 @@ def chrome(path: str, *, title: str, lede: str, body: str,
     """The buyer-facing page: rail, breadcrumb, one title, one plain sentence, then cards."""
     parts = shell.crumb(path)
     sec, here = shell.current(path), shell.current_item(path)
-    # THE TRAIL, NEVER THE SECTION READING ITS OWN NAME BACK (owner, 2026-09-29). On a section's own
-    # address the menu row is "Overview" and the heading already names the section, so there is no
-    # trail to draw; everywhere else it stays, for a pointer, from 821px up.
-    on_index = sec is not None and here is not None and here.href == sec.href
-    crumb = ""
-    if parts and not on_index:
-        crumb = ('<div class="crumb">'
-                 + ' / '.join(_esc(p) for p in parts[:-1])
-                 + (' / ' if len(parts) > 1 else '')
-                 + f'<b>{_esc(parts[-1])}</b></div>')
-    # ON A MOBILE, ONE LINK BACK TO WHERE THIS SECTION BEGINS, as iOS does, in place of the trail.
-    # Never on that first screen itself: a section whose address forwards to its first row (the AEO
-    # Machine lands on Articles) would otherwise offer a link back to the screen it is.
-    landing = ""
-    if sec is not None and sec.items:
-        landing = next((i.href for i in sec.items if i.href == sec.href), sec.items[0].href)
-    # ONLY FROM A ROW OF THIS SECTION, AND NEVER TO THE PAGE ITSELF. By key: the rail hands back a
-    # grouped copy of a row (`shell._grouped`), which is the same row but not an equal object.
-    # The Base Machine's section has no
-    # rows, so there is no landing row to compare against, and an unguarded rule drew "‹ Base
-    # Machine" on the Base Machine (caught by test_the_dashboard_reads, 2026-09-29).
-    back = (f'<a class="back" href="{_esc(sec.href)}">&lsaquo; {_esc(sec.title)}</a>'
-            if sec is not None and here is not None and any(i.key == here.key for i in sec.items)
-            and here.href != landing
-            and sec.href.rstrip("/") != path.rstrip("/") else "")
+    # THE WAY BACK IS ONE FUNCTION, SHARED WITH EVERY MACHINE'S SCREENS (`trail`).
+    way_back = trail(path)
     # WHICH APP THIS SCREEN IS. A machine that registered one (core/dash/look.py) names every tab
     # and every home-screen icon for itself; anything else is the Base Machine's.
     app = look.app_for(sec.machine if sec is not None else None)
@@ -599,11 +623,10 @@ def chrome(path: str, *, title: str, lede: str, body: str,
 {theme.head_tags(th)}
 <title>{_esc(name)} · {_esc(app["name"] if app else title)}</title>{look.head_tags()}{look.app_tags(app)}<style>{CSS}</style></head><body>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
-<div class="topbar"><label class="ham" for="navtoggle" role="button" aria-label="Menu">{_HAM}</label>
-{look.header_mark()}<span class="mark">{_esc(app["name"] if app else "Base Machine")}</span></div>
+<div class="topbar">{look.menu_button()}<span class="mark">{_esc(app["name"] if app else "Base Machine")}</span></div>
 <label class="scrim" for="navtoggle" aria-label="Close menu"></label>
 <div class="lay {shape}">{rail_html(path, who=who, email=email)}
-<main class="main">{back}{crumb}<h1>{_esc(title)}</h1><p class="lede">{_esc(lede)}</p>
+<main class="main">{way_back}<h1>{_esc(title)}</h1><p class="lede">{_esc(lede)}</p>
 {body}</main></div></body></html>"""
 
 
@@ -994,16 +1017,15 @@ def _setup_card() -> str:
     done, total, _waiting = got
     if done >= total:
         return ""
-    # THE CARD GOES TO SYSTEM SETTINGS, NOT TO A MACHINE. Owner, 2026-09-23, looking at a fresh
-    # box: *"The link in the middle to set up your box should go into the System Settings not the
-    # unified inbox machine. It should immediately get them their LLM connection and their
-    # progressive Web App."* So the headline link is the box's own settings, and under it one row
-    # per thing still to do, in the order he named them: the AI account first, the mobile app
-    # second, and only then the channels a machine connects.
+    # THE CARD IS THE BOX'S ONE SET-UP CHECKLIST (owner, 2026-09-29, IA decision D2 as revised:
+    # "go with the lighter version"). One row per thing still to do, each going straight to the
+    # page that finishes it, in the order he named on 2026-09-23 — the AI account first, the mobile
+    # app second, then the channels a machine connects ("It should immediately get them their LLM
+    # connection and their progressive Web App"). The rows do what the headline link to System
+    # Settings was for, so that link went: it opened a settings page, not a checklist.
     return ('<div class="card"><h2>Finish setting up your box</h2>'
             f'<p class="sub">{_esc(_setup_line(done, total))}</p>'
-            f'{_steps_left()}'
-            '<p><a href="/settings">Set up your box &rarr;</a></p></div>')
+            f'{_steps_left()}</div>')
 
 
 # THE ORDER THE CARD OFFERS THE STEPS IN — the box's own first, because nothing a machine does
@@ -1411,6 +1433,12 @@ def _custom_machine_rows() -> str:
                 ("Stopped by the update to " + str(hit.get("release") or "a new release")
                  .replace("release/", "") + " — " if hit else "Not started — ")
                 + str(m.get("reason") or "see the box's log"))
+        # WHOSE FIX IT IS (SDK v0, §9.2): a machine built only on what the box promises was broken
+        # by us; one that reached past the promise is told what it used and how to stop.
+        if hit and hit.get("promised") is True:
+            said += ". It uses only what the box promises, so this one is ours to fix: tell us."
+        elif hit and hit.get("unpromised"):
+            said += ". It used something the box never promised: " + str(hit["unpromised"])
         tone = "" if m.get("ok") else "stale"
         rows.append('<div class="row"><b style="flex:1;min-width:0">' + _esc(m.get("slug"))
                     + f'</b><span class="{tone}">{_esc(said)}</span></div>')
@@ -1476,14 +1504,15 @@ def add_machine():
 shell.register_section("dashboard", order=0, machine="core", title="Base Machine",
                        href="/dashboard", home=True, icon=_HOME_ICON)
 
-# THE MORNING REVIEW SITS RIGHT BELOW BASE MACHINE. Owner, 2026-09-29: "Add the Morning Review to
-# the menu." It had no row — the 8 AM message and the email were its only doors. It is the box's
-# own (every machine reports into it), so it joins the base group, and it sits with Base Machine
-# because both are read, where System Settings is changed. OWNER-ONLY because its page publishes
-# what the box spends and refuses anyone else (`review._admit`); a member is shown no row rather
-# than a door that sends them to sign in again.
-shell.register_section("review", order=5, machine="core", title="Morning Review",
-                       href="/app/review", icon=_SUNRISE_ICON, owner_only=True)
+# THE MORNING REVIEW HEADS THE ADD-ON MACHINES. Owner, 2026-09-29: "Add the Morning Review to the
+# menu" (it had no row; the 8 AM message and the email were its only doors), and then: "move
+# morning review down to the top of the list of the add-on machines. That way it's sort of grouped
+# with what it is related to." It is the day's report of every machine below it, so it leads them:
+# the group's gap opens above it, and a negative order keeps it ahead of the machines, which sort
+# by name at 0. OWNER-ONLY because its page publishes what the box spends and refuses anyone else
+# (`review._admit`); a member is shown no row rather than a door that sends them to sign in again.
+shell.register_section("review", order=-1, machine="core", title="Morning Review",
+                       href="/app/review", icon=_SUN_ICON, owner_only=True, group="addons")
 
 # ADD A MACHINE CLOSES THE ADD-ON GROUP. Owner, 2026-09-24: the add-on machines are *"unified inbox
 # and then add a machine"* — the machines a box has, then the way to add one more. `order=1000`

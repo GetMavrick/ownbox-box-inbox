@@ -196,8 +196,12 @@ def needs_refused(m: dict) -> str:
     if "needs" not in m:
         return ""
     wanted = m["needs"]
-    if not isinstance(wanted, list) or not wanted or not all(isinstance(f, str) for f in wanted):
+    if not isinstance(wanted, list) or not all(isinstance(f, str) for f in wanted):
         return "needs: expected a list of feature names, e.g. needs: [coworkers]"
+    # `needs: []` SAYS "EVERY PLAN RUNS THIS", on purpose (SDK v0: `ownbox check` asks every machine
+    # to say what it needs). It means the same as no `needs:` at all, and carries no version floor.
+    if not wanted:
+        return ""
     from core import tiers
     unknown = [f for f in wanted if f not in tiers.FEATURES]
     if unknown:

@@ -236,7 +236,12 @@ print("\n— a count is never worth taking the morning page down for —")
 print("\ntest_drafts_ready_and_the_oldest_waiting_are_reported")
 import re as _re  # noqa: E402
 from marketing.customer_voice.drafter import store as _drafts  # noqa: E402
-_conv("dr-old", "Nadia Okoro", [("in", _before_window(2))])
+# TWO DAYS AND AN HOUR BEFORE NOW, ON THE REAL CLOCK — the one "oldest waiting" measures from. It
+# was `_before_window(2)`, two days before the start of TODAY in the box's zone; between midnight
+# UTC and midnight in Los Angeles that start is still ahead of now, so the message was only 41h old
+# and read "41h" (found by OSDev4, 2026-09-30, failing every PR in those hours).
+_conv("dr-old", "Nadia Okoro",
+      [("in", (datetime.now(timezone.utc) - timedelta(days=2, hours=1)).isoformat())])
 _last = _drafts.newest_inbound(SPACE, "dr-old")
 ok("the waiting conversation has a message to answer", bool(_last), str(_last))
 _drafts.put(space=SPACE, zcid="dr-old", in_reply_to=str((_last or {}).get("id") or ""),

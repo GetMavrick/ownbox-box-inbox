@@ -73,6 +73,16 @@ def _manifest(folder: pathlib.Path) -> tuple[dict | None, str]:
         return None, f"name '{name}' must match its folder '{folder.name}'"
     if not (folder / "__init__.py").is_file():
         return None, "no __init__.py — a machine is a Python package"
+    # `sdk: N` — the facade it was built on (core/sdk.py). A box with an older facade refuses it by
+    # name rather than let it half-start on a promise this box never made.
+    if m.get("sdk") is not None:
+        from core import sdk
+        try:
+            wanted = int(m["sdk"])
+        except (TypeError, ValueError):
+            return None, f"sdk '{m['sdk']}' must be a whole number, like 1"
+        if wanted > sdk.VERSION:
+            return None, f"built for sdk {wanted}; this box has sdk {sdk.VERSION}. Let the next update arrive"
     try:
         from core import packs
         ok, why = packs.requires_ok(m)

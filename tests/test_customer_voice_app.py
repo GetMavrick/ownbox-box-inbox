@@ -662,9 +662,10 @@ def test_the_install_page_shows_no_markup_to_the_buyer():
     try:
         app, c = _client(token="")
         c.post("/dash/login", data={"token": settings.dash_token})
-        body = c.get("/inbox/install").get_data(as_text=True)
+        # THE INSTALL STEPS HAVE ONE HOME, System Settings > Mobile App (IA D3, 2026-09-29).
+        body = c.get("/settings/mobile").get_data(as_text=True)
         ok("no escaped markup is shown to the buyer", "&lt;b&gt;" not in body)
-        ok("...and the step is still there", "Add to Home screen" in body)
+        ok("...and the step is still there", "Add to Home" in body, body[-300:])
     finally:
         cfg.get_config = real
 

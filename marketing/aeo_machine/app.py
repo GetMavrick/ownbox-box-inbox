@@ -61,8 +61,10 @@ GOOGLE = "/settings/aeo/google"          # core's own screen (core/dash/google_s
 # owner's SANITY_API_TOKEN_OWNBOX"), and tests/test_aeo_machine_shell.py holds the two together.
 TOKEN = sources.SANITY_TOKEN
 
-# A MAGNIFIER, drawn as one path like every other rail icon (core/shell.py draws exactly one).
-_ICON = "M10.5 17a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13ZM15.5 15.5 20 20"
+# A MAGNIFIER WITH A PLUS, the AEO Machine's own mark on ownbox.io/machines (owner, 2026-09-29:
+# "you can just grab these because these are clean looking and better"). The site draws its circle
+# as a <circle>; here it is an arc, because a rail icon is exactly one path (core/shell.py).
+_ICON = "M16.5 10.5a6 6 0 1 1-12 0 6 6 0 0 1 12 0ZM15 15l5 5M10.5 7.5v6M7.5 10.5h6"
 
 # THE SECTION IS `/aeo`, NOT ITS FIRST SCREEN. `core.shell` gives a top-level section every page
 # under its own address and none outside it, so a section at /aeo/topics would leave /aeo/settings
@@ -374,19 +376,19 @@ border-bottom:1px solid var(--hairline)}
 .ar-d{grid-row:1/4;width:9px;height:9px;border-radius:99px;margin-top:7px;background:var(--faint)}
 .ar-d.ok{background:var(--ok)}.ar-d.warn{background:var(--warn)}.ar-d.bad{background:var(--bad)}
 .ar-d.ink{background:var(--ink)}
-.ar-t{grid-row:1;grid-column:2;font:600 15.5px/1.3 var(--sans);min-width:0;
+.ar-t{grid-row:1;grid-column:2;font:600 calc(16.5 * var(--px, 1px))/1.3 var(--sans);min-width:0;
 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ar-w{grid-row:1;grid-column:3;font-size:13px;color:var(--ink-3);white-space:nowrap;padding-top:2px}
-.card .ar-p{grid-row:2;grid-column:2/4;margin:0;font:400 15px/1.4 var(--sans);color:var(--ink-2);
+.ar-w{grid-row:1;grid-column:3;font-size:calc(14 * var(--px, 1px));color:var(--ink-3);white-space:nowrap;padding-top:2px}
+.card .ar-p{grid-row:2;grid-column:2/4;margin:0;font:400 calc(16 * var(--px, 1px))/1.4 var(--sans);color:var(--ink-2);
 max-height:2.8em;overflow:hidden}
 .ar-s{grid-row:3;grid-column:2/4;display:flex;flex-wrap:wrap;align-items:center;gap:0 14px;
-font-size:14px;color:var(--ink-3)}
+font-size:calc(15 * var(--px, 1px));color:var(--ink-3)}
 .ar-s b{color:var(--ink-2);font-weight:600}
 .ar-s form{display:inline}
 button.ar-go{display:inline-flex;align-items:center;width:auto;min-height:44px;margin:0;padding:0;
-border:0;background:none;color:var(--link);font-size:14px;font-weight:600}
+border:0;background:none;color:var(--link);font-size:calc(15 * var(--px, 1px));font-weight:600}
 button.ar-go:hover{background:none;text-decoration:underline}
-.ar-cap{margin:-8px 2px 16px;font-size:14px}
+.ar-cap{margin:-8px 2px 16px;font-size:calc(15 * var(--px, 1px))}
 .ar-add details{margin:6px 0 0}
 </style>"""
 
@@ -910,10 +912,10 @@ _PH_CSS = """<style>
 .ph-r input{width:22px;height:22px;margin:0}
 .pf-g{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 16px}
 .pf-t{background:var(--card);border:1px solid var(--hairline);border-radius:16px;padding:14px}
-.pf-k{font-size:13px;color:var(--ink-3)}.pf-n{font-size:26px;font-weight:700;margin:4px 0}
-.pf-c{font-size:13px;color:var(--ink-3)}.pf-c.up{color:var(--ok)}.pf-c.down{color:var(--bad)}
+.pf-k{font-size:calc(14 * var(--px, 1px));color:var(--ink-3)}.pf-n{font-size:calc(27 * var(--px, 1px));font-weight:700;margin:4px 0}
+.pf-c{font-size:calc(14 * var(--px, 1px));color:var(--ink-3)}.pf-c.up{color:var(--ok)}.pf-c.down{color:var(--bad)}
 .card .pf-l{list-style:none;margin:0;padding:0}.pf-l li{display:flex;justify-content:space-between;gap:10px;
-padding:10px 0;border-bottom:1px solid var(--hairline);font-size:15px}.pf-l li:last-child{border-bottom:0}
+padding:10px 0;border-bottom:1px solid var(--hairline);font-size:calc(16 * var(--px, 1px))}.pf-l li:last-child{border-bottom:0}
 .pf-l span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pf-l b{white-space:nowrap}.pf-w span{white-space:normal}
 @media (min-width:760px){.pf-g{grid-template-columns:repeat(4,1fr)}}
 </style>"""

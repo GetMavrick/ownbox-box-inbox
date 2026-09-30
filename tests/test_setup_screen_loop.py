@@ -335,7 +335,7 @@ def test_the_connect_button_now_reaches_the_set_up_screen():
             ok(f"{path} sends him to the set-up screen",
                got and got[0][0] == "/inbox/setup", str(got))
             ok(f"...and the words match where it goes",
-               got and got[0][1] == "Set up your box", str(got))
+               got and got[0][1] == "Set up your inbox", str(got))
     finally:
         spaces.all_spaces, rep.report, store.list_conversations = keep
 

@@ -271,6 +271,60 @@ def test_watchdog_run_once_gating_and_new_probes():
     print("PASS — #15 both-token gate; #G3/#G8 re-page probes; #G7 watchdog self-init")
 
 
+def test_watchdog_starts_a_checkin_when_a_probe_turns():
+    """docs/PLAN_NO_GHOST_BOXES.md P1 follow-up (OSDev1, 2026-09-30): on a fresh box the first probes
+    run before dispatch is up, and the first check-in carried 'failing: dispatch' for six hours. A
+    probe that turns (ok / warn / fail) starts one check-in NOW, so the next watchdog run clears it."""
+    from core import checkin, cost_guard
+    from core.config import settings as _s
+    names = ("_alert", "_probe_disk", "_probe_dispatch", "_probe_worker", "_probe_heartbeat",
+             "probe_backend", "resolve_deconfigured_backend_alerts", "_retire_old_raws")
+    saved = {n: getattr(watchdog, n) for n in names}
+    saved_cg = (cost_guard.month_to_date_spend, cost_guard.ceiling, cost_guard.metered_vendors)
+    saved_reap, saved_db, saved_nudge = state.reap_orphan_jobs, _s.db_path, checkin.nudge
+    saved_tok = (_s.slack_app_token, _s.slack_bot_token, _s.heygen_api_key, _s.healthcheck_url)
+    nudged = []
+    up = {"dispatch": False}
+    try:
+        _s.db_path = os.path.join(tempfile.mkdtemp(), "wd_turn.db")
+        watchdog._alert = lambda key, ok_, detail: True
+        for n in ("_probe_disk", "_probe_worker"):
+            setattr(watchdog, n, lambda *a, **k: (True, "ok"))
+        watchdog._probe_dispatch = lambda *a, **k: (up["dispatch"], "ok" if up["dispatch"] else "not answering")
+        watchdog._probe_heartbeat = lambda comp: (True, "ok")
+        watchdog.probe_backend = lambda: ("claude_code", True, "ok")
+        watchdog.resolve_deconfigured_backend_alerts = lambda k: None
+        watchdog._retire_old_raws = lambda: None
+        state.reap_orphan_jobs = lambda **k: ([], 0)
+        cost_guard.month_to_date_spend = lambda: 0.0
+        cost_guard.ceiling = lambda: 100.0
+        cost_guard.metered_vendors = lambda: []
+        _s.heygen_api_key = _s.healthcheck_url = ""
+        _s.slack_app_token, _s.slack_bot_token = "", ""
+        checkin.nudge = lambda: nudged.append(1)
+        watchdog.run_once()
+        ok("the first run on a fresh box (every probe new) starts a check-in", len(nudged) == 1)
+        # SETTLE. On a fresh database a probe or two genuinely turn on the second run (a table the
+        # first run's init created is now there and empty); that is a real change, not this rule.
+        watchdog.run_once()
+        nudged.clear()
+        watchdog.run_once()
+        ok("...and a run where nothing turned starts none", nudged == [])
+        up["dispatch"] = True
+        watchdog.run_once()
+        ok("dispatch comes up: fail -> ok starts ONE check-in, so the stale flag clears now",
+           len(nudged) == 1)
+        watchdog.run_once()
+        ok("...and none again while it stays up", len(nudged) == 1)
+    finally:
+        for n, fn in saved.items():
+            setattr(watchdog, n, fn)
+        cost_guard.month_to_date_spend, cost_guard.ceiling, cost_guard.metered_vendors = saved_cg
+        state.reap_orphan_jobs, _s.db_path, checkin.nudge = saved_reap, saved_db, saved_nudge
+        _s.slack_app_token, _s.slack_bot_token, _s.heygen_api_key, _s.healthcheck_url = saved_tok
+    print("PASS — a probe that turns starts one check-in")
+
+
 def _content_machine_loaded() -> bool:
     """THE SCHEMA SPLIT: reel_scripts is the Content Machine's table. This suite is the kernel's and
     ships to every image, so the machine is loaded from its file, never imported by name (the
@@ -591,6 +645,7 @@ if __name__ == "__main__":
     test_a1_handler_that_posts_gets_no_fallback()
     test_a1_automated_job_no_thread_is_left_silent()
     test_a2_startup_probe_sets_heartbeat()
+    test_watchdog_starts_a_checkin_when_a_probe_turns()
     test_a3_health_answers_with_brain_down()
     test_a4_backend_config_problems()
     test_deconfigured_backend_alert_is_cleared()

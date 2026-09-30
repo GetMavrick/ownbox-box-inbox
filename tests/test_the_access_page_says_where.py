@@ -241,7 +241,10 @@ ok("WITH a key on the box, the command comes FIRST — they came back for it",
 ok("...and it no longer says the command cannot work", "cannot work yet" not in visible(_with))
 A.write("")
 world([BOX_IP], BOX_IP)
-ok("...and in 16px type, the size that does not zoom a mobile screen", 'font-size:16px">ssh root@' in page)
+# 17px since the owner's one-point readability pass (2026-09-29); still above the 16px zoom line.
+# 17px at the default setting, and it follows the reader's text size (2026-09-29).
+ok("...and in 17px type at the default, following the reader's text size",
+   'font-size:calc(17 * var(--px, 1px))">ssh root@' in page)
 ok("the address the name leads to is shown, and said to be this box",
    BOX_IP in text and "which is this box" in text)
 ok("...with the address-only command as a fallback", f"ssh root@{BOX_IP}" in text)

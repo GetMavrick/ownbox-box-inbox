@@ -119,9 +119,12 @@ Build your own machines. Yours live in **`my/machines/<name>/`**, one self-conta
 with nothing of it anywhere else. A machine folder needs two things, or the box skips it and says
 why on the Add a Machine page:
 
-- **`machine.yaml`**, with `name`, `version` and `requires_foundation`. The `name` is lowercase
-  letters, digits and hyphens, and it must be the folder's own name.
-- **`__init__.py`**, which registers what the machine does when it is loaded.
+- **`machine.yaml`**, with `name`, `version`, `requires_foundation`, `needs:` and `sdk: 1`. The
+  `name` is lowercase letters, digits and hyphens, and it must be the folder's own name.
+- **`__init__.py`**, which registers what the machine does when it is loaded, through
+  **`from core import sdk`** and nothing else from the box: that is what the box promises to keep
+  working. Start with `python scripts/ownbox.py new <name>`, and run
+  `python scripts/ownbox.py check <name>` after every change.
 
 That folder is what keeps your machine from ever stopping an update, and it is what lets you copy
 a machine to another box later. The full walkthrough is `BUILD_A_MACHINE.md` in this folder, once

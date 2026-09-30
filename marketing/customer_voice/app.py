@@ -320,7 +320,7 @@ body{background:var(--bg);color:var(--ink);
   /* PUBLIC SANS FIRST, THE OLD STACK BEHIND IT. The fallback is not decoration:
      it is what paints during `swap`, and what a box whose font file 404s keeps
      rendering in. */
-  font:16px/1.5 var(--sans);
+  font:calc(17 * var(--px, 1px))/1.5 var(--sans);
   -webkit-font-smoothing:antialiased;
   /* THE TAB BAR IS FIXED, so the last row of every screen would sit under it without this —
      AND THE ORB RISES 16px ABOVE THE BAR, which 64px did not account for. Measured on a box
@@ -353,23 +353,23 @@ a{color:inherit;text-decoration:none}
 .bar-in{display:flex;align-items:center;gap:10px;padding:9px 16px;max-width:620px;margin:0 auto}
 .bar-in .appmark{width:32px;height:32px}
 .brand{font-weight:var(--w-strong);letter-spacing:-.015em}
-.day{margin-left:auto;font-size:13px;color:var(--dimmer)}
+.day{margin-left:auto;font-size:calc(14 * var(--px, 1px));color:var(--dimmer)}
 /* THE DATE, NOW ON THE SCREEN INSTEAD OF IN THE CHROME. Owner, 2026-09-22: *"That date in the
    top needs to get out of there and move down into the today screen."* It sits beside the
    "Today" eyebrow because that is the word it qualifies — "Today" on its own tells a person
    nothing they did not know, and this file already said so about the h1 it replaced. Not bold
    and not a heading: it is the caption on the heading, and it must not compete with the
    sentence underneath. */
-h1 .daystamp{font-weight:var(--w-regular);font-size:13px;color:var(--dimmer);letter-spacing:0;
+h1 .daystamp{font-weight:var(--w-regular);font-size:calc(13 * var(--px, 1px));color:var(--dimmer);letter-spacing:0;
   margin-left:8px;white-space:nowrap}
 /* HEADINGS ARE THE ONLY PLACE THE DISPLAY FACE SPEAKS, and there is not much of it: every
    heading in this app is one word — Inbox, Search, Today, Settings. That is precisely why the
    greeting on Today was worth building; it is the one heading long enough to have a shape. */
 h1{font-family:var(--sans);
-  font-size:22px;font-weight:var(--w-strong);letter-spacing:-.022em;margin:18px 0 2px;color:var(--ink)}
+  font-size:calc(22 * var(--px, 1px));font-weight:var(--w-strong);letter-spacing:-.022em;margin:18px 0 2px;color:var(--ink)}
 .head .v,.hello h1{font-family:var(--sans)}
 h1 .chan{vertical-align:middle}
-.sub{color:var(--dim);font-size:15px;margin:0 0 14px}
+.sub{color:var(--dim);font-size:calc(16 * var(--px, 1px));margin:0 0 14px}
 
 /* ── the briefing ──────────────────────────────────────────────────────────────────────────
    KINSO'S MOBILE SCREEN IS A BRIEFING — "Good morning, Sarah. You've got 4 new and 9 active
@@ -382,14 +382,14 @@ h1 .chan{vertical-align:middle}
    and 9 people waiting on a reply" is the reason to have opened the app — so it gets a readable
    size and the numbers get the weight. */
 .hello{padding:14px 2px 4px}
-.hello h1{margin:0;font-size:30px;line-height:1.1;font-weight:var(--w-strong);letter-spacing:-.03em}
-.hello .line{margin:7px 0 0;font-size:16.5px;line-height:1.42;color:var(--dim)}
+.hello h1{margin:0;font-size:calc(30 * var(--px, 1px));line-height:1.1;font-weight:var(--w-strong);letter-spacing:-.03em}
+.hello .line{margin:7px 0 0;font-size:calc(17.5 * var(--px, 1px));line-height:1.42;color:var(--dim)}
 .hello .line b{font-weight:var(--w-strong);color:var(--ink)}
 
 .head{padding:8px 2px 18px}
 .head .v{font-size:var(--t-title);line-height:1.15;font-weight:var(--w-strong);letter-spacing:-.03em}
 .head .v em{font-style:normal;color:var(--accent)}
-.head .l{margin-top:6px;color:var(--dim);font-size:15px}
+.head .l{margin-top:6px;color:var(--dim);font-size:calc(16 * var(--px, 1px))}
 
 /* ── grouped lists (Apple) on a tinted ground (Kinso) ──────────────────────────────────────
    Rows live in ONE rounded white card on a grey ground, the iOS inset-grouped table. Kinso
@@ -399,7 +399,7 @@ h1 .chan{vertical-align:middle}
 .row{display:flex;gap:12px;align-items:baseline;padding:13px 0;border-bottom:1px solid var(--hair)}
 .row:last-child{border-bottom:0}
 .row .n{font-variant-numeric:tabular-nums;font-weight:var(--w-strong);min-width:2.2em}
-.row .t{color:var(--dim);font-size:15px}
+.row .t{color:var(--dim);font-size:calc(16 * var(--px, 1px))}
 /* A ROW THAT GOES SOMEWHERE LOOKS LIKE ONE. Same row, made an <a>: no underline, no link blue —
    the whole row is the target, exactly as a conversation row already is, with a chevron so the
    affordance is visible rather than discovered by tapping. 44px is kept by the row's own padding.
@@ -415,9 +415,9 @@ a.row:active{background:var(--hair);border-radius:10px}
 .figs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
 .figs .fig:last-child:nth-child(odd){grid-column:1/-1}
 .fig{background:var(--surface);border-radius:16px;padding:15px;box-shadow:var(--lift)}
-.fig .v{font-size:23px;font-weight:var(--w-strong);font-variant-numeric:tabular-nums}
-.fig .l{margin-top:3px;color:var(--dim);font-size:13px;line-height:1.35}
-.quiet{color:var(--dim);font-size:15px;padding:18px 2px;line-height:1.55}
+.fig .v{font-size:calc(24 * var(--px, 1px));font-weight:var(--w-strong);font-variant-numeric:tabular-nums}
+.fig .l{margin-top:3px;color:var(--dim);font-size:calc(14 * var(--px, 1px));line-height:1.35}
+.quiet{color:var(--dim);font-size:calc(16 * var(--px, 1px));padding:18px 2px;line-height:1.55}
 .row .t.quiet{padding:0}
 /* THE SERVER FIELD ONLY WHEN IT MEANS SOMETHING. A Gmail buyer was shown an "IMAP server" box
    they must leave empty. Hidden until "Another provider" is picked; a browser without :has()
@@ -428,8 +428,8 @@ a.row:active{background:var(--hair);border-radius:10px}
    .quiet carries padding meant for a notice standing alone. Neither belongs inside it. */
 .dcard label{font-weight:400;padding:14px 0}
 .dcard label .quiet{padding:0}
-.dcard .dm{font-size:13px}
-.foot{margin-top:26px;color:var(--dimmer);font-size:13px}
+.dcard .dm{font-size:calc(14 * var(--px, 1px))}
+.foot{margin-top:26px;color:var(--dimmer);font-size:calc(14 * var(--px, 1px))}
 .foot a{color:var(--href)}
 
 /* ── a conversation row, copied from Kinso ─────────────────────────────────────────────────
@@ -438,17 +438,17 @@ a.row:active{background:var(--hair);border-radius:10px}
 .conv{display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto auto auto;
   gap:2px 12px;padding:11px 0;min-height:44px;border-bottom:1px solid var(--hair);align-items:center}
 .conv:last-child{border-bottom:0}
-.conv .av{grid-row:1/4;width:42px;height:42px;border-radius:50%;display:flex;align-items:center;
-  justify-content:center;font-size:15px;font-weight:var(--w-strong);letter-spacing:.01em;
+.conv .av{grid-row:1/4;width:calc(42 * var(--px, 1px));height:calc(42 * var(--px, 1px));border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:calc(16 * var(--px, 1px));font-weight:var(--w-strong);letter-spacing:.01em;
   background:var(--accent-soft);color:var(--accent);flex:none;
   /* NO PHOTO EXISTS. The vendor sends us a display name and nothing else, so initials are not a
      placeholder for an avatar we failed to load — they are the avatar, the way Apple's Messages
      draws a contact with no picture. */}
-.conv .w{grid-row:1;grid-column:2;font-size:15.5px;letter-spacing:-.01em;
+.conv .w{grid-row:1;grid-column:2;font-size:calc(16.5 * var(--px, 1px));letter-spacing:-.01em;
   display:flex;align-items:baseline;gap:7px;min-width:0}
 .conv .w b{font-weight:var(--w-regular);color:var(--dim);overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap}
-.conv .t{font-weight:400;font-size:13px;color:var(--dimmer);flex:none}
+.conv .t{font-weight:400;font-size:calc(14 * var(--px, 1px));color:var(--dimmer);flex:none}
 /* ── READ AND UNREAD, THE WAY EVERY INBOX SAYS IT ────────────────────────────────────────────
    Owner, 2026-09-17: "New messages should be in Bold text. Read messages in regular. Just like
    a normal inbox."
@@ -482,12 +482,12 @@ a.row:active{background:var(--hair);border-radius:10px}
    wearing a number. `overflow-wrap` is for the customer who pastes a URL with no spaces in it —
    without it one unbreakable token runs out past the channel logo.
    `--dim` at 15px measures 7.98:1 on the card. */
-.conv .p{grid-row:2;grid-column:2;color:var(--dim);font-size:15px;line-height:1.4;
+.conv .p{grid-row:2;grid-column:2;color:var(--dim);font-size:calc(16 * var(--px, 1px));line-height:1.4;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
   overflow-wrap:anywhere;min-width:0;margin-top:1px}
 .conv .p i{font-style:normal;color:var(--dimmer)}
 .conv .s{grid-row:3;grid-column:2;display:flex;align-items:center;gap:6px;min-width:0;
-  flex-wrap:wrap;row-gap:5px;color:var(--dim);font-size:15px}
+  flex-wrap:wrap;row-gap:5px;color:var(--dim);font-size:calc(16 * var(--px, 1px))}
 /* A TAG NEVER TRUNCATES AND NEVER OVERLAPS — IT WRAPS. Written first as one non-wrapping line,
    and a 390px render showed both failures at once: "2 messages" cut to "2 mess…" for no reason,
    and a second tag sliding straight under the channel logo, because a `flex:none` pill cannot
@@ -547,7 +547,7 @@ a.row:active{background:var(--hair);border-radius:10px}
    differ too, because a red pill and a grey pill are the same pill to a colourblind reader
    and this app already refuses colour-only meaning on the channel marks. */
 .tag{flex:none;display:inline-flex;align-items:center;border:1px solid transparent;
-  border-radius:6px;padding:1px 7px;font-size:11.5px;font-weight:var(--w-strong);letter-spacing:.015em;
+  border-radius:6px;padding:1px 7px;font-size:calc(12.5 * var(--px, 1px));font-weight:var(--w-strong);letter-spacing:.015em;
   line-height:1.6;white-space:nowrap}
 .tag.stop{color:var(--bad);background:var(--bad-soft);border-color:var(--bad-soft)}
 .tag.warn{color:var(--dim);background:var(--bg);border-color:var(--accent-line)}
@@ -562,7 +562,7 @@ a.row:active{background:var(--hair);border-radius:10px}
 .vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
   clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 .chan{display:inline-flex;align-items:center;gap:5px;vertical-align:middle;margin-left:7px;
-  color:var(--dim);background:var(--bg);border-radius:7px;padding:3px 8px;font-size:12px;
+  color:var(--dim);background:var(--bg);border-radius:7px;padding:3px 8px;font-size:calc(13 * var(--px, 1px));
   font-weight:var(--w-regular);letter-spacing:.01em;white-space:nowrap}
 
 /* ── the search field ──────────────────────────────────────────────────────────────────────
@@ -578,7 +578,7 @@ a.row:active{background:var(--hair);border-radius:10px}
   border-radius:13px;padding:0 13px;box-shadow:var(--lift)}
 .find svg{flex:none;display:block;color:var(--dimmer)}
 .find input{flex:1;min-width:0;border:0;background:transparent;color:var(--ink);font:inherit;
-  font-size:16px;padding:13px 0;-webkit-appearance:none}
+  font-size:max(16px, calc(17 * var(--px, 1px)));padding:13px 0;-webkit-appearance:none}
 /* NOT `outline:none`. Written that way first, and test_inbox_design refused it by name — this
    app's accessibility floor is that focus is never removed, only redrawn. Same two lines the
    reply box already uses, so the two fields focus identically. */
@@ -587,12 +587,12 @@ a.row:active{background:var(--hair);border-radius:10px}
 .find input::-webkit-search-decoration,.find input::-webkit-search-cancel-button{
   -webkit-appearance:none}
 .find button{flex:none;border:0;background:transparent;color:var(--accent);font:inherit;
-  font-size:14.5px;font-weight:var(--w-strong);padding:8px 0 8px 4px;cursor:pointer}
+  font-size:calc(15.5 * var(--px, 1px));font-weight:var(--w-strong);padding:8px 0 8px 4px;cursor:pointer}
 /* QUIETER THAN THE RESULTS IT COUNTS. Set at 14.5px first and the "Show everything" link wrapped
    onto its own line reading like the next thing to do — the loudest thing on a screen whose job is
    the rows underneath it. */
 .found{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:11px 2px 0;
-  color:var(--dim);font-size:13.5px;font-variant-numeric:tabular-nums}
+  color:var(--dim);font-size:calc(14.5 * var(--px, 1px));font-variant-numeric:tabular-nums}
 .found a{color:var(--href);font-weight:var(--w-regular)}
 
 /* ── Older and Newer ───────────────────────────────────────────────────────────────────────
@@ -608,7 +608,7 @@ a.row:active{background:var(--hair);border-radius:10px}
    how many siblings there happen to be. */
 .pager .pg.next:only-child{margin-left:auto}
 .pg{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:12px;
-  background:var(--surface);box-shadow:var(--lift);color:var(--href);font-size:15px;
+  background:var(--surface);box-shadow:var(--lift);color:var(--href);font-size:calc(16 * var(--px, 1px));
   font-weight:var(--w-regular)}
 .pg:focus-visible{outline:2px solid var(--accent-line);outline-offset:2px}
 
@@ -618,11 +618,11 @@ a.row:active{background:var(--hair);border-radius:10px}
   -webkit-overflow-scrolling:touch;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;color:var(--dim);
-  background:var(--surface);border-radius:999px;padding:7px 13px;font-size:14px;font-weight:var(--w-regular);
+  background:var(--surface);border-radius:999px;padding:7px 13px;font-size:calc(15 * var(--px, 1px));font-weight:var(--w-regular);
   white-space:nowrap;box-shadow:var(--lift)}
 .chip.on{color:var(--accent-ink);background:var(--accent)}
 .chip.on .n{color:var(--accent-ink);opacity:.75}
-.chip .n{color:var(--dimmer);font-size:12px;font-variant-numeric:tabular-nums}
+.chip .n{color:var(--dimmer);font-size:calc(13 * var(--px, 1px));font-variant-numeric:tabular-nums}
 /* THE TWO ROWS ARE NOT THE SAME KIND OF CHOICE, and stacking two identical rows reads as one
    control that wrapped. The filter row asks WHAT STATE; the channel row asks WHERE FROM. So the
    filter row sits tighter to the header it qualifies, and the channel row keeps its own space. */
@@ -698,7 +698,7 @@ a.row:active{background:var(--hair);border-radius:10px}
    is a real errand on somebody else's website, so the screen's job is to say how far in you are
    and to get the finished ones out of the way of the one you still owe. */
 .wiz{margin:16px 0 4px}
-.wiz-n{margin:0 0 8px;font-size:15px;color:var(--dim)}
+.wiz-n{margin:0 0 8px;font-size:calc(16 * var(--px, 1px));color:var(--dim)}
 .wiz-n b{color:var(--ink);font-weight:var(--w-strong)}
 /* A SEGMENT PER STEP. Gap, not a divider, so the unfilled ones read as empty rather than as
    something drawn — a track with hairlines in it looks like it is already partly full. */
@@ -725,12 +725,12 @@ a.row:active{background:var(--hair);border-radius:10px}
 .stepsum:hover .stepsum-v{color:var(--accent)}
 .stepsum .tick{flex:none;width:22px;height:22px;border-radius:50%;background:var(--accent);
   color:var(--accent-ink);display:flex;align-items:center;justify-content:center;
-  font-size:13px;line-height:1}
+  font-size:calc(14 * var(--px, 1px));line-height:1}
 .stepsum-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
-.stepsum-t b{font-size:15.5px;font-weight:var(--w-strong)}
-.stepsum-s{font-size:13.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;
+.stepsum-t b{font-size:calc(16.5 * var(--px, 1px));font-weight:var(--w-strong)}
+.stepsum-s{font-size:calc(14.5 * var(--px, 1px));color:var(--dim);overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap}
-.stepsum-v{flex:none;font-size:13.5px;color:var(--dim)}
+.stepsum-v{flex:none;font-size:calc(14.5 * var(--px, 1px));color:var(--dim)}
 /* ── THE SET-UP GUIDE (docs/SCOPE_ONE_PLACE_PER_SETTING.md) ─────────────────────────────────
    One row per step, and the whole row is the link to that step's one home: GOV.UK's task list
    makes the row the target because people tap whatever looks tappable. 56px tall, well past the
@@ -739,14 +739,14 @@ a.row:active{background:var(--hair);border-radius:10px}
 .grow{display:flex;align-items:center;gap:12px;min-height:56px;padding:14px 16px;
   background:var(--surface);border-radius:16px;color:var(--ink);text-decoration:none;
   box-shadow:var(--lift)}
-.grow .gn{flex:none;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;
-  justify-content:center;border:1px solid var(--line);font-size:14px;font-weight:var(--w-strong)}
+.grow .gn{flex:none;width:calc(28 * var(--px, 1px));height:calc(28 * var(--px, 1px));border-radius:50%;display:flex;align-items:center;
+  justify-content:center;border:1px solid var(--line);font-size:calc(15 * var(--px, 1px));font-weight:var(--w-strong)}
 .grow.done .gn{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 .grow .gt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.grow .gt b{font-size:16px;font-weight:var(--w-strong)}
-.grow .gs{font-size:14px;color:var(--dim)}
-.grow .gtag{flex:none;font-size:13px;color:var(--dimmer)}
-.grow .chev{flex:none;font-size:20px;color:var(--dimmer)}
+.grow .gt b{font-size:calc(17 * var(--px, 1px));font-weight:var(--w-strong)}
+.grow .gs{font-size:calc(15 * var(--px, 1px));color:var(--dim)}
+.grow .gtag{flex:none;font-size:calc(14 * var(--px, 1px));color:var(--dimmer)}
+.grow .chev{flex:none;font-size:calc(21 * var(--px, 1px));color:var(--dimmer)}
 /* THE STEP STILL OWED IS THE ONE THAT LOOKS LIKE WORK. Everything above it has folded away, so
    it does not need a highlight to be found — it needs the heading weight the folded rows gave up. */
 .wstep:not(.done) > h1{margin-bottom:0}
@@ -763,7 +763,7 @@ a.row:active{background:var(--hair);border-radius:10px}
    14px of side padding are generous per line and ruinous multiplied by forty. 1.28 and tighter
    padding read the same on a short message and give back most of a screen on a long one. */
 .msg .b{background:var(--bubble-in);border-radius:19px;padding:8px 13px;white-space:pre-wrap;
-  overflow-wrap:anywhere;font-size:16px;line-height:1.28;text-align:left}
+  overflow-wrap:anywhere;font-size:calc(17 * var(--px, 1px));line-height:1.28;text-align:left}
 /* A LONG MESSAGE IS WIDER THAN A SHORT ONE. 82% of the column is the right bubble width for a
    sentence and the wrong one for an email, where it forces a narrow ragged column down the
    page; an email-length message takes the full width it needs. */
@@ -772,7 +772,7 @@ a.row:active{background:var(--hair);border-radius:10px}
 /* A LINK IN A BUBBLE TAKES THE BUBBLE'S COLOUR and is underlined, because an accent
    colour that reads on the white bubble is unreadable on the tinted one. */
 .msg .b a{color:inherit;text-decoration:underline;text-underline-offset:2px;word-break:break-word}
-.msg .m{margin-top:3px;margin-bottom:8px;color:var(--dimmer);font-size:12px}
+.msg .m{margin-top:3px;margin-bottom:8px;color:var(--dimmer);font-size:calc(13 * var(--px, 1px))}
 
 /* ── the sender's own document ─────────────────────────────────────────────────────────────
    A framed message is a CARD, not a bubble: no tint, no 19px radius, a hairline border. That
@@ -791,21 +791,21 @@ iframe.mail{display:block;width:100%;border:0}
 /* The text, folded under it. Kept because a frame cannot be searched, swept with one selection,
    or copied out of the way a person copies an address out of a message. */
 .orig{border-top:1px solid var(--line)}
-.orig summary{cursor:pointer;color:var(--dimmer);font-size:13px;padding:9px 13px;min-height:24px;
+.orig summary{cursor:pointer;color:var(--dimmer);font-size:calc(14 * var(--px, 1px));padding:9px 13px;min-height:24px;
   list-style:none}
 .orig summary::-webkit-details-marker{display:none}
 .orig summary::after{content:" ▾"}
 .orig[open] summary::after{content:" ▴"}
-.ot{padding:0 13px 11px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;
+.ot{padding:0 13px 11px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:calc(16 * var(--px, 1px));
   line-height:1.3}
 
 /* ── who really sent it ────────────────────────────────────────────────────────────────────
    The address under the name, then Gmail's caret. Both are absent rather than empty when the
    box kept no headers for this thread — a details panel with nothing in it is worse than none,
    because it invites a tap that answers nothing. */
-.addr{margin:-6px 0 0;color:var(--dimmer);font-size:14px;overflow-wrap:anywhere}
+.addr{margin:-6px 0 0;color:var(--dimmer);font-size:calc(15 * var(--px, 1px));overflow-wrap:anywhere}
 .det{margin:10px 0 0}
-.det summary{display:inline-block;cursor:pointer;color:var(--dimmer);font-size:13px;
+.det summary{display:inline-block;cursor:pointer;color:var(--dimmer);font-size:calc(14 * var(--px, 1px));
   padding:6px 0;min-height:24px;list-style:none}
 .det summary::-webkit-details-marker{display:none}
 .det summary::after{content:" ▾"}
@@ -815,7 +815,7 @@ iframe.mail{display:block;width:100%;border:0}
 /* LABEL OVER VALUE ON A MOBILE, two columns once there is room. A 90px label column next to a
    long From line leaves about eleven characters per row at 390px, which is not a table, it is
    a stack of fragments. */
-.dr{display:block;padding:3px 0;font-size:13px;line-height:1.35}
+.dr{display:block;padding:3px 0;font-size:calc(14 * var(--px, 1px));line-height:1.35}
 .dk{display:block;color:var(--dimmer)}
 .dv{display:block;overflow-wrap:anywhere;font-family:var(--mono)}
 @media (min-width:560px){
@@ -828,7 +828,7 @@ iframe.mail{display:block;width:100%;border:0}
    16px IS NOT A STYLE CHOICE: iOS Safari zooms the page when a focused input is under 16px, and
    on a thread that shunts the conversation off screen the moment he taps to answer. */
 .compose{margin-top:18px;display:flex;flex-direction:column;gap:9px}
-.compose textarea{width:100%;font:inherit;font-size:16px;line-height:1.45;color:var(--ink);
+.compose textarea{width:100%;font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));line-height:1.45;color:var(--ink);
   background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:12px 15px;
   resize:vertical;min-height:78px;max-height:60vh;field-sizing:content;box-shadow:var(--lift)}
 .compose textarea:focus{outline:2px solid var(--accent-line);outline-offset:1px;
@@ -847,7 +847,7 @@ iframe.mail{display:block;width:100%;border:0}
    sentence, reads in the link colour, and never becomes the screen's ink pill. */
 form.inline{display:inline}
 button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
-.drafted{color:var(--dim);font-size:13px;display:flex;align-items:center;gap:7px}
+.drafted{color:var(--dim);font-size:calc(14 * var(--px, 1px));display:flex;align-items:center;gap:7px}
 .drafted::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);
   flex:none}
 
@@ -861,7 +861,7 @@ button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
   padding-bottom:env(safe-area-inset-bottom,0px)}
 .tabs-in{max-width:620px;margin:0 auto;display:flex}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 7px;
-  min-height:52px;color:var(--dimmer);font-size:10.5px;font-weight:var(--w-regular);letter-spacing:.01em}
+  min-height:52px;color:var(--dimmer);font-size:min(calc(12.5 * var(--px, 1px)), 14px);font-weight:var(--w-regular);letter-spacing:.01em}
 .tab svg{display:block}
 .tab.on{color:var(--accent)}
 /* THE DOT SAYS SOMETHING IS WAITING, AND SAYS ONLY THAT. Owner, 2026-09-17, picking it over a
@@ -919,8 +919,8 @@ button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
 .seg{display:flex;gap:4px;background:var(--bg);border-radius:12px;padding:4px;margin-top:4px}
 .setrow{display:flex;flex-direction:column;gap:2px;padding:14px 0;border-bottom:1px solid var(--hair)}
 .setrow:last-child{border-bottom:0}
-.setrow b{font-weight:var(--w-regular);font-size:15.5px}
-.setrow span{color:var(--dim);font-size:13.5px;line-height:1.45}
+.setrow b{font-weight:var(--w-regular);font-size:calc(16.5 * var(--px, 1px))}
+.setrow span{color:var(--dim);font-size:calc(14.5 * var(--px, 1px));line-height:1.45}
 /* A <b> INSIDE THE SENTENCE IS EMPHASIS, NOT A SECOND TITLE. `.setrow b` above sizes each row's
    title, and it also caught the address in "Ownbox is reading owner@…", which came out 15.5px
    in a 13.5px sentence and not bold. Seen at 390 and 1280 in the launch sweep, 2026-09-24. */
@@ -929,14 +929,14 @@ button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
 /* ── the install steps ─────────────────────────────────────────────────────────────────────*/
 .flow{margin-top:16px}
 .step{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start}
-.stepn{width:29px;height:29px;border-radius:999px;display:flex;align-items:center;
-  justify-content:center;font-weight:var(--w-strong);font-size:14px;background:var(--accent-soft);
+.stepn{width:calc(29 * var(--px, 1px));height:calc(29 * var(--px, 1px));border-radius:999px;display:flex;align-items:center;
+  justify-content:center;font-weight:var(--w-strong);font-size:calc(15 * var(--px, 1px));background:var(--accent-soft);
   color:var(--accent);flex:none}
 .stepb{background:var(--surface);border-radius:14px;padding:13px 15px;min-width:0;
   box-shadow:var(--lift)}
-.steph b{font-size:15px}
+.steph b{font-size:calc(16 * var(--px, 1px))}
 .steph b b{font-weight:inherit}
-.stepb p{color:var(--dim);font-size:14px;margin:5px 0 0}
+.stepb p{color:var(--dim);font-size:calc(15 * var(--px, 1px));margin:5px 0 0}
 .stepjoin{width:1px;height:14px;margin:4px 0 4px 14px;background:var(--line)}
 
 @media (min-width:560px){ .figs{grid-template-columns:1fr 1fr 1fr} .figs .fig:last-child:nth-child(odd){grid-column:auto} }
@@ -949,13 +949,13 @@ button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
    app's bar is visible at every width because it carries the brand and the date.
    SO THE BUTTON HIDES, NOT THE BAR — above 820px the rail is on screen and a button that opens
    what you can already see is the dead control this codebase keeps deleting. */
-.bar-in .ham{display:none;margin-left:-6px}
+.bar-in .ham{margin-left:-6px}
 .navtoggle:focus-visible~.bar .ham{outline:2px solid var(--accent);outline-offset:-2px}
 
 /* THE MENU BUTTON SHOWS ONLY WHERE THE RAIL IS HIDDEN — above the breakpoint the rail is on
    screen, and a button that opens what you can already see is the dead control this codebase
    keeps deleting. The bar itself stays at every width; it carries the brand and the date. */
-@media (max-width:820px){ .bar-in .ham{display:flex} }
+@media (min-width:821px){ .bar-in .ham{pointer-events:none} .bar-in .menubadge{display:none} }
 
 /* ── TWO RULES THAT LET THE IMPORTED RAIL SIT IN THIS APP'S PAGE ─────────────────────────────
    `.main` is core's flex slot beside the rail, and it brings the dashboard's own page padding
@@ -1086,6 +1086,8 @@ def _monogram(name: str) -> str:
 # INSTALLED, THERE IS NO BROWSER CHROME. A PWA on a home screen has no back button, no address
 # bar and no tabs, so the app has to supply its own furniture — and on a phone that furniture is
 # a bottom bar, in reach of a thumb, in the idiom every native app on the device already uses.
+# A TAB LABEL GROWS WITH THE READER'S TEXT SIZE ONLY A LITTLE, to 14px, as the system's own tab
+# bars do: four labels and the orb share one row, and at 150% they ran together (2026-09-29).
 # THE TABS ARE THE MENU'S ROWS: Messages · Replies · Search · Settings (owner, 2026-09-29, IA
 # decisions D1 and D5 in docs/SCOPE_APP_IA.md). "Today" went — the day's summary is the Morning
 # Review's job and "right now" is the Base Machine's — so the app opens on its messages. A tab bar
@@ -1203,7 +1205,7 @@ shell.register_section(
         # keyed `setup` rather than learning this machine's URL, so the card it draws works on any
         # box that has a set-up screen and draws nothing on one that does not. This line is what
         # makes this box one of the former.
-        {"key": shell.SETUP_KEY, "label": "Set Up", "href": "/inbox/setup",
+        {"key": shell.SETUP_KEY, "label": "Set Up Your Inbox", "href": "/inbox/setup",
          "icon": _TAB_ICON.get("/inbox/settings", "")},
     ])
 
@@ -1219,8 +1221,6 @@ shell.register_section(
         {"key": "overview", "label": "Overview", "href": "/inbox/settings"},
         {"key": "mailbox", "label": "Mailbox", "href": "/inbox/mailbox"},
         {"key": "channels", "label": "Social Accounts", "href": "/inbox/connect"},
-        {"key": "drafts", "label": "AI and Drafts", "href": "/inbox/drafts"},
-        {"key": "install", "label": "Home Screen", "href": "/inbox/install"},
     ])
 
 
@@ -1389,15 +1389,32 @@ def _rail(path: str) -> str:
 
 
 def _menu_button() -> str:
-    """The hamburger. CORE'S GLYPH, not a third drawing of three lines.
+    """The menu button: the client's icon with the menu badge. CORE'S, not a second drawing.
 
-    HIDDEN ABOVE 820px BY CSS, NOT BY PYTHON, because the rail it opens is on screen there and the
-    markup has to stay identical at every width — the drawer is a CSS-only checkbox, and a button
-    that exists at one width and not another cannot be the same label the stylesheet targets.
+    THE SAME MARKUP AT EVERY WIDTH, because the drawer is a CSS-only checkbox and a button that
+    exists at one width and not another cannot be the label the stylesheet targets. Above 820px the
+    rail is on screen, so CSS leaves the icon as the bar's brand mark: no badge, nothing to press.
     """
-    from core.dash.home import _HAM
-    return ('<label class="ham" for="navtoggle" role="button" aria-label="Menu" '
-            f'aria-controls="railnav">{_HAM}</label>')
+    # THE CLIENT'S ICON, WITH THE MENU BADGE (owner, 2026-09-29, option B): core's, so it is the
+    # same button the Base Machine's screens draw.
+    return _look.menu_button()
+
+
+def _trail(path: str) -> str:
+    """The box's way back, on a screen drilled into from a menu (owner, 2026-09-29: "make them
+    standard anytime you're drilled down to a sub menu page"). CORE'S, so every machine draws it the
+    same (`core.dash.home.trail`). NOT ON A TAB: Messages, Replies, Search and Settings are this
+    app's top level, peers in the bar at the bottom, and a tab never carries a way back."""
+    if any(path == href for href, _l, _d in _TABS):
+        return ""
+    try:
+        from core.dash.home import link_back, trail
+        # A CONVERSATION IS DRILLED INTO FROM MESSAGES, the commonest way down in this app.
+        if path.startswith("/inbox/inbox/"):
+            return link_back("/inbox/inbox", "Messages", "Conversation")
+        return trail(path)
+    except Exception:                                    # noqa: BLE001 — a link, never a 500
+        return ""
 
 
 def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> str:
@@ -1431,11 +1448,11 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
 <title>{_esc(brand)} · {APP_TITLE}</title>{_look.head_tags()}<style>{CSS}</style></head>
 <body{' class="ib"' if wide else ''}>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
-<div class="bar"><div class="bar-in">{_menu_button()}{_look.header_mark()}
+<div class="bar"><div class="bar-in">{_menu_button()}
 <span class="brand">{APP_TITLE}</span></div></div>
 <label class="scrim" for="navtoggle" aria-label="Close menu"></label>
 <div class="lay">{_rail(here or request.path)}
-<main class="main"><div class="wrap">{body}</div></main></div>
+<main class="main"><div class="wrap">{_trail(here or request.path)}{body}</div></main></div>
 {_tabbar(here or request.path)}
 <script>{JS}</script></body></html>"""
 
@@ -1922,7 +1939,9 @@ def _connect_verb(go: str) -> str:
     A LABEL AND A DESTINATION THAT DISAGREE is the same defect as a link that 404s, only quieter:
     nothing breaks, and he simply believes the product is not what he was shown.
     """
-    return {"/inbox/setup": "Set up your box",
+    # "SET UP YOUR INBOX", not "your box" (owner, 2026-09-29, D2 as revised): this guide covers the
+    # inbox's own connections; the box's checklist is the Base Machine's set-up card.
+    return {"/inbox/setup": "Set up your inbox",
             "/inbox/connect": "Connect your social accounts",
             "/inbox/mailbox": "Connect your inbox"}.get(go, "Finish setting up")
 
@@ -3188,14 +3207,6 @@ def r_settings():
     the flash every JS theme toggle on the web has to work around. A cookie read during render
     has neither failure.
     """
-    # THREE CHOICES AGAIN, AND THIS TIME THE THIRD IS TRUE. "System" was dropped on 2026-09-18
-    # because it could not follow the device: the page rendered white on a dark mobile while the
-    # control claimed otherwise. core/dash/theme.py now stamps the page before paint from the
-    # person's own choice, and for Automatic from the device, so the owner's 2026-09-27 ask for a
-    # "system default" can be met honestly. The control is core's, so this screen and System
-    # Settings offer one switch, not two. `/inbox/theme` below stays for old bookmarks.
-    from core.dash import theme as _core_theme
-    switch = _core_theme.control("/inbox/settings")
     # THE FIRST UNFINISHED ROW OWNS THE SCREEN'S ONE INK PILL; the drafts row below it defers.
     _mb = _mailbox_row()
     _above = _mb + _channels_row(primary='class="btn"' not in _mb)
@@ -3208,36 +3219,22 @@ def r_settings():
       # Reading the mail is what the box IS; the channels widen what it reads; drafting is what it
       # does with what it read, and a row for the last above the first asks somebody to configure
       # an answer to a question nothing is yet asking.
-      + _above + _drafts_row(primary='class="btn"' not in _above) + _coworkers_row(_is_owner()) +
-      '<div class="setrow"><b>Appearance</b>'
-      # THE OLD SENTENCE DESCRIBED A "System" CHOICE THAT WAS DROPPED ON 2026-09-18 (see above),
-      # and used a reserved noun (CLAUDE.md, mobile first). It says what the two choices are.
-      '<span>How the box looks for you. Light is its own look; Automatic follows your device.</span>'
-      f'{switch}</div>'
-      # WALK #9: WHETHER THIS DEVICE IS CONNECTED, ANSWERED FROM INSIDE THE APP. The installed
-      # app's scope is /inbox/, so this tab is the one place an iPhone can check its own
-      # registration; core.push.DEVICE_JS fills the sentence in.
-      '<div class="setrow"><b>On this device</b>'
-      '<span><span id="ownbox-device" data-state="unknown" aria-live="polite">Checking whether '
-      'this device gets notifications…</span> '
-      '<a href="/settings/mobile" style="color:var(--href)">Install and notifications</a>'
-      '</span></div>'
+      + _above + _drafts_row(primary='class="btn"' not in _above) +
+      # ONE HOME FOR EACH SHARED THING (owner, 2026-09-29, IA decision D3 in docs/SCOPE_APP_IA.md).
+      # The AI account, the assistants, installing the app and Appearance belong to the whole box,
+      # so they live once, in System Settings; this screen keeps only what is the inbox's own and
+      # says where the rest went. The installed app's scope is the whole box since Phase 4, so the
+      # link stays inside the app on an iPhone.
+      '<div class="setrow"><b>Everything else</b>'
+      '<span>Your AI account, assistants, the mobile app and Appearance are the whole box\'s, '
+      'so they are in System Settings. '
+      '<a href="/settings" style="color:var(--href)">System Settings</a></span></div>'
       '<div class="setrow"><b>How this stays current</b>'
       '<span>The box checks for new messages on a schedule rather than holding a connection '
       'open. Pull down to check now.</span></div>'
       '</div>')
-    body += f'<script>{_push_client_js()}</script><script>{_device_js()}</script>'
+    body += f'<script>{_push_client_js()}</script>'
     return _shell(body), 200
-
-
-def _device_js() -> str:
-    """core.push.DEVICE_JS, loaded like _push_client_js: a box whose release predates it still
-    renders Settings, with the sentence left saying it is checking."""
-    try:
-        from core import push
-        return push.DEVICE_JS
-    except Exception:                                    # noqa: BLE001 — a screen outranks a feature
-        return ""
 
 
 @blueprint.get("/inbox/theme")
@@ -3500,22 +3497,17 @@ def r_drafts():
             return _owner_refusal()
         from core import box_settings
         box_settings.put("inbox", "drafts.enabled", choice == "on", set_by=whoami)
-        return redirect("/inbox/drafts", code=303)
+        return redirect("/inbox/settings", code=303)
     # THE AI ACCOUNT HAS ONE HOME, and it is System Settings → AI account (owner, 2026-09-24:
     # "there's only one place to add a key or change a setting"; docs/SCOPE_ONE_PLACE_PER_SETTING.md).
     # This page used to carry a second paste form for the same credential. Now it says which account
     # the drafts use and links to that home; a post (an old page left open) stores nothing.
     if request.method == "POST":
-        return redirect("/settings/ai" if _is_owner() else "/inbox/drafts", code=303)
-    # ONE CARD, NOT TWO. The row already says whether drafts are on and carries the one door to
-    # the account (a member reads whose it is instead); a second card repeating it was noise.
-    body = ('<h1>AI and Drafts</h1>'
-            '<div class="card">' + _drafts_row() + '</div>'
-            '<p class="quiet" style="margin-top:12px">The AI account lives in one place, System '
-            'Settings, and every machine on this box drafts through it.</p>'
-            '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--href)">'
-            '&larr; Settings</a></p>')
-    return _shell(body, here="/inbox/drafts"), 200
+        return redirect("/settings/ai" if _is_owner() else "/inbox/settings", code=303)
+    # NO SECOND PAGE FOR IT EITHER (owner, 2026-09-29, IA D3 in docs/SCOPE_APP_IA.md). The drafting
+    # switch is a row on the inbox's own Settings, beside the door to the account; this address
+    # still answers — old links and the switch's form land here — and goes there.
+    return redirect("/inbox/settings", code=302)
 
 
 # ── the mailbox ─────────────────────────────────────────────────────────────────────────────
@@ -3565,7 +3557,7 @@ def _mailbox_form(*, user: str = "", note: str = "", verb: str = "Start reading 
     """The two fields and the button. THE PASSWORD IS NEVER PRE-FILLED and never echoed back —
     the address is, because retyping it after a rejected password is a punishment for their
     typo in the other field."""
-    field = ('font:inherit;font-size:16px;padding:12px 14px;width:100%;'
+    field = ('font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;width:100%;'
              'border:1px solid var(--line);border-radius:12px;'
              'background:var(--card);color:var(--ink)')
     return (note +
@@ -3575,13 +3567,13 @@ def _mailbox_form(*, user: str = "", note: str = "", verb: str = "Start reading 
             # LABELLED, NOT ONLY PLACEHOLDERED: a placeholder vanishes the moment the buyer
             # types, and on a mobile that is the moment they switch apps to fetch the password.
             '<label style="display:block;margin-top:10px">'
-            '<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
+            '<span class="t" style="display:block;font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px">'
             'Your email address</span>'
             f'<input type="email" name="user" value="{_esc(user)}" autocomplete="email" '
             'spellcheck="false" aria-label="The email address to read" '
             f'placeholder="you@yourcompany.com" style="{field}"></label>'
             '<label style="display:block">'
-            '<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
+            '<span class="t" style="display:block;font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px">'
             'App password</span>'
             '<input type="password" name="password" autocomplete="off" spellcheck="false" '
             'aria-label="App password" placeholder="the app password for this mailbox" '
@@ -3761,7 +3753,7 @@ _AUTOCOMPLETE = {"email": "email"}
 def _setup_field(f: dict, value: str = "") -> str:
     """One field from the contract. THE CONTRACT DECIDES THE TYPE, never this file — a password
     rendered as a text input is a credential shown over somebody's shoulder."""
-    style = ('font:inherit;font-size:16px;padding:12px 14px;width:100%;'
+    style = ('font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;width:100%;'
              'border:1px solid var(--line);border-radius:12px;'
              'background:var(--card);color:var(--ink)')
     kind = str(f.get("type") or "text")
@@ -3772,12 +3764,12 @@ def _setup_field(f: dict, value: str = "") -> str:
         opts = "".join(f'<option value="{_esc(k)}"{" selected" if k == chosen else ""}>{_esc(v)}</option>'
                        for k, v in f.get("options") or ())
         return (f'<label style="display:block;margin-top:10px">'
-                f'<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
+                f'<span class="t" style="display:block;font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px">'
                 f'{_esc(f.get("label"))}</span>'
                 f'<select name="{_esc(f.get("name"))}" style="{style};appearance:auto">{opts}</select>'
                 f'</label>')
     return (f'<label class="fld-{_esc(f.get("name"))}" style="display:block;margin-top:10px">'
-            f'<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
+            f'<span class="t" style="display:block;font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px">'
             f'{_esc(f.get("label"))}</span>'
             f'<input type="{_esc(kind)}" name="{_esc(f.get("name"))}" '
             f'value="{_esc(value) if kind != "password" else ""}" '
@@ -3811,9 +3803,9 @@ def _setup_consent(e: dict) -> str:
     return (
         '<div style="margin-top:14px;padding:12px 14px;border:1px solid var(--line);'
         'border-radius:12px;background:var(--card)">'
-        f'<p class="t" style="margin:0 0 8px;font-size:13.5px;line-height:1.5">{_esc(warn)}</p>'
-        + (f'<p style="margin:0 0 10px;font-size:13.5px">{links}</p>' if links else "")
-        + f'<label style="display:flex;gap:10px;align-items:flex-start;font-size:13.5px;'
+        f'<p class="t" style="margin:0 0 8px;font-size:calc(14.5 * var(--px, 1px));line-height:1.5">{_esc(warn)}</p>'
+        + (f'<p style="margin:0 0 10px;font-size:calc(14.5 * var(--px, 1px))">{links}</p>' if links else "")
+        + f'<label style="display:flex;gap:10px;align-items:flex-start;font-size:calc(14.5 * var(--px, 1px));'
           f'line-height:1.5;cursor:pointer">'
           f'<input type="checkbox" name="{_esc(field)}" value="yes" '
           f'style="margin-top:3px;flex:none;width:18px;height:18px">'
@@ -3879,7 +3871,7 @@ def _choice_picker(choice: dict) -> str:
             f'<b>{_esc(choice.get("label") or "")}</b>'
             f'<span>{_esc(choice.get("note") or "")}</span></div>'
             '<select aria-label="' + _esc(choice.get("label") or "") + '" '
-            'style="width:100%;font:inherit;font-size:16px;padding:12px 14px;'
+            'style="width:100%;font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;'
             'border:1px solid var(--line);border-radius:12px;background:var(--card);'
             'color:var(--ink)">' + opts + '</select></div>')
 
@@ -3969,7 +3961,7 @@ def _setup_step(n: int, e: dict, *, note: str = "", typed: dict | None = None,
     # no state of ours. The summary carries the verb, so the way back in is named rather than
     # discovered — "Change" on a step that is done, which is the only thing left to do to it.
     done_ = e.get("status") == "connected"
-    head_ = (f'<h1 style="font-size:19px">{n}. {_esc(e.get("title"))}</h1>'
+    head_ = (f'<h1 style="font-size:calc(19 * var(--px, 1px))">{n}. {_esc(e.get("title"))}</h1>'
              f'<p class="quiet" style="margin:2px 0 0">{_esc(e.get("why"))}</p>'
              f'<p class="quiet" style="margin:6px 0 0"><b class="{_esc(tone)}">{_esc(said)}</b>'
              + (f' — {_esc(detail)}' if detail else "") + '</p>')
@@ -4169,7 +4161,7 @@ def r_setup():
     else:
         # ONE COUNT ON THE PAGE, and it is the owner's progress bar (2026-09-21) just below: the
         # heading says what the page is, not a second number (walk #6, "one honest count").
-        head = ('<h1>Set up your box.</h1><p class="quiet">Each step opens its own page and '
+        head = ('<h1>Set up your inbox.</h1><p class="quiet">Each step opens its own page and '
                 'brings you back here.'
                 + (' Anything marked Optional can wait.' if opt_left else '') + '</p>')
 
@@ -4571,11 +4563,11 @@ def _connect_key_form(note: str) -> str:
       '<form class="compose" method="post" action="/inbox/connect">' + _trip_field() +
       # LABELLED, like the mailbox form: the placeholder is gone the moment they paste.
       '<label style="display:block">'
-      '<span class="t" style="display:block;font-size:13.5px;margin-bottom:4px">'
+      '<span class="t" style="display:block;font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px">'
       'Your Zernio API key</span>'
       '<input type="password" name="key" autocomplete="off" spellcheck="false"'
       ' aria-label="Paste your key" placeholder="Paste your key" '
-      'style="width:100%;font:inherit;font-size:16px;padding:12px 14px;'
+      'style="width:100%;font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;'
       'border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)">'
       '</label>'
       '<button class="btn" type="submit">Continue</button>'
@@ -4683,62 +4675,10 @@ def r_installed():
 
 @blueprint.get("/inbox/install")
 def r_install():
-    """TEACH THE INSTALL, ON THE PHONE, IN THE FLOW — not in a support article.
-
-    THIS SCREEN EXISTS BECAUSE APPLE GIVES US NO PROMPT. `beforeinstallprompt` is Chrome-only
-    (MDN: safari NO, safari_ios NO) and web.dev states it plainly: "A browser prompt to install
-    your PWA doesn't exist On iOS and iPadOS." So on an iPhone the only path is Share, scroll, Add
-    to Home Screen — and every person who does not finish that gets a page that CANNOT notify
-    them, which is the exact outcome the owner predicted when he asked for this.
-
-    AND IT IS WORSE FOR A HALF-ADOPTER, which is why the copy says so rather than selling. WebKit
-    deletes script-writable storage — service worker registrations included — after seven days of
-    Safari use without interaction, and home-screen apps are explicitly exempt from that counter.
-    In a tab the notifications die silently after a week. Installed, they do not.
-    """
-    steps_ios = [
-        ("Tap <b>Share</b>", "the square with an arrow, at the bottom of Safari"),
-        ("Scroll and tap <b>Add to Home Screen</b>", "it is below the row of apps"),
-        ("Tap <b>Add</b>", "it appears on your home screen like any other app"),
-    ]
-    steps_android = [
-        ("Tap the <b>⋮</b> menu", "top right of Chrome"),
-        # THE DETAIL IS ESCAPED AND THE TITLE IS NOT (see `block` below), so markup in a detail
-        # renders as visible &lt;b&gt; tags. It did: the install page read "or <b>Add to Home
-        # screen</b> on older versions", angle brackets and all, on the screen that tells a buyer
-        # how to keep their notifications working.
-        ("Tap <b>Install app</b>", "or Add to Home screen on older versions"),
-        ("Tap <b>Install</b>", "it appears in your app drawer"),
-    ]
-
-    def block(title, steps, note):
-        rows = "".join(
-            f'<div class="step"><div class="stepn">{i + 1}</div>'
-            f'<div class="stepb"><div class="steph"><b>{t}</b></div>'
-            f'<p>{_esc(d)}</p></div></div>'
-            + ('<div class="stepjoin" aria-hidden="true"></div>' if i < len(steps) - 1 else "")
-            for i, (t, d) in enumerate(steps))
-        return (f'<h1>{_esc(title)}</h1><div class="flow">{rows}</div>'
-                f'<p class="quiet">{_esc(note)}</p>')
-
-    body = (
-        # ONE HEADING AND ITS REASON UNDER IT. This was a second heading stacked on the first
-        # ("Why it matters") and a sentence that shipped a literal \\u2019 and a reserved noun
-        # to every buyer who opened it (CLAUDE.md, mobile first). Plain text, and no escape.
-        '<h1>Put this on your home screen</h1>'
-        '<p class="quiet">Notifications only work once the app is installed. In a browser tab '
-        'they stop arriving after about a week of not being opened. That rule is Apple and '
-        'Google\'s, not ours. Installed, they keep coming.</p>'
-        + block("On an iPhone or iPad", steps_ios,
-                "Safari has no button we can show you for this — Apple does not provide one, "
-                "so these three taps are the whole path.")
-        + block("On Android", steps_android,
-                "Chrome may also offer this by itself when you have used the app a few times.")
-        + '<div class="card"><div class="row"><span class="t">Already done it? Open the app from '
-        'your home screen rather than this tab, and you are set. Nothing else to switch on.'
-        '</span></div></div>'
-        '<div class="foot"><a href="/inbox/settings">← Settings</a></div>')
-    return _shell(body, here="/inbox/install"), 200
+    """INSTALLING THE APP HAS ONE HOME (owner, 2026-09-29, IA D3): System Settings > Mobile App,
+    which teaches every app on the box — Base Machine, Unified Inbox and each add-on machine — with
+    the same Share, Add to Home Screen steps. This address still answers for old links."""
+    return redirect("/settings/mobile", code=302)
 
 
 # ── search, as a screen of its own ──────────────────────────────────────────────────────────
@@ -4835,34 +4775,11 @@ def _ai_home() -> str:
     """Where the person reading goes to change the AI account.
 
     The owner goes to its one home, System Settings. A member would be refused there, so they go
-    to the inbox's AI and drafts page, which says whose account it is and who can change it.
+    to the inbox's Settings, whose drafting row says whose account it is and who can change it.
     """
-    return "/settings/ai" if _is_owner() else "/inbox/drafts"
-
-
-def _coworkers_row(owner: bool) -> str:
-    """The row a member sees is the same sentence WITHOUT the link.
-
-    NO DOOR A PERSON IS REFUSED AT. The screen it links to answers 403 to anyone who is not the
-    owner, because the credential it mints reads every message on the box — so drawing the link
-    for a member would hand them a dead end, which is what tests/test_a_buyer_can_walk_every_screen
-    exists to stop (it caught exactly that here). The row itself stays: a member should know the
-    box can do this and who to ask, rather than wondering why their colleague has a screen they
-    cannot find.
-
-    THE SCREEN IS THE BOX'S NOW, not this machine's (owner, 2026-09-22 — an AI coworker is a
-    `core.connector` seat, and a box running any other machine needs it just as much). This row
-    survives because the inbox's own Settings is still a reasonable place to be reminded the box
-    can do it; the door it points at is core's.
-    """
-    if owner:
-        return ('<div class="setrow"><b>AI coworkers</b>'
-                '<span>Let Claude, ChatGPT or Grok read this inbox and draft replies for you. '
-                '<a href="/settings/agent" style="color:var(--href)">Connect one</a>.'
-                '</span></div>')
-    return ('<div class="setrow"><b>AI coworkers</b>'
-            '<span>This box can be connected to Claude, ChatGPT or Grok. The owner of the box '
-            'sets that up.</span></div>')
+    # A MEMBER GOES TO THE INBOX'S SETTINGS, where the drafting row says whose account it is (the
+    # old /inbox/drafts page was folded into it on 2026-09-29, IA D3).
+    return "/settings/ai" if _is_owner() else "/inbox/settings"
 
 
 # ── DRAFTS: the queue of people waiting on an answer ─────────────────────────────────────────

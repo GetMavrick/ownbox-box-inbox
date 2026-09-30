@@ -79,9 +79,16 @@ _inbox = ROOT / "marketing" / "customer_voice" / "app.py"
 if _inbox.is_file():
     c = app.test_client()
     c.set_cookie(dash.COOKIE, dash.new_session(state.owner_user()["id"]))
+    # ONLY WHAT IS THE INBOX'S OWN (owner, 2026-09-29, IA D3): the AI account and installing the
+    # app live once, in System Settings, so "AI and Drafts" and "Home Screen" left this menu and
+    # their addresses send people to those one homes.
     rows = {"/inbox/settings": "Overview", "/inbox/mailbox": "Mailbox",
-            "/inbox/connect": "Social Accounts", "/inbox/drafts": "AI and Drafts",
-            "/inbox/install": "Home Screen"}
+            "/inbox/connect": "Social Accounts"}
+    for _old, _home in (("/inbox/drafts", "/inbox/settings"), ("/inbox/install", "/settings/mobile")):
+        _r = c.get(_old)
+        ok(f"{_old} sends people to its one home, {_home}",
+           _r.status_code == 302 and (_r.headers.get("Location") or "").endswith(_home),
+           f"{_r.status_code} {_r.headers.get('Location')}")
     r = shell.rail("/inbox/mailbox")
     ok("the inbox's Settings is a menu with a row per setting home",
        r.level == 2 and r.title == "Settings" and [i.label for i in r.items] == list(rows.values()),

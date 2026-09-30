@@ -56,18 +56,18 @@ _CSS_SRC = """
 .rv-top{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:6px 0 14px}
 .rv-top h1{margin:0}
 .rv-top form{margin:0}
-.rv-top select{background:var(--rv-bg);color:var(--rv-ink);border:1px solid var(--rv-field);border-radius:8px;padding:8px 12px;font-size:14px}
-.rv-lede{color:var(--rv-dim);margin:0 0 18px;font-size:14px}
+.rv-top select{background:var(--rv-bg);color:var(--rv-ink);border:1px solid var(--rv-field);border-radius:8px;padding:8px 12px;font-size:max(16px, calc(15 * var(--px, 1px)))}
+.rv-lede{color:var(--rv-dim);margin:0 0 18px;font-size:calc(15 * var(--px, 1px))}
 .rv-lede b{color:var(--rv-strong)}
 .seg{border:1px solid var(--rv-edge);border-radius:var(--rv-radius);padding:16px 18px;margin:0 0 14px;background:var(--rv-bg)}
 .seg .hd{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
-.seg .hd h2{margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--rv-faint)}
-.seg .big{font-size:28px;font-weight:600;line-height:1.2;color:var(--rv-ink);font-variant-numeric:tabular-nums;margin:0 0 10px}
-.seg .big small{font-size:15px;color:var(--rv-dim);font-weight:400;margin-left:8px}
-.seg .delta{font-size:13px;color:var(--rv-dim);margin-left:8px;font-weight:400}
+.seg .hd h2{margin:0;font-size:calc(14 * var(--px, 1px));letter-spacing:.08em;text-transform:uppercase;color:var(--rv-faint)}
+.seg .big{font-size:calc(29 * var(--px, 1px));font-weight:600;line-height:1.2;color:var(--rv-ink);font-variant-numeric:tabular-nums;margin:0 0 10px}
+.seg .big small{font-size:calc(16 * var(--px, 1px));color:var(--rv-dim);font-weight:400;margin-left:8px}
+.seg .delta{font-size:calc(14 * var(--px, 1px));color:var(--rv-dim);margin-left:8px;font-weight:400}
 .rv-when{color:var(--rv-faint);white-space:nowrap}
 .rv-needs ul{list-style:none;margin:0;padding:0}
-.rv-needs li{padding:10px 0;border-top:1px solid var(--rv-rule);font-size:16px}
+.rv-needs li{padding:10px 0;border-top:1px solid var(--rv-rule);font-size:calc(17 * var(--px, 1px))}
 .rv-needs li:first-child{border-top:0;padding-top:0}
 .rv-needs li:last-child{padding-bottom:0}
 .rv-rail ul.col{display:block}
@@ -76,13 +76,13 @@ _CSS_SRC = """
 .seg .dot.fail{background:var(--rv-red-ink)}
 .seg .dot.connect{background:var(--rv-blue-ink)}
 .rv-rail{display:grid;grid-template-columns:160px 1fr;gap:6px 14px;align-items:baseline;padding:6px 0;border-top:1px solid var(--rv-rule)}
-.rv-rail .k{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--rv-faint)}
+.rv-rail .k{font-size:calc(13 * var(--px, 1px));letter-spacing:.06em;text-transform:uppercase;color:var(--rv-faint)}
 .rv-rail ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px}
-.rv-rail li{font-size:14px;color:var(--rv-text)}
+.rv-rail li{font-size:calc(15 * var(--px, 1px));color:var(--rv-text)}
 .rv-rail li b{color:var(--rv-ink);font-variant-numeric:tabular-nums}
-.rv-note{font-size:12px;color:var(--rv-faint);margin-top:8px}
+.rv-note{font-size:calc(13 * var(--px, 1px));color:var(--rv-faint);margin-top:8px}
 .rv-warn{border:1px solid var(--rv-warn-edge);background:var(--rv-warn-bg);color:var(--rv-warn-ink);border-radius:10px;padding:12px 16px;margin:0 0 14px}
-.rv-empty{color:var(--rv-dim);font-size:14px}
+.rv-empty{color:var(--rv-dim);font-size:calc(15 * var(--px, 1px))}
 
 /* THE BODY BRINGS ITS OWN LINK STYLE, because it is rendered in two different shells and the
    lead app's chrome does not define `.dlink`. Scoped under .seg so it cannot restyle a host page. */
@@ -97,7 +97,7 @@ _CSS_SRC = """
 .seg .spark svg{flex:1;min-width:0;height:34px;overflow:visible}
 .seg .spark circle{fill:currentColor}
 .seg .spark circle.tip{fill:var(--rv-strong)}
-.seg .spark .sk{flex:none;font-size:11px;letter-spacing:.04em;color:var(--rv-faint);font-variant-numeric:tabular-nums}
+.seg .spark .sk{flex:none;font-size:calc(12 * var(--px, 1px));letter-spacing:.04em;color:var(--rv-faint);font-variant-numeric:tabular-nums}
 
 /* THE PHONE. Owner, 2026-09-07, about this app: "From my mobile phone this is virtually
    unusable... the buttons are not visible." This is the page he opens at breakfast, so it gets
@@ -108,7 +108,7 @@ _CSS_SRC = """
    would silently do nothing. That is a bug this app has already shipped once. */
 @media (max-width:760px){
   .rv-top{gap:10px}
-  .rv-top h1{font-size:22px}
+  .rv-top h1{font-size:calc(22 * var(--px, 1px))}
   /* 44px, the target the rest of this app settled on for a thumb — the day picker is the
      only control on the page and it was 36. */
   .rv-top form,.rv-top select{width:100%}

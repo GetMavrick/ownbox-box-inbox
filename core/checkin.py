@@ -140,6 +140,29 @@ def _update() -> dict:
             "result": _RESULT.get(status, "unknown" if status else "never")}
 
 
+def word(raw) -> str:
+    """A heartbeat status as the check-in says it: ok, warn or fail. `ok:<detail>` is ok."""
+    raw = str(raw or "")
+    return "ok" if raw == "ok" or raw.startswith("ok:") else ("fail" if raw.startswith("fail") else "warn")
+
+
+def nudge() -> None:
+    """Start one check-in now, as its own unit, without waiting for it (core/watchdog.py calls this
+    when a probe changes state). Never raises; a test never starts anything.
+
+    WHY. The first check-in on a fresh box goes out two minutes after boot, and the watchdog's first
+    probes run before the web process is up, so it said 'failing: dispatch' about a healthy box and
+    that stale flag sat on the fleet for six hours (OSDev1, measured on the image 247614219 box). A
+    check-in whenever a probe turns clears it on the next watchdog run instead."""
+    if os.environ.get("AIOS_HERMETIC_TEST"):
+        return
+    try:
+        subprocess.Popen(["systemctl", "start", "--no-block", "aios-checkin.service"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, ValueError):
+        pass
+
+
 def _doctor() -> tuple[dict, bool | None]:
     """The box's own health checks, BY NAME ONLY, and whether the watchdog is still running them.
 
@@ -153,8 +176,7 @@ def _doctor() -> tuple[dict, bool | None]:
     counts = {"ok": 0, "warn": 0, "fail": 0}
     failing, newest = [], None
     for b in beats:
-        raw = str(b.get("status") or "")
-        st = "ok" if raw == "ok" or raw.startswith("ok:") else ("fail" if raw.startswith("fail") else "warn")
+        st = word(b.get("status"))
         counts[st] += 1
         if st == "fail":
             failing.append(str(b.get("component"))[len("probe:"):][:40])

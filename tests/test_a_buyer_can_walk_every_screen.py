@@ -502,12 +502,26 @@ for _p, _html in READ.items():
         if _to.rstrip("/") == _p.rstrip("/") or _land.rstrip("/") == _p.rstrip("/"):
             _self.append(f"{_p} -> {_to}")
 ok(f"no screen offers a link back to itself ({len(READ)} read)", not _self, "; ".join(_self[:4]))
+# THE WAY BACK IS STANDARD ON EVERY SCREEN DRILLED INTO FROM A MENU, a machine's own screens too
+# (owner, 2026-09-29: "those rust colored breadcrumbs ... make them standard anytime you're drilled
+# down to a sub menu page"). The Unified Inbox draws its own shell, and had none.
+for _p, _want in (("/inbox/mailbox", ("/inbox/settings", "Settings")),
+                  ("/inbox/connect", ("/inbox/settings", "Settings")),
+                  ("/aeo/sources", ("/aeo", "AEO Machine"))):
+    _got, _cr = _nav(_p)
+    ok(f"{_p} offers the way back to {_want[1]}, and the trail", _got == [_want] and _cr, f"{_got} crumb={_cr}")
+# A TAB IS THE TOP OF ITS APP: the bar at the bottom is its way around, so it carries no way back.
+for _p in ("/inbox/inbox", "/inbox/waiting", "/inbox/search", "/inbox/settings"):
+    _got, _cr = _nav(_p)
+    ok(f"{_p}, a tab, offers no way back", _got == [] and not _cr, f"{_got} crumb={_cr}")
 ok("no trail anywhere says Overview",
    not any(re.search(r'class="crumb"[^>]*>[^<]*(<b>)?Overview', h) for h in READ.values()))
 
 
-# ── 9. every header: the menu, the client's icon, the app's name ──────────────────────────
+# ── 9. every header: the client's icon as the menu, then the app's name ─────────────────────
 print("\ntest_every_header_is_menu_icon_then_name")
+# AND THE ICON IS THE MENU BUTTON (owner, 2026-09-29, option B of three mocks: "go with B, build
+# it"): the client's icon sits inside the control that opens the drawer, badged with three lines.
 
 # Owner, 2026-09-29: the client's icon and the machine's name on every screen, so the button never
 # changes sides between them. The menu went to the right that morning and came back to the left
@@ -524,7 +538,9 @@ for _p, _html in READ.items():
     _order = [m for m in re.findall(r'class="(ui-disc appmark|mark|brand|ham)"', _b)]
     _name = re.sub(r"<[^>]+>", "", (re.search(r'class="(?:mark|brand)">(.*?)</span>', _b, re.S)
                                      or [None, ""])[1]).strip()
+    _btn = _b.split('class="ham"', 1)[-1].split("</label>", 1)[0]
     if (_order[:2] != ["ham", "ui-disc appmark"] or _order[-1:] == ["ham"]
+            or 'class="ui-disc appmark"' not in _btn or 'class="menubadge"' not in _btn
             or f'src="{_look.client_icon()}"' not in _b
             or _name != ("Base Machine" if _expected_app(_p)[1] == "/ui/manifest.webmanifest"
                          else _expected_app(_p)[0])):

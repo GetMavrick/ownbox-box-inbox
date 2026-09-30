@@ -61,7 +61,8 @@ def _put(key: str, value) -> None:
 
 
 def stopped() -> dict:
-    """{slug: {"release", "reason", "since"}}: machines an update stopped, still not starting."""
+    """{slug: {"release", "reason", "since", "promised"?, "unpromised"?}}: machines an update
+    stopped, still not starting, and whether each was built only on what the box promises."""
     try:
         return _get(STOPPED, {})
     except Exception:                           # noqa: BLE001 — a page reads this; it must not 500
@@ -89,7 +90,8 @@ def observe(results: list, *, release: str | None = None, notify=None) -> list:
             for slug in sorted(failing):
                 if slug in was_ok:
                     rec[slug] = {"release": release, "reason": failing[slug][:300],
-                                 "since": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+                                 "since": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                 **_whose(slug)}
                     newly.append(slug)
         _put(STOPPED, rec)
         # THE LAST BOOT IS WHAT IS COMPARED NEXT. A boot with no known release is recorded without
@@ -103,6 +105,25 @@ def observe(results: list, *, release: str | None = None, notify=None) -> list:
     except Exception as e:                      # noqa: BLE001 — see the module docstring
         log.error("machine_breaks.observe_failed", error=f"{type(e).__name__}: {e}"[:300])
         return []
+
+
+def _whose(slug: str) -> dict:
+    """WAS A PROMISE BROKEN? (docs/SCOPE_MACHINE_MARKETPLACE.md §9.2) A machine built only on
+    `core.sdk` that an update stopped is OUR bug: we promised those seams. One that reached past the
+    facade used something we never promised, and the first such thing, with its fix, is what the
+    owner (or their AI) needs to read. The same rules as `scripts/ownbox.py check`.
+
+    {"promised": True} | {"promised": False, "unpromised": "<problem>. Fix: <sentence>"} | {} unknown.
+    """
+    try:
+        from core import custom_machines, sdk_check
+        found = sdk_check.check(custom_machines.machines_dir() / slug)
+    except Exception:                           # noqa: BLE001 — unknown is said as nothing, not a guess
+        return {}
+    if not found:
+        return {"promised": True}
+    first = found[0]
+    return {"promised": False, "unpromised": f"{first['problem']}. Fix: {first['fix']}"[:300]}
 
 
 def _notify(slugs: list, release: str) -> None:

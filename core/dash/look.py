@@ -350,6 +350,28 @@ def header_mark() -> str:
     return f'<span class="ui-disc appmark"><img src="{client_icon()}" alt=""></span>'
 
 
+# THE MENU'S THREE LINES, small enough to sit on the icon's corner.
+_MENU_BADGE = ('<span class="menubadge" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" '
+               'stroke="currentColor" stroke-width="3" stroke-linecap="round">'
+               '<path d="M5 7h14M5 12h14M5 17h14"/></svg></span>')
+
+
+def menu_button() -> str:
+    """THE CLIENT'S ICON IS THE MENU BUTTON, with a small three-line badge on its corner.
+
+    Owner, 2026-09-29, choosing option B of three mocked side by side ("go with B, build it"): the
+    icon the client uploaded opens the menu, the way tapping your own picture top-left opens the
+    menu on X and LinkedIn, so it reads as "my box". The badge still says "menu" to someone new, and
+    the separate three-line button went: one control where there were two.
+
+    STILL THE SAME CONTROL. A <label> for the drawer's checkbox, named "Menu" for a screen reader, so
+    the drawer, its scrim and its keyboard focus work exactly as they did. Every shell draws it
+    from here, so the Base Machine's screens and every machine's cannot drift apart.
+    """
+    return ('<label class="ham" for="navtoggle" role="button" aria-label="Menu" '
+            f'aria-controls="railnav">{header_mark()}{_MENU_BADGE}</label>')
+
+
 def app_tags(app: dict | None = None) -> str:
     """What makes a screen installable, and under which name. Without `app`, the Base Machine's."""
     href, name = (app["manifest"], app["name"]) if app else ("/ui/manifest.webmanifest", base_name())

@@ -248,8 +248,14 @@ for sel, b in re.findall(r"([^{}]*(?:textarea|input|select)[^{}]*)\{([^}]*)\}", 
         if float(size) < 16:
             small.append(f"{sel.strip()} -> {size}px")
 ok("no text input sets a font-size under 16px" + (f" — {small}" if small else ""), not small)
-ok("...and the compose box states 16px rather than inheriting it",
-   re.search(r"\.compose textarea\{[^}]*font-size:16px", CSS) is not None)
+# STATED, NEVER INHERITED, and at least 16px. It is 17px since the owner's one-point readability
+# pass (2026-09-29); the rule this line holds is the floor iOS zooms below, not the exact number.
+# SINCE IT FOLLOWS THE READER'S TEXT SIZE (2026-09-29) the size is max(16px, N * --px): the 16px
+# floor is written into the rule itself, which is what this line holds.
+_ct = re.search(r"\.compose textarea\{[^}]*font-size:(max\(16px, calc\((\d+) \* var\(--px, 1px\)\)\)|(\d+)px)", CSS)
+ok("...and the compose box states its size, never under 16px, rather than inheriting it",
+   _ct is not None and (_ct.group(1).startswith("max(16px") or float(_ct.group(3)) >= 16),
+   _ct.group(1) if _ct else "none")
 
 print("\ntest_the_app_never_implies_it_is_live")
 for banned in ("setInterval", "setTimeout", "fetch(", "XMLHttpRequest", "EventSource",
