@@ -1,0 +1,10 @@
+# The keys whose signature makes a plan real on this box (docs/PLAN_TIER_INTEGRITY.md, step 3).
+# Allowed-signers format, read by `ssh-keygen -Y verify -I ownbox-plans -n ownbox-plan`.
+# The private half lives only on Ownbox's provisioner and is never printed or copied; this is the public half,
+# printed by `python -m provisioner.run --plan-signers`.
+#
+# ROTATION NEVER DOWNGRADES ANYONE (rule 2):
+#   - a new key is ADDED here first, in a release, before the provisioner signs with it;
+#   - an old key is REMOVED only when no delivered box's current plan uses it (orders.plan_signer);
+#   - to cut a leaked key off by date, re-sign every box first, then add valid-before="YYYYMMDD" to its line.
+ownbox-plans namespaces="ownbox-plan" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJn6rOoWgFHGPWJpxCMDaGMzEQJB4P3LfOA3zcXBGpiN

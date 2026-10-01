@@ -592,8 +592,8 @@ def test_the_owners_cards_are_the_owners():
     sid, _ = seats.mint("Claude Code", "act")
     seats.touch(sid)
     owner = _text(_page())
-    # "ASSISTANTS", NOT "MCP" (owner, 2026-09-29, IA D4): what is connected, not the protocol.
-    ok("the owner sees what is connected, named", "Assistants" in owner and "1 client connected" in owner
+    # NAMED FOR WHAT IS CONNECTED, NOT "MCP" (IA D4), and Coworkers (Agents) since 2026-09-30.
+    ok("the owner sees what is connected, named", "Coworkers (Agents)" in owner and "1 client connected" in owner
        and "Claude Code" in owner, owner[:240])
     ok("...and the AI account's state", "Your AI" in owner)
     member = state.add_user("rosa@northwind.example", role="member")["id"]

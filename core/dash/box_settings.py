@@ -630,11 +630,13 @@ def _apps_card() -> str:
             + f'<div class="apps">{tiles}</div></div>')
 
 
-def _icon_card() -> str:
-    """OWNER ONLY: the client's icon, for every header and every home-screen app on this box.
+def icon_card() -> str:
+    """OWNER ONLY: the client's icon, for the menu, every header and every home-screen app on this box.
 
-    Owner, 2026-09-29: uploaded here, beside the home-screen apps it changes, PNG or JPEG, and worn
-    everywhere. The check and the re-encoding live in core/client_icon.py; this is the form.
+    ON THE SYSTEM SETTINGS MAIN SCREEN (owner, 2026-09-30), not on Mobile App where it began: "this
+    icon is not just used for the mobile app, but it's used inside the dashboard". Mobile App keeps
+    a link to it, in the place it left. The check and the re-encoding live in core/client_icon.py;
+    this is the form.
     """
     if not _is_owner():
         return ""
@@ -649,16 +651,24 @@ def _icon_card() -> str:
         said = '<p class="ok">Saved. Every screen now wears it, and every app added from now on.</p>'
     elif _rq.args.get("icon") == "removed":
         said = '<p class="ok">Back to the Ownbox mark.</p>'
-    remove = ('<form method="post" action="/settings/mobile/icon"><input type="hidden" name="do" '
+    remove = ('<form method="post" action="/settings/icon"><input type="hidden" name="do" '
               'value="remove"><button class="ghost" type="submit">Use the Ownbox mark again</button></form>'
               if got else "")
+    # THE TWO PLACES IT IS SEEN, side by side: the circle that opens the menu, and the tile on a
+    # home screen, which is the box's own icon address — what a phone will really be given.
+    tile = f'/ui/icon-192.png{look.icon_version()}'
     return ('<div class="card" id="icon"><h2>Your icon</h2>'
-            '<p class="sub">It appears in the header of every screen and on the home screen for every '
-            'app on this box. A PNG or JPEG, square is best, at least 192 pixels on a side.</p>'
-            f'<p>{look.header_mark()} '
-            f'<span class="quiet">{"Your icon" if got else "The Ownbox mark, until you upload yours"}</span></p>'
+            '<p class="sub">It opens the menu on every screen, heads the menu, and is the icon of '
+            'every app on this box on a home screen. A square PNG or JPEG, at least 192 pixels on '
+            'a side. One with its own background fills the space; one with a clear background '
+            'sits on white.</p>'
+            '<div class="iconsee">'
+            f'<figure>{look.header_mark()}<figcaption>Menu</figcaption></figure>'
+            f'<figure><img class="tile" src="{_esc(tile)}" alt="" width="64" height="64">'
+            '<figcaption>Home screen</figcaption></figure></div>'
+            + ('' if got else '<p class="quiet">The Ownbox mark, until you upload yours.</p>')
             + said +
-            '<form method="post" action="/settings/mobile/icon" enctype="multipart/form-data">'
+            '<form method="post" action="/settings/icon" enctype="multipart/form-data">'
             '<label for="icon-file">Choose a PNG or JPEG</label>'
             '<input id="icon-file" type="file" name="icon" accept="image/png,image/jpeg" required>'
             '<button class="ghost" type="submit">Upload icon</button></form>'
@@ -667,8 +677,18 @@ def _icon_card() -> str:
             'there, remove the app from the home screen and add it again.</p></div>')
 
 
-@blueprint.post("/settings/mobile/icon")
-def box_mobile_icon():
+def _icon_link_card() -> str:
+    """Where the icon card used to be on Mobile App: a way to it, for the owner who comes looking."""
+    if not _is_owner():
+        return ""
+    return ('<div class="card"><h2>Your icon</h2>'
+            '<p class="sub">The icon on these apps is set in System Settings, with the menu and '
+            'every screen.</p>'
+            '<div class="foot"><a href="/settings#icon">Change your icon &rarr;</a></div></div>')
+
+
+@blueprint.post("/settings/icon")
+def box_icon():
     """Save, or remove, the client's icon. Owner only, like the card that sends it.
 
     THE ONLY ROUTE ON THE BOX THAT TAKES MORE THAN 256 KB. `core/dispatch.py` caps every request
@@ -681,7 +701,7 @@ def box_mobile_icon():
     from werkzeug.exceptions import RequestEntityTooLarge
     from core import client_icon
     _rq.max_content_length = client_icon.MAX_BYTES + 64 * 1024
-    back = "/settings/mobile"
+    back = "/settings"
     try:
         if _rq.form.get("do") == "remove":
             client_icon.remove()
@@ -813,7 +833,7 @@ def box_mobile():
                   'The card above is about the device you are holding.</p></div>')
 
     body.append(_apps_card())
-    body.append(_icon_card())
+    body.append(_icon_link_card())
     body.append('<div class="card">' + _platform_cards() + '</div>')
 
     # WHEN THE ASKING HAPPENS, said plainly, because a set-up step that ends with nothing switched
@@ -1096,7 +1116,7 @@ def _seat_credential(label: str, credential: str, url: str) -> str:
             'this connection and make another — there is no way to look it up.</p>'
             f'<p class="addr">{_esc(credential)}'
             '</p></div>'
-            '<div class="card"><p><b>Address</b> — give your assistant this and that key. It '
+            '<div class="card"><p><b>Address</b> — give your AI agent this and that key. It '
             'speaks MCP.</p>'
             f'<p class="addr">{_esc(url)}</p>'
             '</div>')
@@ -1119,7 +1139,7 @@ def box_agent():
     from core.connector import seats
 
     if not _is_owner():
-        return chrome("/settings/agent", title="Assistants",
+        return chrome("/settings/agent", title="Coworkers (Agents)",
                       lede="This one is the owner's.",
                       body='<div class="card"><p>Only the owner of this box can connect an AI '
                            'coworker, because the connection can read every message on it.</p>'
@@ -1145,7 +1165,7 @@ def box_agent():
             # NEVER A REDIRECT AND NEVER A QUERY STRING. The credential is rendered into this one
             # response and then it is gone: a redirect would put it in a URL, and gunicorn logs
             # raw query stnotifies.
-            return chrome("/settings/agent", title="Assistants",
+            return chrome("/settings/agent", title="Coworkers (Agents)",
                           lede="Copy the key now — it is shown once.",
                           # ONE ADDRESS, THE SHORT ONE — carried across from #1417 (OSDev1),
                           # which landed on main while this screen was being moved into core.
@@ -1157,16 +1177,17 @@ def box_agent():
                           # side alone would have silently reverted his fix.
                           body=_seat_credential(label, credential, f"{root}/mcp")
                                + '<div class="foot"><a href="/settings/agent">'
-                                 '&larr; Assistants</a></div>'), 200
+                                 '&larr; Coworkers (Agents)</a></div>'), 200
 
     root = str(request.host_url or "").rstrip("/")
     clients = "".join(f'<div class="row"><b style="flex:1;min-width:0">{_esc(c["name"])}</b>'
                       f'<span class="quiet">{_esc(c["how"])}</span></div>'
                       for c in getattr(box_secrets, "AGENT_CLIENTS", ()))
-    body = ('<div class="card"><p>Your box can be read by an assistant you already pay for — '
-            'Claude, ChatGPT, Grok — so you can ask it about your customers where you already '
-            'work. You give it a key, you choose what it may do, and you can take that key away '
-            'at any moment.</p>'
+    from core.dash.home import coworkers_two_kinds
+    body = (coworkers_two_kinds("agents") +
+            # WHO THEY ARE IS SAID ABOVE, in the two kinds; this card says what holds them.
+            '<div class="card"><p>You give each one a key, you choose what it may do, and you can '
+            'take that key away at any moment.</p>'
             '<p class="quiet">Nothing you connect here can send a message as your business. The '
             'most a coworker can do is leave a reply waiting on the screen for you.</p></div>'
             # THERE IS NO KEY TO COPY, and this sentence said there was. Owner, 2026-09-22, after
@@ -1176,7 +1197,7 @@ def box_agent():
             # to fetch a key first sends them to the hard path we stopped needing. The form below
             # still exists for an assistant that cannot sign in; it is a fallback, not the route.
             '<div class="card"><p><b>This box\'s address</b> — paste this into whichever '
-            'assistant you use. It will send you here to sign in; there is no key to copy.</p>'
+            'AI agent you use. It will send you here to sign in; there is no key to copy.</p>'
             # A PLACE TO BREAK AT EACH SLASH, so a long address wraps between its parts on a
             # mobile screen rather than mid-word ("…/mc" then "p"). <wbr> copies as nothing.
             f'<p class="addr">{_esc(root).replace("/", "/<wbr>")}/<wbr>mcp'
@@ -1195,15 +1216,15 @@ def box_agent():
             + '</ol></div>'
             + '<details style="margin-top:18px"><summary style="cursor:pointer">'
               'Or make a key by hand</summary>'
-              '<p class="quiet" style="margin:10px 0">For a script, or an assistant that cannot '
+              '<p class="quiet" style="margin:10px 0">For a script, or an AI agent that cannot '
               'sign in. The key is shown once and you keep it safe yourself — signing in '
               'above is easier and revoking it is the same button.</p>'
             + _seat_form(note)
             + '</details>'
             + _seat_rows(seats.all_seats())
             + _back())
-    return chrome("/settings/agent", title="Assistants",
-                  lede="Let an assistant you already pay for read this box.",
+    return chrome("/settings/agent", title="Coworkers (Agents)",
+                  lede="Let an AI agent you already pay for read this box.",
                   body=body), 200
 
 
@@ -1296,8 +1317,8 @@ def _connect_card(where: dict, has_keys: bool, host_fp: str) -> str:
 
 
 @blueprint.route("/settings/access", methods=["GET", "POST"])
-def box_access_screen():
-    """Add the owner's own SSH key to this box, or take one away.
+def box_access_screen(move_note: str = "", checkin_note: str = ""):
+    """Add the owner's own SSH key to this box, or take one away. And, at the foot, the danger zone.
 
     THE PRODUCT PROMISES FULL ACCESS AND THE BOX SHIPPED WITH NONE. The only key ever placed on a
     droplet is ours, and first boot deletes it the moment bootstrap succeeds — deliberately, so
@@ -1334,7 +1355,9 @@ def box_access_screen():
             pass
         return redirect("/settings/access", code=303)
 
-    if request.method == "POST":
+    # ONLY THIS PAGE'S OWN FORM ADDS A KEY. The danger zone's two forms post elsewhere and are drawn
+    # back onto this page, so a POST that arrives here from them is not a key to read.
+    if request.method == "POST" and request.path == "/settings/access":
         try:
             text, fp = box_access.add(box_access.read(), request.form.get("key") or "")
             box_access.write(text)
@@ -1439,7 +1462,48 @@ def box_access_screen():
                         if not has else
                         "Put your own key on this box, and the machine is yours from your own terminal."),
                   body=(note + (connect + rows + form if has else form + connect + rows)
-                        + _back())), 200
+                        + danger_zone(move_note, checkin_note) + _back())), 200
+
+
+# ── the danger zone ──────────────────────────────────────────────────────────────────────────────
+# Owner, 2026-09-30: "we should actually have a danger zone area, where turning things off will
+# disconnect their support and things like that and we don't want just anyone to be able to do
+# this" — "an Admin or just the account owner". It sits at the foot of Server Access, the one page
+# that is already the owner's alone (a member is refused it whole), and it is where a control goes
+# when using it makes this box harder for us to help with. Moving the box was a page of its own
+# and a link on System Settings; the owner: "We don't want this to be stumbled upon too much."
+def danger_zone(move_note: str = "", checkin_note: str = "") -> str:
+    """The owner's switches that cut this box loose from us, last on Server Access.
+
+    GITHUB'S SHAPE, which the owner sent (2026-09-30, "it should have a warning like github does
+    it"): the title in red, one red-edged box, a row per action — what it is and what it costs on
+    the left, a red button on the right. The button only OPENS the row: a "Read this first" warning
+    says what will happen, and nothing happens until the owner ticks that they understand and
+    presses the second button. No script — a <details> per row, so it works on every phone."""
+    if not _is_owner():
+        return ""
+    return ('<section class="danger" id="danger"><h2>Danger zone</h2>'
+            '<p class="sub">Only the owner of this box sees these. Each one makes it harder for us '
+            'to support you.</p>'
+            f'<div class="dz">{_checkin_row(checkin_note)}{_move_row(move_note)}</div></section>')
+
+
+def _dz_row(key: str, title: str, said: str, button: str, inside: str, note: str = "") -> str:
+    """One row that opens: its button reads Cancel while it is open, and a result opens it."""
+    return (f'<details class="dzrow" id="{key}"{" open" if note else ""}><summary>'
+            f'<span class="what"><b>{_esc(title)}</b><span>{said}</span></span>'
+            f'<span class="dzbtn"><span class="go">{_esc(button)}</span><span class="no">Cancel</span></span>'
+            f'</summary><div class="dzbody">{note}{inside}</div></details>')
+
+
+def _dz_plain(key: str, title: str, said: str, inside: str = "", note: str = "") -> str:
+    """A row with nothing dangerous to press: what stands, and the safe way back if there is one."""
+    return (f'<div class="dzrow" id="{key}"><span class="what"><b>{_esc(title)}</b>'
+            f'<span>{said}</span></span>{note}{inside}</div>')
+
+
+def _warn(text: str) -> str:
+    return f'<div class="ui-notice bad" role="note"><b>Read this first.</b> {text}</div>'
 
 
 # ── what release this box runs ───────────────────────────────────────────────────────────────────
@@ -1566,19 +1630,39 @@ def _checkin_card(owner: bool) -> str:
     elif on:
         out.append('<p class="quiet">Nothing sent yet. The first check-in goes out within a few minutes '
                    'of the box starting.</p>')
-    if owner and on:
-        out.append('<form method="post" action="/settings/updates/checkin">'
-                   '<input type="hidden" name="to" value="off">'
-                   '<label class="consent"><input type="checkbox" name="confirm" value="yes" required> '
-                   'Stop telling Ownbox this box is running</label>'
-                   '<button type="submit" style="margin-top:14px">Switch off</button></form>')
-    elif owner:
-        out.append('<form method="post" action="/settings/updates/checkin">'
-                   '<input type="hidden" name="to" value="on">'
-                   '<button type="submit">Switch back on</button></form>')
+    # THE SWITCH IS IN THE DANGER ZONE (owner, 2026-09-30): switching this off is how a box goes
+    # dark to us, which is what that zone is for. This card still says what it is and whether it is on.
+    if owner:
+        out.append('<p class="quiet">The switch is in the <a href="/settings/access#danger">danger '
+                   'zone</a>, at the foot of Server Access.</p>')
     else:
-        out.append('<p class="quiet">The owner of this box can switch this off here.</p>')
+        out.append('<p class="quiet">The owner of this box can switch this off.</p>')
     return "".join(out) + "</div>"
+
+
+def _checkin_row(note: str = "") -> str:
+    """The check-in's switch, in the danger zone: the control that makes this box hardest for us to
+    help, so switching off takes the row opened, the warning read, a tick, and a second press.
+    Switching back on is safe, so it is one press."""
+    from core import checkin
+    if not checkin.enabled():
+        return _dz_plain("checkin", "Check-in with Ownbox is off",
+                         "We can no longer see whether this box is healthy.",
+                         '<form method="post" action="/settings/updates/checkin">'
+                         '<input type="hidden" name="to" value="on">'
+                         '<button type="submit">Switch back on</button></form>', note)
+    inside = (_warn("This box stops telling Ownbox it is running. If it stops working, nobody here "
+                    "will know until you tell us. Ownbox is told once that you switched it off, and "
+                    "nothing is sent after that. You can switch it back on here at any time.")
+              + '<p class="quiet"><a href="/settings/updates">Exactly what it sends &rarr;</a></p>'
+              '<form method="post" action="/settings/updates/checkin">'
+              '<input type="hidden" name="to" value="off">'
+              '<label class="consent"><input type="checkbox" name="confirm" value="yes" required> '
+              'Stop telling Ownbox this box is running</label>'
+              '<button type="submit" class="danger">Switch off</button></form>')
+    return _dz_row("checkin", "Stop checking in with Ownbox",
+                   "We would no longer see whether this box is healthy, or know to reach you when it "
+                   "goes quiet.", "Switch off check-in", inside, note)
 
 
 def _seconds_since(iso) -> float | None:
@@ -1670,16 +1754,17 @@ def box_checkin_switch():
                            'off or on.</p></div>' + _back()), 403
     from core import checkin
     to = request.form.get("to")
+    # DRAWN BACK ONTO THE DANGER ZONE, where the switch is, and never carried in a URL.
     if to == "off" and request.form.get("confirm") != "yes":
-        return _updates_page(_put_back_note({"ok": False, "said": "Nothing was changed — tick the box "
-                                                                  "to confirm first."}))
+        return box_access_screen(checkin_note='<p class="stale">Nothing was changed — tick the box '
+                                              'to confirm first.</p>')
     if to not in ("on", "off"):
-        return _updates_page(_put_back_note({"ok": False, "said": "Nothing was changed."}))
+        return box_access_screen(checkin_note='<p class="stale">Nothing was changed.</p>')
     checkin.set_enabled(to == "on", by=str(_who().get("id") or ""))
     _start_checkin()
     said = ("Switched off. Ownbox is being told once, and nothing is sent after that." if to == "off"
             else "Switched back on. A check-in is on its way now.")
-    return _updates_page(_put_back_note({"ok": True, "said": said}))
+    return box_access_screen(checkin_note=f'<p class="ok">{_esc(said)}</p>')
 
 
 def _start_checkin() -> None:
@@ -1720,6 +1805,10 @@ _MOVE_SAID = {
 def box_move_screen():
     """Take this box to the owner's own DigitalOcean account. Owner, 2026-09-23: a button, now.
 
+    NO LONGER A PAGE (owner, 2026-09-30): the card lives in the danger zone at the foot of Server
+    Access, and this address is where its form posts. A GET — an old link, a bookmark — lands on
+    the card.
+
     WHAT IT CAN AND CANNOT DO, said on the screen because a buyer will assume otherwise: DigitalOcean
     cannot move a running server, or its IP address, between accounts. It moves a full COPY — an
     image — to the email of the receiving account. So the button makes that copy and sends it; the
@@ -1729,61 +1818,66 @@ def box_move_screen():
     itself if it tried; the provisioner, which does, reads the request and does the work
     (core/box_move.py). That split is the reason a stolen box cannot be used to copy anybody else's.
 
-    OWNER-ONLY, on the page AND the post. A copy of the box carries every conversation on it, and
+    OWNER-ONLY, on the card AND the post. A copy of the box carries every conversation on it, and
     choosing where that goes is the owner's decision alone.
     """
     refuse = _admit(owner_only=False)
     if refuse is not None:
         return refuse
+    if request.method != "POST":
+        return redirect("/settings/access#move", code=303)
+    if not _is_owner():
+        return box_access_screen()                       # the owner's page refuses a member, 403
     from core import box_move
 
-    if not _is_owner():
-        return chrome("/settings/move", title="Move Your Box",
-                      lede="This one is the owner's.",
-                      body='<div class="card"><p>Only the owner of this box can move it, because a '
-                           'copy of it carries every conversation on it.</p></div>' + _back()), 403
-
     note = ""
-    if request.method == "POST":
-        do = str(request.form.get("do") or "")
-        who = (_who().get("email") or _who().get("id") or None)
-        if do == "cancel":
-            note = ('<div class="card"><p>Cancelled. Nothing was copied.</p></div>'
-                    if box_move.cancel(by=who) else
-                    '<div class="card"><p>That can no longer be cancelled — the copy has already '
-                    'been started.</p></div>')
-        elif do == "request":
-            if request.form.get("confirm") != "yes":
-                note = ('<div class="card"><p>Tick the box to confirm you want a copy of this box '
-                        'sent to that account.</p></div>')
-            else:
-                try:
-                    box_move.request(request.form.get("email") or "", by=who)
-                except box_move.MoveRefused as e:
-                    note = f'<div class="card"><h2>Not started.</h2><p>{_esc(e)}</p></div>'
+    do = str(request.form.get("do") or "")
+    who = (_who().get("email") or _who().get("id") or None)
+    if do == "cancel":
+        note = ('<p class="ok">Cancelled. Nothing was copied.</p>' if box_move.cancel(by=who) else
+                '<p class="stale">That can no longer be cancelled — the copy has already been '
+                'started.</p>')
+    elif do == "request":
+        if request.form.get("confirm") != "yes":
+            note = ('<p class="stale">Tick the box to confirm you want a copy of this box sent to '
+                    'that account.</p>')
+        else:
+            try:
+                box_move.request(request.form.get("email") or "", by=who)
+            except box_move.MoveRefused as e:
+                note = f'<p class="stale"><b>Not started.</b> {_esc(e)}</p>'
+    return box_access_screen(move_note=note)
 
+
+def _move_row(note: str = "") -> str:
+    """Where a move stands, or how to start one: a row of the danger zone."""
+    from core import box_move
     now = box_move.current()
-    if now:
-        title, said = _MOVE_SAID.get(now.get("state"), ("In progress", ""))
-        body = (f'<div class="card"><h2>{_esc(title)}</h2><p>{_esc(said)}</p>'
-                f'<p class="quiet">Sending to</p><p class="addr">{_esc(now.get("email"))}</p>'
-                + (f'<p class="quiet">{_esc(now.get("detail"))}</p>' if now.get("detail") else "")
-                + '</div>')
-        if now.get("state") == "requested":
-            body += ('<form method="post" action="/settings/move" class="card">'
-                     '<input type="hidden" name="do" value="cancel">'
-                     '<button type="submit">Cancel — do not copy this box</button></form>')
-        if now.get("state") in ("sent", "failed"):
-            body += _move_form()
-    else:
-        body = _move_explainer() + _move_form()
-    return chrome("/settings/move", title="Move Your Box",
-                  lede="Move a full copy of this box into your own DigitalOcean account.",
-                  body=note + body + _back()), 200
+    title = "Move your box to your own DigitalOcean account"
+    if not now:
+        return _dz_row("move", title, "A full copy of everything on it goes to an account you name, "
+                       "and we have no access to the server it becomes.", "Move this box",
+                       _move_warning() + _move_explainer() + _move_form(), note)
+    state, (head, said) = now.get("state"), _MOVE_SAID.get(now.get("state"), ("In progress", ""))
+    where = (f'<p class="quiet">Sending to</p><p class="addr">{_esc(now.get("email"))}</p>'
+             + (f'<p class="quiet">{_esc(now.get("detail"))}</p>' if now.get("detail") else ""))
+    if state in ("sent", "failed"):
+        return _dz_row("move", title, f'<b>{_esc(head)}.</b> {_esc(said)}', "Send another copy",
+                       where + _move_warning() + _move_form(), note)
+    cancel = ('<form method="post" action="/settings/move"><input type="hidden" name="do" value="cancel">'
+              '<button type="submit">Cancel — do not copy this box</button></form>'
+              if state == "requested" else "")
+    return _dz_plain("move", title, f'<b>{_esc(head)}.</b> {_esc(said)}', where + cancel, note)
+
+
+def _move_warning() -> str:
+    return _warn("A copy of every conversation, contact and setting on this box goes to the "
+                 "DigitalOcean account you name. Once the copy has started it cannot be stopped. The "
+                 "server it becomes is yours alone: we cannot see it, update it or help with it.")
 
 
 def _move_explainer() -> str:
-    return ('<div class="card"><h2>What happens</h2>'
+    return ('<h3>What happens</h3>'
             '<p>We make a full copy of this box — everything on it — and send it to the '
             'DigitalOcean account you name. You accept it there and create a server from it. '
             'That server is yours, on your own bill, and we have no access to it.</p>'
@@ -1791,21 +1885,21 @@ def _move_explainer() -> str:
             'changes accounts, so the new one gets a new address. The web address you use '
             'stays the same once it is pointed at the new server.</p>'
             '<p class="quiet">You need a DigitalOcean account first. Creating one is free at '
-            'digitalocean.com.</p></div>')
+            'digitalocean.com.</p>')
 
 
 def _move_form() -> str:
     # A DESTRUCTIVE-LOOKING ACTION IS NEVER THE EASIEST THING TO HIT BY ACCIDENT (mobile-first ruling).
     # This is not destructive — the original keeps running — but it sends a copy of every
     # conversation to another account, so it takes a typed address AND a tick, not one tap.
-    return ('<form method="post" action="/settings/move" class="card">'
+    return ('<form method="post" action="/settings/move">'
             '<input type="hidden" name="do" value="request">'
             '<label for="do-email">Your DigitalOcean account email</label>'
             '<input id="do-email" name="email" type="email" autocomplete="email" required '
             'placeholder="you@yourcompany.com">'
             '<label class="consent"><input type="checkbox" name="confirm" value="yes"> Send a full copy of this '
             'box, and everything on it, to that account</label>'
-            '<button type="submit">Send a copy to my account</button></form>')
+            '<button type="submit" class="danger">Send a copy to my account</button></form>')
 
 
 # THE PROVISIONER'S TWO REQUESTS, behind the /deploy prefix so `_auth_gate` holds them to the per-box
@@ -1892,7 +1986,7 @@ def deploy_move_status():
 # `_AGENT_STEP["link"]["url"]` all name paths served here. Keeping the stnotifies in the contract is
 # what lets one screen render a step it has never heard of.
 _DOORS = ("/settings/ai", "/settings/mobile", "/settings/agent", "/settings/access",
-          "/settings/updates", "/settings/move", "/settings/email")
+          "/settings/updates", "/settings/email")
 # The handout hangs off the mobile-app door rather than being one of its own: it is not a
 # step a buyer finishes, it is a sheet they hand to somebody else.
 _HANDOUT = "/settings/mobile/print"

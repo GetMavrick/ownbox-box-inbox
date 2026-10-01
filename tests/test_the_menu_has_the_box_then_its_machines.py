@@ -120,12 +120,13 @@ ok("...and nothing else: no rule and no heading between the groups",
 print("\ntest_system_settings_is_four_groups_with_plain_names")
 # Owner, 2026-09-29, IA decision D4 (docs/SCOPE_APP_IA.md): Your AI · Reaching you · Your team ·
 # The server, each opened by the same subtle gap as the main menu's groups, and plain names —
-# Assistants (not AI Coworkers), Email (not Outbound Email).
+# Email (not Outbound Email). The AI agents you already pay for are Coworkers (Agents), owner,
+# 2026-09-30. Move Your Box is not a row since the same day: it is in Server Access's danger zone.
 _sn = menu("/settings/people")[1]
 _srows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', _sn, re.S)
 ok("the rows, in their groups' order",
-   _srows == ["Overview", "AI Account", "Assistants", "Shifts", "Mobile App", "Email", "People",
-              "Updates", "Server Access", "Move Your Box"], str(_srows))
+   _srows == ["Overview", "AI Account", "Coworkers (Agents)", "Shifts", "Mobile App", "Email", "People",
+              "Updates", "Server Access"], str(_srows))
 _sgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
                    _sn, re.S)
 ok("...each group opening with a gap, and nothing else", _sgrp == ["AI Account", "Mobile App", "People",

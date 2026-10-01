@@ -240,18 +240,6 @@ CSS = """
      with a white row one click away on System Settings, the same menu in two colours. */
   --rail:var(--ground); --hover:var(--bubble-in);
   --sel:var(--card); --nav-ink:var(--dim); --faint:var(--dimmer); --danger:var(--bad);
-  /* THE CREST IS CORE'S COMPONENT AND WEARS CORE'S COLOUR, in both themes deliberately.
-     Pointed at this machine's accent it came out pink here and amber on the dashboard — the
-     same box, the same initial, two different badges one click apart, which is what the owner
-     was looking at (2026-09-22: *"I don't know why this one is different font and icon"*).
-     IDENTICAL IN LIGHT AND DARK, and that is not an oversight: the badge carries its own
-     ground, so the contrast that matters is the ink against the badge, not the badge against
-     the rail behind it. Values are core/dash/home.py's.
-     WRITTEN OUT IN EACH BLOCK rather than declared once on `.rail`, because this file's rule
-     is that a hex lives in a token block. test_inbox_contrast enforces BOTH halves of that —
-     every literal in one theme needs its pair in the other, and no hex outside these blocks —
-     and it caught the two earlier shapes of this change. */
-  --av-ink:#7a5a14; --av-a:#ffe4a3; --av-b:#f7c7a8;
   --drawer-flat:none; --drawer-lift:var(--lift);
   /* ── THE ORB'S GLASS ──────────────────────────────────────────────────────────────────────
      Owner, 2026-09-18: "make it look really cool like glass".
@@ -295,7 +283,6 @@ CSS = """
   /* The drawer is the card's colour over the ground, lifted by the scrim: the job the shadow does
      in light, which a dark shadow on a dark ground cannot. */
   --rail:var(--card); --sel:var(--accent-soft);
-  --av-ink:#7a5a14; --av-a:#ffe4a3; --av-b:#f7c7a8;
   --drawer-flat:none; --drawer-lift:var(--lift);
   --scrim:rgba(0,0,0,.62);
   /* The same layers, this theme's values — not an inversion of light's. The body barely moves

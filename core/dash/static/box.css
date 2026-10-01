@@ -370,6 +370,10 @@ a.ui-row:hover { text-decoration: none; background: linear-gradient(var(--wash),
   overflow: hidden;
 }
 .ui-disc > img { width: 62%; height: 62%; object-fit: contain; }
+/* a client's icon that brings its own ground fills its disc, edge to edge: a white edge around a
+   square that already has a background is a frame nobody drew (owner, 2026-09-30) */
+.ui-disc.fill { background: none; border: 0; }
+.ui-disc.fill > img { width: 100%; height: 100%; object-fit: cover; }
 
 /* metrics: a few figures, each a number over its label, two to a row on a mobile */
 .ui-metrics {

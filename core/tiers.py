@@ -129,11 +129,81 @@ def _stored() -> dict | None:
     return v if isinstance(v, dict) and v.get("tier") in TIERS else None
 
 
+# ── signed plans (docs/PLAN_TIER_INTEGRITY.md, step 3 contract, phase B) ─────────────────────────────
+#
+# ONCE THIS BOX IS ARMED (a release shipped `config/ownbox_plan_signers`) AND HOLDS A SIGNED PLAN, THE
+# PLAN IS THE SIGNED TEXT AND NOTHING ELSE. The row keeps `signed: {text, sig}` beside the plain fields,
+# and the plain fields are never read: editing them does nothing, and editing the text breaks the
+# signature. Unarmed, or holding a plan from before signing, the row is read exactly as it always was.
+
+def _from_signed(held: dict) -> dict | None:
+    """The plan a stored `signed` value proves, as {tier, add, seq, since, until}; None if forged.
+
+    FORGED (a bad signature, another box's plan) is treated as no plan at all: the box falls back to
+    what it was built as and says so in its next check-in. UNVERIFIABLE (no ssh-keygen, a timeout) keeps
+    the plan the text says, unproven, because nothing is known against it (rule 2: never downgrade a
+    paying box because a check failed)."""
+    from core import plan_signing
+    result, plan, why = plan_signing.verify(held.get("signed"))
+    if result == plan_signing.FORGED:
+        log.warning("tiers.signed_plan_refused", why=why)
+        return None
+    if plan is None:                                     # unverifiable: read the text, unproven
+        try:
+            plan = json.loads(held["signed"]["text"])
+        except (KeyError, TypeError, ValueError):
+            return None
+    if not isinstance(plan, dict) or plan.get("tier") not in TIERS:
+        return None
+    return {"tier": plan["tier"], "add": plan.get("add") or [], "seq": plan.get("seq") or 0,
+            "since": held.get("since") or "", "until": plan.get("until")}
+
+
+def _trial_over(until) -> bool:
+    """Has a trial plan's `until` passed? The box's clock is only the offline fallback: at `until`
+    Ownbox issues a Base plan at seq + 1, which the next check-in reply delivers (contract point 3)."""
+    if not until:
+        return False
+    try:
+        end = datetime.fromisoformat(str(until).replace("Z", "+00:00"))
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) >= end
+    except ValueError:
+        return False
+
+
+def _held() -> dict | None:
+    """The plan this box holds from Ownbox, or None: the signed text when there is one and the box is
+    armed, else the row as it always was."""
+    held = _stored()
+    if not held:
+        return None
+    if held.get("signed") is not None:
+        from core import plan_signing
+        if plan_signing.armed():
+            return _from_signed(held)
+    return held
+
+
+def verified() -> bool | None:
+    """For the check-in's `plan.verified`: None on a box not yet armed (it says nothing new); True when
+    it holds a plan whose signature checks out; False otherwise, which Ownbox reads as "re-send"."""
+    from core import plan_signing
+    if not plan_signing.armed():
+        return None
+    held = _stored()
+    if not held or held.get("signed") is None:
+        return False
+    return plan_signing.verify(held["signed"])[0] == plan_signing.OK
+
+
 def _plan() -> tuple:
     """(tier, add, source, seq, since) — current() without the seat count, which reads the config."""
-    held = _stored()
+    held = _held()
     if held:
-        return (held["tier"], [a for a in held.get("add") or [] if a in FEATURES], "ownbox",
+        tier = DEFAULT if _trial_over(held.get("until")) else held["tier"]
+        return (tier, [a for a in held.get("add") or [] if a in FEATURES], "ownbox",
                 int(held.get("seq") or 0), held.get("since") or "")
     p = _provisioned()
     tier, source = (p, "provision.json") if p in TIERS else (DEFAULT, "default")
@@ -260,6 +330,27 @@ def _validate(body: dict) -> tuple:
     return seq, tier, sorted(set(add))
 
 
+def _check_signed(body: dict) -> dict | None:
+    """On an armed box: {"plan", "signed"} for a body carrying a good `signed` plan, None for an unsigned
+    body the box may still accept. Raises PlanRefused for a forged or unverifiable signed plan (nothing
+    is stored, so the box keeps what it holds), and for an unsigned body once it holds a signed plan:
+    from then on only Ownbox's signature changes it (contract phase B). Unarmed, `signed` is ignored and
+    every body is read exactly as before (inert until a release ships the signers)."""
+    from core import plan_signing
+    if not plan_signing.armed():
+        return None
+    if body.get("signed") is None:
+        held = _stored()
+        if held and held.get("signed") is not None:
+            raise PlanRefused("this box holds a signed plan; only a plan signed by Ownbox changes it")
+        return None
+    result, plan, why = plan_signing.verify(body.get("signed"))
+    if result != plan_signing.OK:
+        log.warning("tiers.signed_plan_refused", result=result, why=why)
+        raise PlanRefused(f"signed plan refused: {why}")
+    return {"plan": plan, "signed": {"text": body["signed"]["text"], "sig": body["signed"]["sig"]}}
+
+
 def set_plan(body: dict) -> dict:
     """Store what Ownbox says this box's plan is. Returns current() after, plus `restarting`: True
     when the plan changed which add-on machines this box runs and a restart was asked for (§2.7).
@@ -268,7 +359,9 @@ def set_plan(body: dict) -> dict:
     Nothing is stored unless everything checks. The seq comparison and the write happen under one
     write lock, so of two messages arriving together the higher seq wins, whatever the order.
     """
-    seq, tier, add = _validate(body if isinstance(body, dict) else {})
+    body = body if isinstance(body, dict) else {}
+    signed = _check_signed(body)
+    seq, tier, add = _validate(signed["plan"] if signed else body)
     from core import state
     before = machines_held()
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -279,12 +372,33 @@ def set_plan(body: dict) -> dict:
         held = 0
         if row:
             try:
-                held = int((json.loads(row["value"]) or {}).get("seq") or 0)
-            except (ValueError, TypeError, AttributeError):
-                held = 0
+                v = json.loads(row["value"]) or {}
+                # A SIGNED ROW'S SEQ IS THE SIGNED TEXT'S: the plain field beside it is editable, and a
+                # huge number there would make every later plan from Ownbox look stale.
+                if v.get("signed") is not None:
+                    v = json.loads(v["signed"]["text"])
+                held = int(v.get("seq") or 0)
+                held_plan = (str(v.get("tier") or ""), sorted(set(v.get("add") or [])))
+            except (ValueError, TypeError, AttributeError, KeyError):
+                held, held_plan = 0, None
+            # THE CHECK-IN REPLY RE-CONFIRMS THE PLAN AT THE SAME SEQ (OSDev1, phase A): a signed plan at
+            # the seq held, saying exactly what is held, only replaces the signature. That is how a box
+            # holding a plan from before signing gets its first signature, and how a new key re-signs
+            # every box before the old one retires (contract point 1). Anything that CHANGES the plan
+            # still needs seq + 1, so an equal seq can never be used to swap a plan.
+            if signed and seq == held and held_plan == (tier, add):
+                row_v = json.loads(row["value"]) or {}
+                c.execute("UPDATE box_settings SET value = ?, set_at = ?, set_by = ? "
+                          "WHERE machine = ? AND key = ? AND user_id = ''",
+                          (json.dumps({"seq": seq, "tier": tier, "add": add,
+                                       "since": row_v.get("since") or now, "signed": signed["signed"]}),
+                           now, "ownbox", NS, KEY))
+                log.info("tiers.plan_confirmed", seq=seq, tier=tier)
+                return current() | {"restarting": False}
         if seq <= held:
             raise PlanRefused(f"seq {seq} is not newer than the {held} this box holds", stale=True)
-        value = json.dumps({"seq": seq, "tier": tier, "add": add, "since": now})
+        value = json.dumps({"seq": seq, "tier": tier, "add": add, "since": now,
+                            **({"signed": signed["signed"]} if signed else {})})
         c.execute("INSERT INTO box_settings (machine, key, user_id, value, set_at, set_by) "
                   "VALUES (?,?,'',?,?,?) ON CONFLICT(machine, key, user_id) DO UPDATE SET "
                   "value = excluded.value, set_at = excluded.set_at, set_by = excluded.set_by",

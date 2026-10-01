@@ -199,7 +199,7 @@ _CONSENT = """<!doctype html><html lang=en><meta charset=utf-8>
 <p>Choose what it may do:</p>
 {perms}
 <p class=q>It can never send a message as your business. You can take this back at any time on
-the Assistants screen in System Settings, and nothing else about your box changes.</p>
+the Coworkers (Agents) screen in System Settings, and nothing else about your box changes.</p>
 <form method=post>{hidden}
   <button class=yes name=decision value=allow type=submit>Allow</button>
   <button class=no name=decision value=deny type=submit>Cancel</button>

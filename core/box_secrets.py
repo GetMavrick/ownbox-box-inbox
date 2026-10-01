@@ -1067,9 +1067,9 @@ AGENT_CLIENTS = (
 # instructions to be changed, which is the most useful kind of pass.
 AGENT_STEPS = (
     "Copy the address of this box.",
-    "In your assistant, add a connector or MCP server and paste it. Pick the option that says "
+    "In your AI agent, add a connector or MCP server and paste it. Pick the option that says "
     "it will SIGN IN \u2014 not \u201cno sign-in\u201d, and not an API key.",
-    "It sends you here to approve. Press Allow, then allow the tools your assistant asks about.",
+    "It sends you here to approve. Press Allow, then allow the tools your AI agent asks about.",
 )
 
 
@@ -1087,7 +1087,7 @@ def agent_state() -> dict:
 
 
 _AGENT_STEP = {
-    "key": "agent", "title": "Your assistants",
+    "key": "agent", "title": "Your coworkers",
     "surface": SURFACE_BOX,
     # CORE CAN VOUCH FOR ITS OWN DOOR, which is the whole point of the door having moved. This
     # step mints a credential that reads every message on the box, so it is the owner's alone —
@@ -1104,10 +1104,10 @@ _AGENT_STEP = {
     # pasted into the assistant, which is the reverse of every other step on this screen.
     "steps": ("Press the button below — it mints a key for this box and shows it once.",
               "Choose what that coworker may do: read only, or read and draft replies.",
-              "Copy the key and this box's address into your assistant's connector settings.",
+              "Copy the key and this box's address into your AI agent's connector settings.",
               "Revoke it whenever you like; the box keeps working, it just stops answering them."),
     "why": "Claude, ChatGPT, Gemini or Grok can read this inbox and draft replies for you, in "
-           "whichever one you already pay for. You paste this box's address into your assistant, "
+           "whichever one you already pay for. You paste this box's address into your AI agent, "
            "approve it here, and that is the whole of it \u2014 there is no key to copy and "
            "nothing to keep safe. They can read your conversations and leave draft replies "
            "waiting for you; none of them can send anything as your business, whatever you "

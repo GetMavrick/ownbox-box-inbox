@@ -20,8 +20,10 @@ WHAT MAKES IT HONEST, NOT A BACKDOOR:
   * THE OWNER SEES IT. Settings → Updates shows the exact last message, when it went and where.
   * THE OWNER CAN SWITCH IT OFF, and off means off: one last message says "switched off", so Ownbox
     knows the difference between a box that chose quiet and a box that went dark, and then nothing.
-  * IT GRANTS NOTHING. It is information sent TO Ownbox. It opens no way into the box, and the box
-    reads nothing from the reply.
+  * IT GRANTS NOTHING. It is information sent TO Ownbox. It opens no way into the box. The box reads one
+    thing from the reply, and only once a release has shipped Ownbox's plan key: this box's plan, signed
+    by Ownbox for this box's own order and key, checked exactly as a push is (core/plan_signing.py). It
+    can change the plan, and only to one Ownbox signed; anything else in a reply is ignored.
 
 HOW IT IS SIGNED. With the box's own update key (/var/lib/aios/update_key, minted by
 scripts/box_update_key.sh), `ssh-keygen -Y sign -n ownbox-checkin`. The fleet verifies it with the PUBLIC
@@ -208,6 +210,9 @@ def _plan() -> dict:
     try:
         from core import tiers
         out["tier"] = tiers.current().get("tier")
+        v = tiers.verified()                             # step 3: said only once a box is armed
+        if v is not None:
+            out["verified"] = v
     except Exception:                                    # noqa: BLE001
         pass
     return out
@@ -273,18 +278,43 @@ def sign(text: str, *, key: Path | None = None) -> str | None:
         os.rmdir(d)
 
 
-def _post(body: bytes) -> tuple[int | None, str]:
+REPLY_MAX = 16384                         # a signed plan is well under this; anything bigger is ignored
+
+
+def _post(body: bytes) -> tuple:
+    """(status, why, reply bytes). The reply is read only for a signed plan (step 3, phase B)."""
     if os.environ.get("AIOS_HERMETIC_TEST"):
-        return None, "hermetic"                          # a test never reaches the real fleet
+        return None, "hermetic", b""                     # a test never reaches the real fleet
     req = urllib.request.Request(URL, data=body, method="POST",
                                  headers={"Content-Type": "application/json", "User-Agent": "ownbox-box"})
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
-            return r.status, ""
+            return r.status, "", r.read(REPLY_MAX + 1)
     except urllib.error.HTTPError as e:
         return e.code, f"HTTP {e.code}"
     except Exception as e:                               # noqa: BLE001 — DNS, TLS, timeout, no network
         return None, type(e).__name__
+
+
+def _take_plan(reply) -> None:
+    """A check-in reply of `{"plan": {"text", "sig"}}` re-confirms this box's plan four times a day
+    (docs/PLAN_TIER_INTEGRITY.md, step 3 contract). Handed to `tiers.set_plan` exactly like a push, so it
+    is verified the same way and a stale or forged one changes nothing. On a box not yet armed it is
+    ignored, as every reply body was before. Never raises: the check-in has already been delivered."""
+    try:
+        if not reply or len(reply) > REPLY_MAX:
+            return
+        from core import plan_signing, tiers
+        if not plan_signing.armed():
+            return
+        signed = (json.loads(reply) or {}).get("plan")
+        if not isinstance(signed, dict):
+            return
+        tiers.set_plan({"signed": signed})
+    except Exception as e:                               # noqa: BLE001 — stale, forged or junk: keep what we hold
+        if not getattr(e, "stale", False):              # a stale one is the ordinary re-confirmation
+            from core.logging import get_logger
+            get_logger(__name__).info("checkin.plan_not_taken", why=str(e)[:200])
 
 
 def last() -> dict:
@@ -332,8 +362,11 @@ def run(*, post=_post) -> str:
         if len(body) > MAX_BYTES:                        # never happens with FIELDS; say so if it does
             _record({"at": p["sent_at"], "to": URL, "sent": False, "result": "too_large", "payload": p})
             return "failed"
-        status, why = post(body)
+        got = post(body)
+        status, why = got[0], got[1]
         ok = status is not None and 200 <= status < 300
+        if ok and len(got) > 2:
+            _take_plan(got[2])
         _record({"at": p["sent_at"], "to": URL, "sent": ok,
                  "result": "accepted" if ok else (why or f"HTTP {status}"), "payload": p})
         return "sent" if ok else "failed"

@@ -342,9 +342,11 @@ def shifts_home():
     refuse, not_in_plan, owner = _gate(HOME, "Shifts")
     if refuse is not None:
         return refuse
-    lede = "Your AI coworkers, when they work, and what each one did."
+    lede = "The coworkers that live on this box: when they work, and what each one did."
+    from core.dash.home import coworkers_two_kinds
     if not_in_plan:
-        return _page(HOME, "Shifts", lede, _upgrade_card(not_in_plan, owner=owner)), 200
+        return _page(HOME, "Shifts", lede, _upgrade_card(not_in_plan, owner=owner)
+                     + coworkers_two_kinds("shifts")), 200
     contract, hire, runner, _, _ = _cw()
     tz = runner.box_tz()
     good, bad = runner.discover()
@@ -352,6 +354,7 @@ def shifts_home():
     missing = _missing(owner)
     if missing:
         body += _setup_card(missing)
+    body += coworkers_two_kinds("shifts")
 
     rows = []
     for cw in good:

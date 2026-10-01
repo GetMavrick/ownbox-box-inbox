@@ -125,10 +125,27 @@ tools.register("draft_reply", fn=lambda **k: {"id": "d_1"}, description="draft a
 print("\ntest_the_menu_has_a_shifts_row")
 sec = next((s for s in shell.sections() if s.key == "settings"), None)
 labels = [i.label for i in sec.items] if sec else []
-ok("Shifts is in System Settings, right after Assistants, in the Your AI group",
-   "Shifts" in labels and labels.index("Shifts") == labels.index("Assistants") + 1, str(labels))
+ok("Shifts is in System Settings, right after Coworkers (Agents), in the Your AI group",
+   "Shifts" in labels and labels.index("Shifts") == labels.index("Coworkers (Agents)") + 1, str(labels))
 ok("...open to a member, who may look", not next(i for i in sec.items if i.label == "Shifts").owner_only)
 ok("the top of the menu is unchanged: no row of its own", "shifts" not in [s.key for s in shell.sections()])
+
+print("\ntest_two_kinds_of_coworker_said_on_both_screens")
+# Owner, 2026-09-30: "it's all coworkers" — the outside ones (Coworkers (Agents)) and the ones made
+# on the box (Shifts). Both screens say so, each pointing at the other; a member is never pointed at
+# the owner's page.
+_sh = owner.get("/settings/shifts").get_data(as_text=True)
+_ag = owner.get("/settings/agent").get_data(as_text=True)
+ok("Shifts explains both kinds and points at Coworkers (Agents)",
+   "Two kinds of coworker" in _sh and 'href="/settings/agent">Coworkers (Agents) &rarr;' in _sh
+   and "From outside." in _sh)
+ok("Coworkers (Agents) explains both kinds and points at Shifts",
+   "Two kinds of coworker" in _ag and 'href="/settings/shifts">Shifts &rarr;' in _ag and "On this box." in _ag)
+ok("...each naming its own kind first",
+   _sh.index("On this box.") < _sh.index("From outside.") and _ag.index("From outside.") < _ag.index("On this box."))
+_msh = member.get("/settings/shifts").get_data(as_text=True)
+ok("a member reads both kinds on Shifts, with no link to the page that would refuse them",
+   "From outside." in _msh and 'href="/settings/agent"' not in _msh)
 
 print("\ntest_not_in_your_plan")
 plan("ownbox")

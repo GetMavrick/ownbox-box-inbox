@@ -122,13 +122,15 @@ ok("the tiles are read from the box's routes, not written down in core",
 
 
 print("\ntest_the_owner_can_give_the_box_its_own_icon")
-# Owner, 2026-09-27 and 2026-09-29: the client uploads their icon on this page, PNG or JPEG, and it
-# appears in every header and on every home-screen app. The first place a client's file enters the
-# box, so every refusal is exercised, not just the happy path.
+# Owner, 2026-09-27 and 2026-09-29: the client uploads their icon, PNG or JPEG, and it appears in
+# every header and on every home-screen app. Owner, 2026-09-30: uploaded on the System Settings main
+# screen, since the menu wears it too, with a link left on Mobile App; and it fills its space. The
+# first place a client's file enters the box, so every refusal is exercised, not just the happy path.
 import io as _io  # noqa: E402
 import json as _json  # noqa: E402
 import re as _re  # noqa: E402
 from PIL import Image as _Img  # noqa: E402
+from PIL import ImageDraw as _ImgDraw  # noqa: E402
 from core import client_icon  # noqa: E402
 from core.dash import look as _look  # noqa: E402
 
@@ -140,18 +142,23 @@ def _img(w, h, fmt="PNG", mode="RGBA", colour=(20, 90, 200, 255)):
 
 
 def _post(client, data, name="logo.png"):
-    return client.post("/settings/mobile/icon", data={"icon": (_io.BytesIO(data), name)},
+    return client.post("/settings/icon", data={"icon": (_io.BytesIO(data), name)},
                        content_type="multipart/form-data")
 
 
 mark192 = _look.mark_png(192)
-page = owner.get("/settings/mobile").get_data(as_text=True)
-ok("the owner is offered the upload, beside the home-screen apps it changes",
-   'id="icon"' in page and 'action="/settings/mobile/icon"' in page and 'accept="image/png,image/jpeg"' in page)
+page = owner.get("/settings").get_data(as_text=True)
+ok("the owner is offered the upload on the System Settings main screen",
+   'id="icon"' in page and 'action="/settings/icon"' in page and 'accept="image/png,image/jpeg"' in page)
+mob = owner.get("/settings/mobile").get_data(as_text=True)
+ok("...and Mobile App links to it, in the place it left, with no second form",
+   'href="/settings#icon"' in mob and 'enctype="multipart/form-data"' not in mob)
 member_id = state.add_user("ines@brightline.example", role="member")["id"]
 mc = app.test_client()
 mc.set_cookie(dash.COOKIE, dash.new_session(member_id))
-ok("a member is not offered it", 'id="icon"' not in mc.get("/settings/mobile").get_data(as_text=True))
+ok("a member is not offered it, nor the link to it",
+   'id="icon"' not in mc.get("/settings").get_data(as_text=True)
+   and 'href="/settings#icon"' not in mc.get("/settings/mobile").get_data(as_text=True))
 _post(mc, _img(512, 512))
 ok("...and a member's upload is refused, changing nothing", client_icon.current() is None)
 
@@ -168,9 +175,9 @@ for label, data, name, code in (
     where = r.headers.get("Location", "")
     ok(f"{label} is refused, saying why", r.status_code == 303 and f"icon_error={code}" in where, where)
 ok("...and nothing refused was kept", client_icon.current() is None)
-said = owner.get("/settings/mobile?icon_error=format").get_data(as_text=True)
+said = owner.get("/settings?icon_error=format").get_data(as_text=True)
 ok("the refusal reads as a sentence, chosen by its code", client_icon.SAID["format"] in said)
-forged = owner.get("/settings/mobile?icon_error=%3Cb%3Epwned-by-url%3C%2Fb%3E").get_data(as_text=True)
+forged = owner.get("/settings?icon_error=%3Cb%3Epwned-by-url%3C%2Fb%3E").get_data(as_text=True)
 ok("...and a forged code cannot write its own: the address picks a sentence, never supplies one",
    "pwned-by-url" not in forged and client_icon.SAID["unreadable"] in forged)
 
@@ -199,11 +206,45 @@ ok("every header draws it", f'src="/ui/client-icon.png?v={got["sha"]}"' in head)
 master = _Img.open(_io.BytesIO(owner.get("/ui/client-icon.png").data))
 ok("the header's picture is the re-encoded upload, square, never the file as sent",
    master.format == "PNG" and master.size == (512, 512))
+ok("the top of the menu wears it too, where a letter tile used to be",
+   _re.search(r'<div class="who"><span aria-hidden="true"><span class="[^"]*\bav\b[^"]*"><img src="/ui/client-icon\.png\?v=', head)
+   is not None)
+ok("...and so does the browser tab", f'rel="icon" href="/ui/client-icon.png?v={got["sha"]}"' in head
+   and 'href="/ui/icon.svg" type="image/svg+xml"' not in head)
 
-r = owner.post("/settings/mobile/icon", data={"do": "remove"})
+# IT FILLS ITS SPACE (owner, 2026-09-30: "the icon should fill the whole space instead of shrinking
+# down and having White"). An icon with its own ground runs edge to edge; a bare logo has no ground,
+# so it sits on white, but as large as the mask allows: its own empty margins are trimmed.
+def _corner(png):
+    return _Img.open(_io.BytesIO(png)).convert("RGB").getpixel((2, 2))
+
+
+_post(owner, _img(400, 400, colour=(22, 58, 44, 255)))
+full = client_icon.current()
+ok("an icon with its own ground is recognised as one", bool(full and full["fills"]), str(full))
+ok("...its home-screen tile is the icon edge to edge, no white frame",
+   _corner(owner.get("/ui/icon-192.png").data) == (22, 58, 44)
+   and _corner(owner.get("/apple-touch-icon.png").data) == (22, 58, 44))
+ok("...and it fills the circle that opens the menu", 'class="ui-disc appmark fill"' in owner.get("/dashboard").get_data(as_text=True))
+bare = _Img.new("RGBA", (600, 600), (0, 0, 0, 0))     # a round 120px mark lost in a 600px canvas:
+_ImgDraw.Draw(bare).ellipse((240, 240, 360, 360), fill=(196, 150, 72, 255))   # a SQUARE mark, trimmed,
+b = _io.BytesIO(); bare.save(b, format="PNG")
+_post(owner, b.getvalue())
+lone = client_icon.current()
+ok("a bare logo is recognised as one", bool(lone) and lone["fills"] is False, str(lone))
+t192 = _Img.open(_io.BytesIO(owner.get("/ui/icon-192.png").data)).convert("RGB")
+ok("...it sits on white, inside the margin a home screen's mask needs",
+   _corner(owner.get("/ui/icon-192.png").data) == (255, 255, 255) and t192.getpixel((96, 96)) == (196, 150, 72))
+ok("...and as large as that margin allows: the canvas it came on is trimmed away",
+   t192.getpixel((38, 96)) == (196, 150, 72), str(t192.getpixel((38, 96))))
+ok("...and it stays on the white disc in a header, which keeps a dark logo readable on dark",
+   'class="ui-disc appmark"' in owner.get("/dashboard").get_data(as_text=True))
+
+r = owner.post("/settings/icon", data={"do": "remove"})
 ok("removing it brings the mark back everywhere", r.status_code == 303 and client_icon.current() is None
    and owner.get("/ui/icon-192.png").data == mark192
-   and 'src="/ui/icon.svg"' in owner.get("/dashboard").get_data(as_text=True))
+   and 'src="/ui/icon.svg"' in owner.get("/dashboard").get_data(as_text=True)
+   and 'href="/ui/icon.svg" type="image/svg+xml"' in owner.get("/dashboard").get_data(as_text=True))
 
 print("\n" + ("all good" if not _failed else f"{_failed} FAILED"))
 sys.exit(1 if _failed else 0)

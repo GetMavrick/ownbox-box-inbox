@@ -76,11 +76,18 @@ def head_tags() -> str:
 
     THE ICON RIDES HERE TOO, so every screen that wears the look also wears the mark: the tab, and
     the home screen when a page is added to one. The .ico is for browsers that do not read SVG
-    icons; ownbox.io declares the same three links."""
+    icons; ownbox.io declares the same three links.
+
+    THE TAB WEARS THE CLIENT'S ICON once there is one (owner, 2026-09-30: the icon should be
+    "pulling through to the icon throughout the app"). It is their box, open in their browser."""
+    from core import client_icon as _ci
+    got = _ci.current()
+    tab = (f'<link rel="icon" href="/ui/client-icon.png?v={got["sha"]}" type="image/png">' if got else
+           '<link rel="icon" href="/favicon.ico" sizes="32x32">'
+           '<link rel="icon" href="/ui/icon.svg" type="image/svg+xml">')
     return ('<link rel="preload" href="/ui/font/sans.woff2" as="font" type="font/woff2" crossorigin>'
             f'<link rel="stylesheet" href="/ui/box.css?v={version()}">'
-            '<link rel="icon" href="/favicon.ico" sizes="32x32">'
-            '<link rel="icon" href="/ui/icon.svg" type="image/svg+xml">'
+            + tab +
             f'<link rel="apple-touch-icon" href="/apple-touch-icon.png{icon_version()}">')
 
 
@@ -335,19 +342,30 @@ def app_for(machine: str | None) -> dict | None:
     return _APPS.get(machine or "")
 
 
-def client_icon() -> str:
+def client_icon(got: dict | None | bool = False) -> str:
     """Where the header's icon comes from: the CLIENT'S, once they have uploaded one, and until then
     the box's own mark. One function, so the upload (docs/SCOPE_MOBILE_APP_REDESIGN.md, the install
     phase) changes one line and every header follows. Owner, 2026-09-27: "we are going to keep the
-    name of the client and give them the ability to upload their icon"."""
-    from core import client_icon as _ci
-    got = _ci.current()
+    name of the client and give them the ability to upload their icon". `got` is `current()` when
+    the caller has already asked, so a page asks the database once per mark, not twice."""
+    if got is False:
+        from core import client_icon as _ci
+        got = _ci.current()
     return f"/ui/client-icon.png?v={got['sha']}" if got else "/ui/icon.svg"
 
 
-def header_mark() -> str:
-    """The client's icon on a white disc, for a header: whatever they upload reads on both grounds."""
-    return f'<span class="ui-disc appmark"><img src="{client_icon()}" alt=""></span>'
+def header_mark(shape: str = "") -> str:
+    """The client's icon, for a header, the top of the menu, or a preview of either.
+
+    AN ICON WITH ITS OWN GROUND FILLS ITS SHAPE, edge to edge (owner, 2026-09-30: "the icon should
+    fill the whole space instead of shrinking down and having White"); a bare logo, and the box's
+    own mark, sit on the white disc, which is what lets a dark logo read on the dark ground.
+    `core.client_icon.fills` decides which an upload is. `shape` is an extra class: "av" for the
+    rounded square at the top of the menu, where the letter tile used to be."""
+    from core import client_icon as _ci
+    got = _ci.current()
+    cls = " ".join(c for c in ("ui-disc appmark", "fill" if got and got.get("fills") else "", shape) if c)
+    return f'<span class="{cls}"><img src="{client_icon(got)}" alt=""></span>'
 
 
 # THE MENU'S THREE LINES, small enough to sit on the icon's corner.

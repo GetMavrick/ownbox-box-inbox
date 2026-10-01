@@ -33,7 +33,6 @@ _BASE = """
 :root{--bg:var(--ground);--dim:var(--ink-3);--faint:var(--ink-3);--hover:var(--wash);
 --sel:var(--card);--accent:var(--ink);--accent-dark:var(--ink-2);--on-accent:var(--on-ink);
 --good:var(--ok);--danger:var(--bad);--rail:var(--ground);--nav-ink:var(--ink-2);
---av-ink:var(--ink);--av-a:var(--card);--av-b:var(--wash);
 --drawer-flat:none;--drawer-lift:var(--shadow-lift)}
 /* the box's tokens come from its one stylesheet; these names are the older ones this page's rules
    still read, each pointed at the token that replaced it */
@@ -99,9 +98,8 @@ pointer-events:none;transition:opacity .2s ease}
 padding:0 10px 14px;display:flex;flex-direction:column;
 font:calc(17 * var(--px, 1px))/1.5 var(--sans,-apple-system),-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 .who{display:flex;align-items:center;gap:11px;padding:15px 8px 13px}
-.who .av{width:calc(38 * var(--px, 1px));height:calc(38 * var(--px, 1px));border-radius:11px;flex:none;display:flex;align-items:center;
-justify-content:center;font-weight:700;font-size:calc(18 * var(--px, 1px));color:var(--av-ink);
-background:linear-gradient(145deg,var(--av-a),var(--av-b))}
+.who .av{width:calc(38 * var(--px, 1px));height:calc(38 * var(--px, 1px));border-radius:11px}
+.who .av:not(.fill)>img{width:70%;height:70%}
 .who .id{min-width:0;display:flex;flex-direction:column;line-height:1.25}
 .who b{font-size:calc(17 * var(--px, 1px));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .who span{color:var(--dim);font-size:calc(15 * var(--px, 1px));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -350,7 +348,33 @@ margin:4px 0 14px;border-radius:var(--r-md);
 background:linear-gradient(170deg,var(--ground),color-mix(in srgb,var(--link) 22%,var(--ground)))}
 .apps a{display:flex;flex-direction:column;align-items:center;gap:8px;width:84px;min-height:48px;
 color:var(--ink);font-size:calc(14 * var(--px, 1px));font-weight:600;text-align:center;line-height:1.2}
-.apps img{width:64px;height:64px;border-radius:15px;box-shadow:0 1px 3px rgba(17,17,17,.18)}
+.apps img,.iconsee .tile{width:64px;height:64px;border-radius:15px;box-shadow:0 1px 3px rgba(17,17,17,.18)}
+/* THE DANGER ZONE, last on Server Access, in GitHub's shape (owner, 2026-09-30): the title in the
+   colour that means stop, one box edged in it, a row per action with its red button on the right,
+   stacked under the words on a mobile. A row opens to a warning and a second button. */
+.danger{margin-top:40px}
+.danger>h2{margin:0 0 4px;color:var(--danger);font-size:calc(22 * var(--px, 1px));font-weight:700}
+.danger>.sub{color:var(--ink-2);font-size:calc(16 * var(--px, 1px));margin:0 0 14px}
+.dz{border:1px solid var(--danger);border-radius:var(--r-md);background:var(--card)}
+.dzrow{padding:18px 20px}
+.dzrow+.dzrow{border-top:1px solid var(--card-edge)}
+.dzrow>summary{list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px}
+.dzrow>summary::-webkit-details-marker{display:none}
+.dzrow .what{flex:1 1 240px;min-width:0;display:flex;flex-direction:column;gap:2px}
+.dzrow .what b{font-size:calc(17 * var(--px, 1px))}
+.dzrow .what>span{color:var(--ink-2);font-size:calc(16 * var(--px, 1px))}
+.dzbtn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 18px;
+border:1px solid var(--card-edge);border-radius:var(--r-pill);background:var(--wash);color:var(--danger);
+font-weight:600;white-space:nowrap}
+.dzrow[open] .dzbtn .go,.dzrow:not([open]) .dzbtn .no{display:none}
+.dzbody{margin-top:16px;display:grid;gap:12px}
+.dzbody p,.dzbody h3{margin:0}
+.dzrow form{margin-top:4px}
+/* THE CLIENT'S ICON WHERE IT IS SEEN: the circle that opens the menu, and its home-screen tile. */
+.iconsee{display:flex;gap:28px;align-items:flex-end;margin:4px 0 14px}
+.iconsee figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:8px}
+.iconsee figcaption{color:var(--dim);font-size:calc(14 * var(--px, 1px))}
+.iconsee .ui-disc{width:44px;height:44px}
 /* A LINK THAT IS THE ACTION wears the ink pill, full width until a pointer exists. */
 .card a.btn{display:flex;align-items:center;justify-content:center;min-height:var(--control);
 padding:12px 26px;border-radius:var(--r-pill);background:var(--accent);color:var(--on-accent);
@@ -456,11 +480,6 @@ def _svg(d: str, size: int = 19) -> str:
             f'stroke-linejoin="round" aria-hidden="true"><path d="{_esc(d)}"/></svg>')
 
 
-def _initial(name: str) -> str:
-    n = (name or "").strip()
-    return n[0].upper() if n else "•"
-
-
 def _account(who: str, email: str) -> str:
     """The block at the top of the rail: which box this is, and who is signed in.
 
@@ -468,8 +487,13 @@ def _account(who: str, email: str) -> str:
     answers it correctly on a sold one — the buyer's own company, not ours. A rail headed with an
     individual's name reads as a personal account on a product whose entire pitch is that a
     business owns it.
+
+    AND IT WEARS THE BOX'S ICON, not the name's first letter. Owner, 2026-09-30: the client's icon
+    is "used inside the dashboard like in the upper left side of the menu where it's not currently
+    being updated properly". The letter tile never changed when an icon was uploaded; the menu
+    opens from that icon, and should open onto it.
     """
-    return (f'<div class="who"><span class="av" aria-hidden="true">{_esc(_initial(who))}</span>'
+    return (f'<div class="who"><span aria-hidden="true">{look.header_mark("av")}</span>'
             f'<span class="id"><b>{_esc(who)}</b>'
             + (f'<span>{_esc(email)}</span>' if email else "") + '</span></div>')
 
@@ -835,7 +859,7 @@ def _queue_card() -> str:
 
 
 def _mcp_card() -> str:
-    """OWNER ONLY: which assistants hold a key to this box is the owner's business."""
+    """OWNER ONLY: which AI agents hold a key to this box is the owner's business."""
     if not _is_owner():
         return ""
     from flask import request as _rq
@@ -852,10 +876,10 @@ def _mcp_card() -> str:
     else:
         go = "/settings/agent" if "/settings/agent" in _serving() else ""
         said = ('<p class="quiet">Nothing connected yet.'
-                + (f' <a href="{go}">Connect an assistant &rarr;</a>' if go else "") + '</p>')
-    # "ASSISTANTS", NOT "MCP" (owner, 2026-09-29, IA D4): the name of what is connected, not of
-    # the protocol it speaks. The address stays, since it is what gets pasted into one.
-    return (f'<div class="card"><h2 class="eyebrow">Assistants</h2>'
+                + (f' <a href="{go}">Connect an AI agent &rarr;</a>' if go else "") + '</p>')
+    # NAMED FOR WHAT IS CONNECTED, NOT "MCP" (owner, 2026-09-29, IA D4), and by the menu's name for
+    # it, Coworkers (Agents), since 2026-09-30. The address stays: it is what gets pasted into one.
+    return (f'<div class="card"><h2 class="eyebrow">Coworkers (Agents)</h2>'
             f'<p class="mono">{_esc(address)}</p>{said}</div>')
 
 
@@ -1335,6 +1359,26 @@ def _box_rows(*, owner: bool) -> str:
     return "".join(rows)
 
 
+# TWO KINDS OF COWORKER, ONE WORD. Owner, 2026-09-30: "it's all coworkers. People can use their outside
+# coworkers, and they can also create coworkers on the box ... we should try to explain that." Said
+# once, here, and drawn on both screens — Coworkers (Agents) and Shifts — each naming its own kind
+# first and pointing at the other, so the two screens cannot describe the split two ways.
+def coworkers_two_kinds(here: str) -> str:
+    """`here` is "agents" or "shifts": the screen drawing it, whose kind comes first and links nowhere.
+
+    THE LINK TO COWORKERS (AGENTS) IS THE OWNER'S ALONE, like the page: Shifts is open to a member,
+    and a link that refuses the person who taps it is the dead end the buyer walk forbids."""
+    outside = ("<p><b>From outside.</b> AI agents you already pay for, like Claude, ChatGPT or Grok, "
+               "let into this box. They work when you ask them, wherever you already use them."
+               + (' <a href="/settings/agent">Coworkers (Agents) &rarr;</a>'
+                  if here != "agents" and _is_owner() else "") + "</p>")
+    onbox = ("<p><b>On this box.</b> Coworkers you create here, each with a job in plain words and its "
+             "own times. They work on schedule, on their own, and tell you what they did."
+             + (' <a href="/settings/shifts">Shifts &rarr;</a>' if here != "shifts" else "") + "</p>")
+    return ('<div class="card"><h2>Two kinds of coworker</h2>'
+            + (outside + onbox if here == "agents" else onbox + outside) + '</div>')
+
+
 @blueprint.route("/settings")
 def settings():
     """THE SYSTEM DRAWER'S SETTINGS — the box's, never a machine's.
@@ -1352,6 +1396,11 @@ def settings():
             '<p class="sub">What every machine on this box shares. Each machine keeps its own '
             'settings in its own menu.</p>'
             + _box_rows(owner=_is_owner()) + '</div>')
+    # THE BOX'S ICON, SECOND, beside the box it stands for (owner, 2026-09-30): it is the menu
+    # button and the top of the menu on every screen, not a mobile-app setting, so it lives here and
+    # Mobile App links to it. The owner's alone; for anyone else the card is not drawn.
+    from core.dash import box_settings as _bs
+    body += _bs.icon_card()
     # APPEARANCE IS EACH PERSON'S, SO IT IS FOR EVERYBODY and sits in the same place whoever looks.
     # Owner, 2026-09-27: dark mode and "system default", modelled on ownbox.io's dark half.
     from core.dash import theme as _theme
@@ -1393,15 +1442,15 @@ def settings():
                  '<p class="sub">This box is a server you own outright. Put your own key on it '
                  'and you can sign in to the server itself — no account with us, and it keeps '
                  'working if you move the box somewhere else.</p>'
-                 '<div class="foot"><a href="/settings/access">Server access &rarr;</a></div>'
-                 '<div class="foot"><a href="/settings/move">Move your box to your own '
-                 'DigitalOcean account &rarr;</a></div></div>')
+                 '<div class="foot"><a href="/settings/access">Server access &rarr;</a></div></div>')
+        # MOVING THE BOX IS NOT ON THIS SCREEN (owner, 2026-09-30: "delete this", then "We don't want
+        # this to be stumbled upon too much"). It is in the danger zone at the foot of Server Access.
     # SYSTEM SETTINGS, THE NAME ON THE MENU ROW THAT OPENED IT. The page said "Settings" under a
     # breadcrumb and a menu that both say System Settings; three names for one place. The lede said
     # what it holds in the builder's words ("belong to the box, not to one machine"); it now names
     # the things a person came here for.
     return chrome("/settings", title="System Settings",
-                  lede="Your AI account, the mobile app, email and the server itself.",
+                  lede="Your AI account, your icon, the mobile app, email and the server itself.",
                   body=body), 200
 
 
@@ -1543,12 +1592,14 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                            # Each group opens with a little room, no heading — the same subtle gap
                            # the main menu uses between the box's rows and its machines.
                            #
-                           # YOUR AI: the account that writes, the assistants you already pay for
-                           # (it read "AI Coworkers", and Pro's scheduled coworkers are Shifts — two
-                           # things under one word), and Shifts.
+                           # YOUR AI: the account that writes, the AI agents you already pay for,
+                           # and Shifts. "Coworkers (Agents)", owner, 2026-09-30: "we're gonna start
+                           # calling it coworkers but the common word for it is AI agent" — the
+                           # short form here, because the menu has no room for more, and "AI
+                           # agents" in the words on the screen itself.
                            {"key": "ai", "label": "AI Account", "href": "/settings/ai",
                             "owner_only": True, "group": "ai"},
-                           {"key": "agent", "label": "Assistants", "href": "/settings/agent",
+                           {"key": "agent", "label": "Coworkers (Agents)", "href": "/settings/agent",
                             "owner_only": True, "group": "ai"},
                            {"key": "shifts", "label": "Shifts", "href": "/settings/shifts",
                             "group": "ai"},
@@ -1564,11 +1615,11 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                            # box linked to it, so inviting a colleague meant knowing the address.
                            {"key": "people", "label": "People", "href": "/settings/people",
                             "owner_only": True, "group": "team"},
-                           # THE SERVER: what it runs, who can sign in to it, and taking it with you.
+                           # THE SERVER: what it runs, and who can sign in to it.
                            {"key": "updates", "label": "Updates", "href": "/settings/updates",
                             "group": "server"},
                            {"key": "access", "label": "Server Access",
                             "href": "/settings/access", "owner_only": True, "group": "server"},
-                           {"key": "move", "label": "Move Your Box", "href": "/settings/move",
-                            "owner_only": True, "group": "server"},
+                           # MOVE YOUR BOX IS NOT A ROW (owner, 2026-09-30): it is in the danger
+                           # zone at the foot of Server Access, so it is not stumbled upon.
                        ])
