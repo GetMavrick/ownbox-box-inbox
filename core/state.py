@@ -580,6 +580,25 @@ CREATE TABLE IF NOT EXISTS person_links (
   undone_at  TEXT,
   undone_by  TEXT
 );
+-- WAITING FOR YOU (core/approvals.py): what an AI coworker asked to do that changes something, held until a
+-- person says yes. A row is written once and only its status moves: waiting -> approved -> done | failed,
+-- or waiting -> declined | expired. Nothing runs without a decided_by.
+CREATE TABLE IF NOT EXISTS approvals (
+  id          TEXT PRIMARY KEY,
+  kind        TEXT NOT NULL,             -- who runs it once approved, e.g. "app_action"
+  machine     TEXT NOT NULL,
+  title       TEXT NOT NULL,             -- what a person reads: "Create a page in Notion"
+  detail      TEXT NOT NULL,             -- JSON: exactly what will run
+  fingerprint TEXT NOT NULL,             -- kind + detail, so a retried proposal is one row, not two
+  proposed_by TEXT NOT NULL DEFAULT '',  -- the seat that asked
+  status      TEXT NOT NULL DEFAULT 'waiting',
+  created_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,
+  decided_at  TEXT,
+  decided_by  TEXT,
+  result      TEXT                       -- JSON: what happened when it ran
+);
+CREATE INDEX IF NOT EXISTS ix_approvals_status ON approvals (status, created_at);
 """
 
 

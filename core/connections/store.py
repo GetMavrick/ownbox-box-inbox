@@ -34,7 +34,9 @@ _TOOL_NAME = re.compile(r"^[A-Za-z0-9_.\-/]{1,128}$")
 SCHEMA_MAX = 8_000             # one tool's argument schema; a bigger one is kept as "any object"
 DESCRIPTION_MAX = 1_000
 APP_MAX = 300_000              # one app's tools, as saved: the gateway reads them on every request
-ACTIONS_LATER = "Actions come in the next step, with your approval each time."
+# A TOOL THAT CHANGES THINGS IS NEVER "ON" (docs/SCOPE_CONNECTIONS_MCP_FIRST.md, phase 1): a coworker may only ASK
+# for it, and a person approves each one on Waiting for you (core/approvals.py).
+ACTIONS_LATER = "That one changes things, so a coworker can only ask for it, and you approve each time."
 
 
 class Refused(ValueError):
@@ -199,22 +201,29 @@ def remove(slug: str, *, by: str) -> bool:
     return True
 
 
-def set_enabled(slug: str, tool_ids, *, by: str) -> dict:
-    """Choose which of an app's read-only tools are on. Anything else is refused, never silently dropped."""
+def set_enabled(slug: str, tool_ids, *, by: str, asks=None) -> dict:
+    """Choose which of an app's read-only tools are on (`tool_ids`) and, when `asks` is given, which of the tools
+    that change things a coworker may ASK for. Anything else is refused, never silently dropped."""
     data = load()
     rec = data["items"].get(slug)
     if not isinstance(rec, dict):
         raise Refused("That app isn't connected.")
     tools = {t["id"]: t for t in rec.get("tools") or []}
     want = [str(t) for t in (tool_ids or [])]
-    unknown = [t for t in want if t not in tools]
+    ask = [str(t) for t in (asks or [])]
+    unknown = [t for t in want + ask if t not in tools]
     if unknown:
         raise Refused(f"{rec['name']} has no tool called {unknown[0]}.")
     if any(not tools[t]["read_only"] for t in want):
         raise Refused(ACTIONS_LATER)
+    if any(tools[t]["read_only"] for t in ask):
+        raise Refused("That one only reads, so it's simply on or off.")
     rec["enabled"] = sorted(set(want), key=list(tools).index)
+    if asks is not None:
+        rec["ask_first"] = sorted(set(ask), key=list(tools).index)
     _save(data, by)
-    log.info("connections.enabled", app=slug, enabled=len(rec["enabled"]), by=by)
+    log.info("connections.enabled", app=slug, enabled=len(rec["enabled"]), asks=len(rec.get("ask_first") or []),
+             by=by)
     return dict(rec, slug=slug)
 
 
@@ -235,8 +244,10 @@ def check(slug: str, *, by: str) -> dict:
         raise Refused(str(e)) from None
     _fits(found, conn["url"])
     was = {t["name"]: t["id"] for t in rec.get("tools") or [] if t["id"] in set(rec.get("enabled") or [])}
+    asked = {t["name"] for t in rec.get("tools") or [] if t["id"] in set(rec.get("ask_first") or [])}
     rec["tools"] = found
     rec["enabled"] = [t["id"] for t in found if t["read_only"] and t["name"] in was]
+    rec["ask_first"] = [t["id"] for t in found if not t["read_only"] and t["name"] in asked]
     rec["checked_at"] = _now()
     _save(data, by)
     return dict(rec, slug=slug)

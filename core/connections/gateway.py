@@ -27,9 +27,17 @@ from core.logging import get_logger
 log = get_logger(__name__)
 
 CAPABILITY = "read:apps"
+# A TOOL THAT CHANGES THINGS IS OFFERED ONLY AS A PROPOSAL (core/approvals.py): calling it asks the owner, and a
+# person's yes runs it, once. `write:proposals` is the capability for exactly that (core/connector/tools.py), and
+# `act` is the least role, as for the inbox's draft_reply: a read-only key never gains a way to ask.
+ASK = "write:proposals"
+ASKS = " (asks you first)"
+KIND = "app_action"
 PREFIX = "app_"
 TEXT_MAX = 50_000
 _TITLE_BAD = re.compile(r"[^A-Za-z0-9 ,'’()-]+")
+
+from core import approvals as _approvals  # noqa: E402 — the kind is registered wherever this module is
 
 _lock = threading.Lock()
 _seen = ""                    # a fingerprint of the connections the registry matches
@@ -55,6 +63,14 @@ def title_for(tool: dict, app: str) -> str:
     if not text[:1].isalpha():
         text = f"Use {text}"[:60]
     return text.rstrip()
+
+
+def ask_title(tool: dict, app: str) -> str:
+    """"Create a page in Notion (asks you first)": the plain title, cut to leave room for the promise."""
+    base, room = title_for(tool, app), 60 - len(ASKS)
+    if len(base) > room:
+        base = base[:room].rsplit(" ", 1)[0].rstrip(" ,-(") or base[:room]
+    return base + ASKS
 
 
 def _unique_title(text: str, taken: set) -> str:
@@ -110,7 +126,54 @@ def _specs(slug: str, rec: dict, replacing: frozenset, taken: set) -> list:
             continue
         taken.add(spec["title"])
         out.append(spec)
+    asks = set(rec.get("ask_first") or [])
+    for t in rec.get("tools") or []:
+        if t.get("id") not in asks or t.get("read_only") is True:
+            continue
+        try:
+            spec = tools.make_spec(t["id"], fn=_proposer(slug, t, rec), machine=machine, capability=ASK,
+                                   min_role="act", wants_seat=True,
+                                   title=_unique_title(ask_title(t, rec.get("name") or slug), taken),
+                                   description=_ask_description(t, rec),
+                                   input_schema=t.get("input_schema") or {}, replacing=replacing)
+        except Exception as e:                          # noqa: BLE001 — one odd tool never hides the rest
+            log.warning("connections.tool_skipped", app=slug, tool=str(t.get("id"))[:60],
+                        error=f"{type(e).__name__}: {str(e)[:160]}")
+            continue
+        taken.add(spec["title"])
+        out.append(spec)
     return out
+
+
+def _ask_description(t: dict, rec: dict) -> str:
+    app = rec.get("name") or "a connected app"
+    said = (t.get("description") or "").strip()
+    whose = (f"From {app}, an app connected to this box. This changes something in {app}, so calling it doesn't "
+             "do it: it asks the box's owner, who approves or declines. Ask once; the answer is the owner's.")
+    return f"{said}\n\n{whose}" if said else whose
+
+
+def _proposer(slug: str, tool: dict, rec: dict):
+    app, title = rec.get("name") or slug, title_for(tool, rec.get("name") or slug)
+
+    def fn(seat=None, **arguments):
+        from core import approvals
+        a = approvals.propose(KIND, machine=PREFIX + slug, title=title,
+                              detail={"app": app, "slug": slug, "tool": tool["name"], "arguments": arguments},
+                              seat_id=str((seat or {}).get("label") or (seat or {}).get("id") or ""))
+        return {"app": app, "app_error": False, "asked": True, "approval": a["id"],
+                "text": (f"Asked: \"{title}\" is waiting for the owner, who approves or declines. Nothing in "
+                         f"{app} has changed yet. Don't ask again for the same thing.")}
+    fn.__name__ = f"ask_{slug}"
+    return fn
+
+
+def _run_action(detail: dict) -> dict:
+    """An approved proposal, carried out: the one place an app's changing tool is ever called."""
+    res = call(str(detail.get("slug") or ""), str(detail.get("tool") or ""), dict(detail.get("arguments") or {}))
+    if isinstance(res, tools.NotConfigured):
+        return {"ok": False, "text": "The app was disconnected on Data Sources, so nothing was done."}
+    return {"ok": res.get("app_error") is not True, "text": str(res.get("text") or "")}
 
 
 def _description(t: dict, rec: dict) -> str:
@@ -183,3 +246,6 @@ def as_data(app: str, result: dict) -> dict:
         out["not_shown"] = f"{len(left)} {'item' if len(left) == 1 else 'items'} the box can't show yet " \
                            f"({', '.join(sorted(set(left)))})"
     return out
+
+
+_approvals.register_kind(KIND, run=_run_action)

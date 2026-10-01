@@ -77,6 +77,14 @@ class App(BaseHTTPRequestHandler):
         if self.path == "/.well-known/oauth-protected-resource/notes-mcp":
             return self._send(200, {"resource": f"{BASE}/notes-mcp", "authorization_servers": [f"{BASE}/auth"],
                                     "scopes_supported": ["notes.read"]})
+        if self.path == "/.well-known/oauth-protected-resource/xsite-mcp":
+            # A REAL APP WHOSE LOGIN LIVES ON ANOTHER COMPANY'S ADDRESS (here: localhost, not 127.0.0.1).
+            return self._send(200, {"resource": f"{BASE}/xsite-mcp", "authorization_servers": [f"{LOCAL}/auth2"]})
+        if self.path == "/.well-known/oauth-authorization-server/auth2":
+            return self._send(200, {"issuer": f"{LOCAL}/auth2", "authorization_endpoint": f"{LOCAL}/auth2/authorize",
+                                    "token_endpoint": f"{LOCAL}/auth2/token",
+                                    "registration_endpoint": f"{LOCAL}/auth2/register",
+                                    "code_challenge_methods_supported": ["S256"]})
         if self.path == "/.well-known/oauth-protected-resource/evil-mcp":
             # A HOSTILE ADDRESS: a real login (this suite's authorization server) and ANOTHER service's resource.
             return self._send(200, {"resource": "https://mcp.realapp.example/mcp",
@@ -95,6 +103,8 @@ class App(BaseHTTPRequestHandler):
 
     def do_POST(self):
         raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.path == "/auth2/register":
+            return self._send(201, {"client_id": "client-xsite-1"})
         if self.path == "/auth/register":
             body = json.loads(raw)
             A["registered"].append(dict(body, ua=self.headers.get("User-Agent") or ""))
@@ -120,9 +130,9 @@ class App(BaseHTTPRequestHandler):
                     time.sleep(0.3)
                     return self._send(200, self._issue(lasts=3600))
             return self._send(400, {"error": "unsupported_grant_type"})
-        if self.path in ("/notes-mcp", "/nopkce-mcp", "/evil-mcp"):
+        if self.path in ("/notes-mcp", "/nopkce-mcp", "/evil-mcp", "/xsite-mcp"):
             token = (self.headers.get("Authorization") or "").removeprefix("Bearer ")
-            if token not in A["access"] or self.path in ("/nopkce-mcp", "/evil-mcp"):
+            if token not in A["access"] or self.path in ("/nopkce-mcp", "/evil-mcp", "/xsite-mcp"):
                 meta = f"{BASE}/.well-known/oauth-protected-resource{self.path}"
                 return self._send(401, {"error": "unauthorized"},
                                   {"WWW-Authenticate": f'Bearer resource_metadata="{meta}", scope="notes.read"'})
@@ -153,7 +163,8 @@ srv = ThreadingHTTPServer(("127.0.0.1", 0), App)
 srv.daemon_threads = True
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 BASE = f"http://127.0.0.1:{srv.server_address[1]}"
-net.url_is_public = lambda url, resolve=None: str(url).startswith(BASE)      # the suite's app is local http
+LOCAL = f"http://localhost:{srv.server_address[1]}"                         # the same server, another name
+net.url_is_public = lambda url, resolve=None: str(url).startswith((BASE, LOCAL))   # the suite's app is local http
 client.SCHEMES = ("http", "https")
 
 
@@ -292,6 +303,23 @@ ok("...another host, scheme or port, a sibling path, or nothing at all doesn't",
        "https://mcp.other.example/mcp", "http://mcp.app.example/mcp", "https://mcp.app.example:8443/mcp",
        "https://mcp.app.example/mc", "https://mcp.app.example/other", "https://u:p@mcp.app.example/mcp",
        "https://mcp.app.example/mcp#x", "", "not a url")))
+
+print("\na login on another company's address —")
+r = owner.post("/settings/sources", data={"do": "add", "name": "Cross Site", "url": f"{BASE}/xsite-mcp"})
+html = r.get_data(as_text=True)
+ok("the box asks first, naming both addresses, instead of sending the owner straight there",
+   r.status_code == 200 and not r.headers.get("Location") and "Sign in at localhost?" in html and "127.0.0.1" in html
+   and f"{LOCAL}/auth2/authorize?" in html.replace("&amp;", "&"), f"{r.status_code} {html[-400:]}")
+r = owner.post("/settings/sources", data={"do": "cancel_signin"})
+ok("...and Cancel forgets the sign-in", r.status_code == 303 and box_secrets.get(oauth.PENDING) == "")
+same = oauth.same_company
+ok("the same company: one host, or sibling hosts of one name",
+   same("mcp.stripe.com", "access.stripe.com") and same("mcp.notion.com", "mcp.notion.com")
+   and same("mcp.acme.co.uk", "auth.acme.co.uk") and same("MCP.Linear.app", "mcp.linear.app"))
+ok("different companies, including strangers sharing a country suffix or a hosting platform",
+   not any(same(a, b) for a, b in (("evil.example", "mcp.notion.com"), ("a.co.uk", "b.co.uk"),
+                                   ("x.vercel.app", "y.vercel.app"), ("mcp.example.com", "example.auth0.com"),
+                                   ("127.0.0.1", "localhost"), ("", "mcp.notion.com"))))
 
 srv.shutdown()
 print()

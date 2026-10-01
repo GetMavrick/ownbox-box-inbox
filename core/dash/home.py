@@ -1184,7 +1184,10 @@ def _home() -> str:
     # with nothing connected has no numbers worth reading — "Nothing to report yet" is the whole
     # of what the section above can say — so the first thing on the page should be the thing that
     # changes that. It removes itself when the last step is connected.
-    body = _setup_card() + body
+    # WAITING FOR YOU GOES FIRST, while something is (core/approvals.py): a coworker asked to change something in
+    # an app, and nothing happens until the owner answers. Its own file draws it; '' when nothing waits.
+    from core.dash import approvals as _approvals
+    body = _approvals.card() + _setup_card() + body
     # BOTH LAST, AND IN THIS ORDER. Stop everything is the control you want findable and never
     # the one you want your thumb near while reading the morning's numbers on a phone; Managed is
     # a thing you go looking for on a particular day, so it sits below the numbers and above the

@@ -111,6 +111,37 @@ def same_resource(resource: str, url: str) -> bool:
     return rp == "" or up == rp or up.startswith(rp + "/")
 
 
+# SUFFIXES UNDER WHICH STRANGERS SHARE A NAME: two-part country suffixes, and hosting platforms where anyone can
+# have a subdomain. Under these, a "company" is one more label to the left. Longest first, so a.run.app beats run.app.
+_SHARED = sorted((
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk", "com.au", "net.au", "org.au", "edu.au",
+    "co.nz", "org.nz", "co.jp", "ne.jp", "or.jp", "com.br", "net.br", "com.mx", "co.in", "co.za", "com.sg",
+    "com.hk", "com.tw", "co.kr", "com.cn", "com.tr", "co.il", "vercel.app", "netlify.app", "github.io",
+    "herokuapp.com", "workers.dev", "pages.dev", "fly.dev", "onrender.com", "web.app", "firebaseapp.com",
+    "appspot.com", "azurewebsites.net", "cloudfront.net", "amazonaws.com", "ngrok.app", "ngrok-free.app",
+    "ngrok.io", "railway.app", "deno.dev", "replit.app", "glitch.me", "trycloudflare.com", "a.run.app", "run.app",
+), key=len, reverse=True)
+
+
+def site_of(host: str) -> str:
+    """The part of a host name that says whose it is: mcp.stripe.com and access.stripe.com are both stripe.com;
+    a.vercel.app and b.vercel.app are two different sites. An IP address is only itself."""
+    host = str(host or "").strip().lower().rstrip(".")
+    labels = host.split(".")
+    if not host or all(part.isdigit() for part in labels) or ":" in host:
+        return host
+    for suffix in _SHARED:
+        if host == suffix or host.endswith("." + suffix):
+            rest = host[: -len(suffix)].rstrip(".").split(".")
+            return f"{rest[-1]}.{suffix}" if rest and rest[-1] else host
+    return ".".join(labels[-2:])
+
+
+def same_company(a: str, b: str) -> bool:
+    """Do two host names belong to the same company, as far as their names can say?"""
+    return bool(a) and site_of(a) == site_of(b)
+
+
 def discover(url: str, challenge: str = "") -> dict:
     """The app's login, as the box will use it: {resource, issuer, authorize, token, register, scope}."""
     url = _client.check_address(url)

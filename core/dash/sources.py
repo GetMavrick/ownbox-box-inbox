@@ -12,6 +12,7 @@ this page; the address is kept with it in box_secrets (core/connections/store.py
 from __future__ import annotations
 
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from flask import redirect, request
 
@@ -42,6 +43,7 @@ def _first_sentence(text: str) -> str:
 
 def _app_card(slug: str, rec: dict) -> str:
     on, tools = set(rec.get("enabled") or []), rec.get("tools") or []
+    asks = set(rec.get("ask_first") or [])
     reads = [t for t in tools if t.get("read_only")]
     rows = []
     for t in tools:
@@ -51,12 +53,14 @@ def _app_card(slug: str, rec: dict) -> str:
                         f'{" checked" if t["id"] in on else ""}><span>{words}'
                         + (f'<br><span class="quiet">{said}</span>' if said else "") + '</span></label>')
         else:
+            # A TOOL THAT CHANGES THINGS IS NEVER SIMPLY ON: ticked, a coworker may ASK for it, and each ask waits
+            # for you on Waiting for you (core/approvals.py).
             app = _esc(rec.get("name"))
             why = (f"Changes things in {app}." if t.get("changes") else
                    f"{app} doesn't say whether this only reads, so the box treats it as changing things.")
-            rows.append('<label class="consent"><input type="checkbox" disabled><span>'
-                        f'{words}<br><span class="quiet">{why} Comes in the next step, with your approval '
-                        'each time.</span></span></label>')
+            rows.append(f'<label class="consent"><input type="checkbox" name="ask" value="{_esc(t["id"])}"'
+                        f'{" checked" if t["id"] in asks else ""}><span>{words}<br><span class="quiet">{why} '
+                        'Ticked, a coworker may ask to do it, and you approve each one.</span></span></label>')
     form = (f'<form method="post" action="{DOOR}"><input type="hidden" name="do" value="enable">'
             f'<input type="hidden" name="app" value="{_esc(slug)}">' + "".join(rows)
             # ONE INK PILL PER SCREEN (docs/SCOPE_DESIGN_LANGUAGE.md): Connect is it, so each app's Save is
@@ -115,12 +119,19 @@ def box_sources():
                     rec = store.add(f.get("name"), f.get("url"), f.get("token"), by=who)
                 except store.NeedsSignIn as e:
                     # THE APP SIGNS PEOPLE IN ON ITS OWN PAGE: go there, and come back to the callback below.
-                    return redirect(oauth.begin(f.get("name"), f.get("url"), box_host=_box_host(),
-                                                challenge=e.challenge, user_id=who), code=303)
+                    go = oauth.begin(f.get("name"), f.get("url"), box_host=_box_host(), challenge=e.challenge,
+                                     user_id=who)
+                    login, typed = urlsplit(go).hostname or "", urlsplit(str(f.get("url") or "")).hostname or ""
+                    if oauth.same_company(login, typed):
+                        return redirect(go, code=303)
+                    return _ask_first(f.get("name"), typed, login, go)
                 return redirect(f"{DOOR}?added={rec['slug']}", code=303)
             if action == "enable":
-                store.set_enabled(slug, f.getlist("tool"), by=who)
+                store.set_enabled(slug, f.getlist("tool"), by=who, asks=f.getlist("ask"))
                 return redirect(f"{DOOR}?saved={slug}", code=303)
+            if action == "cancel_signin":
+                oauth.cancel(user_id=who)
+                return redirect(DOOR, code=303)
             if action == "check":
                 store.check(slug, by=who)
                 return redirect(f"{DOOR}?checked={slug}", code=303)
@@ -132,6 +143,23 @@ def box_sources():
             if action == "add":
                 kept = {"name": f.get("name") or "", "url": f.get("url") or ""}
     return _render(note, kept)
+
+
+def _ask_first(name, typed: str, login: str, go: str):
+    """THE LOGIN IS ANOTHER COMPANY'S ADDRESS: say so before sending the owner there. Some apps use a sign-in
+    service on its own domain, which is fine; a fake connection address borrowing a real login page looks exactly
+    the same, so the person decides, knowing which two addresses are involved. (The box also checks that the
+    sign-in is about the address typed, before this: core/connections/oauth.discover.)"""
+    body = ('<div class="card"><h2>Sign in at ' + _esc(login) + '?</h2>'
+            f'<p>You are connecting <b>{_esc(name)}</b> at <b>{_esc(typed)}</b>, but its sign-in page is at '
+            f'<b>{_esc(login)}</b>, a different company\'s address.</p>'
+            '<p class="quiet">That is normal for an app that uses a sign-in service. It is also how a fake address '
+            'would borrow a real login page. Continue only if you trust both, and the address came from the '
+            'app itself.</p>'
+            f'<p style="margin-top:16px"><a href="{_esc(go)}">Continue to {_esc(login)} &rarr;</a></p>'
+            f'<form method="post" action="{DOOR}" style="margin-top:12px"><input type="hidden" name="do" '
+            'value="cancel_signin"><button class="ghost" type="submit">Cancel</button></form></div>')
+    return chrome(DOOR, title=_TITLE, lede=LEDE, body=body), 200
 
 
 def _box_host() -> str:
@@ -178,7 +206,9 @@ def _render(note: str, kept: dict):
     if items:
         body.append('<div class="card"><p class="quiet">To let a coworker read from these, open its shift and '
                     'tick <b>Read from the apps you connected</b>. Each call it makes is on its run\'s '
-                    'receipt.</p><p><a href="/settings/shifts">Shifts &rarr;</a></p></div>')
+                    'receipt. Anything a coworker asks to change waits for you.</p>'
+                    '<p><a href="/settings/shifts">Shifts &rarr;</a> &nbsp; '
+                    '<a href="/approvals">Waiting for you &rarr;</a></p></div>')
     body.append(_connect_form(kept))
     body.append(_back())
     return chrome(DOOR, title=_TITLE, lede=LEDE, body="".join(body)), (400 if note else 200)
