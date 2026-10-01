@@ -25,6 +25,45 @@ DOOR = "/settings/sources"
 _TITLE = "Data Sources"          # the menu row's name, so the page and its row agree
 LEDE = "Connect the apps your business runs on, so your coworkers can read from them."
 
+# THE CONNECTED APPS ARE ONE TABLE, A ROW EACH. Owner, 2026-10-01, with one app connected and more coming: "I
+# would like for the connected list to be tighter and on just a few lines in a table ... we are going to have
+# multiple connections so it needs to be tighter list like in a table format." A card per app spent a screen on
+# each. Now a row says which app, where, since when and how many tools are on, and opens to the ticks and the
+# buttons. Columns with a heading on a wide screen; on a mobile, two lines — the name, then the rest.
+_CSS = """<style>
+.src{padding-bottom:6px}
+.src-head,.card .src-row>summary{display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px}
+.src-head{display:none}
+.card details.src-row{margin:0;border-top:1px solid var(--hairline)}
+.card .src-row>summary{list-style:none;cursor:pointer;padding:12px 0;min-height:48px;color:var(--ink);
+font-weight:400}
+.card .src-row>summary::-webkit-details-marker{display:none}
+.card .src-row>summary::after{content:none;display:none}
+.src-name{flex:1 1 calc(100% - 34px);min-width:0;order:1;font-weight:600;font-size:calc(17 * var(--px, 1px));
+overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.src-chev{order:2;width:24px;display:flex;justify-content:flex-end;color:var(--ink-3)}
+.src-chev svg{transition:transform .15s}
+.src-row[open] .src-chev svg{transform:rotate(90deg)}
+.src-host,.src-when,.src-on,.src-meta{color:var(--ink-2);font-size:calc(15 * var(--px, 1px))}
+.src-host{order:3;flex:1 1 100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.src-when,.src-on{display:none}
+.src-meta{order:4;flex:1 1 100%}
+.src-body{padding:0 0 18px}
+.src-body form>button,.src-acts button{width:auto;padding:0 20px;margin-top:16px}
+.src-acts{display:flex;flex-wrap:wrap;gap:0 10px}
+.src-acts form{margin:0}
+@media (min-width:720px){
+.src-head,.card .src-row>summary{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) 9em 11em 24px;
+gap:16px}
+.src-head{padding:0 0 8px;color:var(--ink-3);font-size:calc(14 * var(--px, 1px));font-weight:600}
+.src-name,.src-chev,.src-host{order:0;flex:none}
+.src-when,.src-on{display:block;white-space:nowrap}
+.src-meta{display:none}
+}
+</style>"""
+_CHEVRON = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>')
+
 
 def _when(iso: str) -> str:
     try:
@@ -41,7 +80,8 @@ def _first_sentence(text: str) -> str:
     return text if len(text) <= 160 else text[:157].rstrip() + "..."
 
 
-def _app_card(slug: str, rec: dict) -> str:
+def _app_row(slug: str, rec: dict, opened: bool = False) -> str:
+    """One connected app, as one row of the table. It opens to the app's tools and its three buttons."""
     on, tools = set(rec.get("enabled") or []), rec.get("tools") or []
     asks = set(rec.get("ask_first") or [])
     reads = [t for t in tools if t.get("read_only")]
@@ -65,19 +105,34 @@ def _app_card(slug: str, rec: dict) -> str:
             f'<input type="hidden" name="app" value="{_esc(slug)}">' + "".join(rows)
             # ONE INK PILL PER SCREEN (docs/SCOPE_DESIGN_LANGUAGE.md): Connect is it, so each app's Save is
             # the outline.
-            + '<button class="ghost" type="submit" style="margin-top:16px">Save</button></form>') if tools else ""
+            + '<button class="ghost" type="submit">Save</button></form>') if tools else (
+        '<p class="quiet">It lists no tools yet. If you change that in the app, check again.</p>')
     name = _esc(rec.get("name"))
-    return (f'<div class="card"><h2>{name}</h2>'
-            f'<p class="sub">{_esc(rec.get("host"))} &middot; connected {_esc(_when(rec.get("added_at")))} '
-            f'&middot; {len(on)} of {len(reads)} reading tools on</p>'
-            + form +
-            f'<form method="post" action="{DOOR}" style="margin-top:10px"><input type="hidden" name="do" '
+    # "TOOLS ON" IS THE READING TOOLS, as it always said; the ones that change things are counted apart, since
+    # ticked they only let a coworker ask.
+    count = (f"{len(on)} of {len(reads)}"
+             + (f" &middot; {len(asks)} {'asks' if len(asks) == 1 else 'ask'} first" if asks else ""))
+    when = _esc(_when(rec.get("added_at")))
+    # A MOBILE HAS NO ROOM FOR COLUMNS, so the date and the count are one line of words there, which wraps
+    # between words; the columns are display:none on a mobile and this is display:none on a wide screen, so
+    # each reader, and each screen reader, gets exactly one of them.
+    meta = f"Connected {when} &middot; {len(on)} of {len(reads)} tools on" + (
+        f" &middot; {len(asks)} {'asks' if len(asks) == 1 else 'ask'} first" if asks else "")
+    return (f'<details class="src-row" id="app-{_esc(slug)}"{" open" if opened else ""}><summary>'
+            f'<span class="src-name">{name}</span>'
+            f'<span class="src-host">{_esc(rec.get("host"))}</span>'
+            f'<span class="src-when">{when}</span><span class="src-on">{count}</span>'
+            f'<span class="src-meta">{meta}</span>'
+            f'<span class="src-chev">{_CHEVRON}</span></summary>'
+            '<div class="src-body">' + form +
+            '<div class="src-acts">'
+            f'<form method="post" action="{DOOR}"><input type="hidden" name="do" '
             f'value="check"><input type="hidden" name="app" value="{_esc(slug)}">'
             '<button class="ghost" type="submit">Check its tools again</button></form>'
-            f'<form method="post" action="{DOOR}" style="margin-top:10px" '
+            f'<form method="post" action="{DOOR}" '
             f'onsubmit="return confirm(\'Disconnect {name}? Your coworkers stop reading from it.\')">'
             f'<input type="hidden" name="do" value="remove"><input type="hidden" name="app" value="{_esc(slug)}">'
-            '<button class="danger" type="submit">Disconnect</button></form></div>')
+            '<button class="danger" type="submit">Disconnect</button></form></div></div></details>')
 
 
 def _connect_form(kept: dict) -> str:
@@ -200,9 +255,15 @@ def _render(note: str, kept: dict):
         rec = items.get(str(request.args.get(flag) or ""))
         if rec and not note:
             body.append(f'<div class="card"><p><b>{_esc(rec.get("name"))}</b>: {said}</p></div>')
-    for slug, rec in sorted(items.items(), key=lambda kv: str(kv[1].get("name") or "").lower()):
-        if isinstance(rec, dict):
-            body.append(_app_card(slug, rec))
+    # THE ROW JUST CONNECTED, SAVED OR CHECKED IS OPEN, so what changed is in front of the owner, not a tap away.
+    touched = {str(request.args.get(k) or "") for k in ("added", "saved", "checked")} - {""}
+    rows = [_app_row(slug, rec, opened=slug in touched)
+            for slug, rec in sorted(items.items(), key=lambda kv: str(kv[1].get("name") or "").lower())
+            if isinstance(rec, dict)]
+    if rows:
+        body.append('<div class="card src"><h2>Connected apps</h2>'
+                    '<div class="src-head" aria-hidden="true"><span>App</span><span>Address</span>'
+                    '<span>Connected</span><span>Tools on</span><span></span></div>' + "".join(rows) + '</div>')
     if items:
         body.append('<div class="card"><p class="quiet">To let a coworker read from these, open its shift and '
                     'tick <b>Read from the apps you connected</b>. Each call it makes is on its run\'s '
@@ -211,4 +272,4 @@ def _render(note: str, kept: dict):
                     '<a href="/approvals">Waiting for you &rarr;</a></p></div>')
     body.append(_connect_form(kept))
     body.append(_back())
-    return chrome(DOOR, title=_TITLE, lede=LEDE, body="".join(body)), (400 if note else 200)
+    return chrome(DOOR, title=_TITLE, lede=LEDE, body=_CSS + "".join(body)), (400 if note else 200)

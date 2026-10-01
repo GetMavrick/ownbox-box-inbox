@@ -309,6 +309,14 @@ html = owner.get("/settings/sources?added=clinic_notes").get_data(as_text=True)
 ok("...the app is listed with its tools: reads ticked, the one that changes things can't be",
    "Clinic Notes" in html and 'value="search_notes" checked' in html and "Changes things in Clinic Notes" in html
    and TOKEN not in html, html[html.find("Clinic Notes"):][:400])
+# ONE ROW PER APP IN A TABLE (owner, 2026-10-01: "it needs to be tighter list like in a table format"): the row
+# says which app, where, since when and how many tools are on, and opens to the ticks and buttons.
+ok("...as one row of the Connected apps table, its columns headed",
+   "Connected apps" in html and html.count('<details class="src-row"') == 1
+   and all(f"<span>{h}</span>" in html for h in ("App", "Address", "Connected", "Tools on")))
+ok("...open, since it was just connected", '<details class="src-row" id="app-clinic_notes" open>' in html)
+ok("...and closed when nothing has just happened to it",
+   '<details class="src-row" id="app-clinic_notes">' in owner.get("/settings/sources").get_data(as_text=True))
 ok("...and one the app says nothing about is named as such, not called a change",
    "Clinic Notes doesn&#x27;t say whether this only reads" in html or "Clinic Notes doesn't say whether" in html)
 import re  # noqa: E402

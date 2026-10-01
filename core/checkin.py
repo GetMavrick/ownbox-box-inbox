@@ -60,7 +60,10 @@ FIELDS = frozenset({"v", "host", "order_id", "droplet_id", "release", "update", 
                     # A BASE BOX STAYS BASE (docs/PLAN_TIER_INTEGRITY.md step 2): how many people can sign
                     # in against the limit the box enforces, and which features its plan switches on.
                     # Counts and feature ids, never who. The receiver learned both first (#1720).
-                    "people", "features"})
+                    "people", "features",
+                    # WHAT THE BOX CAN DO RIGHT NOW: an AI signed in, apps connected, coworkers with a shift on.
+                    # A yes/no and counts, never an app's name or a person. The receiver learned it first.
+                    "ready"})
 FEATURE_ID = re.compile(r"^[a-z0-9_:.-]{1,64}$")   # the receiver's shape (PLAN_TIER_INTEGRITY step 2)
 FEATURES_MAX = 50
 
@@ -239,6 +242,33 @@ def _features() -> list | None:
         return None
 
 
+def _ready() -> dict | None:
+    """Whether this box can do its work, as a yes/no and counts: an AI signed in, apps connected on Data Sources,
+    coworkers with a shift switched on. Never names an app or a person. Each part is left out if unreadable."""
+    out = {}
+    try:
+        from core import brain
+        out["ai"] = bool(brain.can_think()[0])
+    except Exception:                                    # noqa: BLE001
+        pass
+    try:
+        from core.connections import store
+        out["apps"] = min(len(store.load()["items"]), 100)
+    except Exception:                                    # noqa: BLE001
+        pass
+    try:
+        from core.coworkers import contract, runner
+        n = 0
+        for d in sorted(runner.coworkers_dir().iterdir()):
+            if d.is_dir():
+                cw, _ = contract.load(d)
+                n += bool(cw is not None and cw.enabled and cw.shifts)
+        out["shifts"] = min(n, 100)
+    except Exception:                                    # noqa: BLE001
+        pass
+    return out or None
+
+
 def payload(*, on: bool | None = None) -> dict | None:
     """The whole check-in, or None on a box that is not a sold box (no host or order in provision.json):
     the operator's own box and a developer's checkout say nothing to anyone."""
@@ -250,7 +280,7 @@ def payload(*, on: bool | None = None) -> dict | None:
     out = {"v": FORMAT, "host": host, "order_id": order, "droplet_id": _droplet_id(),
            "release": _release(), "update": _update(), "doctor": doctor, "plan": _plan(),
            "watchdog_ok": watchdog_ok, "enabled": enabled() if on is None else bool(on),
-           "sent_at": _iso(_now()), "people": _people(), "features": _features()}
+           "sent_at": _iso(_now()), "people": _people(), "features": _features(), "ready": _ready()}
     assert set(out) == FIELDS, "the check-in's fields changed without the list changing"
     return out
 
