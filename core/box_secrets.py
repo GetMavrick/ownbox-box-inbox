@@ -518,6 +518,17 @@ def clear(name: str, *, user_id: str | None = None) -> bool:
     return gone
 
 
+def take(name: str, expected: str, *, user_id: str | None = None) -> bool:
+    """Remove `name` only while it still holds `expected`: True for exactly one caller. For a single-use value
+    two requests can race for (core/connections/oauth.py's pending sign-in). One statement, so no gap."""
+    with state.connect() as c:
+        cur = c.execute("DELETE FROM box_secrets WHERE name = ? AND value = ?", (name, str(expected or "")))
+    took = cur.rowcount > 0
+    if took:
+        log.info("box_secret.taken", name=name, user=user_id)
+    return took
+
+
 def anthropic_key() -> str:
     """The key `core.brain` should use, environment first.
 

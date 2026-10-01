@@ -887,7 +887,7 @@ def _posthog_form(typed=None) -> str:
         f'{" checked" if k == region else ""}> {_esc(lab)}</label>' for k, lab in _REGIONS)
     return (f'<form method="post" action="{POSTHOG}"><div class="card">'
             f'<fieldset class="ph-f"><legend>Where your PostHog is</legend>{radios}</fieldset>'
-            + _text_input("own_host", "Your PostHog address (own PostHog only)", own,
+            + _text_input("own_host", "Your PostHog address (leave blank if you do not self host)", own,
                           "https://posthog.example.com", kind="url")
             + _text_input("project", "Project ID", project, "12345")
             + '<p class="sub">In PostHog, open Settings, then Project. The ID is a number.</p>'

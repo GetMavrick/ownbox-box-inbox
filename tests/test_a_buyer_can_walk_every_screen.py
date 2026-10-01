@@ -360,6 +360,8 @@ DOORS: dict[str, str] = {
                 "never by a person",
     "/ui": "the design specimen, typed by whoever maintains the box's look "
            "(docs/BOX_DESIGN_REFERENCE.md); signed-in only",
+    "/settings/sources/callback": "where an app's own login page sends the owner back after Connect on Data "
+                                  "Sources (core/connections/oauth.py); never a link",
 }
 
 _reached = set(fresh) | set(done) | set(mem) | set(pro)

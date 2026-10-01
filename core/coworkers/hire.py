@@ -43,6 +43,7 @@ _WANTS = {
     "read:spend": "see what the box is spending",
     "read:manifest": "see which tools the box has",
     "write:proposals": "draft things for your approval",
+    "read:apps": "read from the apps you connected",
     "web:search": "search the web",
     "web:read": "read web pages",
 }

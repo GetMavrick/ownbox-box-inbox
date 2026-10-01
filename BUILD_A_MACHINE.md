@@ -73,7 +73,8 @@ blueprint = m.blueprint               # the box mounts this when it starts
 | answer your AI's questions | `m.tool(name, fn=, title=, description=, capability="read:<noun>")`. The `title` is what you read when your AI asks permission, in plain words: "Read my job list". |
 | keep a small value | `m.setting(key, default)` and `m.save_setting(key, value)` |
 | keep more than that | your own SQLite file in `m.data_dir()`, inside your machine's folder |
-| run work on a schedule | a **coworker**: ship it as `coworkers/<name>/coworker.yaml` in your folder, and hire it on the Shifts page (Pro). |
+| run work on a schedule | `m.every(seconds, fn)`: every 15 seconds or more, in the box's worker. Each run has its own thread and a time budget; a run that fails is shown on the Add a Machine page, and the next one goes ahead. Keep progress in `m.data_dir()`. For work an AI does on a shift (Pro), ship a **coworker** instead: `coworkers/<name>/coworker.yaml`, hired on the Shifts page. |
+| add a section to another machine's screen | `m.panel(slot, title=, render=)`. `render()` returns the card's HTML. A machine's guide names the slots its screens offer. If it raises, the card says it couldn't load and the screen is unharmed. Keep `render()` to a quick read of what you already have: the screen waits for it, so do the slow work in `m.every`. |
 
 A tiny working example:
 
@@ -95,8 +96,8 @@ def home():
 Restart the box's services (`sudo systemctl restart aios-dispatch aios-worker`) and the new row
 appears in the menu.
 
-**Not promised yet**, so `check` flags them: the box's own background workers and its database
-tables. Use a coworker for scheduled work, and your own SQLite file for data, so our updates can
+**Not promised**, so `check` flags them: the box's own background workers and its database
+tables. Use `m.every` for scheduled work, and your own SQLite file for data, so our updates can
 never collide with yours.
 
 ## When something goes wrong

@@ -1466,11 +1466,12 @@ _MACHINE_SHOP_ASK = "https://www.ownbox.io/contact"
 def _custom_machine_rows() -> str:
     """One row per folder in my/machines/, and whether it started. Read-only: the loader owns this."""
     try:
-        from core import custom_machines, machine_breaks
+        from core import custom_machines, machine_breaks, machine_jobs
         seen = custom_machines.status()
         by_update = machine_breaks.stopped()
+        jobs_failing = machine_jobs.failing()
     except Exception:                            # noqa: BLE001 — the page must not 500 on a reader
-        seen, by_update = [], {}
+        seen, by_update, jobs_failing = [], {}, {}
     if not seen:
         return '<p class="quiet">None yet.</p>'
     rows = []
@@ -1488,7 +1489,15 @@ def _custom_machine_rows() -> str:
             said += ". It uses only what the box promises, so this one is ours to fix: tell us."
         elif hit and hit.get("unpromised"):
             said += ". It used something the box never promised: " + str(hit["unpromised"])
-        tone = "" if m.get("ok") else "stale"
+        # A SCHEDULED JOB THAT FAILS IS REPORTED HERE (m.every, owner 2026-10-01): the machine is running,
+        # and one of its jobs isn't doing its work. Said once per job, with when it started failing.
+        from core.sdk import _key
+        broken = [j for j in jobs_failing.values() if j.get("machine") == _key(str(m.get("slug") or "x"))]
+        if m.get("ok") and broken:
+            said = "Running, but " + "; ".join(
+                f'its job {j.get("job")} is failing since {str(j.get("since") or "")[:16].replace("T", " ")} UTC: '
+                f'{j.get("error")}' for j in broken)
+        tone = "" if m.get("ok") and not broken else "stale"
         rows.append('<div class="row"><b style="flex:1;min-width:0">' + _esc(m.get("slug"))
                     + f'</b><span class="{tone}">{_esc(said)}</span></div>')
     return "".join(rows)
@@ -1603,6 +1612,11 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                             "owner_only": True, "group": "ai"},
                            {"key": "shifts", "label": "Shifts", "href": "/settings/shifts",
                             "group": "ai"},
+                           # DATA SOURCES: the apps the business runs on, connected through each app's
+                           # own MCP server so coworkers can read from them (docs/SCOPE_CONNECTIONS_MCP_
+                           # FIRST.md, owner-approved 2026-10-01).
+                           {"key": "sources", "label": "Data Sources", "href": "/settings/sources",
+                            "owner_only": True, "group": "ai"},
                            # REACHING YOU: the app on your mobile, and the email the box SENDS
                            # (Morning Review, alerts). It read "Outbound Email" (owner, 2026-09-24)
                            # so it was not taken for the inbox it reads; under "Reaching you" the

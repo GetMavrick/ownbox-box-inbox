@@ -306,6 +306,10 @@ def _capabilities(chosen=()) -> list:
     caps = set()
     try:
         from core.connector import tools
+        # THE APPS THE OWNER CONNECTED are tools only once this process has looked (core/connections),
+        # so look first: a coworker can then be given "read from the apps you connected" right away.
+        from core.connections import gateway
+        gateway.refresh()
         for spec in tools.registry().values():
             c = str(spec.get("capability") or "")
             if c.startswith("read:") or c == "write:proposals":

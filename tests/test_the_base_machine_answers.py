@@ -195,6 +195,10 @@ from core.dash import box_settings  # noqa: E402
 _choices = {r: d for r, _t, d in box_settings._ROLE_CHOICES}
 ok("read-only says out loud that it CANNOT see spending",
    "cannot see what the box is spending" in _choices["read"], _choices["read"])
+# A read seat reads the apps the owner connected (read:apps, #1751); the screen says so before the key is minted
+# (OSDev4, review of #1751). "Everything above" carries it to the act role.
+ok("read-only says it reads the apps connected on Data Sources",
+   "the apps you connected on Data Sources" in _choices["read"], _choices["read"])
 ok("and the role that CAN see it says so before the key is minted",
    "spent against its monthly ceiling" in _choices["act"], _choices["act"])
 ok("every role offered on that screen exists in the capability table",

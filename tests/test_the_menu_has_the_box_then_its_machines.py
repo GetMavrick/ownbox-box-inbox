@@ -124,9 +124,11 @@ print("\ntest_system_settings_is_four_groups_with_plain_names")
 # 2026-09-30. Move Your Box is not a row since the same day: it is in Server Access's danger zone.
 _sn = menu("/settings/people")[1]
 _srows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', _sn, re.S)
+# Data Sources joined Your AI on 2026-10-01: the page the owner approved for connecting apps by MCP
+# (docs/SCOPE_CONNECTIONS_MCP_FIRST.md), and what it connects is read by coworkers on their shifts.
 ok("the rows, in their groups' order",
-   _srows == ["Overview", "AI Account", "Coworkers (Agents)", "Shifts", "Mobile App", "Email", "People",
-              "Updates", "Server Access"], str(_srows))
+   _srows == ["Overview", "AI Account", "Coworkers (Agents)", "Shifts", "Data Sources", "Mobile App", "Email",
+              "People", "Updates", "Server Access"], str(_srows))
 _sgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
                    _sn, re.S)
 ok("...each group opening with a gap, and nothing else", _sgrp == ["AI Account", "Mobile App", "People",

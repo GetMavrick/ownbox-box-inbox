@@ -146,6 +146,8 @@ def _input_schema(spec: dict) -> dict:
     spec recommends it, and it is the difference between "takes nothing" and "takes anything",
     which is exactly the ambiguity that makes a model invent a parameter.
     """
+    if isinstance(spec.get("input_schema"), dict):          # a connected app's own schema, untouched
+        return {"type": "object", **spec["input_schema"]}
     props, required = {}, []
     for arg, decl in (spec.get("args") or {}).items():
         props[arg] = {"type": decl["type"]}
@@ -203,7 +205,9 @@ def _tool_result(payload: dict, status: int) -> dict:
         result = payload["result"]
         return {"content": [{"type": "text", "text": json.dumps(result, default=str)}],
                 "structuredContent": result,
-                "isError": False}
+                # A CONNECTED APP'S OWN "that failed" (core/connections/gateway.py) stays a tool error, so the
+                # coworker reads the app's words and can correct itself. Opt-in by a key no shipped tool uses.
+                "isError": isinstance(result, dict) and result.get("app_error") is True}
     if status == 200 and payload.get("not_configured"):
         # A shipped box's most common state: the machine is here, the credential is not.
         return {"content": [{"type": "text", "text": payload.get("message", "not connected yet")}],
@@ -247,6 +251,15 @@ def _handle(method: str, params: dict, rpc_id, seat: dict) -> dict | None:
 
     if method in ("notifications/initialized", "initialized"):
         return None                                   # a notification: accepted, nothing to say
+
+    if method in ("tools/list", "tools/call"):
+        # THE OWNER'S CONNECTED APPS, current as of this request (core/connections/gateway.py): a connection
+        # added or turned off on Data sources is seen here without a restart. Never raises.
+        try:
+            from core.connections import gateway as _gateway
+            _gateway.refresh()
+        except Exception:                                   # noqa: BLE001
+            log.exception("connections.refresh_failed")
 
     if method == "tools/list":
         # CAPABILITY-FILTERED, which the spec explicitly permits: the tool set "MAY vary by the

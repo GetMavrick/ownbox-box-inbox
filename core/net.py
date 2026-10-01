@@ -37,6 +37,7 @@ import ipaddress
 import json as _json
 import os
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -221,6 +222,56 @@ def post_public(url: str, *, data: dict | bytes | None = None, json: dict | None
         raise
     except Exception as e:                       # noqa: BLE001 — transport, DNS, TLS, timeout
         raise PostRefused(f"{type(e).__name__} posting to {str(url)[:120]}") from e
+
+
+def post_public_raw(url: str, *, json: dict, headers: dict | None = None, timeout: int = DEFAULT_TIMEOUT,
+                    max_bytes: int = DEFAULT_MAX_BYTES, resolve=None, until=None) -> tuple[int, dict, str]:
+    """`post_public`, but the response HEADERS come back too: (status, {lower-case name: value}, body).
+
+    The same door with the same guards (public http(s) only, no redirects, a capped body, PostRefused on a
+    transport failure). It exists for one caller so far, the MCP client in core/connections/client.py:
+    an MCP server answers `initialize` with its session id in a header, and says in Content-Type whether
+    the body is plain JSON or a stream of events. Without the headers neither can be read.
+
+    `until(line) -> bool` reads the body a line at a time and stops when it says so. A server streaming
+    its answer as events may hold the stream open after the answer; reading to the end would wait out the
+    timeout and lose an answer that had already arrived. The whole read is bounded by `timeout` in total,
+    not per line, so a server trickling keep-alives can't hold a caller forever.
+    """
+    # THE HOST ONLY, in the log and the error: an app's MCP address can carry its secret in the path
+    # (Zapier's and Composio's do), and a log line is where a secret sits forever.
+    host = urllib.parse.urlsplit(str(url)).hostname or "?"
+    if not url_is_public(url, resolve):
+        log.warning("net.post_refused", host=host)
+        raise PostRefused(f"not a public http(s) address: {host}")
+    hdrs = dict(headers or {})
+    hdrs.setdefault("Content-Type", "application/json")
+    opener = urllib.request.build_opener(_NoRedirects())
+    req = urllib.request.Request(url, data=_json.dumps(json).encode(), headers=hdrs, method="POST")
+    try:
+        with opener.open(req, timeout=timeout) as r:
+            got = {k.lower(): v for k, v in r.headers.items()}
+            if until is None:
+                return int(getattr(r, "status", 200)), got, r.read(max_bytes).decode("utf-8", "replace")
+            deadline, buf = time.monotonic() + timeout, bytearray()
+            while len(buf) < max_bytes and time.monotonic() < deadline:
+                line = r.readline(max_bytes - len(buf))
+                if not line:
+                    break
+                buf += line
+                if until(line.decode("utf-8", "replace")):
+                    break
+            return int(getattr(r, "status", 200)), got, buf.decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:          # a 4xx/5xx IS an answer — hand it back
+        try:
+            got = {k.lower(): v for k, v in (e.headers or {}).items()}
+            return int(e.code), got, e.read(max_bytes).decode("utf-8", "replace")
+        except Exception:                        # noqa: BLE001
+            return int(e.code), {}, ""
+    except PostRefused:
+        raise
+    except Exception as e:                       # noqa: BLE001 — transport, DNS, TLS, timeout
+        raise PostRefused(f"{type(e).__name__} posting to {host}") from e
 
 
 # ── downloading BYTES through the same door ─────────────────────────────────────────────

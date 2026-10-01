@@ -1048,8 +1048,9 @@ def device_card() -> str:
 # this text grows with it.
 _ROLE_CHOICES = (
     ("read", "Read only",
-     "It can read your conversations, your morning report, and whether the box is running. It "
-     "cannot write anything, and it cannot see what the box is spending."),
+     "It can read your conversations, your morning report, whether the box is running, and the apps "
+     "you connected on Data Sources. It cannot write anything, and it cannot see what the box is "
+     "spending."),
     ("act", "Read and draft replies",
      "Everything above, plus what the box has spent against its monthly ceiling, and it can "
      "leave a suggested reply waiting on the screen. It still cannot send - you press send, or "
@@ -1986,7 +1987,7 @@ def deploy_move_status():
 # `_AGENT_STEP["link"]["url"]` all name paths served here. Keeping the stnotifies in the contract is
 # what lets one screen render a step it has never heard of.
 _DOORS = ("/settings/ai", "/settings/mobile", "/settings/agent", "/settings/access",
-          "/settings/updates", "/settings/email")
+          "/settings/updates", "/settings/email", "/settings/sources")
 # The handout hangs off the mobile-app door rather than being one of its own: it is not a
 # step a buyer finishes, it is a sheet they hand to somebody else.
 _HANDOUT = "/settings/mobile/print"

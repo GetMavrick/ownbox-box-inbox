@@ -105,12 +105,17 @@ _CAPABILITY = re.compile(r"^(read|write|act):[a-z][a-z0-9_]{2,39}$")
 # seat holds four other reads — it is the one field this system has already decided is the owner's
 # alone: core/report_tools.py withholds the meters segment from a read seat, by name and loudly.
 # Granting read:spend to `read` would hand the same number back through a different door.
+# `read:apps` (docs/SCOPE_CONNECTIONS_MCP_FIRST.md, owner-approved 2026-10-01): the READ tools of the apps the
+# owner connected on Data sources, served through this box as their one gateway. Granted to every role,
+# because every seat on a box is minted by its owner for their own assistant, and which tools are on at all
+# is the owner's choice per connection (core/connections/store.py). Actions are not this capability: they
+# come later, each behind a person's yes.
 _ROLE_CAPABILITIES = {
-    "read":    frozenset({"read:manifest", "read:reports", "read:inbox", "read:health"}),
+    "read":    frozenset({"read:manifest", "read:reports", "read:inbox", "read:health", "read:apps"}),
     "act":     frozenset({"read:manifest", "read:reports", "read:inbox", "read:health",
-                          "read:spend", "write:proposals"}),
+                          "read:spend", "write:proposals", "read:apps"}),
     "service": frozenset({"read:manifest", "read:reports", "read:inbox", "read:health",
-                          "read:spend", "write:proposals"}),
+                          "read:spend", "write:proposals", "read:apps"}),
 }
 
 
@@ -212,10 +217,13 @@ def plain_title(title: str) -> bool:
     return bool(_TITLE.match(title or "")) and "aios" not in title.lower()
 
 
-def register(name: str, *, fn, description: str, machine: str, capability: str,
-             min_role: str = "read", args: dict | None = None,
-             wants_seat: bool = False, output: dict | None = None, title: str | None = None) -> None:
-    """Declare one question this box can answer.
+def make_spec(name: str, *, fn, description: str, machine: str, capability: str,
+              min_role: str = "read", args: dict | None = None,
+              wants_seat: bool = False, output: dict | None = None, title: str | None = None,
+              input_schema: dict | None = None, replacing=frozenset()) -> dict:
+    """Declare one question this box can answer: every rule `register` keeps, returned as the spec and not
+    yet registered. `replacing` names machines whose tools `swap` is about to replace, so their names and
+    titles don't count as taken.
 
     `wants_seat=True` hands the resolved seat to the function as a keyword. Opt-in, because most
     tools must not know who is asking — a tool that varies its ANSWER by caller is a tool nobody
@@ -249,10 +257,11 @@ def register(name: str, *, fn, description: str, machine: str, capability: str,
     if not plain_title(title):
         raise ValueError(f"tool {name!r}: title must be plain words a person reads, like "
                          f"'Search your inbox' (no dots, underscores or AIOS), got {title!r}")
-    if any(t["title"] == title and t["name"] != name for t in _REGISTRY.values()):
+    if any(t["title"] == title and t["name"] != name and t["machine"] not in replacing
+           for t in list(_REGISTRY.values())):
         raise ValueError(f"tool {name!r}: title {title!r} is already used; two permissions must not "
                          f"read the same")
-    if name in _REGISTRY:
+    if name in _REGISTRY and _REGISTRY[name]["machine"] not in replacing:
         # Two machines claiming one name is a silent overwrite in a dict, and the loser's tool
         # disappears with no signal anywhere. Refuse at import, where somebody is watching.
         raise ValueError(f"tool {name!r} is already registered by {_REGISTRY[name]['machine']!r}")
@@ -273,7 +282,7 @@ def register(name: str, *, fn, description: str, machine: str, capability: str,
         # The seat is identity, resolved from a verified credential. A caller that could pass it
         # as an argument could claim to be anyone, which is the whole game.
         raise ValueError(f"tool {name!r}: 'seat' is not an argument a caller may supply")
-    _REGISTRY[name] = {"name": name, "title": title, "title_given": given, "fn": fn,
+    return {"name": name, "title": title, "title_given": given, "fn": fn,
                        "description": description,
                        "machine": machine, "min_role": min_role, "args": args or {},
                        "wants_seat": wants_seat, "capability": capability,
@@ -281,9 +290,61 @@ def register(name: str, *, fn, description: str, machine: str, capability: str,
                        # Where an outputSchema is present a client MUST validate against it, so a
                        # schema that drifts from the code breaks calls that would otherwise work.
                        # Declared where the shape is small and stable; absent where it is not.
-                       "output": output}
-    log.info("connector.tool_registered", tool=name, title=title, machine=machine, min_role=min_role,
-             capability=capability)
+                       "output": output,
+                       # AN APP'S OWN SCHEMA, passed through untouched (core/connections/gateway.py). Our
+                       # small `args` vocabulary can't describe another app's tools, and translating it
+                       # would be guessing; the app validates its own arguments.
+                       "input_schema": input_schema if isinstance(input_schema, dict) else None}
+
+
+def register(name: str, *, fn, description: str, machine: str, capability: str,
+             min_role: str = "read", args: dict | None = None,
+             wants_seat: bool = False, output: dict | None = None, title: str | None = None,
+             input_schema: dict | None = None) -> None:
+    """Declare one question this box can answer (the rules are `make_spec`'s). A name or title already taken
+    is refused here, at import, where somebody is watching."""
+    spec = make_spec(name, fn=fn, description=description, machine=machine, capability=capability,
+                     min_role=min_role, args=args, wants_seat=wants_seat, output=output, title=title,
+                     input_schema=input_schema)
+    _REGISTRY[spec["name"]] = spec
+    log.info("connector.tool_registered", tool=spec["name"], title=spec["title"], machine=machine,
+             min_role=min_role, capability=capability)
+
+
+def swap(machines, specs: list) -> None:
+    """Replace every tool of `machines` with `specs` (made with `make_spec(..., replacing=machines)`), with no
+    moment where a tool that stays is missing: new and changed tools land first, then the ones that went are
+    removed. For connected apps (core/connections/gateway.py), whose tools change while the box runs; a call
+    landing mid-swap finds either the old tool or the new one, never neither (OSDev4, review of #1751)."""
+    machines, keep = set(machines), {s["name"] for s in specs}
+    for spec in specs:
+        _REGISTRY[spec["name"]] = spec
+    for gone in [n for n, s in list(_REGISTRY.items()) if s["machine"] in machines and n not in keep]:
+        _REGISTRY.pop(gone, None)
+
+
+def unregister_machine(machine: str) -> int:
+    """Remove every tool one machine registered. For connected apps only (core/connections/gateway.py), whose
+    tools come and go while the box runs; a shipped machine's tools are registered once, at import."""
+    gone = [n for n, s in _REGISTRY.items() if s["machine"] == machine]
+    for n in gone:
+        _REGISTRY.pop(n, None)
+    return len(gone)
+
+
+def titles(excluding=()) -> set:
+    """Every title in use, except those of the machines in `excluding` (about to be replaced): a new tool must
+    not read the same as one already here."""
+    skip = set(excluding)
+    return {s["title"] for s in list(_REGISTRY.values()) if s["machine"] not in skip}
+
+
+def _json_dumps(v) -> str:
+    import json as _j
+    try:
+        return _j.dumps(v)
+    except (TypeError, ValueError):
+        return "x" * 20_000                  # unserialisable: refused by the size rule, never raised
 
 
 def note_absent(machine: str, reason: str) -> None:
@@ -319,6 +380,12 @@ def validate(spec: dict, raw: dict | None) -> dict:
     raw = raw or {}
     if not isinstance(raw, dict):
         raise ToolError("bad_args", "arguments must be an object")
+    if spec.get("input_schema") is not None:
+        # A CONNECTED APP'S TOOL: its own server validates its own arguments. Here only the shape and the
+        # size: an object, small enough to forward.
+        if len(_json_dumps(raw)) > 16_000:
+            raise ToolError("bad_args", "arguments are too large to send")
+        return raw
     declared = spec["args"]
     unknown = sorted(set(raw) - set(declared))
     if unknown:

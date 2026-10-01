@@ -27,10 +27,16 @@ WHAT IS PROMISED (§9.2), AND WHAT IS NOT:
                      Signed-in is the default: a screen nobody gates is a page the internet can read.
   * small state      m.setting / m.save_setting (core.box_settings), and m.data_dir() for the
                      machine's own SQLite file inside its own folder
+  * scheduled jobs   m.every(seconds, fn): at most every 15 seconds, in the worker, on its own thread
+                     under a time budget; a job that fails is reported, never stops the box
+                     (core.machine_jobs). Added in SDK 1, owner 2026-10-01.
+  * panels           m.panel(slot, title=, render=): a card on another machine's screen, in a slot
+                     that screen offers; one that fails shows a quiet card (core.panels). Added in
+                     SDK 1, owner 2026-10-01.
   * the manifest     machine.yaml: name, version, requires_foundation, needs:, sdk
-  NOT promised: worker.register / register_periodic (schedules go through Coworkers and Shifts until
-  the worker model settles), state.register_schema (a company's tables would block our migrations),
-  and any other `core.*` import.
+  NOT promised: worker.register / register_periodic (use m.every; a job on the worker's own loop
+  holds up every other one), state.register_schema (a company's tables would block our migrations:
+  use m.data_dir()), and any other `core.*` import.
 """
 from __future__ import annotations
 
@@ -44,7 +50,7 @@ VERSION = 1
 # and core/machine_breaks.py read these, so there is one list of what we promised.
 MANIFEST_FIELDS = ("name", "version", "requires_foundation", "needs", "sdk")
 SEAMS = ("machine", "think", "reporter", "tool", "menu", "screen", "page", "setting",
-         "save_setting", "data_dir", "STYLE_CLASSES", "VERSION")
+         "save_setting", "data_dir", "every", "panel", "STYLE_CLASSES", "VERSION")
 
 # The style classes a screen may use. Our markup changes; these names keep their meaning.
 STYLE_CLASSES = ("card", "quiet", "addr", "consent")
@@ -164,6 +170,37 @@ class Machine:
     def save_setting(self, key: str, value, *, by: str = "") -> None:
         from core import box_settings
         box_settings.put(self.key, key, value, set_by=by or self.slug)
+
+    # ── scheduled jobs ────────────────────────────────────────────────────────────────────────
+    def every(self, seconds, fn=None, *, name: str | None = None):
+        """Run `fn()` every `seconds` (15 or more) in the box's worker. Either form works:
+
+            m.every(60, check_orders)
+
+            @m.every(60)
+            def check_orders(): ...
+
+        Each run gets its own thread and a time budget; a run still going when the next is due is left to
+        finish, never doubled. A run that raises is reported on the Add a Machine page and the next one goes
+        ahead. The job is known as `<this machine>.<name>`; `name` defaults to the function's name. Keep
+        your own progress in `m.data_dir()`, so a restart picks up where the last run stopped."""
+        from core import machine_jobs
+        if fn is None:
+            def wrap(f):
+                machine_jobs.register(self.key, seconds, f, name=name)
+                return f
+            return wrap
+        machine_jobs.register(self.key, seconds, fn, name=name)
+        return fn
+
+    # ── panels on another machine's screen ────────────────────────────────────────────────────
+    def panel(self, slot: str, *, title: str, render) -> None:
+        """A card in `slot` on another machine's screen (that machine's guide names its slots). `render()`
+        returns the card's HTML; the box draws the card and its `title`. It is shown to whoever that screen
+        shows itself to. A render that raises shows "This section couldn't load", never a broken screen.
+        Link to your own pages under `m.home` for anything more than a card."""
+        from core import panels
+        panels.register(slot, machine=self.key, title=title, render=render)
 
     def data_dir(self) -> pathlib.Path:
         """A folder of this machine's own, for its own SQLite file or anything larger than a setting.
