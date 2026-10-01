@@ -486,7 +486,17 @@ def _think_claude_code(task: str, model: str, prompt: str, *, system, cached_con
         raise RetryableError(
             f"claude_code timed out ({task})" + (f" — said: {tail}" if tail else "")) from e
 
-    if rc != 0 or not out.strip():
+    # THE CLI EXITS 1 AND STILL PRINTS ITS WHOLE JSON ANSWER when the account refuses the request (measured on the
+    # owner's box, 2026-10-01: rc=1, "is_error":true, "api_error_status":401, the reason in "result"). Reading only
+    # the tail of that matched a word in the stats as "transient" and cut the reason off, so a refused sign-in read
+    # as a hiccup that a retry would fix. When the output is JSON, the JSON decides (below), whatever the exit code.
+    parsed = None
+    if out.strip():
+        try:
+            parsed = json.loads(out)
+        except ValueError:
+            parsed = None
+    if (rc != 0 or not out.strip()) and not isinstance(parsed, dict):
         blob = (err or out)[-400:]
         if _CLI_LIMIT_RE.search(blob):
             # The subscription window is exhausted — pause; it resets on its own.
@@ -495,13 +505,24 @@ def _think_claude_code(task: str, model: str, prompt: str, *, system, cached_con
             raise RetryableError(f"claude_code transient (rc={rc}): {blob[:200]}")
         raise RuntimeError(f"claude_code failed (rc={rc}): {blob[:300]}")
 
-    try:
-        data = json.loads(out)
-    except ValueError as e:
-        raise RetryableError(f"claude_code non-JSON output: {out[:200]}") from e
+    if isinstance(parsed, dict):
+        data = parsed
+    else:
+        try:
+            data = json.loads(out)
+        except ValueError as e:
+            raise RetryableError(f"claude_code non-JSON output: {out[:200]}") from e
 
     text = str(data.get("result") or "")
-    if data.get("is_error"):
+    if data.get("is_error") or rc != 0:
+        status = data.get("api_error_status")
+        if status in (401, 403) or _CLI_AUTH_RE.search(text):
+            # REFUSED, NOT TRANSIENT: a retry sends the same credential. The account's own words, scrubbed, say which
+            # fix applies ("OAuth access token is invalid", "invalid x-api-key", "Please run /login").
+            from core.logging import scrub_secrets
+            said = scrub_secrets(" ".join(text.split()))[:160] or "no reason given"
+            raise RuntimeError(f"the AI account refused the request ({status or 'auth'}: {said}): the Claude "
+                               f"sign-in or key needs attention in Set up")
         if _CLI_LIMIT_RE.search(text):
             raise BudgetExceeded(f"claude subscription limit: {text[:200]}")
         raise RuntimeError(f"claude_code error result: {text[:300]}")
