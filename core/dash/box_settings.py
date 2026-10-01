@@ -146,6 +146,13 @@ def box_ai():
             elif action == "cancel":
                 claude_login.cancel()
                 return redirect("/settings/ai", code=303)
+            elif action == "test":
+                # ONE TINY REAL QUESTION, THROUGH THE PATH DRAFTS USE (core/ai_health.py). Owner, 2026-10-01: "It
+                # says it's connected, but I can't tell if it's using inference." The answer is kept, so the
+                # page shows it after the redirect.
+                from core import ai_health
+                ai_health.test()
+                return redirect("/settings/ai?tested=1", code=303)
             elif action == "key":
                 # ONE FIELD, EITHER CREDENTIAL — the router decides, not the buyer and not a radio
                 # button. An sk-ant-oat… token is stored as a subscription and selects the
@@ -196,7 +203,7 @@ def box_ai():
                     "Anthropic API key")
             parts = (['<div class="card"><h2>Connected</h2>'
                       f'<p>Your drafts are written with your {_esc(kind)}, on your own account '
-                      'and your own bill.</p></div>',
+                      'and your own bill.</p>' + _ai_health_lines() + '</div>',
                       '<details class="fold ai-other"><summary>Use a different account</summary>']
                      + parts + ['</details>', _back()])
             lede = "What writes your drafts, and how to change it."
@@ -390,6 +397,44 @@ def box_chatgpt():
     if refresh and "</head>" in page:
         page = page.replace("</head>", refresh + "</head>", 1)
     return page, 200
+
+
+def _local_when(iso) -> str:
+    """An ISO time as the owner reads it, in their own timezone ("Oct 1, 2:58 PM")."""
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        from core import notify
+        d = datetime.fromisoformat(str(iso)).astimezone(ZoneInfo(notify.buyer_timezone()))
+    except Exception:                                # noqa: BLE001 — a time that can't be read isn't shown
+        return ""
+    return f"{d:%b} {d.day}, {d.hour % 12 or 12}:{d:%M} {'AM' if d.hour < 12 else 'PM'}"
+
+
+_HOW = {"test": "a test", "coworker": "a coworker's shift", "router": "a quick check"}
+
+
+def _ai_health_lines() -> str:
+    """WHETHER THE AI REALLY ANSWERS, not only whether it's connected (core/ai_health.py): the last answer, a
+    failure newer than it with its reason, the latest test, and the button to test it now."""
+    from core import ai_health
+    st, t = ai_health.state(), ai_health.last_test()
+    ok, fail = st.get("last_ok") or {}, st.get("last_fail") or {}
+    out = []
+    if ok.get("at"):
+        out.append(f'<p class="quiet">Last answered: {_esc(_local_when(ok["at"]))}, '
+                   f'{_esc(_HOW.get(ok.get("how"), "writing for a machine"))}.</p>')
+    else:
+        out.append('<p class="quiet">It hasn\'t answered anything yet. Test it below.</p>')
+    if fail.get("at") and str(fail.get("at")) > str(ok.get("at") or ""):
+        out.append(f'<p class="quiet">Last failed: {_esc(_local_when(fail["at"]))}: {_esc(fail.get("why"))}</p>')
+    if request.args.get("tested") and t:
+        said = (f'It answered "{_esc(t.get("answer"))}" in {_esc(t.get("seconds"))} seconds. Your AI is working.'
+                if t.get("ok") else f'It did not answer: {_esc(t.get("why"))}')
+        out.append(f'<p><b>{said}</b></p>')
+    out.append('<form method="post" action="/settings/ai" style="margin-top:12px"><input type="hidden" '
+               'name="do" value="test"><button class="ghost" type="submit">Test it now</button></form>')
+    return "".join(out)
 
 
 def _models(e: dict) -> tuple:

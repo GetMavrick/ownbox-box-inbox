@@ -251,6 +251,17 @@ def _ready() -> dict | None:
         out["ai"] = bool(brain.can_think()[0])
     except Exception:                                    # noqa: BLE001
         pass
+    try:                                                 # when the AI last really answered (core/ai_health.py)
+        from core import ai_health
+        st = ai_health.state()
+        at = (st.get("last_ok") or {}).get("at")
+        if isinstance(at, str) and len(at) <= 32:
+            out["ai_ok_at"] = at
+        fail = st.get("last_fail") or {}
+        if str(fail.get("at") or "") > str(at or ""):         # a failure newer than the last answer, and why
+            out["ai_fail"] = {"at": str(fail.get("at"))[:32], "why": str(fail.get("why") or "")[:160]}
+    except Exception:                                    # noqa: BLE001
+        pass
     try:
         from core.connections import store
         out["apps"] = min(len(store.load()["items"]), 100)

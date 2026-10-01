@@ -269,7 +269,25 @@ ok("a coworker called New never takes the form's address",
 
 print("\ntest_the_coworker_page")
 page = owner.get("/settings/shifts/trial-follow-up").get_data(as_text=True)
-ok("it says it is on, and when", "<h2>On</h2>" in page and "Weekdays at 07:30" in page)
+ok("it says it is on, and when", "<b>On</b>" in page
+   and "Weekdays, starting between 07:30 and 07:45" in page and "Sat, starting between 09:00" in page)
+# ONE CARD, EVERYTHING ON IT (owner, 2026-10-01: "We still want all of the information visible, but we
+# don't want it to take a whole page"; then "Show full", "yes", "yes" to its three questions).
+ok("its facts are one card of labelled lines", page.count('<dl class="ui-facts">') == 1
+   and all(f"<dt>{k}</dt>" in page for k in ("Status", "When", "It may", "Its job"))
+   and ("<dt>It can't</dt>" in page or "<dt>It can&#x27;t</dt>" in page))
+ok("...its job in full, on the page and not folded away",
+   '<dd class="sh-job">Every weekday morning, read trial members' in page
+   and "<summary>Its job</summary>" not in page)
+ok("...its actions in one row under them, Edit a button among them",
+   '<div class="ui-acts">' in page and '<a class="ui-btn ui-ghost" href="/settings/shifts/trial-follow-up/edit">Edit</a>'
+   in page)
+ok("...and Remove asks in place, then deletes", '<details class="ui-confirm"><summary>Remove this coworker</summary>'
+   in page and "Its file and job are deleted" in page)
+saved = owner.get("/settings/shifts/trial-follow-up?said=saved").get_data(as_text=True)
+ok("a save is said at the top of that card, not on a card of its own",
+   '<p class="sh-said">&#10003; Saved.</p><dl class="ui-facts">' in saved
+   and '<div class="card"><p>Saved.</p></div>' not in saved)
 ok("one ink pill, and it is Try it now", ink_pills(page) == ["Try it now"], str(ink_pills(page)))
 ok("switching off is a ghost, removing is a danger folded away",
    'class="ghost">Switch off' in page and "<summary>Remove this coworker</summary>" in page)
@@ -286,7 +304,7 @@ page = member.get("/settings/shifts").get_data(as_text=True)
 ok("a member sees the coworker, and no New coworker", "Trial follow-up" in page
    and "New coworker" not in main(page))
 page = member.get("/settings/shifts/trial-follow-up").get_data(as_text=True)
-ok("a member sees its page with no control on it", "<h2>On</h2>" in page
+ok("a member sees its page with no control on it", "<b>On</b>" in page and "ui-acts" not in main(page)
    and "<button" not in main(page) and "/edit" not in main(page), str(ink_pills(page)))
 r = member.post("/settings/shifts/trial-follow-up", data={"do": "off"})
 ok("...and a member's post changes nothing", r.status_code == 403

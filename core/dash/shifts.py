@@ -90,8 +90,15 @@ border-top:1px solid var(--hairline)}
 .sh-when label{margin:10px 0 6px}
 .sh-h{margin:22px 2px 10px;font-size:calc(18 * var(--px, 1px));font-weight:600}
 .card .sh-p.full{max-height:none}
-.sh-sheet h3{margin:16px 0 4px}
-.sh-sheet ul{margin:0 0 8px}
+.sh-said{margin:0 0 14px;color:var(--ok);font-weight:600}
+.sh-job{white-space:pre-wrap}
+.sh-trial{margin:12px 0 0;font-size:calc(14 * var(--px, 1px));color:var(--ink-3)}
+.sh-runs{width:100%;border-collapse:collapse;font-size:calc(15 * var(--px, 1px));font-variant-numeric:tabular-nums}
+.sh-runs th{text-align:left;font-size:calc(14 * var(--px, 1px));font-weight:600;color:var(--ink-3);padding:0 12px 6px 0}
+.sh-runs td{padding:8px 12px 8px 0;border-top:1px solid var(--hairline);vertical-align:top}
+.sh-runs tr.why td{border-top:0;padding-top:0;color:var(--ink-2)}
+.sh-runs .sh-d,.ui-facts .sh-d{display:inline-block;margin:0 6px 1px 0;vertical-align:middle}
+.sh-runs b{font-weight:600}
 </style>"""
 
 
@@ -438,17 +445,18 @@ def _post(action: str, do: str, label: str, cls: str = "") -> str:
             f'value="{do}"><button type="submit"{c}>{_esc(label)}</button></form>')
 
 
-def _sheet_html(sheet: dict) -> str:
-    def lst(items):
-        return "<ul>" + "".join(f"<li>{_esc(i[:1].upper() + i[1:])}</li>" for i in items) + "</ul>"
-    out = '<div class="sh-sheet">'
-    out += "<h3>It may</h3>" + (lst(sheet["wants"]) if sheet["wants"] else
-                                "<p>Nothing on the box. Only its job.</p>")
-    out += "<h3>It can't</h3>" + lst(sheet["cannot"])
+def _sheet_facts(sheet: dict, when: str = "") -> str:
+    """The permission sheet as labelled lines (`.ui-facts`), each list on one line joined by dots. `when`
+    replaces the sheet's own "It works" line where the page has more to say about times (the next start)."""
+    def line(items):
+        return " &middot; ".join(_esc(i[:1].upper() + i[1:]) for i in items)
+    out = f'<dt>When</dt><dd>{when or line(sheet["works"]) + "."}</dd>'
+    out += "<dt>It may</dt><dd>" + (line(sheet["wants"]) if sheet["wants"] else
+                                    "Nothing on the box. Only its job.") + "</dd>"
+    out += f"<dt>It can't</dt><dd>{line(sheet['cannot'])}</dd>"
     if sheet["box_does"]:
-        out += "<h3>The box does for it</h3>" + lst(sheet["box_does"])
-    out += "<h3>It works</h3>" + lst(sheet["works"])
-    return out + "</div>"
+        out += f"<dt>The box does</dt><dd>{line(sheet['box_does'])}</dd>"
+    return out
 
 
 @blueprint.route(HOME + "/<slug>", methods=["GET", "POST"])
@@ -488,65 +496,84 @@ def shifts_one(slug: str):
 
 
 def _detail(cw, *, note: str = "", owner: bool = True) -> str:
+    """ONE COWORKER IS ONE CARD: its facts as labelled lines and its actions in a row under them, then
+    its runs. Owner, 2026-10-01, of this page taking a whole screen: "We still want all of the
+    information visible, but we don't want it to take a whole page" — then, of the mock-up, "Show
+    full" (its job, in full), "yes" (Remove asks in place) and "yes" (the same card for every single
+    thing). It was five cards: a "Saved." card, On, Last runs, What it may do, Remove. "Every day at
+    07:30" on one and "Every day, starting between 07:30 and 07:45" on another were one fact."""
     contract, hire, runner, _, _ = _cw()
     tz = runner.box_tz()
     path = f"{HOME}/{cw.slug}"
-    body = _said() + (f'<div class="card notice"><p>{_esc(note)}</p></div>' if note else "")
+    body = f'<div class="card notice"><p>{_esc(note)}</p></div>' if note else ""
     missing = _missing(owner)
     if missing:
         body += _setup_card(missing, pill=False)
     needs_ok = not hire.acknowledged(cw)
 
     # THE ONE INK PILL is the thing to do next: the OK if it needs one, else switching it on,
-    # else trying it. Everything else on the screen is a ghost, a link, or folded away.
+    # else trying it. Everything else on the screen is a ghost, a link, or asks first.
     if needs_ok:
         body += ('<div class="card notice"><h2>It needs '
                  + ("your" if owner else "the owner\'s") + ' OK to run</h2>'
                  f'<p>{_esc(hire.RISK)}</p>'
                  + (_post(path, "ok", "OK, let it run") if owner else "") + '</div>')
-    state_card = '<div class="card">'
-    nxt = _next_start(cw, tz) if cw.enabled else None
-    if cw.enabled:
-        state_card += (f'<h2>On</h2><p>{_esc(_when_words(cw))}.'
-                       + (f' Next: {_esc(_stamp(nxt.isoformat(), tz))}.' if nxt else "") + '</p>')
-        if not needs_ok and owner:
-            state_card += ('<p class="quiet">Try it now for a trial run: it does its job, its '
-                           'steps do nothing outward, and you get its report.</p>'
-                           + _post(path, "run", "Try it now"))
-        state_card += _post(path, "off", "Switch off", "ghost") if owner else ""
-    else:
-        state_card += (f'<h2>Off</h2><p>{_esc(_when_words(cw))}, once it is switched on.</p>'
-                       + (_post(path, "on", "Switch on", "ghost" if needs_ok else "") if owner else ""))
-    body += state_card + '</div>'
-
-    rows = []
-    for r in _runs_of(cw.slug):
-        tone, word = _OUTCOME.get(r["status"], ("", r["status"]))
-        rc = _receipt(r)
-        when = _stamp(r.get("started_at") or r["window_start"], tz)
-        bits = ["Trial run" if r.get("dry_run") else "Shift"]
-        u = rc.get("usage") or {}
-        if rc.get("outcome") in ("DONE", "FAILED") and u:
-            bits.append(f"{u.get('minutes', 0):.0f} min, {u.get('turns', 0)} turns")
-        text = rc.get("reason") or (r.get("note") or "")
-        # IN FULL HERE: the list keeps two rows of it, and this page is where it is read.
-        rows.append(_row("", tone, when, word, text, " · ".join(bits), link=False, full=True))
-    body += '<h2 class="sh-h">Last runs</h2>'
-    body += ('<div class="card sh-list">' + "".join(rows) + '</div>' if rows else
-             '<div class="card"><p class="quiet">No runs yet. Each run ends Done, Failed or '
-             'Missed, and you get a report for every one.</p></div>')
 
     sheet = hire.sheet(cw, machine=cw.source)
-    body += ('<div class="card"><h2>What it may do</h2>' + _sheet_html(sheet)
-             + f'<details><summary>Its job</summary><p style="white-space:pre-wrap">'
-             f'{_esc(_job_text(cw))}</p></details>'
-             + (f'<div class="foot"><a href="{path}/edit">Change its job, times or access '
-                '&rarr;</a></div>' if owner else "") + '</div>')
+    times = " &middot; ".join(_esc(w) for w in sheet["works"])
+    nxt = _next_start(cw, tz) if cw.enabled else None
+    if cw.enabled:
+        state = '<span class="sh-d ok"></span><b>On</b>'
+        when = f"{times}." + (f" <b>Next: {_esc(_stamp(nxt.isoformat(), tz))}.</b>" if nxt else "")
+    else:
+        state = '<span class="sh-d"></span><b>Off</b>'
+        when = f"{times}, once it is switched on."
+    runs_rows = _runs_of(cw.slug)
+    said = request.args.get("said") or ""
+    card = ('<div class="card">'
+            + (f'<p class="sh-said">&#10003; {_esc(_SAID[said])}</p>' if said in _SAID else "")
+            + f'<dl class="ui-facts"><dt>Status</dt><dd>{state}</dd>'
+            + _sheet_facts(sheet, when)
+            + f'<dt>Its job</dt><dd class="sh-job">{_esc(_job_text(cw).strip())}</dd>'
+            + ('' if runs_rows else '<dt>Last runs</dt><dd class="quiet">No runs yet. Each run ends Done, '
+               'Failed or Missed, and you get a report for every one.</dd>')
+            + '</dl>')
     if owner:
-        body += ('<div class="card"><details><summary>Remove this coworker</summary>'
-                 '<p>Its file and job are deleted from this box. Its past reports stay in your '
-                 'email.</p>' + _post(path, "remove", "Remove " + cw.title, "danger")
-                 + '</details></div>')
+        acts, trial = [], cw.enabled and not needs_ok
+        if trial:
+            acts.append(_post(path, "run", "Try it now"))
+        elif not cw.enabled:
+            acts.append(_post(path, "on", "Switch on", "ghost" if needs_ok else ""))
+        acts.append(f'<a class="ui-btn ui-ghost" href="{path}/edit">Edit</a>')
+        if cw.enabled:
+            acts.append(_post(path, "off", "Switch off", "ghost"))
+        # REMOVE ASKS IN PLACE (owner, 2026-10-01): it opens to what it deletes and the one button that does.
+        acts.append('<details class="ui-confirm"><summary>Remove this coworker</summary>'
+                    '<p>Its file and job are deleted from this box. Its past reports stay in your email.</p>'
+                    + _post(path, "remove", "Remove " + cw.title, "danger") + '</details>')
+        card += '<div class="ui-acts">' + "".join(acts) + '</div>'
+        if trial:
+            card += ('<p class="sh-trial">Try it now is a trial run: it does its job, its steps do nothing '
+                     'outward, and you get its report.</p>')
+    body += card + '</div>'
+
+    # ITS RUNS, A ROW EACH: when, how it ended, what kind and how long; what it said, in full, under it.
+    if runs_rows:
+        rows = []
+        for r in runs_rows:
+            tone, word = _OUTCOME.get(r["status"], ("", r["status"]))
+            rc = _receipt(r)
+            bits = ["Trial run" if r.get("dry_run") else "Shift"]
+            u = rc.get("usage") or {}
+            if rc.get("outcome") in ("DONE", "FAILED") and u:
+                bits.append(f"{u.get('minutes', 0):.0f} min, {u.get('turns', 0)} turns")
+            text = rc.get("reason") or (r.get("note") or "")
+            rows.append(f'<tr><td>{_esc(_stamp(r.get("started_at") or r["window_start"], tz))}</td>'
+                        f'<td><span class="sh-d {tone}"></span><b>{_esc(word)}</b></td>'
+                        f'<td>{_esc(" · ".join(bits))}</td></tr>'
+                        + (f'<tr class="why"><td colspan="3">{_esc(text)}</td></tr>' if text else ""))
+        body += ('<div class="card"><h2>Last runs</h2><table class="sh-runs"><thead><tr><th>When</th>'
+                 '<th>Result</th><th>Kind</th></tr></thead><tbody>' + "".join(rows) + '</tbody></table></div>')
     body += f'<div class="foot"><a href="{HOME}">&larr; Shifts</a></div>'
     return _page(path, cw.title, "Shipped by " + cw.source if cw.source != "my"
                  else "One of your coworkers.", body)
@@ -841,7 +868,8 @@ def shifts_hire(machine: str, name: str):
         risk = (f'<p class="quiet" style="margin-top:16px">{_esc(sheet["risk"])}</p>'
                 '<label class="consent"><input type="checkbox" name="risk_ok" value="1"><span>'
                 'I understand, and it may read the box and reach the web.</span></label>')
-    body = (note + f'<div class="card"><h2>{_esc(sheet["who"])}</h2>' + _sheet_html(sheet)
+    body = (note + f'<div class="card"><h2>{_esc(sheet["who"])}</h2>'
+            f'<dl class="ui-facts">{_sheet_facts(sheet)}</dl>'
             + f'<p class="quiet">Hiring copies its job to your box, switched on. You can change '
             f'its job and times after, and an update to {_esc(machine)} never overwrites them.'
             f'</p><form method="post" action="{_esc(path)}">'

@@ -477,6 +477,12 @@ def _specimen() -> str:
       <div class="ui-metric"><b>21m</b><span>oldest waiting</span></div></div>
     <p class="ui-eyebrow">A mark that is not ours, on its white disc in both themes</p>
     <p><span class="ui-disc"><img src="{client_icon()}" alt=""></span></p>
+    <p class="ui-eyebrow">One thing: its facts as labelled lines, its actions in one row, removing asks first</p>
+    <dl class="ui-facts"><dt>Status</dt><dd>On</dd><dt>When</dt><dd>Weekdays, starting between 07:30 and 07:45.</dd>
+      <dt>It may</dt><dd>Read your conversations &middot; Search the web</dd></dl>
+    <div class="ui-acts"><button type="button">Try it now</button><a class="ui-btn ui-ghost" href="#">Edit</a>
+      <details class="ui-confirm"><summary>Remove</summary><p>What it deletes, said first.</p>
+      <button type="button" class="ui-danger">Remove it</button></details></div>
     <p class="ui-eyebrow">Status: green is good, amber is caution, red is stop, and always with a word</p>
     <p><span class="ui-chip"><span class="ui-dot ok"></span>Running</span>
       <span class="ui-chip"><span class="ui-dot warn"></span>Worth watching</span>

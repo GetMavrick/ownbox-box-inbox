@@ -296,6 +296,30 @@ html[data-theme="dark"] {
 .ui-actions { display: flex; flex-direction: column; gap: var(--s-3); margin-top: var(--s-5); }
 @media (min-width: 720px) { .ui-actions { flex-direction: row; flex-wrap: wrap; } }
 
+/* facts: ONE THING, said as labelled lines. Owner, 2026-10-01, of a coworker's page that took a whole
+   screen: "We still want all of the information visible, but we don't want it to take a whole page."
+   A word or two of label in its own column, the words beside it, a hairline between lines, on a mobile
+   too. A list of things is rows; one thing is facts, and its actions sit under them in .ui-acts. */
+.ui-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); margin: 0; }
+.ui-facts > dt, .ui-facts > dd { margin: 0; padding: var(--s-3) 0; border-top: 1px solid var(--hairline); }
+.ui-facts > dt { padding-right: var(--s-4); font-size: var(--t-label); font-weight: var(--w-strong); color: var(--ink-3); }
+.ui-facts > dd { font-size: var(--t-body-2); line-height: 1.45; }
+.ui-facts > dt:first-of-type, .ui-facts > dd:first-of-type { border-top: 0; padding-top: 0; }
+
+/* acts: the actions on one thing, in one row at the foot of its card. They wrap on a mobile and never
+   stack full width; the primary first, and a way to remove it last, at the end of the row. */
+.ui-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); margin-top: var(--s-4); padding-top: var(--s-4); border-top: 1px solid var(--hairline); }
+.ui-acts > form { margin: 0; }
+.ui-acts button, .ui-acts .ui-btn { width: auto; min-height: 44px; margin: 0; padding: 8px 20px; font-size: var(--t-label); }
+
+/* confirm: an action that asks first, in place. Its summary names it; opened, it says what will happen
+   and holds the one button that does it. In a row of actions it sits at the end, and opens below. */
+.ui-confirm > summary { color: var(--bad); font-weight: var(--w-strong); list-style: none; }
+.ui-confirm > summary::-webkit-details-marker { display: none; }
+.ui-acts .ui-confirm { margin: 0 0 0 auto; }
+.ui-acts .ui-confirm[open] { flex-basis: 100%; margin: 0; }
+.ui-confirm[open] > summary + * { margin-top: var(--s-2); }
+
 /* field: label, control, then hint or error; the value is never cleared on error */
 .ui-field + .ui-field { margin-top: var(--s-4); }
 .ui-field .ui-hint { margin-top: var(--s-2); font-size: var(--t-small); color: var(--ink-3); }

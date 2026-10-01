@@ -622,6 +622,24 @@ def think(task: str, prompt: str, *, system: str | None = None,
           cached_context: str | None = None, max_tokens: int = 1024,
           job_id: str | None = None, timeout: float | None = None,
           isolated: bool = False, machine: str | None = None) -> str:
+    """Run one reasoning call and return the text (see `_think_routed`). Its outcome is recorded for
+    Settings → AI Account and the check-in (core/ai_health.py): owner, 2026-10-01, "I can't tell if it's
+    using inference". The record never raises into the call."""
+    from core import ai_health
+    try:
+        out = _think_routed(task, prompt, system=system, cached_context=cached_context, max_tokens=max_tokens,
+                            job_id=job_id, timeout=timeout, isolated=isolated, machine=machine)
+    except Exception as e:
+        ai_health.note(False, task, f"{type(e).__name__}: {e}")
+        raise
+    ai_health.note(True, task)
+    return out
+
+
+def _think_routed(task: str, prompt: str, *, system: str | None = None,
+                  cached_context: str | None = None, max_tokens: int = 1024,
+                  job_id: str | None = None, timeout: float | None = None,
+                  isolated: bool = False, machine: str | None = None) -> str:
     """Run one reasoning call and return the text, on the calling machine's account if it has one.
 
     machine  the calling machine's key (core names none; the caller passes its own). When that
@@ -899,6 +917,23 @@ def _stop_agent_unit(cmd: list[str]) -> None:
 def run_agent(prompt: str, *, run_id: str, coworker: str, workspace, system: str = "",
               mcp: dict | None = None, web=(), max_turns: int = 40, max_minutes: int = 30,
               max_usd: float = 1.0, task: str = "coworker", sandboxed: bool = True) -> dict:
+    """Run one coworker shift's AI loop (see `_run_agent_now`), recording whether the AI answered
+    (core/ai_health.py). The record never raises into the shift."""
+    from core import ai_health
+    try:
+        out = _run_agent_now(prompt, run_id=run_id, coworker=coworker, workspace=workspace, system=system,
+                             mcp=mcp, web=web, max_turns=max_turns, max_minutes=max_minutes, max_usd=max_usd,
+                             task=task, sandboxed=sandboxed)
+    except Exception as e:
+        ai_health.note(False, "coworker", f"{type(e).__name__}: {e}")
+        raise
+    ai_health.note(True, "coworker")
+    return out
+
+
+def _run_agent_now(prompt: str, *, run_id: str, coworker: str, workspace, system: str = "",
+                   mcp: dict | None = None, web=(), max_turns: int = 40, max_minutes: int = 30,
+                   max_usd: float = 1.0, task: str = "coworker", sandboxed: bool = True) -> dict:
     """Run one coworker shift's AI loop and return what it did. Raises on anything else.
 
     prompt      today's instructions for the shift (the runner builds them); goes in on stdin
@@ -1094,7 +1129,11 @@ def _agent_verdict(rc: int, out: str, err: str, *, run_id, be, model, task, minu
         status = data.get("api_error_status")
         blob = text or err[-300:] or subtype
         if status in (401, 403) or _CLI_AUTH_RE.search(blob):
-            raise RuntimeError(f"the AI account refused the run ({status or 'auth'}): the Claude "
+            # THE ACCOUNT'S OWN WORDS, SCRUBBED (owner, 2026-10-01: a trial run showed only "refused the run (401)",
+            # and "the token is invalid" and "a key in the wrong slot" need different fixes).
+            from core.logging import scrub_secrets
+            said = scrub_secrets(" ".join(str(blob).split()))[:160]
+            raise RuntimeError(f"the AI account refused the run ({status or 'auth'}: {said}): the Claude "
                                f"sign-in or key needs attention in Set up")
         if _AGENT_WINDOW_RE.search(blob):
             raise BudgetExceeded(f"claude subscription limit: {blob[:200]}")
