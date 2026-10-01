@@ -69,8 +69,8 @@ def seed():
                    "there is a leak here too", "2026-09-02T00:00:00Z"))
 
 
-INBOX_TOOLS = ("aios.inbox.list_conversations", "aios.inbox.search", "aios.inbox.read_conversation")
-WRITE_TOOL = "aios.inbox.draft_reply"
+INBOX_TOOLS = ("inbox.list_conversations", "inbox.search", "inbox.read_conversation")
+WRITE_TOOL = "inbox.draft_reply"
 
 
 def test_the_inbox_is_actually_offered():
@@ -128,22 +128,22 @@ def test_a_real_call_through_the_connector_returns_the_inbox():
         out, code = registry.call(name, args, seat)
         return (out or {}).get("result", out), code
 
-    out, code = result("aios.inbox.list_conversations", {"limit": 5})
+    out, code = result("inbox.list_conversations", {"limit": 5})
     ok("a read seat's call is answered, not refused", code == 200, f"{code}: {str(out)[:120]}")
     convs = (out or {}).get("conversations")
     ok("...and it returns this box's conversations",
        isinstance(convs, list) and [c["who"] for c in convs] == ["Dana Roofing"], str(out)[:160])
-    out, code = result("aios.inbox.search", {"query": "leak"})
+    out, code = result("inbox.search", {"query": "leak"})
     ok("search answers through the call path too", code == 200, f"{code}: {str(out)[:120]}")
     ok("...with the conversation that said it",
        [c["who"] for c in (out or {}).get("conversations", [])] == ["Dana Roofing"], str(out)[:160])
-    out, code = result("aios.inbox.read_conversation", {"id": "c1"})
+    out, code = result("inbox.read_conversation", {"id": "c1"})
     ok("read_conversation answers through the call path", code == 200, f"{code}: {str(out)[:120]}")
     ok("...and returns the thread's text",
        (out or {}).get("messages") and out["messages"][0]["text"].startswith("there is a leak"),
        str(out)[:160])
     ok("...and a required argument that is missing is refused, not guessed",
-       registry.call("aios.inbox.read_conversation", {}, seat)[1] != 200)
+       registry.call("inbox.read_conversation", {}, seat)[1] != 200)
 
 
 def test_nothing_here_can_speak_as_the_business():
@@ -157,7 +157,7 @@ def test_nothing_here_can_speak_as_the_business():
     # SO THE BAR MOVED UP, NOT DOWN. Before, one line asserted "no write exists". Now four lines
     # assert what a write may be: act-role, write:proposals, invisible to a read seat, and
     # REFUSED to one that asks anyway. A deleted guard would have proven none of that.
-    inbox = {n: t for n, t in registry.registry().items() if ".inbox." in n}
+    inbox = {n: t for n, t in registry.registry().items() if n.startswith("inbox.")}
     banned = [n for n in inbox if any(w in n for w in ("send", "publish", "post"))]
     ok("no tool name offers to send or publish", not banned, str(banned))
 

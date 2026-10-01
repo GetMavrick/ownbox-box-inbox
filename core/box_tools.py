@@ -210,6 +210,7 @@ def spend():
 
 tools.register(
     "health",
+    title="See whether your box is running",
     fn=health, machine=MACHINE, min_role="read",
     # Its own capability, not read:manifest. The manifest describes CAPABILITY and never changes
     # between two calls a second apart; this is live state. A seat allowed to ask what the box can
@@ -222,6 +223,7 @@ tools.register(
 
 tools.register(
     "spend",
+    title="See what your box has spent on AI",
     fn=spend, machine=MACHINE, min_role="act",
     # NOT held by a read seat, deliberately and consistently: core/report_tools.py already
     # withholds the meters segment from a read seat because the box's spend is the owner's

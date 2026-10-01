@@ -89,7 +89,7 @@ from core import sdk
 
 m = sdk.machine("{slug}")
 blueprint = m.blueprint                      # the box mounts this when it starts
-m.menu("{key}", title="{title}", href="/{slug}")
+m.menu("{key}", title="{title}", href=m.home)   # /my/{slug}
 
 
 def notes() -> list:
@@ -105,11 +105,11 @@ def add(text: str) -> None:
         m.save_setting("notes", (notes() + [{{"text": text, "day": today}}])[-50:])
 
 
-@m.screen("/{slug}", methods=("GET", "POST"))
+@m.screen(m.home, methods=("GET", "POST"))
 def home():
     if request.method == "POST":
         add(request.form.get("note", ""))
-        return redirect("/{slug}", code=303)
+        return redirect(m.home, code=303)
     rows = "".join(f"<p>{{html.escape(n['text'])}}</p>" for n in reversed(notes()))
     body = ('<div class="card"><h2>Add a note</h2><form method="post">'
             '<input name="note" maxlength="200" aria-label="Note" '
@@ -118,7 +118,7 @@ def home():
             '</form></div>'
             '<div class="card"><h2>Notes</h2>'
             + (rows or '<p class="quiet">Nothing saved yet.</p>') + '</div>')
-    return sdk.page("/{slug}", title="{title}", lede="Your own machine, running on your box.", body=body)
+    return sdk.page(m.home, title="{title}", lede="Your own machine, running on your box.", body=body)
 
 
 def morning(day: date) -> dict:
@@ -139,7 +139,8 @@ def latest(limit: int = 5) -> dict:
     return {{"notes": [n["text"] for n in notes()[-max(1, min(int(limit), 20)):]]}}
 
 
-m.tool("latest_notes", fn=latest, description="The newest notes saved in {title}.",
+m.tool("latest_notes", fn=latest, title="Read the newest notes in {title}",
+       description="The newest notes saved in {title}.",
        capability="read:{key}_notes", args={{"limit": {{"type": "integer", "description": "how many, 1 to 20"}}}})
 '''
 

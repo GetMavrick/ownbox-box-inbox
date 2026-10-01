@@ -9,6 +9,10 @@ that is ours to fix. Anything else in the box's code can change in any update.
 
 If you build with an AI agent, show it this page first.
 
+## Your machine's own corner
+
+Every page of a machine of your own lives under `/my/<its name>` (`m.home`), and every name it takes on the box starts `my_`. Official add-on machines keep the plain names, so yours never takes a name an add-on needs, and the box refuses a page outside its corner with the fix in one sentence.
+
 ## Start in one command
 
 ```bash
@@ -63,10 +67,10 @@ blueprint = m.blueprint               # the box mounts this when it starts
 |---|---|
 | use AI | `m.think(task, prompt)`. **Always this, never an AI company's library.** It runs on the box's one AI account, under its monthly ceiling. |
 | add a row to the menu | `m.menu(key, title=, href=)`. The `key` is lowercase letters, digits and underscores. |
-| add a screen | `@m.screen("/path")` on a function that returns `sdk.page(path, title=, lede=, body=)`. Screens are behind the box's sign-in; `owner_only=True` limits one to the owner. |
+| add a screen | `@m.screen(m.home)` (or a path under it, like `m.home + "/settings"`) on a function that returns `sdk.page(path, title=, lede=, body=)`. Screens are behind the box's sign-in; `owner_only=True` limits one to the owner. |
 | style a screen | the classes in `sdk.STYLE_CLASSES`: `card`, `quiet`, `addr`, `consent`. |
 | put a line on the Morning Review | `m.reporter(title, fn)`. `fn(day)` returns `{}` on a quiet day, or a `title`, a `headline` and what `happened`. |
-| answer your AI's questions | `m.tool(name, fn=, description=, capability="read:<noun>")` |
+| answer your AI's questions | `m.tool(name, fn=, title=, description=, capability="read:<noun>")`. The `title` is what you read when your AI asks permission, in plain words: "Read my job list". |
 | keep a small value | `m.setting(key, default)` and `m.save_setting(key, value)` |
 | keep more than that | your own SQLite file in `m.data_dir()`, inside your machine's folder |
 | run work on a schedule | a **coworker**: ship it as `coworkers/<name>/coworker.yaml` in your folder, and hire it on the Shifts page (Pro). |
@@ -79,12 +83,12 @@ from core import sdk
 
 m = sdk.machine("job-tracker")
 blueprint = m.blueprint
-m.menu("job_tracker", title="Job Tracker", href="/job-tracker")
+m.menu("job_tracker", title="Job Tracker", href=m.home)     # m.home is /my/job-tracker
 
 
-@m.screen("/job-tracker")
+@m.screen(m.home)
 def home():
-    return sdk.page("/job-tracker", title="Job Tracker", lede="Your jobs, on your box.",
+    return sdk.page(m.home, title="Job Tracker", lede="Your jobs, on your box.",
                     body='<div class="card"><p>Your jobs will show up here.</p></div>')
 ```
 

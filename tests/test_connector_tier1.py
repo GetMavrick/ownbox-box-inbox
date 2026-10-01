@@ -83,7 +83,7 @@ def call(tool, args=None, headers=RH):
     return client.post("/api/v1/call", json=body, headers=headers)
 
 
-for t in ("aios.morning_review.report_day", "aios.morning_review.report_days", "aios.morning_review.report_trend"):
+for t in ("morning_review.report_day", "morning_review.report_days", "morning_review.report_trend"):
     b = call(t).get_json()
     ok(f"{t} on a box with no report ever says not_configured",
        b.get("not_configured") is True, str(b))
@@ -99,13 +99,13 @@ seed(TODAY, report.METERS, "$11", FRESH)
 seed(YESTERDAY, "lead_machine", 4, FRESH, final=1)
 seed(YESTERDAY, report.METERS, "$9", FRESH, final=1)
 
-b = call("aios.morning_review.report_days").get_json()["result"]
+b = call("morning_review.report_days").get_json()["result"]
 ok("report_days lists the stored days, newest first", b["days"] == [TODAY, YESTERDAY], str(b))
 ok("and counts them", b["count"] == 2)
 
 
 # ── the money rail is withheld from a read seat, and NAMED ────────────────────────────────
-b = call("aios.morning_review.report_day", {"day": TODAY}).get_json()["result"]
+b = call("morning_review.report_day", {"day": TODAY}).get_json()["result"]
 machines = [s["machine"] for s in b["segments"]]
 ok("a read seat sees the machine segments", "lead_machine" in machines, str(machines))
 ok("a read seat does NOT see the meters segment", report.METERS not in machines, str(machines))
@@ -115,37 +115,37 @@ ok("meters is absent, never present-and-empty (that reads as 'nothing was spent'
 ok("the spend figure appears nowhere in the read seat's response",
    "$11" not in json.dumps(b), json.dumps(b)[:200])
 
-b = call("aios.morning_review.report_day", {"day": TODAY}, headers=AH).get_json()["result"]
+b = call("morning_review.report_day", {"day": TODAY}, headers=AH).get_json()["result"]
 machines = [s["machine"] for s in b["segments"]]
 ok("an ACT seat does see meters", report.METERS in machines, str(machines))
 ok("and nothing is marked withheld for it", b["withheld"] == [], str(b["withheld"]))
 
 
 # ── freshness is on every answer ──────────────────────────────────────────────────────────
-ok("a fresh day is not stale", call("aios.morning_review.report_day", {"day": TODAY}).get_json()["result"]["stale"] is False)
-ok("and carries written_at", call("aios.morning_review.report_day", {"day": TODAY}).get_json()["result"]["written_at"])
+ok("a fresh day is not stale", call("morning_review.report_day", {"day": TODAY}).get_json()["result"]["stale"] is False)
+ok("and carries written_at", call("morning_review.report_day", {"day": TODAY}).get_json()["result"]["written_at"])
 
 seed(TODAY, "lead_machine", 7, OLD)
 seed(TODAY, "content_machine", 3, OLD)
 seed(TODAY, report.METERS, "$11", OLD)
-b = call("aios.morning_review.report_day", {"day": TODAY}).get_json()["result"]
+b = call("morning_review.report_day", {"day": TODAY}).get_json()["result"]
 ok("a report older than the module's own threshold is marked STALE", b["stale"] is True, str(b["stale"]))
 
-b = call("aios.morning_review.report_day", {"day": YESTERDAY}).get_json()["result"]
+b = call("morning_review.report_day", {"day": YESTERDAY}).get_json()["result"]
 ok("a CLOSED day is never stale — it is finished, not late", b["stale"] is False, str(b))
 ok("and is marked final", b["final"] is True)
 
-b = call("aios.morning_review.report_day", {"day": "2020-01-01"}).get_json()["result"]
+b = call("morning_review.report_day", {"day": "2020-01-01"}).get_json()["result"]
 ok("a day with no stored report says so in words", b["note"] and "no Morning Review" in b["note"],
    str(b))
 ok("rather than returning an unexplained empty list", b["segments"] == [])
 
-b = call("aios.morning_review.report_day").get_json()["result"]
+b = call("morning_review.report_day").get_json()["result"]
 ok("omitting the day gives the most recent stored one", b["day"] == TODAY, str(b["day"]))
 
 
 # ── the trend ─────────────────────────────────────────────────────────────────────────────
-b = call("aios.morning_review.report_trend", {"day": TODAY, "back": 5}).get_json()["result"]
+b = call("morning_review.report_trend", {"day": TODAY, "back": 5}).get_json()["result"]
 ok("the trend returns a series per machine", "lead_machine" in b["series"], str(b["series"]))
 ok("days with no report are ABSENT, not zero — a gap is not a zero",
    len(b["series"]["lead_machine"]) == 2, str(b["series"]["lead_machine"]))
@@ -153,15 +153,15 @@ ok("the money headline has no series (it is a currency string, and a chart of st
    report.METERS not in b["series"], str(list(b["series"])))
 ok("and the response says the gap rule out loud", "absent rather than zero" in b["note"])
 
-b = call("aios.morning_review.report_trend", {"back": 100000}).get_json()["result"]
+b = call("morning_review.report_trend", {"back": 100000}).get_json()["result"]
 ok("an absurd window is clamped rather than scanning the table", b["days_back"] == 365,
    str(b["days_back"]))
 ok("a zero window is clamped up, not divided by",
-   call("aios.morning_review.report_trend", {"back": 0}).get_json()["result"]["days_back"] == 1)
+   call("morning_review.report_trend", {"back": 0}).get_json()["result"]["days_back"] == 1)
 
 
 # ── the seat is identity, never an argument ───────────────────────────────────────────────
-r = call("aios.morning_review.report_day", {"seat": {"id": "x", "role": "service"}})
+r = call("morning_review.report_day", {"seat": {"id": "x", "role": "service"}})
 ok("a caller cannot pass `seat` as an argument to claim a role", r.status_code == 400,
    str(r.status_code))
 ok("and the refusal names it", "seat" in r.get_json()["message"])
@@ -193,7 +193,7 @@ def _imports(path):
     return out
 
 
-_TIER1 = ("aios.morning_review.report_day", "aios.morning_review.report_days", "aios.morning_review.report_trend")
+_TIER1 = ("morning_review.report_day", "morning_review.report_days", "morning_review.report_trend")
 for f in ("tools.py", "manifest.py", "http.py"):
     path = ROOT / "core" / "connector" / f
     imps = _imports(path)
@@ -204,13 +204,13 @@ for f in ("tools.py", "manifest.py", "http.py"):
     ok(f"core/connector/{f} names none of the Tier 1 tools",
        not any(n in src for n in _TIER1), f)
 
-ok("yet all three Tier 1 tools are served", {"aios.morning_review.report_day", "aios.morning_review.report_days", "aios.morning_review.report_trend"}
+ok("yet all three Tier 1 tools are served", {"morning_review.report_day", "morning_review.report_days", "morning_review.report_trend"}
    <= set(tools.registry()))
 man = client.get("/api/v1/manifest", headers=RH).get_json()
 ok("and they are in the manifest with their schemas",
    all(t["machine"] == "morning_review" for t in man["tools"] if t["name"].startswith("report_")))
 ok("report_day advertises its day argument",
-   next(t for t in man["tools"] if t["name"] == "aios.morning_review.report_day")["args"]["day"]["type"] == "string")
+   next(t for t in man["tools"] if t["name"] == "morning_review.report_day")["args"]["day"]["type"] == "string")
 
 
 # ── a core-level registration failure must not kill the web process ───────────────────────
@@ -241,7 +241,7 @@ with state.connect() as c:
         "SELECT tool, outcome FROM seat_actions WHERE seat_id = ?", (read_id,))]
 tools_seen = {r["tool"] for r in rows}
 ok("every Tier 1 call is on the ledger",
-   {"aios.morning_review.report_day", "aios.morning_review.report_days", "aios.morning_review.report_trend"} <= tools_seen, str(tools_seen))
+   {"morning_review.report_day", "morning_review.report_days", "morning_review.report_trend"} <= tools_seen, str(tools_seen))
 ok("including the refused one", any(r["outcome"] == "denied" for r in rows))
 
 

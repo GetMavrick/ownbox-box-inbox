@@ -119,7 +119,7 @@ ok("server/discover answers (mandatory in the current spec)", r.status_code == 2
 ok("  it lists every version we speak, not one",
    len(d["supportedVersions"]) >= 3 and "2026-07-28" in d["supportedVersions"],
    str(d.get("supportedVersions")))
-ok("  it names the server", d["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "aios")
+ok("  it names the server", d["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "ownbox")
 ok("  its instructions survive C1 — proposals, not 'read-only', which expires",
    "read-only" not in d["instructions"] and "propos" in d["instructions"],
    d["instructions"][:90])
@@ -144,35 +144,35 @@ r = rpc("tools/list")
 lst = r.get_json()["result"]["tools"]
 names = [t["name"] for t in lst]
 ok("tools/list returns the registry",
-   "aios.test.weather" in names and "aios.core.manifest" in names, str(names))
+   "test.weather" in names and "core.manifest" in names, str(names))
 ok("  sorted, so a client can cache it", names == sorted(names), str(names))
-w = next(t for t in lst if t["name"] == "aios.test.weather")
+w = next(t for t in lst if t["name"] == "test.weather")
 ok("  a tool carries a JSON Schema for its arguments",
    w["inputSchema"]["properties"]["city"]["type"] == "string")
 ok("  a required argument is marked required", w["inputSchema"]["required"] == ["city"])
-u = next(t for t in lst if t["name"] == "aios.test.unplugged")
+u = next(t for t in lst if t["name"] == "test.unplugged")
 ok("  a no-argument tool says 'takes nothing', not 'takes anything'",
    u["inputSchema"]["additionalProperties"] is False and not u["inputSchema"]["properties"])
 
 # ── tools/call ────────────────────────────────────────────────────────────────────────────
-r = rpc("tools/call", {"name": "aios.test.weather", "arguments": {"city": "Laguna"}})
+r = rpc("tools/call", {"name": "test.weather", "arguments": {"city": "Laguna"}})
 res = r.get_json()["result"]
 ok("tools/call runs the tool", res["isError"] is False and res["structuredContent"]["city"] == "Laguna")
 ok("  and mirrors it as text for a weaker model", "Laguna" in res["content"][0]["text"])
 
-r = rpc("tools/call", {"name": "aios.test.unplugged"})
+r = rpc("tools/call", {"name": "test.unplugged"})
 res = r.get_json()["result"]
 ok("NOT CONNECTED is a result with isError, never a protocol error",
    "error" not in r.get_json() and res["isError"] is True)
 ok("  and it says what to do, not that we broke",
    "not connected" in res["content"][0]["text"].lower(), res["content"][0]["text"])
 
-r = rpc("tools/call", {"name": "aios.test.nope"})
+r = rpc("tools/call", {"name": "test.nope"})
 body = r.get_json()
 ok("an UNKNOWN tool is a protocol error — a model cannot self-correct onto it",
    "error" in body and body["error"]["code"] == -32602, str(body)[:120])
 
-r = rpc("tools/call", {"name": "aios.test.weather", "arguments": {"nope": 1}})
+r = rpc("tools/call", {"name": "test.weather", "arguments": {"nope": 1}})
 res = r.get_json()["result"]
 ok("a bad ARGUMENT is a result with isError — that one a model CAN fix",
    "error" not in r.get_json() and res["isError"] is True)
@@ -240,12 +240,14 @@ print("\nA2 — names, annotations, capability filter\n")
 r = rpc("tools/list")
 lst = r.get_json()["result"]["tools"]
 names = [t["name"] for t in lst]
-ok("every tool is aios.<machine>.<verb>", all(n.startswith("aios.") and n.count(".") >= 2
-   for n in names), str(names))
+ok("every tool is <machine>.<verb>, never aios.-prefixed (owner, 2026-10-01)",
+   all(not n.startswith("aios.") and n.count(".") >= 1 for n in names), str(names))
+ok("every tool carries a plain title, in both places a client looks for one",
+   all(t.get("title") and t["annotations"].get("title") == t["title"] for t in lst), str(lst[:2]))
 ok("  NO bare-name alias survives — zero customers, so the rename is hard",
    not any(n in ("weather", "manifest", "report_day") for n in names), str(names))
 
-w = next(t for t in lst if t["name"] == "aios.test.weather")
+w = next(t for t in lst if t["name"] == "test.weather")
 a = w["annotations"]
 ok("a read tool is annotated read-only and NOT destructive",
    a["readOnlyHint"] is True and a["destructiveHint"] is False, str(a))
@@ -262,17 +264,17 @@ tools.register("leads_export", fn=lambda: {"rows": []}, description="Contact det
 for role in ("read", "act", "service"):
     seen = [s["name"] for s in tools.visible_to({"id": "x", "role": role})]
     ok(f"a {role} seat never sees a read:leads_pii tool — no role grants it",
-       "aios.test.leads_export" not in seen, str(seen))
+       "test.leads_export" not in seen, str(seen))
 
 r = rpc("tools/list")
 ok("  and tools/list does not carry it either",
-   "aios.test.leads_export" not in [t["name"] for t in r.get_json()["result"]["tools"]])
+   "test.leads_export" not in [t["name"] for t in r.get_json()["result"]["tools"]])
 
 # THE BYPASS: the manifest must filter too, or the filter above is one call from useless.
-r = rpc("tools/call", {"name": "aios.core.manifest"})
+r = rpc("tools/call", {"name": "core.manifest"})
 mnames = [t["name"] for t in r.get_json()["result"]["structuredContent"]["tools"]]
 ok("the MANIFEST is filtered too — otherwise a hidden tool is one call away, named",
-   "aios.test.leads_export" not in mnames, str(mnames))
+   "test.leads_export" not in mnames, str(mnames))
 
 # ── THE ONE THIS SUITE WAS MISSING, AND IT IS THE WHOLE POINT ─────────────────────────────
 # Hiding a tool is not authorising it. The first version of A2 filtered tools/list and the
@@ -280,15 +282,15 @@ ok("the MANIFEST is filtered too — otherwise a hidden tool is one call away, n
 # by naming it. Caught in review of #1127 by OSDev1, reproduced, then fixed in tools.call().
 # A visibility test alone would still pass on the broken build — this is the one that would not.
 for role in ("read", "act", "service"):
-    body, status = tools.call("aios.test.leads_export", None, {"id": "probe", "role": role})
+    body, status = tools.call("test.leads_export", None, {"id": "probe", "role": role})
     ok(f"a {role} seat calling the hidden tool BY NAME is refused, not served",
        status == 403 and body.get("error") == "forbidden", f"{status} {body}")
 ok("  and the refusal names the capability, so an operator knows what to grant",
-   "read:leads_pii" in tools.call("aios.test.leads_export", None,
+   "read:leads_pii" in tools.call("test.leads_export", None,
                                   {"id": "probe", "role": "read"})[0]["message"])
 
 # min_role still bites independently — capability is power over WHAT, role is how MUCH.
-r = rpc("tools/call", {"name": "aios.test.queued"})
+r = rpc("tools/call", {"name": "test.queued"})
 res = r.get_json()["result"]
 ok("a read seat is still refused an act tool it CAN see — neither check subsumes the other",
    res["isError"] is True, str(res)[:110])

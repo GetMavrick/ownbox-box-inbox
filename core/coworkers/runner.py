@@ -679,6 +679,7 @@ def _work(row: dict, *, run_agent=None, sleep=time.sleep) -> dict:
 def _tools_used(seat_id: str) -> list:
     out = []
     for t in runs.seat_calls(seat_id):
+        # A call recorded before 2026-10-01 carries the old `aios.` prefix; read it the same way.
         name = t["tool"][5:] if t["tool"].startswith("aios.") else t["tool"]
         if contract._STEP.match(name):
             out.append({**t, "tool": name})

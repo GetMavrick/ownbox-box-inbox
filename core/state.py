@@ -532,6 +532,54 @@ CREATE TABLE IF NOT EXISTS connector_box (
   box_id     TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+-- ── ONE RECORD PER PERSON (docs/SCOPE_ONE_PERSON_RECORD.md, phase 1; owner-approved 2026-10-01) ────────────
+-- Everyone a business meets through any machine, as ONE person: the ways we know them (person_ids), what
+-- happened (person_events), and every join with its evidence (person_links), so a wrong join can be undone.
+-- Written and read only through core/people.py. SCHEMA, not MIGRATIONS: brand-new tables.
+CREATE TABLE IF NOT EXISTS people (
+  id             TEXT PRIMARY KEY,
+  space          TEXT NOT NULL,
+  name           TEXT NOT NULL DEFAULT '',
+  first_seen_at  TEXT NOT NULL,
+  first_seen_by  TEXT NOT NULL,          -- the machine that met them first
+  merged_into    TEXT,                   -- set when a link joined this person into another
+  updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_people_merged ON people (merged_into);
+CREATE TABLE IF NOT EXISTS person_ids (
+  space      TEXT NOT NULL,
+  kind       TEXT NOT NULL,              -- email | phone | instagram | messenger | facebook | web | prospect
+  value      TEXT NOT NULL,              -- normalized (core/people.py `normalize`)
+  person_id  TEXT NOT NULL,
+  added_by   TEXT NOT NULL,
+  added_at   TEXT NOT NULL,
+  PRIMARY KEY (space, kind, value)       -- an id belongs to exactly one person in a space
+);
+CREATE INDEX IF NOT EXISTS ix_person_ids_person ON person_ids (person_id);
+CREATE TABLE IF NOT EXISTS person_events (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  person_id  TEXT NOT NULL,
+  space      TEXT NOT NULL,
+  at         TEXT NOT NULL,
+  machine    TEXT NOT NULL,
+  kind       TEXT NOT NULL,              -- read_article | commented | sent_dm | emailed | replied | booked ...
+  ref        TEXT NOT NULL DEFAULT '',   -- what it was about: a message, an article, a reel
+  UNIQUE (person_id, machine, kind, ref) -- a machine telling the same thing twice records it once
+);
+CREATE INDEX IF NOT EXISTS ix_person_events_person ON person_events (person_id, at);
+CREATE TABLE IF NOT EXISTS person_links (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  space      TEXT NOT NULL,
+  kept       TEXT NOT NULL,              -- the person that remains
+  merged     TEXT NOT NULL,              -- the person joined into it
+  moved      TEXT NOT NULL,              -- JSON [[kind, value], ...]: the ids that moved, so undo can move them back
+  machine    TEXT NOT NULL,
+  evidence   TEXT NOT NULL,              -- what the machine actually saw, e.g. "email typed in DM message m_123"
+  at         TEXT NOT NULL,
+  undone_at  TEXT,
+  undone_by  TEXT
+);
 """
 
 

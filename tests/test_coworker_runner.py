@@ -173,12 +173,12 @@ def fake_agent(prompt, **kw):
     AGENT_CALLS[-1]["seat"] = seat
     b = AGENT_BEHAVIOUR.pop(0) if AGENT_BEHAVIOUR else "work"
     if b == "work":
-        tools.call("aios.inbox_demo.list_threads", None, seat)
+        tools.call("inbox_demo.list_threads", None, seat)
         return {"text": "Drafted 3 replies.\nAll quiet otherwise.", "turns": 9, "minutes": 2.0,
                 "cost_usd": 0.0, "api_usd": 0.31, "backend": "claude_code", "model": "cc:sonnet",
                 "denied": []}
     if b == "work_then_busy":
-        tools.call("aios.inbox_demo.list_threads", None, seat)
+        tools.call("inbox_demo.list_threads", None, seat)
         raise RetryableError("agent run: the AI was busy or unreachable (529)")
     raise b
 

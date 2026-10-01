@@ -178,7 +178,7 @@ cw, _ = C.parse(base(steps={"before": ["acme.fetch_list"], "after": ["acme.save_
 ok("steps are machine.tool names, in order",
    cw.before == ("acme.fetch_list",) and cw.after == ("acme.save_picks",))
 ok("tool_name maps a step to the registry's name", C.tool_name("acme.save_picks")
-   == "aios.acme.save_picks")
+   == "acme.save_picks")
 for s in ({"before": ["save_picks"]}, {"during": []}, {"after": "acme.x_y"}, ["acme.a_b"]):
     ok(f"steps {s!r} is refused", refused(base(steps=s))[0])
 for lim in ({"minutes": 0}, {"minutes": 121}, {"turns": 201}, {"turns": True}, {"hours": 1}):
@@ -223,7 +223,7 @@ ok("a slot is coworker, day and start",
    C.slot_key("front-desk", date(2026, 9, 28), "07:30") == "front-desk@2026-09-28T07:30")
 STEP_SPEC = {"args": {a: {"type": t, "required": True} for a, t in C.STEP_ARGS.items()}}
 cw, _ = C.parse(base(steps={"before": ["acme.fetch_list"], "after": ["gone.save"]}), "a-b")
-why = C.unresolved(cw, {"aios.acme.fetch_list": STEP_SPEC})
+why = C.unresolved(cw, {"acme.fetch_list": STEP_SPEC})
 ok("a step whose machine is missing is named, with the machine",
    len(why) == 1 and "gone.save" in why[0] and "gone machine" in why[0], str(why))
 
@@ -245,7 +245,7 @@ for label, spec, want in (
     why = C.step_signature(spec)
     ok(f"refused as a step: {label}", want in why, why)
 cw, _ = C.parse(base(steps={"after": ["acme.save_picks"]}), "a-b")
-why = C.unresolved(cw, {"aios.acme.save_picks": {"args": {}}})
+why = C.unresolved(cw, {"acme.save_picks": {"args": {}}})
 ok("the preflight names a step tool that is not written to be a step",
    len(why) == 1 and "acme.save_picks cannot be a step" in why[0], str(why))
 
@@ -261,7 +261,7 @@ ctx = C.step_context(run_id="run_1", cw=cw, slot="a-b@2026-09-28T07:30",
 ok("the run context is exactly the five, with the coworker's slug",
    set(ctx) == set(C.STEP_ARGS) and ctx["coworker"] == "a-b" and ctx["dry_run"] is True)
 ok("and the registry accepts it as the tool's arguments",
-   tools.validate(tools.registry()["aios.acme.save_picks"], ctx) == ctx)
+   tools.validate(tools.registry()["acme.save_picks"], ctx) == ctx)
 for label, kw in (("a relative workspace", {"workspace": "workspace"}),
                   ("an empty run id", {"run_id": " "}),
                   ("a dry_run that is text", {"dry_run": "yes"})):
@@ -335,7 +335,7 @@ tools.register("draft", fn=lambda: "ok", description="d", machine="t",
                capability="write:proposals", min_role="act")
 tools.register("send", fn=lambda: "sent", description="d", machine="t",
                capability="act:send_email", min_role="act")
-ok("an act: tool registers (steps call it)", "aios.t.send" in tools.registry())
+ok("an act: tool registers (steps call it)", "t.send" in tools.registry())
 
 sid, cred = seats.mint("Front desk 2026-09-28 07:30", "act",
                        capabilities=["write:proposals", "read:inbox"])
@@ -343,17 +343,17 @@ seat = seats.verify(cred)
 ok("a run seat verifies with its own list",
    seat is not None and seat["capabilities"] == ("read:inbox", "write:proposals"), str(seat))
 ok("it sees only its grant, not its role's",
-   [s["name"] for s in tools.visible_to(seat)] == ["aios.t.draft", "aios.t.inbox_list"])
-ok("it calls what it was granted", tools.call("aios.t.inbox_list", None, seat)[1] == 200)
-ok("it may draft", tools.call("aios.t.draft", None, seat)[1] == 200)
+   [s["name"] for s in tools.visible_to(seat)] == ["t.draft", "t.inbox_list"])
+ok("it calls what it was granted", tools.call("t.inbox_list", None, seat)[1] == 200)
+ok("it may draft", tools.call("t.draft", None, seat)[1] == 200)
 ok("its role holds read:spend, and it still cannot read spend",
-   tools.call("aios.t.spend", None, seat)[1] == 403)
-ok("it cannot act", tools.call("aios.t.send", None, seat)[1] == 403)
+   tools.call("t.spend", None, seat)[1] == 403)
+ok("it cannot act", tools.call("t.send", None, seat)[1] == 403)
 for role in ("read", "act", "service"):
     s = {"id": "seat_x", "role": role}
     ok(f"no {role} seat can see or call an act: tool",
-       "aios.t.send" not in [t["name"] for t in tools.visible_to(s)]
-       and tools.call("aios.t.send", None, s)[1] == 403)
+       "t.send" not in [t["name"] for t in tools.visible_to(s)]
+       and tools.call("t.send", None, s)[1] == 403)
 ok("an act: tool says it reaches the world",
    tools.annotations_for("act:send_email")["openWorldHint"] is True
    and tools.annotations_for("read:inbox")["openWorldHint"] is False)
@@ -379,11 +379,11 @@ with state.connect() as c:
               (credx.split(".")[0],))
 sx = seats.verify(credx)
 ok("an unreadable grant fails CLOSED to nothing, never to the role",
-   sx["capabilities"] == () and tools.call("aios.t.inbox_list", None, sx)[1] == 403)
+   sx["capabilities"] == () and tools.call("t.inbox_list", None, sx)[1] == 403)
 _, credp = seats.mint("Owner's assistant", "act")
 ok("a person's seat is unchanged: its role's capabilities, no list",
    "capabilities" not in seats.verify(credp)
-   and tools.call("aios.t.spend", None, seats.verify(credp))[1] == 200)
+   and tools.call("t.spend", None, seats.verify(credp))[1] == 200)
 
 ids = [s["id"] for s in seats.all_seats()]
 ok("the connected-assistants list leaves run seats out", sid not in ids and credp.split(".")[0] in ids)

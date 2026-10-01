@@ -138,6 +138,7 @@ def report_trend(day: str | None = None, back: int = report.HISTORY_DAYS):
 
 tools.register(
     "report_day",
+    title="Read a day's Morning Review",
     fn=report_day, wants_seat=True, machine=MACHINE, min_role="read",
     capability="read:reports",
     description="One day's Morning Review as stored, with its freshness. Defaults to the most "
@@ -148,6 +149,7 @@ tools.register(
 
 tools.register(
     "report_days",
+    title="See which days have a Morning Review",
     fn=report_days, machine=MACHINE, min_role="read",
     capability="read:reports",
     description="Every day that has a stored Morning Review, newest first.",
@@ -155,6 +157,7 @@ tools.register(
 
 tools.register(
     "report_trend",
+    title="See how your Morning Review numbers change",
     fn=report_trend, machine=MACHINE, min_role="read",
     capability="read:reports",
     description="The stored headline per machine over recent days, oldest first. Days with no "

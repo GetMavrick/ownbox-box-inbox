@@ -53,8 +53,19 @@ _SLUG = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 
 
 def _key(slug: str) -> str:
-    """The registries' key form of a machine's slug: `job-tracker` → `job_tracker`."""
-    return slug.replace("-", "_")
+    """The registries' key form of a machine's slug: `job-tracker` → `my_job_tracker`.
+
+    YOUR OWN MACHINES LIVE IN THEIR OWN CORNER (owner, 2026-10-01: "ownbox new should have some sort of
+    prefix"). Every name a machine of your own takes on the box (its settings, its Morning Review part, its
+    tools, its menu row) starts `my_`, and every page lives under `/my/<slug>`. Official add-on machines keep
+    the plain names, so a machine of yours can never take a name an add-on needs, and becoming an official
+    add-on later is one deliberate move to the plain names, never a collision."""
+    return "my_" + slug.replace("-", "_")
+
+
+def _home(slug: str) -> str:
+    """Where every page of this machine lives: `/my/<slug>`."""
+    return f"/my/{slug}"
 
 
 def page(path: str, *, title: str, lede: str, body: str) -> str:
@@ -76,9 +87,19 @@ class Machine:
                              f"and the same as its folder's name")
         self.slug = slug
         self.key = _key(slug)
+        self.home = _home(slug)                  # `m.home`: this machine's own address on the box
         from flask import Blueprint
         # The box mounts a package's `blueprint`; `__init__.py` sets `blueprint = m.blueprint`.
-        self.blueprint = Blueprint(self.key, f"my_machines.{self.key}")
+        self.blueprint = Blueprint(self.key, f"my_machines.{slug.replace('-', '_')}")
+
+    def _own(self, path: str, what: str) -> str:
+        """`path` if it is this machine's own address or below it; else the one-sentence fix."""
+        path = str(path or "")
+        if path == self.home or path.startswith(self.home + "/") or path.startswith(self.home + "?"):
+            return path
+        raise ValueError(f"{what} {path!r} is outside this machine's own address: every page of a machine of "
+                         f"your own lives under {self.home} (use m.home), so it never takes a name an "
+                         f"official add-on needs")
 
     # ── reasoning ─────────────────────────────────────────────────────────────────────────────
     def think(self, task: str, prompt: str, *, system: str | None = None,
@@ -96,27 +117,33 @@ class Machine:
 
     # ── tools for the owner's AI ──────────────────────────────────────────────────────────────
     def tool(self, name: str, *, fn, description: str, capability: str,
-             args: dict | None = None) -> None:
+             args: dict | None = None, title: str | None = None) -> None:
         """One question the owner's AI may ask this box. `capability` is `read:<noun>` for a
-        question that changes nothing; the box decides who may ask it."""
+        question that changes nothing; the box decides who may ask it. `title` is what the owner
+        reads when their AI asks permission ("Read your latest notes"); without one, the box makes
+        one from the name. Added in SDK 1 without breaking anything built on it: it is optional."""
         from core.connector import tools
         tools.register(name, fn=fn, description=description, machine=self.key,
-                       capability=capability, args=args)
+                       capability=capability, args=args, title=title)
 
     # ── the menu ──────────────────────────────────────────────────────────────────────────────
     def menu(self, key: str, *, title: str, href: str) -> None:
-        """One row in the box's menu. Where it sits and how it looks are the box's to decide."""
+        """One row in the box's menu, pointing at one of this machine's own pages (under `m.home`). Where it sits
+        and how it looks are the box's to decide."""
         from core import shell
-        shell.register_section(key, order=90, machine=self.key, title=title, href=href)
+        key = key if str(key).startswith("my_") else "my_" + str(key)
+        shell.register_section(key, order=90, machine=self.key, title=title, href=self._own(href, "menu link"))
 
     # ── screens ───────────────────────────────────────────────────────────────────────────────
     def screen(self, path: str, *, owner_only: bool = False, methods=("GET",)):
-        """A page of this machine, behind the box's own sign-in. Return `sdk.page(...)` from it.
+        """A page of this machine, behind the box's own sign-in, at `m.home` or below it. Return `sdk.page(...)`.
 
-            @m.screen("/job-tracker")
+            @m.screen(m.home)                    # /my/job-tracker
             def home():
-                return sdk.page("/job-tracker", title="Jobs", lede="...", body='<div class="card">…</div>')
+                return sdk.page(m.home, title="Jobs", lede="...", body='<div class="card">…</div>')
         """
+        path = self._own(path, "screen")
+
         def wrap(fn):
             @functools.wraps(fn)
             def gated(*a, **kw):

@@ -82,7 +82,10 @@ def machines() -> list:
 
 
 def box_type() -> str:
-    """base | lead | content | customer_voice | aios | unknown — DERIVED, and labelled as such."""
+    """base | lead | content | customer_voice | multi_machine | unknown — DERIVED, and labelled as such.
+
+    Never `aios`: this value reaches the owner's AI in the manifest and the health answer, and the
+    product it describes is called Ownbox (tests/test_permissions_read_plainly.py)."""
     mods = _modules()
     if mods is None:
         return "unknown"                # the config did not read; we genuinely do not know
@@ -97,7 +100,7 @@ def box_type() -> str:
         only = next(iter(found))
         return {"lead_machine": "lead", "content_machine": "content",
                 "customer_voice": "customer_voice"}.get(only, only)
-    return "aios"
+    return "multi_machine"
 
 
 def build(*, seat: dict) -> dict:
@@ -119,6 +122,7 @@ def build(*, seat: dict) -> dict:
         "tools": [
             {
                 "name": s["name"],
+                "title": s["title"],
                 "description": s["description"],
                 "machine": s["machine"],
                 "min_role": s["min_role"],
@@ -142,10 +146,11 @@ def build(*, seat: dict) -> dict:
 #
 # min_role="read": it describes CAPABILITY, never data. The lowest seat on the box may ask what
 # the box can do; that is how a client discovers it has nothing it is allowed to call.
-TOOL = "aios.core.manifest"   # the computed public name; callers use this, never a literal
+TOOL = "core.manifest"   # the computed public name; callers use this, never a literal
 
 tools.register(
     "manifest",
+    title="See what your box can do",
     fn=build,
     description="What this box is and every tool it can serve, with argument schemas and the "
                 "minimum role each needs.",

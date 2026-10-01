@@ -41,7 +41,7 @@ log = get_logger(__name__)
 
 blueprint = Blueprint("connector_mcp", __name__)
 
-SERVER_NAME = "aios"
+SERVER_NAME = "ownbox"
 
 # Every generation we actually serve, newest first. A client negotiates DOWN to one of these
 # rather than failing, which is the whole reason the list is not a single string.
@@ -171,10 +171,14 @@ def _tool_entry(spec: dict) -> dict:
     They are also UX, never enforcement: the spec says clients must treat annotations from an
     untrusted server as untrusted. What actually stops a seat is `visible_to()` and `tools.call()`.
     """
+    # THE TITLE IS WHAT THE OWNER READS ON HIS AI'S PERMISSION SCREEN (owner, 2026-10-01). Sent in
+    # both places the spec has had one: `title` on the tool (2025-06-18) and `annotations.title`
+    # (2025-03-26), so a client on either version shows the plain words, not the id.
     entry = {"name": spec["name"],
+             "title": spec["title"],
              "description": spec["description"],
              "inputSchema": _input_schema(spec),
-             "annotations": tools.annotations_for(spec["capability"])}
+             "annotations": {"title": spec["title"], **tools.annotations_for(spec["capability"])}}
     if spec.get("output"):
         entry["outputSchema"] = spec["output"]
     return entry
@@ -224,10 +228,10 @@ def _handle(method: str, params: dict, rpc_id, seat: dict) -> dict | None:
             # the kind that is never revisited because nothing breaks when it goes stale. This says
             # the thing that does not change: a tool may PROPOSE, a human approves, nothing on this
             # box sends or spends by itself. (OSDev1, gate review of #1122.)
-            "instructions": "One AIOS box. Call tools/list for what this box can answer. Every "
-                            "tool is typed: reads return the box's state, and actions are "
-                            "proposals a human on the box approves — no tool sends, publishes or "
-                            "spends on its own.",
+            "instructions": "This is one business's own Ownbox. Call tools/list for what it can "
+                            "answer. Every tool is typed: reads return the box's state, and "
+                            "actions are proposals a person on the box approves; no tool sends, "
+                            "publishes or spends on its own.",
         })
 
     if method == "initialize":

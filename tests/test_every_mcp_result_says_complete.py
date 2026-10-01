@@ -117,15 +117,15 @@ stamped("server/discover", rpc("server/discover"))
 print("\n— listing and calling —")
 stamped("tools/list", rpc("tools/list"))
 stamped("tools/call — a real answer",
-        rpc("tools/call", {"name": "aios.test.complete_probe_ok", "arguments": {"city": "Oslo"}}))
+        rpc("tools/call", {"name": "test.complete_probe_ok", "arguments": {"city": "Oslo"}}))
 stamped("tools/call — a machine that is here but not connected",
-        rpc("tools/call", {"name": "aios.test.complete_probe_unplugged", "arguments": {}}))
+        rpc("tools/call", {"name": "test.complete_probe_unplugged", "arguments": {}}))
 stamped("tools/call — a call that fails validation (missing argument)",
-        rpc("tools/call", {"name": "aios.test.complete_probe_ok", "arguments": {}}))
+        rpc("tools/call", {"name": "test.complete_probe_ok", "arguments": {}}))
 
 # THE FIELD SITS BESIDE THE ANSWER, IT DOES NOT REPLACE IT. A stamp that clobbered the payload
 # would pass every check above and break every client.
-r = rpc("tools/call", {"name": "aios.test.complete_probe_ok", "arguments": {"city": "Oslo"}})["result"]
+r = rpc("tools/call", {"name": "test.complete_probe_ok", "arguments": {"city": "Oslo"}})["result"]
 ok("the stamp does not disturb the tool's own answer",
    r.get("isError") is False and r.get("structuredContent") == {"city": "Oslo"}, str(r))
 r = rpc("initialize", {"protocolVersion": mcp.SUPPORTED_VERSIONS[0]})["result"]
@@ -138,7 +138,7 @@ ok("...nor the handshake's own fields",
 e = rpc("no/such/method")
 ok("a protocol error carries no result, stamped or otherwise",
    "error" in e and "result" not in e, str(e))
-e = rpc("tools/call", {"name": "aios.test.not_a_tool"})
+e = rpc("tools/call", {"name": "test.not_a_tool"})
 ok("...and neither does an unknown tool", "error" in e and "result" not in e, str(e))
 
 print("\nALL MCP RESULTS SAY COMPLETE" if not _failed else f"\n{_failed} FAILED")

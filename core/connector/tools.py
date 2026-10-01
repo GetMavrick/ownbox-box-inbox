@@ -201,9 +201,20 @@ class ToolError(Exception):
         self.code, self.message, self.status = code, message, status
 
 
+# A TITLE IS WHAT THE OWNER IS GRANTING, IN HIS WORDS (owner, 2026-10-01, on Claude's connector screen:
+# "human readable permissions that a human understands what they are granting. I don't think all of
+# them should start with AIOS."). Plain words: no dots, no underscores, never "AIOS".
+_TITLE = re.compile(r"^[A-Z][A-Za-z0-9 ,'’()-]{2,59}$")
+
+
+def plain_title(title: str) -> bool:
+    """Is `title` something a person reads as plain words? (Also used by the suite.)"""
+    return bool(_TITLE.match(title or "")) and "aios" not in title.lower()
+
+
 def register(name: str, *, fn, description: str, machine: str, capability: str,
              min_role: str = "read", args: dict | None = None,
-             wants_seat: bool = False, output: dict | None = None) -> None:
+             wants_seat: bool = False, output: dict | None = None, title: str | None = None) -> None:
     """Declare one question this box can answer.
 
     `wants_seat=True` hands the resolved seat to the function as a keyword. Opt-in, because most
@@ -212,20 +223,35 @@ def register(name: str, *, fn, description: str, machine: str, capability: str,
     role, where the money rail is kept from a `read` seat. The seat is never part of `args`, so
     it can never be supplied by the caller.
 
+    `title` is what a person reads on their AI's permission screen: what they are granting, in plain
+    words ("Search your inbox"). Every tool Ownbox ships passes one. A custom machine that does not
+    gets one made from its name ("Latest notes"), so no machine built on SDK v1 stops loading.
+
     `args` is {name: {"type": "string"|"integer"|"boolean", "required": bool, "description": str}}.
     Deliberately small: a schema language would be a dependency and an argument about which
     dialect, and every Tier 1 question so far takes a date or an id.
     """
-    # THE PUBLIC NAME IS COMPUTED, never hand-written. A client aggregating several MCP servers
-    # collides on bare names — two servers each offering `search` — and the spec says the server
-    # name is not unique enough to disambiguate with, so the prefix has to be in the tool name
-    # itself. Computed here so a call site cannot spell it differently from its neighbour, and so
-    # the machine in the name is always the machine that owns the tool.
+    # THE PUBLIC NAME IS COMPUTED, never hand-written: `<machine>.<name>`, so a call site cannot spell
+    # it differently from its neighbour and the machine in the name is always the one that owns it.
+    # The machine stays in the name because two machines may both offer a `search`.
     #
-    # NO ALIAS TO THE OLD BARE NAME. We have zero customers and every box is a golden image built
-    # fresh, so there is nothing in the field to migrate; an alias would be dead weight cloned
-    # onto every droplet we ever ship. (Owner, 2026-09-13.)
-    name = f"aios.{machine}.{name}"
+    # NO `aios.` PREFIX (owner, 2026-10-01, assigned by OSDev1). It was there for clients that merge
+    # several servers' tools, but a client already keeps each server's tools apart (Claude shows
+    # them under the connector's own name), and the prefix was the "AIOS" the owner read on every
+    # permission. No alias to the old name: the one thing it resets is a client's per-tool choice,
+    # once, and the owner accepted that.
+    name = f"{machine}.{name}"
+    if title is None:
+        title = name.split(".", 1)[1].replace("_", " ").capitalize()
+        given = False
+    else:
+        given = True
+    if not plain_title(title):
+        raise ValueError(f"tool {name!r}: title must be plain words a person reads, like "
+                         f"'Search your inbox' (no dots, underscores or AIOS), got {title!r}")
+    if any(t["title"] == title and t["name"] != name for t in _REGISTRY.values()):
+        raise ValueError(f"tool {name!r}: title {title!r} is already used; two permissions must not "
+                         f"read the same")
     if name in _REGISTRY:
         # Two machines claiming one name is a silent overwrite in a dict, and the loser's tool
         # disappears with no signal anywhere. Refuse at import, where somebody is watching.
@@ -247,7 +273,8 @@ def register(name: str, *, fn, description: str, machine: str, capability: str,
         # The seat is identity, resolved from a verified credential. A caller that could pass it
         # as an argument could claim to be anyone, which is the whole game.
         raise ValueError(f"tool {name!r}: 'seat' is not an argument a caller may supply")
-    _REGISTRY[name] = {"name": name, "fn": fn, "description": description,
+    _REGISTRY[name] = {"name": name, "title": title, "title_given": given, "fn": fn,
+                       "description": description,
                        "machine": machine, "min_role": min_role, "args": args or {},
                        "wants_seat": wants_seat, "capability": capability,
                        # OPTIONAL, AND OMITTED IS THE HONEST ANSWER FOR A BIG NESTED RESULT.
@@ -255,7 +282,7 @@ def register(name: str, *, fn, description: str, machine: str, capability: str,
                        # schema that drifts from the code breaks calls that would otherwise work.
                        # Declared where the shape is small and stable; absent where it is not.
                        "output": output}
-    log.info("connector.tool_registered", tool=name, machine=machine, min_role=min_role,
+    log.info("connector.tool_registered", tool=name, title=title, machine=machine, min_role=min_role,
              capability=capability)
 
 

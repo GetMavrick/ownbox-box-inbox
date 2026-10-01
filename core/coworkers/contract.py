@@ -44,8 +44,8 @@ _SLUG = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 # `from:` is "my" or the machine that shipped the coworker. Machines registered in code use
 # underscores (aeo_machine), folder machines use hyphens, so both are accepted.
 _MACHINE = re.compile(r"^[a-z][a-z0-9_-]{1,40}$")
-# A step names a tool the way a person would say it, `machine.tool`. The box's MCP publishes the
-# same tool as `aios.machine.tool` (core/connector/tools.py), and `tool_name()` maps one to other.
+# A step names a tool the way a person would say it, `machine.tool`, which is also the name the
+# box's MCP publishes it under (core/connector/tools.py); `tool_name()` maps one to the other.
 _STEP = re.compile(r"^([a-z][a-z0-9_-]{1,40})\.([a-z][a-z0-9_]{1,60})$")
 _JOB = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}\.md$")
 _TIME = re.compile(r"^([01]?[0-9]|2[0-3]):([0-5][0-9])$")
@@ -79,8 +79,9 @@ def may_grant(capability: str) -> bool:
 
 
 def tool_name(step: str) -> str:
-    """`acme.send_approved` → `aios.acme.send_approved`, the name the registry knows it by."""
-    return f"aios.{step}"
+    """The name the registry knows a step's tool by. Since 2026-10-01 a tool's public name is
+    `machine.tool` (core/connector/tools.py), the same words a step uses, so this is the step."""
+    return step
 
 
 # ── the file ─────────────────────────────────────────────────────────────────────────────────────

@@ -336,7 +336,7 @@ push.send = lambda sub, **kw: PUSHES.append(kw) or (True, "ok")
 
 def fake_agent(prompt, **kw):
     seat = seats.verify(kw["mcp"]["credential"])
-    tools.call("aios.inbox_demo.list_threads", None, seat)
+    tools.call("inbox_demo.list_threads", None, seat)
     return {"text": "Drafted 2 replies for trial members.", "turns": 6, "minutes": 1.0,
             "cost_usd": 0.0, "api_usd": 0.1, "backend": "claude_code", "model": "cc", "denied": []}
 

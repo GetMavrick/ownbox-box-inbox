@@ -133,6 +133,7 @@ def read_conversation(id=None, limit=None):
 
 tools.register(
     "list_conversations",
+    title="See who has messaged your business",
     fn=list_conversations, machine=MACHINE, min_role="read",
     capability="read:inbox",
     description="Who has spoken to this business, most recent first. Returns conversations, not "
@@ -145,6 +146,7 @@ tools.register(
 
 tools.register(
     "search",
+    title="Search your inbox",
     fn=search, machine=MACHINE, min_role="read",
     capability="read:inbox",
     description="Find conversations by something said in them, or by who said it. Matches message "
@@ -159,6 +161,7 @@ tools.register(
 
 tools.register(
     "read_conversation",
+    title="Read a conversation in your inbox",
     fn=read_conversation, machine=MACHINE, min_role="read",
     capability="read:inbox",
     description="Every message in one conversation, oldest first.",
@@ -224,6 +227,7 @@ def draft_reply(id=None, body=None):
 
 tools.register(
     "draft_reply",
+    title="Suggest a reply for you to approve",
     fn=draft_reply, machine=MACHINE, min_role="act",
     capability="write:proposals",
     description="Leave a suggested reply waiting on the screen for one conversation. It is NOT "

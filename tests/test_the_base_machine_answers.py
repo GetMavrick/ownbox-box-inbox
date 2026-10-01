@@ -78,7 +78,7 @@ listed = client.get("/api/v1/tools", headers=RH).get_json()["tools"]
 names = [t["name"] for t in listed]
 ok("a read seat is shown a non-empty tool list", bool(names), str(names))
 ok("core's own tools are in it — the box can be asked about itself",
-   {"aios.core.manifest", "aios.core.health"} <= set(names), str(names))
+   {"core.manifest", "core.health"} <= set(names), str(names))
 
 # Every tool that takes no required argument is CALLED. The ones that need an id or a query are
 # not invented arguments for — a made-up id proves the validator works, not that the tool does —
@@ -101,7 +101,7 @@ for n in names:
 # box was the manifest — a description of capability. A box that can only describe itself is the
 # empty endpoint the list length hides.
 ok("and at least one gives a REAL answer, not a 'nothing yet' state",
-   len(answered) >= 2 and "aios.core.health" in answered,
+   len(answered) >= 2 and "core.health" in answered,
    f"answered={answered} deferred={deferred}")
 
 
@@ -138,7 +138,7 @@ ok("and it is still labelled derived, not stamped",
 # ── health answers on a box where nothing has run ─────────────────────────────────────────
 print("\n— health, on a box four minutes old —")
 
-code, h = call("aios.core.health")
+code, h = call("core.health")
 ok("health runs for a read seat", code == 200, f"HTTP {code}")
 ok("never-beaten is its OWN state, not a dead worker",
    h["worker"]["state"] == "no_beat_yet" and h["worker"]["ok"] is None, str(h["worker"]))
@@ -157,14 +157,14 @@ ok("it names the box it is speaking for", h["box_id"] == manifest.box_id())
 # ── spend is the owner's, through every door ──────────────────────────────────────────────
 print("\n— the one number a read seat may not have —")
 
-ok("a read seat is not even SHOWN spend", "aios.core.spend" not in names, str(names))
-code, body = call("aios.core.spend", headers=RH)
+ok("a read seat is not even SHOWN spend", "core.spend" not in names, str(names))
+code, body = call("core.spend", headers=RH)
 ok("and asking for it anyway is refused, not answered empty",
    code == 403 and body.get("error") == "forbidden", f"HTTP {code}: {body}")
 
 act_names = [t["name"] for t in client.get("/api/v1/tools", headers=AH).get_json()["tools"]]
-ok("an act seat IS shown it", "aios.core.spend" in act_names, str(act_names))
-code, s = call("aios.core.spend", headers=AH)
+ok("an act seat IS shown it", "core.spend" in act_names, str(act_names))
+code, s = call("core.spend", headers=AH)
 ok("and gets the ceiling with the window it is measured over",
    code == 200 and s["claude"]["ceiling_usd"] > 0 and s["claude"]["cycle_started"],
    f"HTTP {code}: {s}")
@@ -207,10 +207,10 @@ with state.connect() as c:
     rows = [dict(x) for x in c.execute(
         "SELECT seat_id, tool, outcome FROM seat_actions")]
 ok("the read seat's spend attempt is recorded as denied",
-   any(r["seat_id"] == read_id and r["tool"] == "aios.core.spend" and r["outcome"] == "denied"
+   any(r["seat_id"] == read_id and r["tool"] == "core.spend" and r["outcome"] == "denied"
        for r in rows), str(rows))
 ok("and the act seat's as ok",
-   any(r["seat_id"] == act_id and r["tool"] == "aios.core.spend" and r["outcome"] == "ok"
+   any(r["seat_id"] == act_id and r["tool"] == "core.spend" and r["outcome"] == "ok"
        for r in rows), str(rows))
 
 
@@ -219,7 +219,7 @@ print("\n— the registry is still a registry —")
 for f in ("tools.py", "manifest.py", "http.py", "mcp.py"):
     src = (ROOT / "core" / "connector" / f).read_text()
     ok(f"core/connector/{f} names none of core's own tools",
-       not any(n in src for n in ("aios.core.health", "aios.core.spend", "box_tools")), f)
+       not any(n in src for n in ("core.health", "core.spend", "box_tools")), f)
 
 print("\nALL BASE-MACHINE CHECKS PASS" if not _failed else f"\n{_failed} FAILED")
 sys.exit(1 if _failed else 0)

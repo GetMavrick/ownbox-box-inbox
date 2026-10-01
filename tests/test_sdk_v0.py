@@ -91,27 +91,27 @@ from core.dispatch import app  # noqa: E402
 
 res = {r["slug"]: r for r in custom_machines.status()}
 ok("the box loads it", res.get("job-tracker", {}).get("ok") is True, str(res.get("job-tracker")))
-ok("its menu row is registered", any(s.key == "job_tracker" and s.href == "/job-tracker" for s in shell.sections()))
-anon = app.test_client().get("/job-tracker")
+ok("its menu row is registered, in its own corner", any(s.key == "my_job_tracker" and s.href == "/my/job-tracker" for s in shell.sections()))
+anon = app.test_client().get("/my/job-tracker")
 ok("its screen is behind the box's sign-in (a stranger is sent to sign in)", anon.status_code in (302, 303)
    and "login" in anon.headers.get("Location", ""), f"{anon.status_code} {anon.headers.get('Location')}")
 owner = app.test_client()
 owner.set_cookie(dash.COOKIE, dash.new_session(state.owner_user()["id"]))
-page = owner.get("/job-tracker")
+page = owner.get("/my/job-tracker")
 ok("the owner sees it on the box's own page", page.status_code == 200 and "Job Tracker" in page.get_data(as_text=True))
-posted = owner.post("/job-tracker", data={"note": "call the Hendersons back"}, headers={"Origin": "http://localhost"})
-ok("a note saves", posted.status_code == 303 and "call the Hendersons back" in owner.get("/job-tracker")
+posted = owner.post("/my/job-tracker", data={"note": "call the Hendersons back"}, headers={"Origin": "http://localhost"})
+ok("a note saves", posted.status_code == 303 and "call the Hendersons back" in owner.get("/my/job-tracker")
    .get_data(as_text=True), str(posted.status_code))
 today = datetime.now(timezone.utc).date()
-rep = report.REPORTERS.get("job_tracker")
+rep = report.REPORTERS.get("my_job_tracker")
 out = rep["fn"](today) if rep else {}
 ok("its Morning Review line counts today's notes", out.get("headline", {}).get("value") == 1, str(out))
 ok("...and says nothing on a quiet day", rep and rep["fn"](today.replace(year=today.year - 1)) == {})
-tool = tools._REGISTRY.get("aios.job_tracker.latest_notes")
+tool = tools._REGISTRY.get("my_job_tracker.latest_notes")
 ok("the owner's AI can ask it a question", tool is not None and tool["fn"]()["notes"] == ["call the Hendersons back"])
 mod = sys.modules.get("my_machines.job_tracker")
 ok("m.think goes through the box's brain, on the machine's own account",
-   mod is not None and mod.m.think("summarise", "x") == "fine" and asked == [("summarise", "job_tracker")])
+   mod is not None and mod.m.think("summarise", "x") == "fine" and asked == [("summarise", "my_job_tracker")])
 brain.think = real_think
 d = mod.m.data_dir() if mod else None
 ok("its own data folder is inside its own folder", d is not None and d.parent == folder and d.is_dir())
@@ -222,6 +222,28 @@ ok("my/CLAUDE.md tells the box's AI: the starter, sdk only, m.think, check",
    all(s in mine for s in ("ownbox.py new", "from core import sdk", "m.think", "ownbox.py check")))
 ok("the box's CLAUDE.md points at the facade and the check",
    "from core import sdk" in boxmd and "ownbox.py check" in boxmd)
+
+print("\n— a machine of your own lives in its own corner (owner, 2026-10-01: \"some sort of prefix\") —")
+from core import box_settings as _bs  # noqa: E402
+from core import sdk as _sdk  # noqa: E402
+lm = _sdk.machine("lead-magnet")
+ok("a machine of yours named like an add-on takes its own names, never the add-on's",
+   lm.key == "my_lead_magnet" and lm.home == "/my/lead-magnet", f"{lm.key} {lm.home}")
+for bad in ("/lead-magnet", "/my/lead-magnetic", "/dashboard", ""):
+    try:
+        lm.screen(bad)(lambda: "")
+        ok(f"a page at {bad!r} is refused", False)
+    except ValueError as e:
+        ok(f"a page at {bad!r} is refused, with the fix in one sentence", "use m.home" in str(e), str(e))
+try:
+    lm.menu("lead_magnet", title="Lead Magnet", href="/lead-magnet")
+    ok("a menu link outside its corner is refused", False)
+except ValueError:
+    ok("a menu link outside its corner is refused", True)
+ok("a page below its corner is fine", callable(lm.screen(lm.home + "/settings")(lambda: "")))
+lm.save_setting("keywords", ["GLOW"])
+ok("its settings are kept under its own name, never the add-on's",
+   _bs.get("my_lead_magnet", "keywords") == ["GLOW"] and _bs.get("lead_magnet", "keywords") is None)
 
 print()
 if FAILS:
