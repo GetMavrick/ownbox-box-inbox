@@ -122,3 +122,10 @@ def check(conn: Conn, host: str, tz: str) -> int:
     r = q(conn, f"select count() from events where event = '$pageview' and properties.$host = {_lit(host)} "
                 f"and timestamp >= now() - INTERVAL 30 DAY")
     return int(r[0][0] or 0) if r else 0
+
+
+def hosts(conn: Conn, *, days: int = 30, min_views: int = 50, n: int = 25) -> list[tuple[str, int]]:
+    """The hosts this project recorded page views on, busiest first, with at least `min_views` in `days`."""
+    rows = q(conn, f"select properties.$host h, count() c from events where event = '$pageview' "
+                   f"and timestamp >= now() - INTERVAL {int(days)} DAY group by h order by c desc limit {int(n)}")
+    return [(str(h).strip().lower(), int(c or 0)) for h, c in rows if h and int(c or 0) >= int(min_views)]

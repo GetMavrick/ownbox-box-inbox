@@ -14,6 +14,7 @@ from core.worker import register_periodic as _register_periodic
 
 from . import report as _report  # noqa: F401 — registers the reporter
 from . import card as _card  # noqa: F401 — registers the Data Sources card (core/source_cards.py)
+from . import jobs as _jobs
 from . import sync as _sync
 from .schema import DDL as _DDL
 from .seam import day, sites, week
@@ -22,6 +23,7 @@ __all__ = ["sites", "day", "week"]
 
 _state.register_schema("marketing_foundation", _DDL)
 _register_periodic(_sync.tick, interval_s=3600, name="website_sync")
+_jobs.register()                    # Sync now and Check and save, run by the worker (jobs.py)
 
 
 def _drain_outbound_mail():

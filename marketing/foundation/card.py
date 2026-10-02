@@ -12,6 +12,7 @@ Machine's own fields, which OSDev6 removes once AEO reads the store.
 from __future__ import annotations
 
 import html
+import json
 import re
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -19,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 from core import box_secrets, box_settings, source_cards
 
-from . import posthog, settings
+from . import jobs, posthog, settings
 
 KEY = "website"
 CLOUD = {"us": "https://us.posthog.com", "eu": "https://eu.posthog.com"}
@@ -114,12 +115,15 @@ def render(note=None) -> str:
     if note:
         ok, text = note
         said = f'<p class="{"ok" if ok else "stale"}" role="status">{_esc(text)}</p>'
+    # WHILE THE WORKER HAS IT, SAY SO, AND OFFER NO SECOND PRESS (jobs.py): the queue is what says it is running.
+    syncing, checking_jobs = jobs.running(jobs.SYNC), jobs.running(jobs.CHECK)
+    checking = (f"Checking PostHog, started {_esc(_when(checking_jobs[0]['created_at']))}." if checking_jobs else "")
     facts = ('<dl class="ui-facts">'
              f'<dt>Websites</dt><dd>{" &middot; ".join(_esc(s) for s in sites) or "None yet. Add them below."}</dd>'
-             f'<dt>PostHog</dt><dd>{ph}</dd>'
+             f'<dt>PostHog</dt><dd>{checking or ph}</dd>'
              f'<dt>Search Console</dt><dd>{_search_console()}</dd>'
-             f'<dt>Last sync</dt><dd>{_last_sync()}</dd></dl>'
-             '<div class="ui-acts">' + _post("sync", "Sync now") + '</div>')
+             f'<dt>Last sync</dt><dd>{_syncing(syncing) if syncing else _last_sync()}</dd></dl>'
+             '<div class="ui-acts">' + (_busy("Syncing") if syncing else _post("sync", "Sync now")) + '</div>')
     sites_form = (_form("sites",
                         '<label for="wa-sites">Your websites, each on its own row</label>'
                         f'<textarea id="wa-sites" name="sites" rows="3" autocapitalize="off" spellcheck="false" '
@@ -141,7 +145,12 @@ def render(note=None) -> str:
                     '<input id="wa-key" name="key" type="password" autocomplete="off" '
                     f'placeholder="{"Saved. Paste a new one to replace it." if own_key else "phx_..."}">'
                     f'<p class="quiet">In PostHog: your account settings, then Personal API keys. Give it only '
-                    f'{posthog.SCOPE}, and this project. It stays on this box.</p>', "Check and save")
+                    f'{posthog.SCOPE}, and this project. It stays on this box.</p>', "Check and save",
+                    busy="Checking" if checking_jobs else "")
+    lc = jobs.last_check()
+    if lc.get("said") and not checking_jobs:
+        ph_form = (f'<p class="{"ok" if lc.get("ok") else "stale"}">Last check, {_esc(_when(lc.get("at")))}: '
+                   f'{_esc(lc["said"])}</p>' + ph_form)
     conv = []
     for site in sites:
         mine = _own_events(site)
@@ -192,9 +201,31 @@ def _post(do: str, label: str, *, extra: dict | None = None) -> str:
             f'<button class="ghost" type="submit">{_esc(label)}</button></form>')
 
 
-def _form(do: str, fields: str, label: str) -> str:
+def _form(do: str, fields: str, label: str, *, busy: str = "") -> str:
     return (f'<form method="post" action="/settings/sources#website">{_hidden(do)}{fields}'
-            f'<button class="ghost" type="submit">{_esc(label)}</button></form>')
+            + (_busy(busy) if busy else f'<button class="ghost" type="submit">{_esc(label)}</button>') + '</form>')
+
+
+def _busy(doing: str) -> str:
+    """In place of the button while the worker has it: what is happening, and a way to look again."""
+    return (f'<p class="quiet wa-busy">{_esc(doing)}&hellip; <a href="/settings/sources#website">Refresh</a> '
+            'to see the result.</p>')
+
+
+def _syncing(js: list[dict]) -> str:
+    """"Syncing, started 09:41: ownbox.io done, brian-macdonald.com waiting." from the run and its queued jobs."""
+    run = jobs.sync_run()
+    done = run.get("done") or {}
+    waiting = []
+    for j in js:
+        try:
+            waiting.append(str(json.loads(j.get("raw_text") or "{}").get("site") or ""))
+        except ValueError:
+            pass
+    bits = [f"{_esc(s)} done" for s in run.get("sites") or [] if s in done and done[s].get("outcome") == "ok"]
+    bits += [f"{_esc(s)} waiting" for s in waiting if s]
+    return (f"Syncing, started {_esc(_when(run.get('started') or js[0]['created_at']))}"
+            + (": " + ", ".join(bits) if bits else "") + ".")
 
 
 # ── acting ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -242,7 +273,11 @@ def handle(do: str, form, by: str) -> tuple[bool, str]:
             return False, f"Up to {MAX_SITES} websites. Remove one, then save."
         box_settings.put(settings.NS, "sites", out, set_by=by)
         if not out:
-            return True, "Saved. No websites are watched now."
+            # AN EMPTY LIST HANDS THE CHOICE BACK TO THE BOX (settings.sites): it watches what it finds in PostHog and
+            # the AEO Machine's site, so the sentence says which, never "none" while some are watched.
+            now = settings.sites()
+            return True, ("Saved. The box picks the websites itself from your PostHog: " + ", ".join(now) + "."
+                          if now else "Saved. No websites are watched yet; the box adds them when PostHog sees visits.")
         return True, "Saved: " + ", ".join(out) + "."
     if do == "posthog":
         return _posthog(form, by)
@@ -277,18 +312,11 @@ def handle(do: str, form, by: str) -> tuple[bool, str]:
         box_settings.put(settings.NS, "conversions", own, set_by=by)
         return True, f"No longer counting {gone['name']} on {site}."
     if do == "sync":
-        from . import sync
         if settings.posthog() is None:
             return False, "Connect PostHog first, below; the sync reads from it."
         if not settings.sites():
             return False, "Add your websites first, below."
-        out = sync.sync(force=True)
-        if out.get("error"):
-            return False, f"The sync stopped: {out['error']}"
-        done = out.get("synced") or {}
-        if not done:
-            return True, "Nothing to sync yet."
-        return True, "Synced " + ", ".join(done) + f" through {_day(out.get('upto'))}."
+        return jobs.start_sync()
     return False, "That did not work, and nothing was changed."
 
 
@@ -307,23 +335,10 @@ def _posthog(form, by: str) -> tuple[bool, str]:
     if not key:
         if not box_secrets.is_set(settings.SECRET):
             return False, f"Paste your PostHog personal API key. It needs the {posthog.SCOPE} scope."
-        key = box_secrets.get(settings.SECRET)
     elif any(ch.isspace() for ch in key):
         return False, "That key has a space in it, or came in two pieces. Copy it again and paste it on its own."
-    conn = posthog.Conn(host=host, project=project, key=key)
-    seen = []
-    try:
-        for site in sites:
-            seen.append((site, posthog.check(conn, site, settings.tz())))
-    except posthog.Refused as e:
-        return False, f"{e} Nothing was saved."
-    box_settings.put(settings.NS, "posthog_host", host, set_by=by)
-    box_settings.put(settings.NS, "posthog_project", project, set_by=by)
-    if str(form.get("key") or "").strip():
-        box_secrets.put(settings.SECRET, key, user_id=by)
-    parts = [f"{s}: {n:,} page views" if n else f"{s}: none yet, so the PostHog snippet isn't on that site yet"
-             for s, n in seen]
-    return True, "PostHog is connected. In the last 30 days, " + "; ".join(parts) + "."
+    # THE QUERIES RUN IN THE WORKER (jobs.py): saved only if PostHog answers, said on this card when done.
+    return jobs.start_check(host, project, key)
 
 
 source_cards.register(KEY, title="Website analytics", render=render, handle=handle, order=10)

@@ -39,13 +39,46 @@ def _own(key: str, default=None):
 
 
 def sites() -> list[str]:
-    """The hosts this box watches, as a person typed them (www. kept: PostHog's $host is exact)."""
+    """The hosts this box watches, as PostHog records them (www. kept: PostHog's $host is exact).
+
+    The sites a person typed on the card, when there are any. Otherwise the ones the box found in this PostHog
+    project (`found()`, refreshed by the sync), then the AEO Machine's site: SETUP FIXES ITSELF (owner, 2026-10-01),
+    so a box whose PostHog already holds two sites watches both without anyone typing them.
+    """
     own = _own("sites") or []
     out = [str(h).strip().lower() for h in own if isinstance(h, str) and _HOST.match(str(h).strip().lower())]
     if out:
         return out
+    out = [h for h in found() if _HOST.match(h)]
     aeo = str(box_settings.get(_AEO_NS, "host") or "").strip().lower()
-    return [aeo] if _HOST.match(aeo) else []
+    if _HOST.match(aeo) and aeo not in out:
+        out.insert(0, aeo)
+    return out
+
+
+def sites_source() -> str:
+    """"yours" when a person typed the list, "found" when the box found it, "" for none."""
+    if [h for h in (_own("sites") or []) if isinstance(h, str) and _HOST.match(h.strip().lower())]:
+        return "yours"
+    return "found" if sites() else ""
+
+
+FOUND_KEY = "sites_found"           # {"hosts": [...], "at": iso}: what the sync last found in PostHog
+
+
+def found() -> list[str]:
+    f = _own(FOUND_KEY)
+    hosts = f.get("hosts") if isinstance(f, dict) else None
+    return [str(h).strip().lower() for h in (hosts or []) if isinstance(h, str)]
+
+
+def found_at() -> str:
+    f = _own(FOUND_KEY)
+    return str(f.get("at") or "") if isinstance(f, dict) else ""
+
+
+def set_found(hosts: list[str], at: str) -> None:
+    box_settings.put(NS, FOUND_KEY, {"hosts": list(hosts), "at": at}, set_by="website")
 
 
 def posthog() -> Conn | None:
