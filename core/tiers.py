@@ -246,6 +246,16 @@ def allows(feature: str) -> bool:
     return feature in current()["features"]
 
 
+def badge(feature: str) -> str:
+    """The plan's short name beside something this box's plan lacks ("Pro"), "" when it has it or no
+    plan includes it. Asked by feature, like `allows`; the word comes from the table, never from code
+    (owner, 2026-10-02: "a little pro badge on the feature")."""
+    if not feature or allows(feature):
+        return ""
+    name = next((t["name"] for t in TIERS.values() if feature in t["features"]), "")
+    return name.replace(TIERS[DEFAULT]["name"], "").strip() or name
+
+
 def _machine_map() -> dict:
     """{feature: [module prefix, ...]} from config `machine_features:`, keeping only features the
     table knows. Read per call; a config that cannot be read claims nothing."""

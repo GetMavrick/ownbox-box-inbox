@@ -86,6 +86,11 @@ def _brain(hbs: dict) -> dict:
     if status == "unset":
         return {"state": "no_ai_key", "ok": None, "probed_s_ago": age,
                 "note": "no AI key is set, so nothing on this box can draft yet"}
+    if status == "unchecked":
+        # One failed check of the AI sign-in (core/watchdog.CLAUDE_FIRST_MISS): not green, not "no key".
+        return {"state": "unchecked", "ok": None, "probed_s_ago": age,
+                "note": "the last check of the AI sign-in did not get through; the next one, within "
+                        "the hour, decides"}
     if status == "ok" and not _fresh(age, _BACKEND_STALE_S):
         return {"state": "stale_ok", "ok": None, "probed_s_ago": age,
                 "note": "the last probe succeeded but is too old to be evidence the backend is "

@@ -42,6 +42,35 @@ from core import approvals as _approvals  # noqa: E402 — the kind is registere
 _lock = threading.Lock()
 _seen = ""                    # a fingerprint of the connections the registry matches
 _mine: set = set()            # the machines this module registered
+_skipped: dict = {}           # {slug: {tool id: why}}: the app tools left off the list, for its Data Sources row
+
+# ONE APP TOOL MUST NEVER BREAK THE OWNER'S WHOLE LIST (the connector strike, 2026-10-02). An app's tools go into
+# this box's tools/list beside its own, and a client that can't take one tool refuses the whole reload: the owner
+# saw "Couldn't reload tools from the server". So every app tool is checked before it is listed, and one that
+# fails is left off, logged, and named on its row on Data sources with why.
+NAME_MAX = 64                 # the strictest length a client allows a tool's name
+
+
+def unlistable(slug: str, t: dict) -> str:
+    """Why this app tool can't be offered to an AI, in words for the owner, or "" when it can."""
+    if len(f"{PREFIX}{slug}.{t.get('id') or ''}") > NAME_MAX:
+        return "its name is too long for an AI to use"
+    schema = t.get("input_schema") or {}
+    if not isinstance(schema, dict):
+        return "the app describes its inputs in a shape an AI can't read"
+    if schema.get("type") not in (None, "object"):
+        return "its inputs aren't a set of named fields, which is what an AI fills in"
+    if "properties" in schema and not isinstance(schema["properties"], dict):
+        return "the app describes its inputs in a shape an AI can't read"
+    req = schema.get("required")
+    if req is not None and not (isinstance(req, list) and all(isinstance(x, str) for x in req)):
+        return "the app describes its inputs in a shape an AI can't read"
+    return ""
+
+
+def skipped(slug: str) -> dict:
+    """{tool id: why} for the app tools left off the list the last time it was built."""
+    return dict(_skipped.get(slug) or {})
 
 
 def _fingerprint(items: dict) -> str:
@@ -99,6 +128,7 @@ def refresh() -> bool:
         # which a call on another thread found no tool at all.
         replacing = frozenset(set(_mine) | {PREFIX + slug for slug in items})
         specs, taken = [], tools.titles(excluding=replacing)
+        _skipped.clear()
         for slug, rec in sorted(items.items()):
             if isinstance(rec, dict):
                 specs += _specs(slug, rec, replacing, taken)
@@ -113,6 +143,8 @@ def _specs(slug: str, rec: dict, replacing: frozenset, taken: set) -> list:
     machine, on, out = PREFIX + slug, set(rec.get("enabled") or []), []
     for t in rec.get("tools") or []:
         if t.get("id") not in on or t.get("read_only") is not True:
+            continue
+        if _left_off(slug, t):
             continue
         try:
             spec = tools.make_spec(t["id"], fn=_forwarder(slug, t["name"]), machine=machine,
@@ -130,6 +162,8 @@ def _specs(slug: str, rec: dict, replacing: frozenset, taken: set) -> list:
     for t in rec.get("tools") or []:
         if t.get("id") not in asks or t.get("read_only") is True:
             continue
+        if _left_off(slug, t):
+            continue
         try:
             spec = tools.make_spec(t["id"], fn=_proposer(slug, t, rec), machine=machine, capability=ASK,
                                    min_role="act", wants_seat=True,
@@ -143,6 +177,14 @@ def _specs(slug: str, rec: dict, replacing: frozenset, taken: set) -> list:
         taken.add(spec["title"])
         out.append(spec)
     return out
+
+
+def _left_off(slug: str, t: dict) -> bool:
+    why = unlistable(slug, t)
+    if why:
+        _skipped.setdefault(slug, {})[str(t.get("id"))] = why
+        log.warning("connections.tool_left_off", app=slug, tool=str(t.get("id"))[:60], why=why)
+    return bool(why)
 
 
 def _ask_description(t: dict, rec: dict) -> str:

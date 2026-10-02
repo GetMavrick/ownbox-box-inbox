@@ -5,19 +5,24 @@ A machine that reads website numbers says `needs: [foundation:marketing]` in its
 this package before that machine, in both processes (core/foundations.py), and ships it with any box that
 carries such a machine (scripts/export_box.sh). Nothing else imports it.
 
-What it registers at import: its tables, the Morning Review's line per site, the Website analytics and Outreach
-cards on Data Sources, the worker's hourly pass that syncs yesterday once a day, and the hourly outreach pull. What
-machines call: `sites()`, `day(site, day)`, `week(site, end_day)`, and through `seam`, `campaigns()`,
-`outreach_week(end_day)` and `outreach_day(day)`.
+What it registers at import: its tables, the Morning Review's line per site, the Website analytics card on Data
+Sources, and the worker's hourly pass that syncs yesterday once a day. What machines call: `sites()`,
+`day(site, day)`, `week(site, end_day)`.
+
+INSTANTLY IS OFF ON EVERY BOX, his included (owner, 2026-10-02: "I never approved instantly as a standard connection
+under data sources. That's an obscure piece of software that not many companies use", "99.5% of customers don't want
+instantly", then "Instantly is not going to be a section. I can just connect that with the fucking MCP. I don't need
+a section displaying instantly."). A business that uses it connects it through Connect an app, by its MCP server,
+like any other app. Its read-only adapter, store and card stay in this package, dormant, never deleted: nothing on a
+box calls `wire_outreach()`, so there is no card, row or page, no hourly pull, no worker job and no meter. OSDev2's
+Lead Machine plan may move it into the owner's own custom machine later, with his approval.
 """
 from core import state as _state
 from core.worker import register_periodic as _register_periodic
 
 from . import report as _report  # noqa: F401 — registers the reporter
 from . import card as _card  # noqa: F401 — registers the Data Sources card (core/source_cards.py)
-from . import outreach_card as _outreach_card  # noqa: F401 — and the Outreach card beside it
 from . import jobs as _jobs
-from . import outreach_sync as _outreach_sync
 from . import sync as _sync
 from .schema import DDL as _DDL
 from .seam import day, sites, week
@@ -27,10 +32,15 @@ __all__ = ["sites", "day", "week"]
 _state.register_schema("marketing_foundation", _DDL)
 _register_periodic(_sync.tick, interval_s=3600, name="website_sync")
 _jobs.register()                    # Sync now and Check and save, run by the worker (jobs.py)
-# OUTREACH, READ ONLY (docs/PLAN_OWNBOX_RUNS_ON_OWNBOX.md §5 step 3): Instantly's campaigns, pulled hourly, one
-# campaign at a time through the worker (outreach_sync.py).
-_register_periodic(_outreach_sync.tick, interval_s=3600, name="outreach_pull")
-_outreach_sync.register()
+
+
+def wire_outreach() -> None:
+    """The dormant Instantly source, wired in: its Data Sources card, its hourly pull and its worker jobs. NOTHING ON A
+    BOX CALLS THIS (see above); tests/test_the_outreach_source.py does, to keep the dormant code proven."""
+    from . import outreach_card  # noqa: F401 — registers the Outreach card (core/source_cards.py)
+    from . import outreach_sync
+    _register_periodic(outreach_sync.tick, interval_s=3600, name="outreach_pull")
+    outreach_sync.register()
 
 
 def _drain_outbound_mail():

@@ -255,8 +255,11 @@ ok("minting answers with a page rather than a redirect", r.status_code == 200, s
 # NEVER A REDIRECT AND NEVER A QUERY STRING: gunicorn logs raw query strings, so a credential in
 # a URL is a credential in the box's log file.
 ok("...and the credential is in the body, never in a Location", not r.headers.get("Location"))
+# READ BELOW THE PAGE'S OWN TITLE: the page is called "MCP Server" since 2026-10-02 (owner, the System Settings
+# preview), so the word is in the menu and the heading before the credential is.
+_below = minted.split("</h1>", 1)[-1]
 ok("...and the page says it is shown once before it shows it",
-   minted.find("only time") < minted.find("MCP"), str((minted.find("only time"), minted.find("MCP"))))
+   -1 < _below.find("only time") < _below.find("MCP"), str((_below.find("only time"), _below.find("MCP"))))
 # ONE ADDRESS, THE SHORT ONE (#1417, OSDev1). The minting screen printed `/api/v1/mcp` while the
 # screen that links to it printed `/mcp` — both work, but a buyer shown two addresses for one
 # thing reasonably concludes one is wrong, mid-paste of a secret. His fix landed on main while

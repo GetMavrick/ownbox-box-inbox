@@ -283,8 +283,9 @@ def make_spec(name: str, *, fn, description: str, machine: str, capability: str,
     # NO `aios.` PREFIX (owner, 2026-10-01, assigned by OSDev1). It was there for clients that merge
     # several servers' tools, but a client already keeps each server's tools apart (Claude shows
     # them under the connector's own name), and the prefix was the "AIOS" the owner read on every
-    # permission. No alias to the old name: the one thing it resets is a client's per-tool choice,
-    # once, and the owner accepted that.
+    # permission. An old name is still ANSWERED in call() (OLD_PREFIX), never LISTED: a client that cached
+    # the old list kept getting "does not serve" on every call, which is more than the per-tool reset the
+    # owner accepted.
     name = f"{machine}.{name}"
     if title is None:
         title = name.split(".", 1)[1].replace("_", " ").capitalize()
@@ -429,7 +430,9 @@ def validate(spec: dict, raw: dict | None) -> dict:
         raise ToolError("unknown_args", f"this tool has no argument(s): {', '.join(unknown)}")
     out = {}
     for arg, decl in declared.items():
-        if arg not in raw:
+        # NULL IS ABSENT. Many clients send `"limit": null` for an optional argument they don't set; that
+        # was refused as "limit must be integer". A null required argument is still missing.
+        if arg not in raw or raw[arg] is None:
             if decl.get("required"):
                 raise ToolError("missing_arg", f"{arg} is required")
             continue
@@ -445,6 +448,9 @@ def validate(spec: dict, raw: dict | None) -> dict:
     return out
 
 
+OLD_PREFIX = "aios."      # the public names before #1743; still answered, never listed (see call)
+
+
 def call(name: str, raw_args: dict | None, seat: dict) -> tuple[dict, int]:
     """Invoke a tool for a seat. Returns (body, http_status). ALWAYS writes one audit row.
 
@@ -455,6 +461,15 @@ def call(name: str, raw_args: dict | None, seat: dict) -> tuple[dict, int]:
     from core.connector import seats as _seats
 
     spec = _REGISTRY.get(name)
+    if spec is None and name.startswith(OLD_PREFIX):
+        # AN OLD NAME STILL ANSWERS (2026-10-02). #1743 dropped the `aios.` prefix from every public name, and a
+        # client that listed the tools before then keeps calling `aios.<machine>.<tool>`. Measured that day: OSDev1's own
+        # connector to the owner's box answered EVERY call with "this box does not serve", the evening before he
+        # films his investor demo. So the old name reaches the same tool, through the SAME gates below (capability,
+        # role, arguments); tools/list and the manifest still show only the new names. The audit row keeps the
+        # name the client sent, so seat_actions shows when old names stop arriving (keep this until 2027-10,
+        # the 12-month rule for contracts partners and owners build on).
+        spec = _REGISTRY.get(name[len(OLD_PREFIX):])
     if spec is None:
         # A tool that is absent is absent at STARTUP; by here the honest answer is that this box
         # does not serve it, which is a different sentence from "that failed".

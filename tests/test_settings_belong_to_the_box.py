@@ -41,6 +41,14 @@ from core.dash import box_settings, home                    # noqa: E402
 # THE DOORS CORE ACTUALLY SERVES, read off the module that serves them rather than
 # copied into this file — a list typed here would agree with itself forever.
 bs_doors = set(box_settings.registered_doors())
+# CORE'S OWN TWO ROWS ON THE OVERVIEW (owner, 2026-10-02: the data sources row and the coworkers row, in his setup
+# order) point at core screens served by other core modules: Data Sources, Coworkers, and the one upgrade sheet.
+# Read off the routes core registers, never typed here as served.
+from core.dash import UPGRADE_URL                           # noqa: E402
+from core.dispatch import app as _app                       # noqa: E402
+
+_served = {r.rule for r in _app.url_map.iter_rules()}
+CORE_ROWS = {h for h in ("/settings/sources", "/settings/shifts", UPGRADE_URL) if h in _served}
 
 _failed = 0
 
@@ -138,7 +146,7 @@ def test_core_does_not_know_where_set_up_lives():
     finally:
         box_secrets.setup_state = _real
     ok("a step with no door of its own falls back to the registry, not to a written URL",
-       fallback == ["/widgets/first-run#anthropic"], str(fallback))
+       [h for h in fallback if h not in CORE_ROWS] == ["/widgets/first-run#anthropic"], str(fallback))
     ok("no row hardcodes the inbox's set-up screen",
        not any("/inbox/setup" in h for h in hrefs), str(hrefs))
 
@@ -152,8 +160,10 @@ def test_core_does_not_know_where_set_up_lives():
     # drawer and their doors moved with them, so this is now the strong form of the assertion:
     # every link a step declares is a path CORE serves, on any box, whatever machine it carries.
     declared = [h for h in hrefs if "#" not in h]
+    ok("core's own rows are served by core: Data Sources, Coworkers and the upgrade sheet",
+       len(CORE_ROWS) == 3, str(CORE_ROWS))
     ok("every declared link is a path core serves on any box",
-       declared and all(h in bs_doors for h in declared), str(declared))
+       declared and all(h in bs_doors or h in CORE_ROWS for h in declared), str(declared))
     ok("...and not one of them names a machine",
        not any(h.startswith("/inbox/") for h in declared), str(declared))
 

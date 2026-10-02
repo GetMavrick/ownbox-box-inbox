@@ -182,6 +182,14 @@ ok("tools/call with no name is invalid params",
    r.get_json()["error"]["code"] == -32602)
 r = rpc("nonsense/method")
 ok("an unknown method is method-not-found", r.get_json()["error"]["code"] == -32601)
+r = rpc("ping", rpc_id=7)
+ok("ping gets an empty result, as the spec requires (a client checks the connection with it)",
+   r.status_code == 200 and r.get_json().get("id") == 7 and "error" not in r.get_json()
+   and {k: v for k, v in r.get_json()["result"].items() if k != "resultType"} == {}, r.get_json())
+for note in ("notifications/cancelled", "notifications/progress", "notifications/roots/list_changed"):
+    r = rpc(note, {"requestId": 1}, rpc_id=None)
+    ok(f"{note} gets 202 and an empty body, like every notification",
+       r.status_code == 202 and not r.data, f"{r.status_code} {r.data[:60]!r}")
 
 # ── transport rules the spec states as MUST ───────────────────────────────────────────────
 r = app.get("/api/v1/mcp", headers=AUTH)

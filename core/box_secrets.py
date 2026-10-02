@@ -1113,7 +1113,9 @@ def agent_state() -> dict:
 
 
 _AGENT_STEP = {
-    "key": "agent", "title": "Your coworkers",
+    # "YOUR MCP SERVER" (owner, 2026-10-02, the System Settings preview): the step is the box's inbound door
+    # for the AI a person already pays for; "coworkers" now names the ones that work on the box (Pro).
+    "key": "agent", "title": "Your MCP server",
     "surface": SURFACE_BOX,
     # CORE CAN VOUCH FOR ITS OWN DOOR, which is the whole point of the door having moved. This
     # step mints a credential that reads every message on the box, so it is the owner's alone —

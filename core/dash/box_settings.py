@@ -1211,7 +1211,7 @@ def box_agent():
     from core.connector import seats
 
     if not _is_owner():
-        return chrome("/settings/agent", title="Coworkers (Agents)",
+        return chrome("/settings/agent", title="MCP Server",
                       lede="This one is the owner's.",
                       body='<div class="card"><p>Only the owner of this box can connect an AI '
                            'coworker, because the connection can read every message on it.</p>'
@@ -1243,7 +1243,7 @@ def box_agent():
             # NEVER A REDIRECT AND NEVER A QUERY STRING. The credential is rendered into this one
             # response and then it is gone: a redirect would put it in a URL, and gunicorn logs
             # raw query stnotifies.
-            return chrome("/settings/agent", title="Coworkers (Agents)",
+            return chrome("/settings/agent", title="MCP Server",
                           lede="Copy the key now — it is shown once.",
                           # ONE ADDRESS, THE SHORT ONE — carried across from #1417 (OSDev1),
                           # which landed on main while this screen was being moved into core.
@@ -1255,7 +1255,7 @@ def box_agent():
                           # side alone would have silently reverted his fix.
                           body=_seat_credential(label, credential, f"{root}/mcp")
                                + '<div class="foot"><a href="/settings/agent">'
-                                 '&larr; Coworkers (Agents)</a></div>'), 200
+                                 '&larr; MCP Server</a></div>'), 200
 
     root = str(request.host_url or "").rstrip("/")
     clients = "".join(f'<div class="row"><b style="flex:1;min-width:0">{_esc(c["name"])}</b>'
@@ -1301,7 +1301,7 @@ def box_agent():
             + '</details>'
             + _seat_rows(seats.all_seats())
             + _back())
-    return chrome("/settings/agent", title="Coworkers (Agents)",
+    return chrome("/settings/agent", title="MCP Server",
                   lede="Let an AI agent you already pay for read this box.",
                   body=body), 200
 

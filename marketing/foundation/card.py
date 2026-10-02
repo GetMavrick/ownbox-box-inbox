@@ -246,18 +246,18 @@ def _hidden(do: str, extra: dict | None = None) -> str:
 
 def _post(do: str, label: str, *, extra: dict | None = None) -> str:
     # EVERY BUTTON HERE IS A GHOST: the page's one ink pill is Connect, for an app (core/dash/sources.py).
-    return (f'<form method="post" action="/settings/sources#website">{_hidden(do, extra)}'
+    return (f'<form method="post" action="/settings/sources/website">{_hidden(do, extra)}'
             f'<button class="ghost" type="submit">{_esc(label)}</button></form>')
 
 
 def _form(do: str, fields: str, label: str, *, busy: str = "") -> str:
-    return (f'<form method="post" action="/settings/sources#website">{_hidden(do)}{fields}'
+    return (f'<form method="post" action="/settings/sources/website">{_hidden(do)}{fields}'
             + (_busy(busy) if busy else f'<button class="ghost" type="submit">{_esc(label)}</button>') + '</form>')
 
 
 def _busy(doing: str) -> str:
     """In place of the button while the worker has it: what is happening, and a way to look again."""
-    return (f'<p class="quiet wa-busy">{_esc(doing)}&hellip; <a href="/settings/sources#website">Refresh</a> '
+    return (f'<p class="quiet wa-busy">{_esc(doing)}&hellip; <a href="/settings/sources/website">Refresh</a> '
             'to see the result.</p>')
 
 
@@ -399,4 +399,15 @@ def _posthog(form, by: str) -> tuple[bool, str]:
     return jobs.start_check(host, project, key)
 
 
-source_cards.register(KEY, title="Website analytics", render=render, handle=handle, order=10)
+def summary() -> dict:
+    """The card's one row in the Data Sources table (core/source_cards.py; owner, 2026-10-02: one table, a row per
+    source, each opening its own page): what it reads, when it last read it, and whether it is connected."""
+    sites, conn, st = settings.sites(), settings.posthog(), settings.sync_state()
+    what = (", ".join(sites) + (", from PostHog" if conn else "")) if sites else (
+        "PostHog, no websites yet" if conn else "Your websites, from PostHog")
+    status = ("Stopped" if st.get("error") else "Connected") if conn else "Not connected"
+    return {"what": what, "when": _when(st.get("last_run")) if conn else "", "status": status,
+            "connected": bool(conn)}
+
+
+source_cards.register(KEY, title="Website analytics", render=render, handle=handle, order=10, summary=summary)

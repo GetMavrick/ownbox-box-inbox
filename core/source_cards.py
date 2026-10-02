@@ -10,13 +10,17 @@ from __future__ import annotations
 
 from typing import Callable
 
-# key -> {"title", "render", "handle", "order", "owner"}
+# key -> {"title", "render", "handle", "summary", "order", "owner"}
 _CARDS: dict[str, dict] = {}
 
 
-def register(key: str, *, title: str, render: Callable, handle: Callable, order: int = 50) -> None:
+def register(key: str, *, title: str, render: Callable, handle: Callable, order: int = 50,
+             summary: Callable | None = None) -> None:
     """`render(note) -> html`: the card, with `note` ((ok, sentence) or None) saying what the last action did.
     `handle(do, form, by) -> (ok, sentence)`: one action, posted to Data Sources as card=<key>, do=<action>.
+    `summary() -> {"what", "when", "status", "connected"}`: the card's one row in the Data Sources table (owner,
+    2026-10-02: one table, a row per source, each opening its own page, so the page never grows a card per
+    source). Words only; the row links to the card's own page, /settings/sources/<key>.
 
     REFUSED FOR A KEY ANOTHER MODULE ALREADY HOLDS, as core/onboarding.register_step is, so one department's card
     can never silently replace another's. The same module registering again (a reload) replaces its own."""
@@ -25,7 +29,20 @@ def register(key: str, *, title: str, render: Callable, handle: Callable, order:
     if held is not None and held["owner"] != owner:
         raise ValueError(f"Data Sources card {key!r} is already registered by {held['owner']!r}")
     _CARDS[str(key)] = {"title": str(title), "render": render, "handle": handle, "order": int(order),
-                        "owner": owner}
+                        "owner": owner, "summary": summary}
+
+
+def summary(key: str) -> dict:
+    """A card's row, never raising: {"what", "when", "status", "connected"}, empty strings when it says nothing."""
+    spec = _CARDS.get(str(key or ""))
+    got: dict = {}
+    if spec and spec.get("summary"):
+        try:
+            got = dict(spec["summary"]() or {})
+        except Exception:                                # noqa: BLE001 — a row is never worth a broken page
+            got = {"status": "Could not be read just now"}
+    return {"what": str(got.get("what") or ""), "when": str(got.get("when") or ""),
+            "status": str(got.get("status") or ""), "connected": bool(got.get("connected"))}
 
 
 def get(key: str) -> dict | None:

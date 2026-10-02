@@ -49,7 +49,7 @@ STEPS_ALLOWANCE_MIN = 15                   # a run unit's budget for its steps, 
 START_GRACE_S = 120                        # a unit that is still coming up is not a crash
 RUN_NOW_WINDOW = timedelta(minutes=10)     # how long a Run now request waits for its turn
 REPORT_GIVE_UP = timedelta(days=1)         # an email that cannot go out for a day stops retrying
-PUSH_BODY = "A coworker has finished a shift. Open Shifts to see what it did."
+PUSH_BODY = "A coworker has finished a shift. Open Coworkers to see what it did."
 
 
 # ── the box ──────────────────────────────────────────────────────────────────────────────────────
@@ -582,7 +582,7 @@ def _work(row: dict, *, run_agent=None, sleep=time.sleep) -> dict:
         # §4.3: reading the box's data and reaching the web together waits for the owner's OK,
         # given for this exact grant. Said every shift until given, never run without it.
         return fail("It can read your box's data and also reach the web, and that needs your OK "
-                    "before it runs: on the Shifts screen, or on the server with "
+                    "before it runs: on the Coworkers screen, or on the server with "
                     f"python3 scripts/coworker_ok.py {cw.slug}", source=cw.source)
     ready, why = brain.can_think()
     if not ready:
@@ -770,7 +770,7 @@ def report(row: dict | None) -> int:
         try:
             from core import push
             for sub in push.subscriptions_for(owner["id"]):
-                push.send(sub, title="Shifts", body=PUSH_BODY, navigate="/shifts/")
+                push.send(sub, title="Coworkers", body=PUSH_BODY, navigate="/shifts/")
             sent += 1
         except Exception as e:                              # noqa: BLE001
             log.warning("coworker.report_push_failed", slot=row["slot"],

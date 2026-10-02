@@ -263,12 +263,10 @@ vendors:
                                 # daily_send_cap is the tighter day-to-day guardrail.
     est_usd_per_unit: 0.0
   instantly:
-    # THE OUTREACH PULL, READ ONLY (marketing/foundation/instantly.py). Instantly bills a flat
-    # plan, so a request costs nothing. No monthly_unit_cap: no hard limits that get in the way
-    # (owner's ruling, relayed by OSDev1 2026-10-02). `metered: true` keeps every request in the
-    # spend reports (plan rule 6). A unit is one API request: about 3 an hour per sending
-    # campaign plus 3, ~13,000 a month at five campaigns, plus 28 once per new campaign.
-    metered: true
+    # DORMANT (owner, 2026-10-02: Instantly is off on every box; a business that uses it connects
+    # it as an app by its MCP server). Not metered, so no box's spend report names it. If the
+    # foundation's Instantly source is ever wired in again (marketing/foundation/__init__.py
+    # wire_outreach), put `metered: true` back here first: plan rule 6.
     est_usd_per_unit: 0.0
 
 # Department web dashboards loaded by the dispatch app (data-not-code seam,

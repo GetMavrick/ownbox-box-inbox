@@ -116,6 +116,15 @@ class Item:
     # first user is System Settings (owner, 2026-09-29, IA D4: Your AI · Reaching you · Your team ·
     # The server). A machine names the group; `rail()` turns a change of name into the gap.
     group: str = ""
+    # THE GROUP'S NAME, ABOVE ITS FIRST ROW, when the section gives its groups names (owner,
+    # 2026-10-02, System Settings: "rename and re-organize some things to clean up the user
+    # experience", approved from a preview: AI · Connections · Team · Server). Set by `rail()` from
+    # the section's `group_labels`, never by a caller.
+    label_above: str = ""
+    # A ROW FOR A PLAN FEATURE THIS BOX MAY NOT HAVE, named by feature, never by tier
+    # (core/tiers.py). The renderer shows the row either way, with the plan's badge when the box
+    # lacks it (owner, 2026-10-02: "a little pro badge", and an upsell rather than a missing row).
+    feature: str = ""
 
 
 @dataclass(frozen=True)
@@ -135,6 +144,8 @@ class Section:
     # parent; and it claims the pages its own items point at, because a setting's one home need not
     # live under the section's own path (/inbox/mailbox is the Unified Inbox's mailbox setting).
     parent: str = ""
+    # {group: name} for the sub-menu's groups (Item.label_above); empty draws a gap and no name.
+    group_labels: tuple = ()
     # A SECTION ONLY THE OWNER MAY OPEN, dropped from everyone else's menu exactly as an owner-only
     # `Item` is. The first is the Morning Review (owner, 2026-09-29: "Add the Morning Review to the
     # menu"): its page publishes what the box spends, and its gate sends anyone else to sign in.
@@ -176,7 +187,8 @@ GROUPS = ("base", "addons")
 
 def register_section(key: str, *, order: int, machine: str, title: str, href: str,
                      items: Iterable = (), home: bool = False, icon: str = "",
-                     group: str = "", parent: str = "", owner_only: bool = False) -> None:
+                     group: str = "", parent: str = "", owner_only: bool = False,
+                     group_labels: dict | None = None) -> None:
     """Declare one rail section. Called at import, like every other seam in this box.
 
     CHECKED HERE, AT IMPORT, where a mistake is a failed boot line — not on the screen, where it
@@ -251,7 +263,7 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
         built.append(Item(key=ikey, label=str(it["label"]).strip(),
                           href=str(it["href"]), tone=tone, icon=str(it.get("icon") or ""),
                           owner_only=bool(it.get("owner_only")),
-                          group=str(it.get("group") or "")))
+                          group=str(it.get("group") or ""), feature=str(it.get("feature") or "")))
 
     if home:
         other = next((s for s in _SECTIONS.values() if s.home and s.key != key), None)
@@ -262,7 +274,8 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
 
     _SECTIONS[key] = Section(key=key, order=order, machine=machine, title=title.strip(),
                              href=href, items=tuple(built), home=bool(home), icon=str(icon or ""),
-                             group=group, parent=str(parent or ""), owner_only=bool(owner_only))
+                             group=group, parent=str(parent or ""), owner_only=bool(owner_only),
+                             group_labels=tuple((str(k), str(v)) for k, v in (group_labels or {}).items()))
     log.info("shell.section_registered", key=key, machine=machine, items=len(built))
 
 
@@ -369,14 +382,18 @@ def current(path: str) -> Section | None:
     return best
 
 
-def _grouped(items: tuple) -> tuple:
-    """A sub-menu's rows with `group_start` set where a named group begins. Rows with no group
-    never open one, so a menu that names none draws exactly as before."""
+def _grouped(items: tuple, labels: tuple = ()) -> tuple:
+    """A sub-menu's rows with `group_start` set where a named group begins, and the group's name
+    above its first row when the section names its groups. Rows with no group never open one, so
+    a menu that names none draws exactly as before."""
     from dataclasses import replace
+    names = dict(labels)
     out, prev = [], None
     for i, it in enumerate(items):
-        start = bool(i and it.group and it.group != prev)
-        out.append(replace(it, group_start=start) if start else it)
+        new = bool(it.group and it.group != prev)
+        start = bool(i and new)
+        label = names.get(it.group, "") if new else ""
+        out.append(replace(it, group_start=start, label_above=label) if (start or label) else it)
         prev = it.group or prev
     return tuple(out)
 
@@ -395,7 +412,7 @@ def rail(path: str) -> Rail:
     path = path or "/"
     here = current(path)
     if here is not None and here.items and not here.home:
-        items = _grouped(here.items)
+        items = _grouped(here.items, here.group_labels)
         up = _SECTIONS.get(here.parent) if here.parent else None
         if up is not None:
             # BACK GOES UP ONE, to the menu this one opened from, never all the way home.

@@ -8,6 +8,7 @@ liveness via the heartbeats table (so a dead worker actually pages you). Alerts 
 on OK->FAIL and FAIL->OK edges, plus a 'still down' reminder every N hours.
 """
 import os
+import re
 import shutil
 from datetime import datetime, timedelta, timezone
 
@@ -67,7 +68,15 @@ def _oauth_token() -> str:
     retries and pages honestly (logged loud so it's diagnosable)."""
     import time as _time
     for attempt in range(4):
-        tok = (settings.claude_code_oauth_token or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip()
+        # THE BRAIN'S OWN RESOLVER FIRST. `_run_claude` thinks with `box_secrets.claude_oauth_token()`,
+        # which includes the token a buyer connected with Sign in to Claude; settings and the .env never
+        # see that one, so a signed-in box read as 'not set' here (2026-10-02, the owner's own box).
+        try:
+            from core import box_secrets as _bs
+            tok = (_bs.claude_oauth_token() or "").strip()
+        except Exception:                                # noqa: BLE001 — fall through to the old sources
+            tok = ""
+        tok = tok or (settings.claude_code_oauth_token or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip()
         if tok:
             return tok
         try:
@@ -85,14 +94,63 @@ def _oauth_token() -> str:
     return ""
 
 
+# THE CLAUDE SIGN-IN PROBE, AND WHAT IT COSTS (OSDev1's review of #1820, 2026-10-02). It used to run a live
+# Haiku call through `claude -p` on every watchdog pass: about 48 a day per box, drawn from the BUYER'S own
+# subscription. Now a real answer the box gave in the last 6 hours is the proof (the brain records a spend
+# row only after the CLI answered), and otherwise the live call runs at most once every 6 hours.
+_CLAUDE_PROBE_EVERY_S = 6 * 3600
+# Bookkeeping for that, kept between watchdog runs (each run is a fresh process): ts = the last LIVE probe,
+# status = its outcome, "ok", "auth" or "miss:N" (N failures in a row that were not the sign-in).
+# Deliberately not "probe:"-prefixed, so the check-in and the health report never read it as a probe.
+_CLAUDE_PROBE_ROW = "claude_live_probe"
+# What a refused sign-in looks like from the CLI or the API behind it.
+_CLAUDE_AUTH_RE = re.compile(r"\b401\b|authentication_error|invalid[ _-]?(?:x-api-key|bearer|token)|"
+                             r"oauth (?:access )?token|/login|unauthori[sz]ed|token (?:has )?expired", re.I)
+# The page a buyer can act on. The raw CLI error, cut at 120 characters, ended "...OAuth access to".
+CLAUDE_SIGNIN_EXPIRED = "Claude sign-in expired: sign in again on Settings → AI"
+CLAUDE_SIGNIN_MISSING = "no Claude sign-in found: sign in on Settings → AI"
+# One failed live call that wasn't the sign-in: a skip (no page), and `_beat` records it as `unchecked`.
+CLAUDE_FIRST_MISS = "skip (one failed probe, checking again next pass: "
+
+
+def _claude_answered_within(seconds: int) -> str | None:
+    """When the box's Claude sign-in last answered a REAL request, if within `seconds`: the newest
+    claude_code spend row (`cc:<model>`) WITH OUTPUT. A refused call writes a cc: row too, with zero
+    output tokens (the brain records spend before it reads the result), so without the output test an
+    expired sign-in on a box whose shifts keep trying would read as answered forever and never page
+    (OSDev1's review, 2026-10-02)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+    try:
+        with state.connect() as c:
+            row = c.execute("SELECT MAX(ts) AS ts FROM spend_ledger WHERE model LIKE 'cc:%' AND output_tokens > 0 "
+                            "AND ts >= ?",
+                            (cutoff,)).fetchone()
+        return (row["ts"] if row else None) or None
+    except Exception:                                    # noqa: BLE001 — no ledger means no evidence, not an error
+        return None
+
+
+def _age_s(iso: str | None) -> int:
+    """Seconds since an ISO timestamp; -1 when it can't be read, which no freshness check accepts."""
+    try:
+        return int((datetime.now(timezone.utc) - datetime.fromisoformat(iso)).total_seconds())
+    except Exception:                                    # noqa: BLE001 — a malformed ts is simply not fresh
+        return -1
+
+
+def _last_live_probe() -> tuple[str | None, str]:
+    row = next((r for r in state.get_heartbeats() if r["component"] == _CLAUDE_PROBE_ROW), None)
+    return (row["ts"], row["status"]) if row else (None, "")
+
+
 def _probe_claude_code() -> tuple[bool, str]:
     """Reasoning-path health on the subscription backend — by REASONING (defect
     B5: binary-exists + token-present stayed green through a revoked token, a CLI
-    auto-update, or an account block, while every real think() died). One tiny
-    tool-less haiku call per watchdog pass: $0 marginal on subscription, and the
-    probe now exercises the exact path the workload uses. An exhausted usage
-    window will show here as a FAIL with the limit text — which IS the right
-    page: reels are silently paused until it resets."""
+    auto-update, or an account block, while every real think() died). A tiny
+    tool-less haiku call, the exact path the workload uses, but only when nothing
+    else has proved the sign-in lately (see _CLAUDE_PROBE_EVERY_S). An exhausted usage
+    window shows as a FAIL with the limit text — which IS the right page: work is
+    silently paused until it resets."""
     import json as _json
     import subprocess
     binary = shutil.which("claude")
@@ -100,21 +158,65 @@ def _probe_claude_code() -> tuple[bool, str]:
         return False, "claude CLI not installed (scripts/install_claude_code.sh)"
     token = _oauth_token()
     if not token:
-        return False, "CLAUDE_CODE_OAUTH_TOKEN not set in /opt/aios/.env"
-    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token   # ensure the `claude -p` subprocess inherits it
+        return False, CLAUDE_SIGNIN_MISSING
+
+    # A REAL ANSWER IS THE BEST PROBE, AND IT IS FREE.
+    answered = _claude_answered_within(_CLAUDE_PROBE_EVERY_S)
+    if answered:
+        return True, f"reasoning ok (answered a real request at {answered[:16]})"
+    # AT MOST ONE LIVE CALL EVERY 6 HOURS, while the last one passed. After a miss or a refused
+    # sign-in the next pass probes again, so a second miss (or the fix) is seen in minutes, not hours.
+    last_ts, last_status = _last_live_probe()
+    if last_status == "ok" and last_ts and 0 <= _age_s(last_ts) < _CLAUDE_PROBE_EVERY_S:
+        return True, f"reasoning ok (live call at {last_ts[:16]})"
+
+    # THE TOKEN GOES TO THE ONE CHILD PROCESS, NEVER INTO THIS PROCESS'S ENVIRONMENT. Writing it into
+    # os.environ (as this did) handed the buyer's sign-in to every program the worker starts afterwards,
+    # and left a copy that kept `brain._backend()` on claude_code after `clear_claude_oauth()`.
+    env = {**os.environ, "CLAUDE_CODE_OAUTH_TOKEN": token}
+    error = ""
     try:
         out = subprocess.run(
             [binary, "-p", "Reply with exactly: ok", "--model", "haiku",
              "--output-format", "json", "--tools", ""],
-            capture_output=True, text=True, timeout=60)
-        if out.returncode != 0 or not (out.stdout or "").strip():
-            return False, f"rc={out.returncode}: {(out.stderr or out.stdout)[:120]}"
-        data = _json.loads(out.stdout[out.stdout.index("{"):])
-        if data.get("is_error"):
-            return False, str(data.get("result"))[:120]
-        return True, "reasoning ok (live call)"
-    except Exception as e:
-        return False, str(e)[:120]
+            capture_output=True, text=True, timeout=60, env=env, stdin=subprocess.DEVNULL)
+        text = (out.stdout or "").strip()
+        data = {}
+        if "{" in text:
+            try:
+                data = _json.loads(text[text.index("{"):])
+            except ValueError:
+                data = {}
+        if out.returncode != 0 or not text:
+            error = f"rc={out.returncode}: {(out.stderr or out.stdout or '')[:300]}"
+        elif data.get("is_error"):
+            error = str(data.get("result"))[:300]
+        else:
+            log.info("watchdog.claude_probe_live", total_cost_usd=data.get("total_cost_usd"))
+            state.heartbeat(_CLAUDE_PROBE_ROW, "ok")
+            return True, "reasoning ok (live call)"
+    except Exception as e:                               # noqa: BLE001 — a timeout or a missing binary is a miss
+        error = str(e)[:300]
+
+    # A REFUSED SIGN-IN NAMES ITS FIX, and the AI screen learns it needs a new sign-in.
+    if _CLAUDE_AUTH_RE.search(error):
+        try:
+            from core import box_secrets as _bs
+            from core.logging import scrub_secrets
+            _bs.note_claude_oauth_status("needs_reauth", scrub_secrets(error)[:200])
+        except Exception as e:                           # noqa: BLE001 — the page still goes out
+            log.warning("watchdog.claude_reauth_note_failed", error=str(e)[:120])
+        state.heartbeat(_CLAUDE_PROBE_ROW, "auth")
+        return False, CLAUDE_SIGNIN_EXPIRED
+
+    # ANYTHING ELSE (the network, a timeout, a busy provider) PAGES ON THE SECOND MISS IN A ROW. One blip is
+    # reported as a skip, which `_alert` reads as "could not evaluate": no page, no false recovery.
+    misses = (int(last_status.split(":", 1)[1]) if last_status.startswith("miss:")
+              and last_status.split(":", 1)[1].isdigit() else 0) + 1
+    state.heartbeat(_CLAUDE_PROBE_ROW, f"miss:{misses}")
+    if misses < 2:
+        return True, f"{CLAUDE_FIRST_MISS}{error[:120]})"
+    return False, error[:120]
 
 
 def _probe_disk(min_gb: float = 2.0) -> tuple[bool, str]:
@@ -391,13 +493,17 @@ def probe_backend() -> tuple[str, bool, str]:
     pass and the worker's startup probe (A2) page on the SAME key — one dedup/recovery
     edge, never a double page. claude_code is probed by a real tool-less haiku call; the
     api backend by a free models.list. An api-key probe on a subscription box (or vice
-    versa) would page a permanent false FAIL, so we pick by config."""
-    from core.config import get_config
-    backend = (get_config().get("brain") or {}).get("backend", "api")
+    versa) would page a permanent false FAIL, so we pick the way the brain does (`brain._backend()`)."""
+    # PICKED THE WAY THE BRAIN PICKS: `brain._backend()`, not config alone. Every sold box is built with
+    # `backend: api`, and a buyer who connects a Claude subscription thinks on claude_code without that
+    # line changing (brain._backend, step 2). Reading config here probed the absent API key instead and
+    # reported "no AI key yet" on a box that was drafting fine (the owner's box, 2026-10-02, while
+    # `brain.can_think()` was True). One rule, shared with the thing being probed.
+    from core import brain as _brain
+    backend = _brain._backend()
     if backend == "claude_code":
         return ("claude_code", *_probe_claude_code())
-    from core import brain as _brain
-    if _brain._backend() == "codex":
+    if backend == "codex":
         # NO SPEND: `codex login status` answers from the CLI's own file. A box signed in to
         # ChatGPT that is probed for an Anthropic key would page a permanent false FAIL.
         from core import codex_login
@@ -435,9 +541,17 @@ NO_AI_KEY = "skip (no AI key yet — nothing to probe until the buyer adds one)"
 
 def _beat(ok: bool, detail: str) -> str:
     """The heartbeat status a probe result records: `unset` for a box with no AI key yet, so the
-    health report says so instead of an `ok` it has not earned; otherwise `ok` or `fail`."""
+    health report says so instead of an `ok` it has not earned; `unchecked` right after one failed
+    Claude probe; otherwise `ok` or `fail`."""
     if detail == NO_AI_KEY:
         return "unset"
+    # A FIRST MISS IS NOT A GREEN BRAIN (OSDev4's catch on #1820, 2026-10-02). It is a skip so it never
+    # pages, and it used to beat `ok`, so health showed a green brain right after a failed probe. Nor
+    # is it `unset`, which every screen reads as "no AI key". `unchecked` until the next pass decides.
+    # Only this skip: every other probe's skip ("no inbox tables on this box", a transient DB error)
+    # still beats `ok`, or each box's check-in would warn about features it simply doesn't have.
+    if detail.startswith(CLAUDE_FIRST_MISS):
+        return "unchecked"
     return "ok" if ok else "fail"
 
 

@@ -123,8 +123,15 @@ border-radius:var(--r-sm,9px);color:var(--nav-ink);font-size:calc(17 * var(--px,
 .nav a[aria-current]{background:var(--sel);color:var(--ink);font-weight:600;
 box-shadow:inset 0 0 0 1px var(--hairline,transparent)}
 .nav a.danger{color:var(--danger)}
-/* a new group starts: a little more room above it, and nothing else */
+/* a new group starts: a little more room above it, and its name when the menu names its groups */
 .nav a.grp{margin-top:16px}
+.nav .glabel{display:block;margin:18px 0 2px;padding:0 10px;font-size:calc(12 * var(--px, 1px));font-weight:600;
+letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.nav .glabel+a.grp{margin-top:0}
+/* a plan badge beside a row this box's plan lacks: the row still opens, onto the upgrade */
+.nav .badge,.row .badge{display:inline-block;margin-left:7px;padding:1px 7px;border:1px solid currentColor;
+border-radius:var(--r-pill,999px);font-size:calc(11 * var(--px, 1px));font-weight:600;letter-spacing:.02em;
+color:var(--link);vertical-align:1px}
 .nav a .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nav a .out{color:var(--faint);margin-left:2px}
 .nav a .fwd{color:var(--faint);flex:none}
@@ -338,6 +345,11 @@ padding:10px 12px;margin:10px 0 0;word-break:break-all;user-select:all}
 .row.setting{flex-wrap:nowrap;align-items:center;padding:12px 0}
 .row.setting .what{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .row.setting .what>span{font-size:calc(16 * var(--px, 1px))}
+.row.setting .step{flex:none;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;
+justify-content:center;font-size:calc(13 * var(--px, 1px));font-weight:600;color:var(--ink-2);
+border:1px solid var(--hairline)}
+.row.setting .step.done{background:var(--ink);color:var(--on-ink);border-color:var(--ink)}
+.row.setting{gap:14px}
 .row.setting .act{color:var(--link);font-weight:600;white-space:nowrap;min-height:44px;
 display:flex;align-items:center}
 .row>.quiet{flex:1 1 320px;min-width:0}
@@ -528,9 +540,12 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
     rows = []
     # THE GAP BEFORE A NEW GROUP IS CARRIED, not dropped with its row: if the first row of the
     # add-on group is one this person is not shown, the gap moves to the next row that is.
-    gap = False
+    gap, label = False, ""
     for it in got.items:
         gap = gap or it.group_start
+        # A GROUP'S NAME TRAVELS WITH ITS GAP to the first row this person is shown, and a new group's
+        # name replaces one whose rows were all hidden, so a name never sits over another group's rows.
+        label = it.label_above or (label if not it.group_start else "")
         if it.owner_only and not _owner:
             continue
         # OFF-BOX IS READ FROM THE HREF, never declared beside it. `away` still works for a row
@@ -546,7 +561,16 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
             # dropped from every rail as unserved — measured, not reasoned.
             continue
         cls = " ".join(c for c in (it.tone, "grp" if gap and rows else "") if c)
-        gap = False
+        if label:
+            rows.append(f'<span class="glabel">{_esc(label)}</span>')
+        gap, label = False, ""
+        badge = ""
+        if it.feature:
+            try:
+                from core import tiers as _tiers
+                badge = _tiers.badge(it.feature)
+            except Exception:                    # noqa: BLE001 — a badge is never worth a broken menu
+                badge = ""
         cur = ' aria-current="page"' if shell.is_current(it, path) else ""
         # A LINK THAT LEAVES OPENS AWAY FROM THE BOX and carries `noopener`: the destination is
         # outside this box's control, and a menu row is not a reason to hand it this window.
@@ -557,7 +581,8 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
                     # first level, where they tell sections apart at a glance; one level down every
                     # row is already inside one section, and the title above them says which.
                     + f'{cur}>{_svg(it.icon) if got.level == 1 else ""}'
-                    + f'<span class="lbl">{_esc(it.label)}</span>'
+                    + f'<span class="lbl">{_esc(it.label)}'
+                    + (f'<span class="badge">{_esc(badge)}</span>' if badge else "") + '</span>'
                     + (_OUT_ARROW if (off or it.tone == "away") else "")
                     + (_FWD_CHEVRON if it.submenu else "") + '</a>')
 
@@ -877,9 +902,9 @@ def _mcp_card() -> str:
         go = "/settings/agent" if "/settings/agent" in _serving() else ""
         said = ('<p class="quiet">Nothing connected yet.'
                 + (f' <a href="{go}">Connect an AI agent &rarr;</a>' if go else "") + '</p>')
-    # NAMED FOR WHAT IS CONNECTED, NOT "MCP" (owner, 2026-09-29, IA D4), and by the menu's name for
-    # it, Coworkers (Agents), since 2026-09-30. The address stays: it is what gets pasted into one.
-    return (f'<div class="card"><h2 class="eyebrow">Coworkers (Agents)</h2>'
+    # NAMED BY THE MENU'S NAME FOR IT: MCP Server since 2026-10-02 (owner, from the System Settings
+    # preview; Coworkers (Agents) from 2026-09-30). The address stays: it is what gets pasted into one.
+    return (f'<div class="card"><h2 class="eyebrow">MCP Server</h2>'
             f'<p class="mono">{_esc(address)}</p>{said}</div>')
 
 
@@ -1264,7 +1289,12 @@ def dashboard():
 # WHY NOT THE MERGED REGISTRY (option A): core would have to understand each machine's settings
 # shape to draw them, which is precisely what `tests/test_core_boundary.py` exists to refuse. B
 # needs no registry, so it is also not blocked on one being designed.
-BOX_SETTINGS = ("anthropic", "mobile", "agent")
+# IN THE ORDER A NEW BUYER SETS A BOX UP (owner, 2026-10-02): "connect to their AI account, figure out how to do the
+# inbound MCP server set up and then add outbound MCP data connections. And then set up the mobile app." The data
+# sources row and the coworkers row are core's own (`_sources_row`, `_coworkers_row`), placed by `_box_rows`.
+BOX_SETTINGS = ("anthropic", "agent", "mobile")
+# THE AI ACCOUNT NAMES THE AIs IT CAN BE, on this screen only (owner, 2026-10-02, his words for the Overview).
+_BOX_TITLES = {"anthropic": "Your AI account (Claude, ChatGPT, Gemini, Grok)"}
 
 
 # THE SAME CLOSED SET `box_secrets.setup_state()` DOCUMENTS, plus core's own `unavailable`. Said
@@ -1350,34 +1380,81 @@ def _box_rows(*, owner: bool) -> str:
         # THE VERB IS THE STATE. "Change" on something set and "Set up" on something not is the
         # whole difference a person needs, and it saves the row a second sentence explaining it.
         press = ("Change" if e.get("status") == "connected" else "Set up")
-        rows.append(
-            '<div class="row setting">'
-            f'<span class="what"><b>{_esc(e.get("title"))}</b>'
-            f'<span class="{tone}">{_esc(said)}'
-            + (f' — {_esc(detail)}' if detail else '') + '</span></span>'
-            + (f'<a class="act" href="{_esc(href)}">{press}</a>' if href else '')
-            + '</div>')
+        rows.append((e.get("status") == "connected", _BOX_TITLES.get(key) or str(e.get("title") or ""),
+                     tone, said + (f' — {detail}' if detail else ''), href, press, ""))
+        if key == "agent":
+            rows += _sources_row(owner)
     if not rows:
         return '<p class="quiet">This box carries no box-level settings yet.</p>'
-    return "".join(rows)
+    rows += _coworkers_row(owner)
+    # NUMBERED IN THE ORDER TO DO THEM, A TICK FOR WHAT IS DONE (owner, 2026-10-02, approved from a preview).
+    return "".join(
+        '<div class="row setting">'
+        f'<span class="step{" done" if done else ""}" aria-hidden="true">{"&#10003;" if done else n}</span>'
+        f'<span class="what"><b>{_esc(title)}{badge}</b><span class="{tone}">{_esc(said)}</span></span>'
+        + (f'<a class="act" href="{_esc(href)}">{press}</a>' if href else '') + '</div>'
+        for n, (done, title, tone, said, href, press, badge) in enumerate(rows, 1))
+
+
+def _sources_row(owner: bool) -> list:
+    """YOUR DATA SOURCES, between the MCP server and the mobile app (owner, 2026-10-02: "Data sources should probably
+    be one too"). What the box reads from: the built-in sources a department registered (core/source_cards.py, by
+    their own summaries, so core names none) and the apps connected through their own MCP servers. The owner's
+    page, so a member is shown the row with nothing to press."""
+    from core import source_cards
+    names = []
+    try:
+        names += [spec["title"] for key, spec in source_cards.cards() if source_cards.summary(key)["connected"]]
+        from core.connections import store as _apps
+        names += [str(r.get("name") or "") for r in (_apps.load().get("items") or {}).values() if isinstance(r, dict)]
+    except Exception:                        # noqa: BLE001 — a row is never worth a broken settings page
+        return []
+    names = [n for n in names if n]
+    said = (f"{len(names):,} connected: " + ", ".join(names)) if names else "Not set up yet"
+    return [(bool(names), "Your data sources", "" if names else "quiet", said,
+             "/settings/sources" if owner else "", "Add" if names else "Set up", "")]
+
+
+def _coworkers_row(owner: bool) -> list:
+    """YOUR COWORKERS, last: the ones that work on the box, on their schedules. A plan feature, asked of by feature
+    (core/tiers.py). Without it the row stays, with its badge, and offers the one upgrade (owner, 2026-10-02: "leave
+    it and it could be an upsell opportunity", "a little pro badge on the feature and there is an upgrade path")."""
+    try:
+        from core import tiers
+        badge = tiers.badge("coworkers")
+    except Exception:                        # noqa: BLE001
+        return []
+    if badge:
+        from core.dash import UPGRADE_URL
+        return [(False, "Your coworkers", "quiet", "Coworkers that work on a schedule, on your box, while you are "
+                 "away.", UPGRADE_URL if owner else "", "Upgrade", f'<span class="badge">{_esc(badge)}</span>')]
+    try:
+        from core.coworkers import runner
+        # SWITCHED ON ONLY (OSDev1's review of #1828): a coworker that is off is not "working on its schedule".
+        n = sum(1 for cw in runner.discover()[0] if getattr(cw, "enabled", True))
+    except Exception:                        # noqa: BLE001
+        n = 0
+    return [(bool(n), "Your coworkers", "" if n else "quiet",
+             f"{n:,} working on {'its' if n == 1 else 'their'} schedule{'s' if n != 1 else ''}" if n else "None yet",
+             "/settings/shifts", "Change" if n else "Set up", "")]
 
 
 # TWO KINDS OF COWORKER, ONE WORD. Owner, 2026-09-30: "it's all coworkers. People can use their outside
 # coworkers, and they can also create coworkers on the box ... we should try to explain that." Said
-# once, here, and drawn on both screens — Coworkers (Agents) and Shifts — each naming its own kind
+# once, here, and drawn on both screens — MCP Server and Coworkers — each naming its own kind
 # first and pointing at the other, so the two screens cannot describe the split two ways.
 def coworkers_two_kinds(here: str) -> str:
     """`here` is "agents" or "shifts": the screen drawing it, whose kind comes first and links nowhere.
 
-    THE LINK TO COWORKERS (AGENTS) IS THE OWNER'S ALONE, like the page: Shifts is open to a member,
+    THE LINK TO THE MCP SERVER IS THE OWNER'S ALONE, like the page: Coworkers is open to a member,
     and a link that refuses the person who taps it is the dead end the buyer walk forbids."""
     outside = ("<p><b>From outside.</b> AI agents you already pay for, like Claude, ChatGPT or Grok, "
                "let into this box. They work when you ask them, wherever you already use them."
-               + (' <a href="/settings/agent">Coworkers (Agents) &rarr;</a>'
+               + (' <a href="/settings/agent">MCP Server &rarr;</a>'
                   if here != "agents" and _is_owner() else "") + "</p>")
     onbox = ("<p><b>On this box.</b> Coworkers you create here, each with a job in plain words and its "
              "own times. They work on schedule, on their own, and tell you what they did."
-             + (' <a href="/settings/shifts">Shifts &rarr;</a>' if here != "shifts" else "") + "</p>")
+             + (' <a href="/settings/shifts">Coworkers &rarr;</a>' if here != "shifts" else "") + "</p>")
     return ('<div class="card"><h2>Two kinds of coworker</h2>'
             + (outside + onbox if here == "agents" else onbox + outside) + '</div>')
 
@@ -1395,7 +1472,8 @@ def settings():
     refuse = _review._admit(owner_only=False)
     if refuse is not None:
         return refuse
-    body = ('<div class="card"><h2>Your box</h2>'
+    # "YOUR OWNBOX" (owner, 2026-10-02, his words for this card, approved from a preview).
+    body = ('<div class="card"><h2>Your Ownbox</h2>'
             '<p class="sub">What every machine on this box shares. Each machine keeps its own '
             'settings in its own menu.</p>'
             + _box_rows(owner=_is_owner()) + '</div>')
@@ -1453,7 +1531,7 @@ def settings():
     # what it holds in the builder's words ("belong to the box, not to one machine"); it now names
     # the things a person came here for.
     return chrome("/settings", title="System Settings",
-                  lede="Your AI account, your icon, the mobile app, email and the server itself.",
+                  lede="Your AI account, MCP server, your icon, the mobile app, email and the server itself.",
                   body=body), 200
 
 
@@ -1597,46 +1675,50 @@ shell.register_section("add_machine", order=1000, machine="core", title="Add a M
 # two things he wants a new buyer to reach first. The five rows whose screens refuse a member are
 # `owner_only`, so a member is shown a shorter menu rather than doors that refuse them.
 shell.register_section("settings", order=10, machine="core", title="System Settings",
-                       href="/settings", icon=_GEAR_ICON, items=[
+                       href="/settings", icon=_GEAR_ICON,
+                       # FOUR GROUPS, EACH NAMED ABOVE ITS ROWS (owner, 2026-10-02: "rename and
+                       # re-organize some things to clean up the user experience", approved from a
+                       # preview). Named now, where D4 (2026-09-29) left only a gap: ten rows read as
+                       # one list. The order inside AI and Connections is the order a new buyer sets
+                       # a box up in, in his words: "connect to their AI account, figure out how to do
+                       # the inbound MCP server set up and then add outbound MCP data connections.
+                       # And then set up the mobile app."
+                       group_labels={"ai": "AI", "connect": "Connections", "team": "Team",
+                                     "server": "Server"},
+                       items=[
                            {"key": "overview", "label": "Overview", "href": "/settings"},
-                           # FOUR GROUPS, PLAIN NAMES (owner, 2026-09-29, IA decision D4 in
-                           # docs/SCOPE_APP_IA.md): Your AI · Reaching you · Your team · The server.
-                           # Each group opens with a little room, no heading — the same subtle gap
-                           # the main menu uses between the box's rows and its machines.
-                           #
-                           # YOUR AI: the account that writes, the AI agents you already pay for,
-                           # and Shifts. "Coworkers (Agents)", owner, 2026-09-30: "we're gonna start
-                           # calling it coworkers but the common word for it is AI agent" — the
-                           # short form here, because the menu has no room for more, and "AI
-                           # agents" in the words on the screen itself.
+                           # AI: the account that writes, the MCP server your own AI connects to, and the
+                           # coworkers that work on the box.
                            {"key": "ai", "label": "AI Account", "href": "/settings/ai",
                             "owner_only": True, "group": "ai"},
-                           {"key": "agent", "label": "Coworkers (Agents)", "href": "/settings/agent",
+                           # MCP SERVER, WHERE IT READ "COWORKERS (AGENTS)" (owner, 2026-10-02, from the
+                           # preview): the page is the box's inbound door for the AI a person already
+                           # pays for. The page and its address are unchanged.
+                           {"key": "agent", "label": "MCP Server", "href": "/settings/agent",
                             "owner_only": True, "group": "ai"},
-                           {"key": "shifts", "label": "Shifts", "href": "/settings/shifts",
-                            "group": "ai"},
-                           # DATA SOURCES: the apps the business runs on, connected through each app's
-                           # own MCP server so coworkers can read from them (docs/SCOPE_CONNECTIONS_MCP_
-                           # FIRST.md, owner-approved 2026-10-01).
+                           # COWORKERS, WHERE IT READ "SHIFTS" (same ruling): coworkers on the box, on
+                           # their schedules. Pro only, so on a box without it the row stays, with "a
+                           # little pro badge", and opens onto the upgrade (core/dash/shifts.py).
+                           {"key": "shifts", "label": "Coworkers", "href": "/settings/shifts",
+                            "group": "ai", "feature": "coworkers"},
+                           # CONNECTIONS: what the box reads from (Data Sources, each app through its own
+                           # MCP server: docs/SCOPE_CONNECTIONS_MCP_FIRST.md), the app on your mobile,
+                           # and the address the box sends from (Morning Review, alerts): "Sending
+                           # Email", so it is not taken for an inbox.
                            {"key": "sources", "label": "Data Sources", "href": "/settings/sources",
-                            "owner_only": True, "group": "ai"},
-                           # REACHING YOU: the app on your mobile, and the email the box SENDS
-                           # (Morning Review, alerts). It read "Outbound Email" (owner, 2026-09-24)
-                           # so it was not taken for the inbox it reads; under "Reaching you" the
-                           # plain word says the same, and D4 chose it.
+                            "owner_only": True, "group": "connect"},
                            {"key": "mobile", "label": "Mobile App", "href": "/settings/mobile",
-                            "group": "reach"},
-                           {"key": "email", "label": "Email", "href": "/settings/email",
-                            "owner_only": True, "group": "reach"},
-                           # YOUR TEAM. PEOPLE HAD NO DOOR once: the page existed and nothing on a
-                           # box linked to it, so inviting a colleague meant knowing the address.
+                            "group": "connect"},
+                           {"key": "email", "label": "Sending Email", "href": "/settings/email",
+                            "owner_only": True, "group": "connect"},
+                           # TEAM. PEOPLE HAD NO DOOR once: the page existed and nothing on a box linked
+                           # to it, so inviting a colleague meant knowing the address.
                            {"key": "people", "label": "People", "href": "/settings/people",
                             "owner_only": True, "group": "team"},
-                           # THE SERVER: what it runs, and who can sign in to it.
+                           # SERVER: what it runs, and who can sign in to it. MOVE YOUR BOX IS NOT A ROW
+                           # (owner, 2026-09-30): it is in the danger zone at the foot of Server Access.
                            {"key": "updates", "label": "Updates", "href": "/settings/updates",
                             "group": "server"},
                            {"key": "access", "label": "Server Access",
                             "href": "/settings/access", "owner_only": True, "group": "server"},
-                           # MOVE YOUR BOX IS NOT A ROW (owner, 2026-09-30): it is in the danger
-                           # zone at the foot of Server Access, so it is not stumbled upon.
                        ])

@@ -125,9 +125,14 @@ tools.register("draft_reply", fn=lambda **k: {"id": "d_1"}, description="draft a
 print("\ntest_the_menu_has_a_shifts_row")
 sec = next((s for s in shell.sections() if s.key == "settings"), None)
 labels = [i.label for i in sec.items] if sec else []
-ok("Shifts is in System Settings, right after Coworkers (Agents), in the Your AI group",
-   "Shifts" in labels and labels.index("Shifts") == labels.index("Coworkers (Agents)") + 1, str(labels))
-ok("...open to a member, who may look", not next(i for i in sec.items if i.label == "Shifts").owner_only)
+# "COWORKERS", WHERE IT READ "SHIFTS", right after "MCP Server", where it read "Coworkers (Agents)" (owner, 2026-10-02,
+# approved from the System Settings preview). The address stays /settings/shifts.
+ok("Coworkers is in System Settings, right after MCP Server, in the AI group",
+   "Coworkers" in labels and labels.index("Coworkers") == labels.index("MCP Server") + 1
+   and next(i for i in sec.items if i.label == "Coworkers").group == "ai", str(labels))
+_cw = next(i for i in sec.items if i.label == "Coworkers")
+ok("...open to a member, who may look", not _cw.owner_only and _cw.href == "/settings/shifts")
+ok("...and named by the plan feature it needs, so a box without it shows the badge", _cw.feature == "coworkers")
 ok("the top of the menu is unchanged: no row of its own", "shifts" not in [s.key for s in shell.sections()])
 
 print("\ntest_two_kinds_of_coworker_said_on_both_screens")
@@ -136,11 +141,13 @@ print("\ntest_two_kinds_of_coworker_said_on_both_screens")
 # the owner's page.
 _sh = owner.get("/settings/shifts").get_data(as_text=True)
 _ag = owner.get("/settings/agent").get_data(as_text=True)
-ok("Shifts explains both kinds and points at Coworkers (Agents)",
-   "Two kinds of coworker" in _sh and 'href="/settings/agent">Coworkers (Agents) &rarr;' in _sh
+ok("Coworkers explains both kinds and points at the MCP Server",
+   "Two kinds of coworker" in _sh and 'href="/settings/agent">MCP Server &rarr;' in _sh
    and "From outside." in _sh)
-ok("Coworkers (Agents) explains both kinds and points at Shifts",
-   "Two kinds of coworker" in _ag and 'href="/settings/shifts">Shifts &rarr;' in _ag and "On this box." in _ag)
+ok("MCP Server explains both kinds and points at Coworkers",
+   "Two kinds of coworker" in _ag and 'href="/settings/shifts">Coworkers &rarr;' in _ag and "On this box." in _ag)
+ok("...and neither page says its old name", "Coworkers (Agents)" not in _sh + _ag
+   and not re.search(r"<h1>Shifts</h1>|&larr; Shifts<", _sh + _ag))
 ok("...each naming its own kind first",
    _sh.index("On this box.") < _sh.index("From outside.") and _ag.index("From outside.") < _ag.index("On this box."))
 _msh = member.get("/settings/shifts").get_data(as_text=True)

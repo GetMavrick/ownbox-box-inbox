@@ -147,7 +147,7 @@ def _input_schema(spec: dict) -> dict:
     which is exactly the ambiguity that makes a model invent a parameter.
     """
     if isinstance(spec.get("input_schema"), dict):          # a connected app's own schema, untouched
-        return {"type": "object", **spec["input_schema"]}
+        return {**spec["input_schema"], "type": "object"}   # never an app's own other type
     props, required = {}, []
     for arg, decl in (spec.get("args") or {}).items():
         props[arg] = {"type": decl["type"]}
@@ -249,8 +249,16 @@ def _handle(method: str, params: dict, rpc_id, seat: dict) -> dict | None:
             "serverInfo": {"name": SERVER_NAME, "version": tools.CONTRACT_VERSION},
         })
 
-    if method in ("notifications/initialized", "initialized"):
+    if method == "initialized" or method.startswith("notifications/"):
+        # EVERY NOTIFICATION, not only the handshake's: a client also sends notifications/cancelled and
+        # notifications/progress. Each answered "unknown method" in a 200 body until 2026-10-02.
         return None                                   # a notification: accepted, nothing to say
+
+    if method == "ping":
+        # THE SPEC'S LIVENESS CHECK: a client may send it at any time, and it MUST get an empty result.
+        # It answered "unknown method" until 2026-10-02 (OSDev4's audit for the connector strike, the
+        # night the owner's own Claude app said "Couldn't reload tools from the server").
+        return _ok(rpc_id, {})
 
     if method in ("tools/list", "tools/call"):
         # THE OWNER'S CONNECTED APPS, current as of this request (core/connections/gateway.py): a connection

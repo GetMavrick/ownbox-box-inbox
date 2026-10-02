@@ -49,6 +49,10 @@ def report() -> str:
             # Not set up yet (core/watchdog.NO_AI_KEY): neither a green brain nor a red outage.
             lines.append(f"• brain: :grey_question: no AI key yet — nothing can draft until one is added "
                          f"(probed {age}s ago)")
+        elif backend["status"] == "unchecked":
+            # One failed check of the AI sign-in (core/watchdog.CLAUDE_FIRST_MISS): neither green nor red.
+            lines.append(f"• brain: :large_yellow_circle: last check didn't get through — the next one decides "
+                         f"(probed {age}s ago)")
         elif backend["status"] == "ok" and not (0 <= age <= _BACKEND_STALE_S):
             # An "ok" older than ~2 watchdog passes can't be trusted — the backend may have
             # died since. Don't let `health` show a confident green off a stale probe.

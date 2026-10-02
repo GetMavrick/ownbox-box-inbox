@@ -36,7 +36,11 @@ LEDE = "Connect the apps your business runs on, so your coworkers can read from 
 # buttons. Columns with a heading on a wide screen; on a mobile, two lines — the name, then the rest.
 _CSS = """<style>
 .src{padding-bottom:6px}
-.src-head,.card .src-row>summary{display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px}
+.src-head,.card .src-row>summary,.card a.src-link{display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px}
+.card a.src-link{border-top:1px solid var(--hairline);padding:12px 0;min-height:48px;color:var(--ink);
+text-decoration:none}
+.card a.src-link:hover .src-name{text-decoration:underline}
+.card .src-head+a.src-link,.card .src-head+details.src-row{border-top:0}
 .src-head{display:none}
 .card details.src-row{margin:0;border-top:1px solid var(--hairline)}
 .card .src-row>summary{list-style:none;cursor:pointer;padding:12px 0;min-height:48px;color:var(--ink);
@@ -57,11 +61,13 @@ overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .src-acts{display:flex;flex-wrap:wrap;gap:0 10px}
 .src-acts form{margin:0}
 @media (min-width:720px){
-.src-head,.card .src-row>summary{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) 9em 11em 24px;
+.src-head,.card .src-row>summary,.card a.src-link{display:grid;
+grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) 9em 11em 24px;
 gap:16px}
 .src-head{padding:0 0 8px;color:var(--ink-3);font-size:calc(14 * var(--px, 1px));font-weight:600}
 .src-name,.src-chev,.src-host{order:0;flex:none}
 .src-when,.src-on{display:block;white-space:nowrap}
+.card .src-head+a.src-link,.card .src-head+details.src-row{border-top:1px solid var(--hairline)}
 .src-meta{display:none}
 }
 </style>"""
@@ -89,9 +95,14 @@ def _app_row(slug: str, rec: dict, opened: bool = False) -> str:
     on, tools = set(rec.get("enabled") or []), rec.get("tools") or []
     asks = set(rec.get("ask_first") or [])
     reads = [t for t in tools if t.get("read_only")]
+    from core.connections import gateway as _gateway
     rows = []
     for t in tools:
         words, said = _esc(t.get("title") or t.get("name")), _esc(_first_sentence(t.get("description")))
+        # NAMED WHERE IT IS TICKED: the same check the list uses, so the page and the list never disagree.
+        left_off = _gateway.unlistable(slug, t)
+        off_note = _esc(f"Your AI isn't offered this one: {left_off}.") if left_off else ""
+        said = off_note or said
         if t.get("read_only"):
             rows.append(f'<label class="consent"><input type="checkbox" name="tool" value="{_esc(t["id"])}"'
                         f'{" checked" if t["id"] in on else ""}><span>{words}'
@@ -104,7 +115,8 @@ def _app_row(slug: str, rec: dict, opened: bool = False) -> str:
                    f"{app} doesn't say whether this only reads, so the box treats it as changing things.")
             rows.append(f'<label class="consent"><input type="checkbox" name="ask" value="{_esc(t["id"])}"'
                         f'{" checked" if t["id"] in asks else ""}><span>{words}<br><span class="quiet">{why} '
-                        'Ticked, a coworker may ask to do it, and you approve each one.</span></span></label>')
+                        'Ticked, a coworker may ask to do it, and you approve each one.'
+                        + (f' {off_note}' if off_note else '') + '</span></span></label>')
     form = (f'<form method="post" action="{DOOR}"><input type="hidden" name="do" value="enable">'
             f'<input type="hidden" name="app" value="{_esc(slug)}">' + "".join(rows)
             # ONE INK PILL PER SCREEN (docs/SCOPE_DESIGN_LANGUAGE.md): Connect is it, so each app's Save is
@@ -177,7 +189,7 @@ def box_sources():
         except Exception as e:                   # noqa: BLE001 — a card's failure is said on it, never a 500
             log.warning("sources.card_failed", card=key, error=type(e).__name__)
             said = (False, "That did not work, and nothing was changed. Try again in a minute.")
-        return _render("", {}, cards={key: said})
+        return _card_page(key, said)
     if request.method == "POST":
         f = request.form
         action, slug = str(f.get("do") or ""), str(f.get("app") or "")
@@ -258,18 +270,60 @@ def box_sources_signed_in():
     return redirect(f"{DOOR}?added={rec['slug']}", code=303)
 
 
-def _built_in(said: dict) -> list[str]:
-    """The cards registered by code that is not core (core/source_cards.py), each drawn by
-    its owner. One that fails to draw says so in a sentence; the page still opens."""
-    out = []
-    for key, spec in source_cards.cards():
+def _source_row(key: str, spec: dict) -> str:
+    """A built-in source as one row of the table, opening its card's own page."""
+    s = source_cards.summary(key)
+    # ON A MOBILE THE SECOND LINE IS WHEN AND HOW, the first already says what (the columns are hidden there).
+    meta = " &middot; ".join(_esc(x) for x in (s["when"], s["status"]) if x)
+    return (f'<a class="src-link" href="{DOOR}/{_esc(key)}"><span class="src-name">{_esc(spec["title"])}</span>'
+            f'<span class="src-host">{_esc(s["what"])}</span><span class="src-when">{_esc(s["when"])}</span>'
+            f'<span class="src-on">{_esc(s["status"])}</span><span class="src-meta">{meta}</span>'
+            f'<span class="src-chev">{_CHEVRON}</span></a>')
+
+
+def _built_in(key: str, said) -> str:
+    """One card registered by code that is not core (core/source_cards.py), drawn by its owner. One that fails to
+    draw says so in a sentence; the page still opens."""
+    spec = source_cards.get(key)
+    try:
+        return spec["render"](said)
+    except Exception as e:                       # noqa: BLE001
+        log.warning("sources.card_unavailable", card=key, error=type(e).__name__)
+        return (f'<div class="card"><h2>{_esc(spec["title"])}</h2><p>This could not be shown just now. '
+                'Nothing about it has changed; open this page again in a minute.</p></div>')
+
+
+def _card_page(key: str, said=None):
+    """A built-in source on its own page, the card and nothing else, with the way back to the table."""
+    spec = source_cards.get(key)
+    body = (_CSS + _built_in(key, said)
+            + f'<div class="foot"><a href="{DOOR}">&larr; {_TITLE}</a></div>')
+    return chrome(f"{DOOR}/{key}", title=spec["title"], lede=LEDE, body=body), (400 if said and not said[0] else 200)
+
+
+@blueprint.route(f"{DOOR}/<key>", methods=["GET", "POST"])
+def box_source(key: str):
+    """A built-in source's own page (owner, 2026-10-02): its card, and its form posts here."""
+    refuse = _admit(owner_only=True)
+    if refuse is not None:
+        return refuse
+    if not _is_owner():
+        return chrome(DOOR, title=_TITLE, lede=LEDE,
+                      body='<div class="card"><p>Only the owner of this box can connect apps.</p></div>'
+                           + _back()), 403
+    if source_cards.get(key) is None:
+        return chrome(DOOR, title=_TITLE, lede=LEDE,
+                      body='<div class="card"><p>There is no source by that name on this box.</p>'
+                           f'<p><a href="{DOOR}">&larr; {_TITLE}</a></p></div>'), 404
+    said = None
+    if request.method == "POST":
         try:
-            out.append(spec["render"](said.get(key)))
-        except Exception as e:                   # noqa: BLE001
-            log.warning("sources.card_unavailable", card=key, error=type(e).__name__)
-            out.append(f'<div class="card"><h2>{_esc(spec["title"])}</h2><p>This could not be shown just now. '
-                       'Nothing about it has changed; open this page again in a minute.</p></div>')
-    return out
+            said = source_cards.get(key)["handle"](str(request.form.get("do") or ""), request.form,
+                                                   str(_who().get("id") or "owner"))
+        except Exception as e:                   # noqa: BLE001 — a card's failure is said on it, never a 500
+            log.warning("sources.card_failed", card=key, error=type(e).__name__)
+            said = (False, "That did not work, and nothing was changed. Try again in a minute.")
+    return _card_page(key, said)
 
 
 def _render(note: str, kept: dict, cards: dict | None = None):
@@ -277,8 +331,6 @@ def _render(note: str, kept: dict, cards: dict | None = None):
     body = []
     if note:
         body.append(f'<div class="card"><p>{_esc(note)}</p></div>')
-    # THE BUILT-IN SOURCES FIRST: they are what the box reads on its own, every day.
-    body += _built_in(cards or {})
     for flag, said in (("added", "Connected. The tools that only read are on."), ("saved", "Saved."),
                        ("checked", "Checked. Its tools are up to date.")):
         rec = items.get(str(request.args.get(flag) or ""))
@@ -289,17 +341,24 @@ def _render(note: str, kept: dict, cards: dict | None = None):
     rows = [_app_row(slug, rec, opened=slug in touched)
             for slug, rec in sorted(items.items(), key=lambda kv: str(kv[1].get("name") or "").lower())
             if isinstance(rec, dict)]
-    if rows:
-        body.append('<div class="card src"><h2>Connected apps</h2>'
-                    '<div class="src-head" aria-hidden="true"><span>App</span><span>Address</span>'
-                    '<span>Connected</span><span>Tools on</span><span></span></div>' + "".join(rows) + '</div>')
+    # ONE TABLE, A ROW PER SOURCE (owner, 2026-10-02: "This page is going to get out of control ... I wanna make sure
+    # we're being smart about where we put this", then, from a preview, one table, each row opening its own page).
+    # The built-in sources come first, as rows that open their cards' own pages; then the apps connected through
+    # their own MCP servers, which open in place as before. Core names no source: each built-in row is its card's
+    # own summary (core/source_cards.py).
+    built = [_source_row(key, spec) for key, spec in source_cards.cards()]
+    if built or rows:
+        body.append('<div class="card src">'
+                    '<div class="src-head" aria-hidden="true"><span>Source</span><span>Reads from</span>'
+                    '<span>Last read</span><span>Status</span><span></span></div>'
+                    + "".join(built) + "".join(rows) + '</div>')
     if items:
         body.append('<div class="card"><p class="quiet">To let a coworker read from these, open its shift and '
                     'tick <b>Read from the apps you connected</b>. Each call it makes is on its run\'s '
                     'receipt. Anything a coworker asks to change waits for you.</p>'
-                    '<p><a href="/settings/shifts">Shifts &rarr;</a> &nbsp; '
+                    '<p><a href="/settings/shifts">Coworkers &rarr;</a> &nbsp; '
                     '<a href="/approvals">Waiting for you &rarr;</a></p></div>')
     body.append(_connect_form(kept))
     body.append(_back())
-    bad = note or any(v and not v[0] for v in (cards or {}).values())
+    bad = note
     return chrome(DOOR, title=_TITLE, lede=LEDE, body=_CSS + "".join(body)), (400 if bad else 200)

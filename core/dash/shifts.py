@@ -1,4 +1,6 @@
-"""Shifts: the owner's coworkers, when they work, and what became of each run.
+"""Coworkers (the screen read "Shifts" until 2026-10-02): the owner's coworkers on this box, when they work, and
+what became of each run. Owner, 2026-10-02, approved from a preview: the menu says "Coworkers", with "a little pro
+badge" on a box whose plan lacks them; the address stays /settings/shifts.
 
 docs/SCOPE_SHIFTS.md §7, piece 4 (this screen) and piece 5's permission sheet. Its done-when: *a
 buyer creates the gym example on a mobile device and gets its first report without touching a
@@ -350,13 +352,13 @@ def shifts_report_link():
 
 @blueprint.route(HOME, methods=["GET"])
 def shifts_home():
-    refuse, not_in_plan, owner = _gate(HOME, "Shifts")
+    refuse, not_in_plan, owner = _gate(HOME, "Coworkers")
     if refuse is not None:
         return refuse
     lede = "The coworkers that live on this box: when they work, and what each one did."
     from core.dash.home import coworkers_two_kinds
     if not_in_plan:
-        return _page(HOME, "Shifts", lede, _upgrade_card(not_in_plan, owner=owner)
+        return _page(HOME, "Coworkers", lede, _upgrade_card(not_in_plan, owner=owner)
                      + coworkers_two_kinds("shifts")), 200
     contract, hire, runner, _, _ = _cw()
     tz = runner.box_tz()
@@ -411,7 +413,7 @@ def shifts_home():
         body += ('<div class="card"><a class="btn" href="' + NEW + '">New coworker</a></div>'
                  if not any(h for _, h in missing) else
                  f'<div class="foot"><a href="{NEW}">New coworker &rarr;</a></div>')
-    return _page(HOME, "Shifts", lede, body), 200
+    return _page(HOME, "Coworkers", lede, body), 200
 
 
 _SAID = {"saved": "Saved.", "on": "Switched on. It starts at its next time.",
@@ -462,16 +464,16 @@ def _sheet_facts(sheet: dict, when: str = "") -> str:
 @blueprint.route(HOME + "/<slug>", methods=["GET", "POST"])
 def shifts_one(slug: str):
     path = f"{HOME}/{slug}"
-    refuse, not_in_plan, owner = _gate(path, "Shifts", change=request.method == "POST")
+    refuse, not_in_plan, owner = _gate(path, "Coworkers", change=request.method == "POST")
     if refuse is not None:
         return refuse
     if not_in_plan:
-        return _page(path, "Shifts", "", _upgrade_card(not_in_plan, owner=owner)), 200
+        return _page(path, "Coworkers", "", _upgrade_card(not_in_plan, owner=owner)), 200
     contract, hire, runner, runs, _ = _cw()
     cw, why = _load(slug)
     if cw is None:
         return _page(path, "Not found", "There is no coworker by that name on this box.",
-                     f'<div class="card"><a href="{HOME}">&larr; Shifts</a></div>'), 404
+                     f'<div class="card"><a href="{HOME}">&larr; Coworkers</a></div>'), 404
     if request.method == "POST":
         do = (request.form.get("do") or "").strip()
         try:
@@ -574,7 +576,7 @@ def _detail(cw, *, note: str = "", owner: bool = True) -> str:
                         + (f'<tr class="why"><td colspan="3">{_esc(text)}</td></tr>' if text else ""))
         body += ('<div class="card"><h2>Last runs</h2><table class="sh-runs"><thead><tr><th>When</th>'
                  '<th>Result</th><th>Kind</th></tr></thead><tbody>' + "".join(rows) + '</tbody></table></div>')
-    body += f'<div class="foot"><a href="{HOME}">&larr; Shifts</a></div>'
+    body += f'<div class="foot"><a href="{HOME}">&larr; Coworkers</a></div>'
     return _page(path, cw.title, "Shipped by " + cw.source if cw.source != "my"
                  else "One of your coworkers.", body)
 
@@ -850,7 +852,7 @@ def shifts_hire(machine: str, name: str):
     if offer is None or offer["coworker"] is None:
         why = offer["reason"] if offer else "no machine on this box offers it"
         return _page(path, "Can't hire", f"This coworker can't be hired: {why}.",
-                     f'<div class="card"><a href="{HOME}">&larr; Shifts</a></div>'), 404
+                     f'<div class="card"><a href="{HOME}">&larr; Coworkers</a></div>'), 404
     cw = offer["coworker"]
     note = ""
     if request.method == "POST":
@@ -875,5 +877,5 @@ def shifts_hire(machine: str, name: str):
             f'</p><form method="post" action="{_esc(path)}">'
             f'<input type="hidden" name="fingerprint" value="{_esc(sheet["fingerprint"])}">{risk}'
             '<button type="submit">Hire</button></form></div>'
-            f'<div class="foot"><a href="{HOME}">&larr; Shifts</a></div>')
+            f'<div class="foot"><a href="{HOME}">&larr; Coworkers</a></div>')
     return _page(path, f"Hire {cw.title}", f"Shipped by {machine}.", body), (400 if note else 200)

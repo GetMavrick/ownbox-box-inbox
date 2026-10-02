@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from core import source_cards
 
 from . import instantly, jobs, outreach_sync, seam, settings
+from .card import _CSS as _WA_CSS        # the foundation's card styles: each card is on its own page now
 
 KEY = "outreach"
 # SENDING FIRST, DRAFTS LAST: what the owner is asking of this row is what is out there now.
@@ -107,7 +108,7 @@ def _hidden(do: str) -> str:
 
 
 def _busy(doing: str) -> str:
-    return (f'<p class="quiet wa-busy">{_esc(doing)}&hellip; <a href="/settings/sources#outreach">Refresh</a> '
+    return (f'<p class="quiet wa-busy">{_esc(doing)}&hellip; <a href="/settings/sources/outreach">Refresh</a> '
             'to see the result.</p>')
 
 
@@ -132,12 +133,12 @@ def render(note=None) -> str:
         acts = ('<div class="ui-acts">' + (_busy("Pulling") if pulling else
                 f'<p class="quiet">Pull now works again at {_esc(wait)}, when Instantly lets the box ask.</p>'
                 if wait else
-                f'<form method="post" action="/settings/sources#outreach">{_hidden("pull")}'
+                f'<form method="post" action="/settings/sources/outreach">{_hidden("pull")}'
                 '<button class="ghost" type="submit">Pull now</button></form>') + '</div>')
     lc = outreach_sync.last_check()
     last = (f'<p class="{"ok" if lc.get("ok") else "stale"}">Last check, {_esc(_when(lc.get("at")))}: '
             f'{_esc(lc["said"])}</p>' if lc.get("said") and not checking else "")
-    form = (last + f'<form method="post" action="/settings/sources#outreach">{_hidden("key")}'
+    form = (last + f'<form method="post" action="/settings/sources/outreach">{_hidden("key")}'
             f'<label for="out-key">Instantly API key, with the {instantly.SCOPE} scope</label>'
             '<input id="out-key" name="key" type="password" autocomplete="off" '
             f'placeholder="{"Saved. Paste a new one to replace it." if connected else "Paste your key"}">'
@@ -148,7 +149,7 @@ def render(note=None) -> str:
     return ('<div class="card" id="outreach"><h2>Outreach</h2>'
             '<p class="sub">Your cold email campaigns in Instantly: what was sent, opened, clicked, replied to and '
             'booked, by campaign and by step, read every hour. Your coworkers read them from here.</p>'
-            + said + facts + acts + '<h3 class="wa-h">Instantly</h3>' + form + '</div>')
+            + said + facts + acts + '<h3 class="wa-h">Instantly</h3>' + form + _WA_CSS + '</div>')
 
 
 def handle(do: str, form, by: str) -> tuple[bool, str]:
@@ -165,4 +166,17 @@ def handle(do: str, form, by: str) -> tuple[bool, str]:
     return False, "That did not work, and nothing was changed."
 
 
-source_cards.register(KEY, title="Outreach", render=render, handle=handle, order=20)
+def summary() -> dict:
+    """The card's one row in the Data Sources table (core/source_cards.py), in the card's own words."""
+    connected = settings.instantly() is not None
+    st, cs = settings.pull_state(), seam.campaigns()
+    live = sum(1 for c in cs if c.get("status") in outreach_sync._LIVE)
+    what = ("Instantly: " + f"{len(cs):,} campaign{'s' if len(cs) != 1 else ''}"
+            + (f", {live:,} sending" if live else "")) if cs else "Instantly"
+    stopped = st.get("error") or st.get("key_refused")
+    status = ("Stopped" if stopped else "Connected") if connected else "Not connected"
+    return {"what": what, "when": _when(st.get("last_run")) if connected else "", "status": status,
+            "connected": connected}
+
+
+source_cards.register(KEY, title="Outreach", render=render, handle=handle, order=20, summary=summary)

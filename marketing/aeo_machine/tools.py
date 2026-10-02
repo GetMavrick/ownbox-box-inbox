@@ -83,7 +83,8 @@ def status():
     except Exception:                                   # noqa: BLE001 — a section, never the answer
         brain = {}
     ai_ready = brain.get("state") == "ok" or brain.get("ok") is True
-    if not ai_ready:
+    # One failed check of the sign-in (`unchecked`) is not a missing account: the next check decides.
+    if not ai_ready and brain.get("state") != "unchecked":
         need.insert(0, "a signed-in AI account (System Settings → AI account)")
     try:
         cap = max(0, int(settings.get().get("weekly_cap") or 0))

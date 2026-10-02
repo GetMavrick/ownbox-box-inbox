@@ -123,26 +123,34 @@ print("\ntest_system_settings_is_four_groups_with_plain_names")
 # Email (not Outbound Email). The AI agents you already pay for are Coworkers (Agents), owner,
 # 2026-09-30. Move Your Box is not a row since the same day: it is in Server Access's danger zone.
 _sn = menu("/settings/people")[1]
-_srows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', _sn, re.S)
+# A ROW'S NAME IS THE TEXT BEFORE ANY BADGE INSIDE IT (the plan badge sits in the label, beside the name).
+_srows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _sn, re.S)
 # Data Sources joined Your AI on 2026-10-01: the page the owner approved for connecting apps by MCP
 # (docs/SCOPE_CONNECTIONS_MCP_FIRST.md), and what it connects is read by coworkers on their shifts.
+# FOUR NAMED GROUPS, IN THE ORDER A BOX IS SET UP (owner, 2026-10-02, approved from a preview): AI (the account, the MCP
+# server your own AI connects to, the coworkers on the box), Connections (what it reads from, the mobile app, the
+# address it sends from), Team, Server.
 ok("the rows, in their groups' order",
-   _srows == ["Overview", "AI Account", "Coworkers (Agents)", "Shifts", "Data Sources", "Mobile App", "Email",
+   _srows == ["Overview", "AI Account", "MCP Server", "Coworkers", "Data Sources", "Mobile App", "Sending Email",
               "People", "Updates", "Server Access"], str(_srows))
-_sgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
-                   _sn, re.S)
-ok("...each group opening with a gap, and nothing else", _sgrp == ["AI Account", "Mobile App", "People",
-   "Updates"], str(_sgrp))
-ok("...and no old name is left", "AI Coworkers" not in _sn and "Outbound Email" not in _sn)
+_sgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _sn, re.S)
+ok("...each group opening with a gap", _sgrp == ["AI Account", "Data Sources", "People", "Updates"], str(_sgrp))
+ok("...and its name above its first row", re.findall(r'<span class="glabel">([^<]*)</span>', _sn)
+   == ["AI", "Connections", "Team", "Server"], re.findall(r'<span class="glabel">([^<]*)</span>', _sn))
+ok("...and no old name is left", all(x not in _sn for x in ("AI Coworkers", "Outbound Email", "Coworkers (Agents)",
+                                                           '"lbl">Shifts', '"lbl">Email<')))
 _mc = app.test_client()
 _mc.set_cookie(dash.COOKIE, dash.new_session(state.add_user("tomas.reyes@acme.co", name="Tomas",
                                                             role="member")["id"]))
 _mn = _mc.get("/settings").get_data(as_text=True).split('<nav class="rail"', 1)[-1].split("</nav>", 1)[0]
-_mgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
-                   _mn, re.S)
+_mgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _mn, re.S)
 # A GROUP WHOSE FIRST ROWS A MEMBER IS NOT SHOWN still opens with its gap, on the first row they are.
 ok("a member's shorter menu keeps its gaps on the rows they are shown",
-   _mgrp == ["Shifts", "Mobile App", "Updates"], str(_mgrp))
+   _mgrp == ["Coworkers", "Mobile App", "Updates"], str(_mgrp))
+# A GROUP'S NAME TRAVELS WITH ITS GAP, and a group a member sees nothing of has no name over another group's rows.
+ok("...and its group names over them, never a name for a group they are shown nothing of",
+   re.findall(r'<span class="glabel">([^<]*)</span>', _mn) == ["AI", "Connections", "Server"],
+   re.findall(r'<span class="glabel">([^<]*)</span>', _mn))
 
 
 print("\ntest_every_settings_page_says_where_you_are")

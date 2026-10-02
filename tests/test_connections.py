@@ -311,9 +311,10 @@ ok("...the app is listed with its tools: reads ticked, the one that changes thin
    and TOKEN not in html, html[html.find("Clinic Notes"):][:400])
 # ONE ROW PER APP IN A TABLE (owner, 2026-10-01: "it needs to be tighter list like in a table format"): the row
 # says which app, where, since when and how many tools are on, and opens to the ticks and buttons.
-ok("...as one row of the Connected apps table, its columns headed",
-   "Connected apps" in html and html.count('<details class="src-row"') == 1
-   and all(f"<span>{h}</span>" in html for h in ("App", "Address", "Connected", "Tools on")))
+# ONE TABLE FOR EVERY SOURCE since 2026-10-02 (owner, from a preview): the apps and the built-in sources share it.
+ok("...as one row of the Data Sources table, its columns headed",
+   html.count('<details class="src-row"') == 1
+   and all(f"<span>{h}</span>" in html for h in ("Source", "Reads from", "Last read", "Status")))
 ok("...open, since it was just connected", '<details class="src-row" id="app-clinic_notes" open>' in html)
 ok("...and closed when nothing has just happened to it",
    '<details class="src-row" id="app-clinic_notes">' in owner.get("/settings/sources").get_data(as_text=True))
