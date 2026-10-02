@@ -141,7 +141,10 @@ _ANTHROPIC_SHAPE = ("sk-ant-", 40)
 # field take either. `claude setup-token` mints `sk-ant-oat...`; an API key is `sk-ant-api...`. Both
 # start `sk-ant-`, so the ORDER of the test matters: the longer prefix is asked about first, or
 # every subscription token is misfiled as an API key and sent to an endpoint that will refuse it.
-_CLAUDE_OAUTH_SHAPE = ("sk-ant-oat", 40)
+# A WHOLE TOKEN IS ABOUT 108 CHARACTERS (measured 2026-09-22). 90 is the floor: a token copied from a terminal that
+# wrapped it at 80 columns loses its tail and still starts right, and Anthropic then answers "OAuth access token is
+# invalid" on every draft (the owner's box, 2026-10-01). Refused here, while the person is looking at the field.
+_CLAUDE_OAUTH_SHAPE = ("sk-ant-oat", 90)
 
 # WHAT A GOOGLE APP PASSWORD LOOKS LIKE: sixteen letters, which Google DISPLAYS as four groups of four.
 # People paste it with the spaces in, every time, because that is how it is shown to them. Stripping
@@ -479,9 +482,12 @@ def validate(name: str, value: str) -> str:
                                  f"with {prefix} and are longer than that.")
     if name == CLAUDE_OAUTH:
         prefix, least = _CLAUDE_OAUTH_SHAPE
-        if not value.startswith(prefix) or len(value) < least:
+        if not value.startswith(prefix):
             raise SecretRejected("That does not look like a Claude subscription token — run "
                                  "`claude setup-token` and paste the sk-ant-oat... value.")
+        if len(value) < least or not all(ch.isascii() and (ch.isalnum() or ch in "-_") for ch in value):
+            raise SecretRejected("That token looks cut short or has something extra in it. Copy it again in one "
+                                 "piece: it is about 108 characters, all letters, digits, - and _.")
     return value
 
 
@@ -552,15 +558,24 @@ def anthropic_key() -> str:
             or get(ANTHROPIC))
 
 def claude_oauth_token() -> str:
-    """The buyer's Claude subscription token, environment first — the same order as the API key.
+    """The buyer's Claude subscription token: THE NEWEST SIGN-IN FIRST, the box's .env only when nobody has signed in.
 
-    ENVIRONMENT FIRST KEEPS THE OWNER BOX EXACTLY AS IT IS. It already carries
-    CLAUDE_CODE_OAUTH_TOKEN in /opt/aios/.env, installed by scripts/install_claude_code.sh, and
-    nothing about that changes. The table is consulted only where the environment is empty, which
-    is precisely the delivered-box hole this is here to close.
+    IT WAS ENVIRONMENT FIRST, and that made signing in again useless on any box whose .env held a token: the new
+    sign-in was saved and never used, the AI Account page still said Connected, and every request was refused
+    (owner's box, 2026-10-01, "OAuth access token is invalid" after re-signing in). The HQ box, whose token lives
+    only in its .env, has nothing in the table, so it is unchanged.
     """
     import os
-    return (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip() or get(CLAUDE_OAUTH)
+    return get(CLAUDE_OAUTH) or (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip()
+
+
+def claude_oauth_source() -> str:
+    """Where the token in use comes from: "sign-in", "settings file", or "" when there is none. For the AI Account
+    page, so it says which token the box is using."""
+    import os
+    if get(CLAUDE_OAUTH):
+        return "sign-in"
+    return "settings file" if (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip() else ""
 
 
 def put_claude_oauth(value: str, *, consented: bool = False,

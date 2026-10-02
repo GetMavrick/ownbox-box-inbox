@@ -96,8 +96,8 @@ def wait(pred, secs=20.0):
     return pred()
 
 
-BOX_TOKEN = "sk-ant-oat01-" + "B" * 60
-OWN_TOKEN = "sk-ant-oat01-" + "M" * 60
+BOX_TOKEN = "sk-ant-oat01-" + "B" * 95
+OWN_TOKEN = "sk-ant-oat01-" + "M" * 95
 
 try:
     print("test_two_claude_sign_ins_run_side_by_side")

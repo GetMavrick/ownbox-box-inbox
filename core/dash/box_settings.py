@@ -142,7 +142,11 @@ def box_ai():
                     str(_step("anthropic").get("consent_field") or "subscription_consent"))))
             elif action == "code":
                 claude_login.finish(str(request.form.get("code") or ""), user_id=who.get("id"))
-                return redirect("/settings", code=303)
+                # CHECKED THE MOMENT IT'S SAVED (owner, 2026-10-01: a sign-in the page called connected was refused
+                # by Anthropic on every draft). One tiny question; the page then says working, or exactly why not.
+                from core import ai_health
+                ai_health.test(fresh=True)
+                return redirect("/settings/ai?tested=1", code=303)
             elif action == "cancel":
                 claude_login.cancel()
                 return redirect("/settings/ai", code=303)
@@ -162,7 +166,9 @@ def box_ai():
                     consented=bool(request.form.get(
                         str(_step("anthropic").get("consent_field") or "subscription_consent"))),
                     user_id=who.get("id"))
-                return redirect("/settings", code=303)
+                from core import ai_health                         # checked the moment it's saved, as above
+                ai_health.test(fresh=True)
+                return redirect("/settings/ai?tested=1", code=303)
         except claude_login.LoginError as e:
             # THE SENTENCE IS THE PRODUCT HERE. `claude_login` raises only things a person can act
             # on and never quotes the CLI's transcript at them — the transcript carried the
@@ -417,10 +423,20 @@ _HOW = {"test": "a test", "coworker": "a coworker's shift", "router": "a quick c
 def _ai_health_lines() -> str:
     """WHETHER THE AI REALLY ANSWERS, not only whether it's connected (core/ai_health.py): the last answer, a
     failure newer than it with its reason, the latest test, and the button to test it now."""
-    from core import ai_health
+    from core import ai_health, box_secrets
     st, t = ai_health.state(), ai_health.last_test()
     ok, fail = st.get("last_ok") or {}, st.get("last_fail") or {}
     out = []
+    # WHICH TOKEN IS IN USE (owner, 2026-10-01): a newer sign-in always wins; a token only in the box's settings file
+    # is named, so a stale one there can never hide behind "Connected" again.
+    try:
+        source = box_secrets.claude_oauth_source()
+    except Exception:                                # noqa: BLE001
+        source = ""
+    if source == "sign-in":
+        out.append('<p class="quiet">Using the token from your sign-in on this page.</p>')
+    elif source == "settings file":
+        out.append('<p class="quiet">Using a token from the box\'s settings file. Sign in below to replace it.</p>')
     if ok.get("at"):
         out.append(f'<p class="quiet">Last answered: {_esc(_local_when(ok["at"]))}, '
                    f'{_esc(_HOW.get(ok.get("how"), "writing for a machine"))}.</p>')

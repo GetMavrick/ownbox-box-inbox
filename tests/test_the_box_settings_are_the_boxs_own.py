@@ -215,13 +215,15 @@ before = box_secrets.anthropic_state()["status"]
 ok("nothing is connected to begin with", before == "not_connected", before)
 
 # A SUBSCRIPTION TOKEN, which needs no vendor call to store — an API key would reach Anthropic.
-token = "sk-ant-oat" + ("T" * 48)
+token = "sk-ant-oat" + ("T" * 98)
 r = oc.post("/settings/ai", data={"do": "key", "key": token})
 ok("the save is accepted", r.status_code in (302, 303), str(r.status_code))
 # THE OWNER'S ACCEPTANCE, IN OSDEV5'S WORDS: connecting the AI account from System Settings leaves
 # you on System Settings. He hit the opposite of this and it is what started the whole change.
+# Since 2026-10-01 a saved credential is tested at once, and the owner lands on the AI Account page with the
+# answer (owner: "I can't tell if it's using inference"). That page is in System Settings, never in a machine.
 ok("...and lands back on Settings, not inside a machine",
-   (r.headers.get("Location") or "").endswith("/settings"), str(r.headers.get("Location")))
+   (r.headers.get("Location") or "").endswith(("/settings", "/settings/ai?tested=1")), str(r.headers.get("Location")))
 ok("...and the credential actually landed",
    box_secrets.anthropic_state()["status"] == "connected",
    str(box_secrets.anthropic_state()))
@@ -339,7 +341,7 @@ ok("...and it fires no permission prompt", "requestPermission" not in sheet)
 # THE ONE THAT MATTERS, AND IT IS ASSERTED AGAINST REAL SECRETS RATHER THAN A PATTERN. The day
 # somebody adds "and here is your key" to this page is the day a key goes on a noticeboard, so the
 # box is given genuine credentials FIRST and the sheet is then read for every one of them.
-_tok = "sk-ant-oat" + ("H" * 48)
+_tok = "sk-ant-oat" + ("H" * 98)
 box_secrets.put_claude_oauth(_tok, consented=True, user_id=state.owner_user()["id"])
 _sid, _cred = seats.mint("Handout leak check", "read")
 fresh = mc.get("/settings/mobile/print").get_data(as_text=True)

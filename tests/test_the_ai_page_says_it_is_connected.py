@@ -94,7 +94,7 @@ try:
 
     print("\ntest_a_claude_subscription_is_named_as_one")
     clear()
-    box_secrets.put(box_secrets.CLAUDE_OAUTH, "sk-ant-oat01-" + "b" * 60)
+    box_secrets.put(box_secrets.CLAUDE_OAUTH, "sk-ant-oat01-" + "b" * 95)
     code, html = page()
     ok("it says Claude subscription", "<h2>Connected</h2>" in html
        and "Claude subscription" in text(html).split("Use a different account")[0])
@@ -118,7 +118,7 @@ try:
 
     print("\ntest_the_vocabulary")
     clear()
-    box_secrets.put(box_secrets.CLAUDE_OAUTH, "sk-ant-oat01-" + "b" * 60)
+    box_secrets.put(box_secrets.CLAUDE_OAUTH, "sk-ant-oat01-" + "b" * 95)
     said = text(page()[1])
     banned = re.findall(r"\b(phone|phones|ring|call|calls|dial|line|voice)\b", said, re.I)
     ok("no reserved noun on the connected page", not banned, str(sorted(set(banned))))

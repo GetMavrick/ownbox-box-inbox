@@ -79,13 +79,14 @@ def _keep_test(result: dict) -> dict:
     return result
 
 
-def test() -> dict:
+def test(*, fresh: bool = False) -> dict:
     """Ask the box's AI one tiny question, through the path drafts use. -> {"ok", "answer", "seconds", "why"}.
     Kept as `last_test`, so the page shows it after a reload. At most one every 30 seconds: each one is a real
-    request on the owner's plan."""
+    request on the owner's plan. `fresh` skips that gap: a credential was just saved, and the last answer was
+    about the one it replaced."""
     prev = last_test() or {}
     try:
-        if time.time() - datetime.fromisoformat(str(prev.get("at"))).timestamp() < TEST_GAP_S:
+        if not fresh and time.time() - datetime.fromisoformat(str(prev.get("at"))).timestamp() < TEST_GAP_S:
             return {"ok": bool(prev.get("ok")), "answer": prev.get("answer", ""), "seconds": prev.get("seconds", 0),
                     "why": prev.get("why", ""), "repeat": True}
     except (TypeError, ValueError):

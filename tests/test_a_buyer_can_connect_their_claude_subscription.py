@@ -56,7 +56,7 @@ FAILS: list[str] = []
 
 # Shapes only — neither is a real credential and neither is ever sent anywhere.
 API_KEY = "sk-ant-api03-" + "a" * 60
-SUB_TOKEN = "sk-ant-oat01-" + "b" * 60
+SUB_TOKEN = "sk-ant-oat01-" + "b" * 95
 
 
 def ok(label: str, cond: bool, detail: str = "") -> None:

@@ -181,7 +181,7 @@ ok("no constant claims the store refuses a token without the tick",
 
 # AND THE BEHAVIOUR IT WAS WRONG ABOUT, ASSERTED DIRECTLY so the comment can never drift alone.
 box_secrets.clear_claude_oauth(user_id="usr_owner")
-box_secrets.put_claude_oauth("sk-ant-oat" + "a" * 40, user_id="usr_owner")
+box_secrets.put_claude_oauth("sk-ant-oat" + "a" * 98, user_id="usr_owner")
 ok("a Claude token given without the tick is stored anyway",
    box_secrets.get(box_secrets.CLAUDE_OAUTH).startswith("sk-ant-oat"))
 ok("...and records no consent either", box_secrets.oauth_consent_record() == "",

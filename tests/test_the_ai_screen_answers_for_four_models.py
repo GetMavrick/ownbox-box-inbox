@@ -216,12 +216,12 @@ ok("...and no call in it passes consent as a literal True", not _hard, f"{len(_h
 
 # NEVER REQUIRED, ON THE OWNER'S 2026-09-18 RULING: a box refuses nobody over our tick.
 ok("the tick is not a `required` field", 'required' not in (start_form[0] if start_form else ""))
-box_secrets.put_claude_oauth("sk-ant-oat01-" + "z" * 40, consented=False)
+box_secrets.put_claude_oauth("sk-ant-oat01-" + "z" * 95, consented=False)
 ok("a token given without the tick is stored anyway",
    bool(box_secrets.get(box_secrets.CLAUDE_OAUTH)))
 ok("...and records no consent that was never given",
    not box_secrets.oauth_consent_record())
-box_secrets.put_claude_oauth("sk-ant-oat01-" + "y" * 40, consented=True)
+box_secrets.put_claude_oauth("sk-ant-oat01-" + "y" * 95, consented=True)
 ok("...while a tick that IS given is written down", bool(box_secrets.oauth_consent_record()))
 
 

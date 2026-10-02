@@ -125,24 +125,50 @@ def find_token(text: str) -> str:
     blank line, a space, or any other character. The length is not hard-coded — that is the
     vendor's to change — but a sane ceiling stops a runaway join.
     """
+    return scan_token(text)[0]
+
+
+def scan_token(text: str) -> tuple[str, bool]:
+    """(the token as printed so far, whether it is COMPLETE). Complete means something that can't be more token
+    follows it: a blank line, a space, a sentence. A token at the very end of what has arrived is NOT complete,
+    because its wrapped second line may still be on its way.
+
+    MEASURED 2026-10-01 (the owner's box, Anthropic answering "OAuth access token is invalid"; reproduced by another
+    session): the capture saved the first token-shaped text it saw and stopped the CLI, so when the first line of
+    the wrap had arrived and the second had not, 43 of 108 characters were saved. The capture now waits for this.
+    """
     text = text.replace("\r\n", "\n").replace("\r", "")
     m = _TOKEN_START.search(text)
     if not m:
-        return ""
-    tok, pos = m.group(0), m.end()
-    while pos < len(text) and text[pos] == "\n":
+        return "", False
+    tok, pos, complete = m.group(0), m.end(), False
+    while True:
+        if pos >= len(text):
+            break                                    # it ends right here: more may be coming
+        if text[pos] != "\n":
+            complete = True                          # a space or another character ends it
+            break
         rest = text[pos + 1:]
+        if not rest:
+            break                                    # a line break and nothing yet: the wrap may follow
         n = _TOKEN_LINE.match(rest)
         if not n:
-            break                                    # blank line or a non-token character
+            complete = True                          # blank line or a non-token character
+            break
         end = n.end()
-        if end < len(rest) and rest[end] not in ("\n",):
-            break                                    # the line goes on with a space or more: prose
+        if end == len(rest):
+            if len(tok) + end <= 256:
+                tok += n.group(0)                    # join what has arrived; more of it may still come
+            break
+        if rest[end] != "\n":
+            complete = True                          # the line goes on with a space or more: prose
+            break
         if len(tok) + end > 256:
-            break                                    # no token is this long; stop a runaway join
+            complete = True                          # no token is this long; stop a runaway join
+            break
         tok += n.group(0)
         pos += 1 + end
-    return tok if len(tok) >= 30 else ""
+    return (tok, complete) if len(tok) >= 30 else ("", False)
 
 
 def redact(text: str) -> str:
@@ -666,6 +692,29 @@ def _serve(d: pathlib.Path) -> int:
         except Exception:                                # noqa: BLE001 — never break the login
             pass
 
+    def save(found: str) -> int:
+        """Store the whole token and finish, or fail in words if it isn't a whole token."""
+        user = _read(d, "user") or None
+        machine = _read(d, "machine")
+        try:
+            if machine:
+                from core import machine_accounts
+                machine_accounts.put(machine, "claude_oauth", found, user_id=user)
+            else:
+                box_secrets.put_claude_oauth(found, consented=_read(d, "consent") == "1", user_id=user)
+        except box_secrets.SecretRejected:
+            keep_transcript()
+            if proc.poll() is None:
+                proc.kill()
+            os.close(master)
+            return fail("Claude's token arrived incomplete, so nothing was saved. Press Connect to start again.")
+        keep_transcript()
+        _write(d, "status", "done")
+        if proc.poll() is None:
+            proc.kill()
+        os.close(master)
+        return 0
+
     def fail(sentence: str) -> int:
         keep_transcript()
         _write(d, "error", sentence)
@@ -784,28 +833,16 @@ def _serve(d: pathlib.Path) -> int:
         text = _clean(buf)
         # THE TOKEN IS SEARCHED FOR IN THE WHOLE TRANSCRIPT, not only the newest chunk: it is
         # printed across a wrapped line, and a chunk boundary can land in the middle of it.
-        # WHOLE, AND NOTHING MORE — see find_token for the night this line cost.
-        found = find_token(text)
-        if found:
-            user = _read(d, "user") or None
+        # WHOLE, AND NOTHING MORE — see find_token for the night this line cost. AND ONLY ONCE IT IS
+        # COMPLETE (scan_token): saving at first sight saved half a token on 2026-10-01.
+        found, complete = scan_token(text)
+        if found and (complete or proc.poll() is not None):
             # BOTH HALVES OF THIS LINE WERE FIXED TONIGHT, BY TWO PEOPLE, AN HOUR APART, and a
             # merge that kept either one alone would have quietly undone the other. `found` is
             # #1422's — the token captured whole and nothing that came after it. The consent is
             # this branch's — read from the login's own directory rather than asserted, because
             # the tick a buyer is shown now sits beside Connect and has to survive the round trip.
-            machine = _read(d, "machine")
-            if machine:
-                from core import machine_accounts
-                machine_accounts.put(machine, "claude_oauth", found, user_id=user)
-            else:
-                box_secrets.put_claude_oauth(found, consented=_read(d, "consent") == "1",
-                                             user_id=user)
-            keep_transcript()
-            _write(d, "status", "done")
-            if proc.poll() is None:
-                proc.kill()
-            os.close(master)
-            return 0
+            return save(found)
         flat = _squash(text)
         if flat.count("pastecodehere") > asked_before:
             proc.kill()
@@ -833,6 +870,11 @@ def _serve(d: pathlib.Path) -> int:
             return fail("Claude finished the sign-in but this box did not recognise a token in "
                         "what it printed. Nothing is wrong with your account. Paste a token "
                         "instead, and tell support the sign-in ended without one.")
+    # THE OUTPUT ENDED OR TIME RAN OUT WITH A TOKEN ON SCREEN: the CLI closing its output ends the loop above before
+    # a last look, so look now. Too short a token is refused by `put_claude_oauth`, never stored.
+    found, _complete = scan_token(_clean(buf))
+    if found:
+        return save(found)
     if proc.poll() is None:
         proc.kill()
     os.close(master)
