@@ -255,4 +255,48 @@ CREATE TABLE IF NOT EXISTS inbox_claims (
   note        TEXT,                   -- why it was handed back, shown to the person; NULL = finished
   PRIMARY KEY (space, zernio_conversation_id)
 );
+
+-- A PERSON TOOK THIS CONVERSATION OVER from a machine (claims.take_over). No machine claims it again; only the owner
+-- reopens it, by handing it back (claims.hand_back). OSDev1's reviews of #1790. A NEW table, so no migration number.
+CREATE TABLE IF NOT EXISTS inbox_takeovers (
+  space       TEXT NOT NULL,
+  zernio_conversation_id TEXT NOT NULL,
+  taken_at    TEXT NOT NULL,          -- YYYY-MM-DDTHH:MM:SS UTC
+  PRIMARY KEY (space, zernio_conversation_id)
+);
+
+-- WHO IS ON EACH CONVERSATION, by the platform's own ids: the other party's id and @handle, lowercased, written
+-- every time the poller reads the conversation. So "did this commenter say STOP?" is answered here, for every
+-- conversation the box has ever read, never by paging the platform's list (OSDev1's review of #1789: page 1 alone
+-- let a STOP on page 2 through). A NEW table, so no migration number.
+CREATE TABLE IF NOT EXISTS inbox_participant_ids (
+  space       TEXT NOT NULL,
+  zernio_conversation_id TEXT NOT NULL,
+  ident       TEXT NOT NULL,
+  PRIMARY KEY (space, zernio_conversation_id, ident)
+);
+CREATE INDEX IF NOT EXISTS idx_inbox_participant_ids ON inbox_participant_ids (space, ident);
+
+-- EVERY COMMENT THE BOX ITSELF READ FROM THE PLATFORM (inbox/conversations.comments). A machine can name a comment as
+-- the NEW start that reopens a conversation a person took over (claims.claim(trigger=)); the box believes it only if
+-- the comment is here, was written by that conversation's person, and is newer than the takeover (OSDev1's re-review
+-- of #1790: enforce, don't trust). A NEW table, so no migration number.
+CREATE TABLE IF NOT EXISTS inbox_comments_seen (
+  space       TEXT NOT NULL,
+  comment_id  TEXT NOT NULL,
+  author_id   TEXT NOT NULL DEFAULT '',
+  author_handle TEXT NOT NULL DEFAULT '',
+  at          TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (space, comment_id)
+);
+
+-- THE BOX'S OWN MESSAGE, READ BACK UNDER ANOTHER ID (store.is_box_echo): each box send is paired with AT MOST ONE
+-- read-back, so a person repeating the same words is never taken for a second echo. A NEW table.
+CREATE TABLE IF NOT EXISTS inbox_echoes (
+  space          TEXT NOT NULL,
+  box_message_id TEXT NOT NULL,       -- the id the send call returned
+  echo_id        TEXT NOT NULL,       -- the id the conversation list gave the same message
+  PRIMARY KEY (space, box_message_id),
+  UNIQUE (space, echo_id)
+);
 """

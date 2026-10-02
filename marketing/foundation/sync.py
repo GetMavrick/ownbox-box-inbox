@@ -61,6 +61,18 @@ _NOT_A_SITE = re.compile(r"(^localhost$|^127\.|^0\.0\.0\.0$|^\[|^[0-9.]+$|\.loca
                          r"\.vercel\.app$|\.ownbox\.app$|\.ngrok(-free)?\.(app|io|dev)$)")
 
 
+def site_hosts(conn: posthog.Conn) -> list[str]:
+    """The real sites this PostHog project sees, busiest first. Raises posthog.Refused. Used by the weekly find and by
+    the card's first connection (marketing/foundation/jobs.py), so both call the same hosts a site."""
+    # A HOST WITH A PORT OR A TRAILING DOT IS NOT A PUBLIC SITE (localhost:3000, 192.168.1.20:3000, example.com.):
+    # PostHog records $host with the port, and a day query matches $host exactly, so it is dropped, not cleaned.
+    # EACH HOST ONCE (OSDev1's review of #1815): hosts() lower-cases, so "Ownbox.io" and "ownbox.io" are one site,
+    # and a site listed twice would end the one-at-a-time sync chain at its second appearance.
+    seen = (str(h or "").strip().lower() for h, _ in posthog.hosts(conn))
+    return list(dict.fromkeys(h for h in seen
+                              if h and ":" not in h and not h.endswith(".") and not _NOT_A_SITE.search(h)))[:MAX_FOUND]
+
+
 def _find_sites(conn: posthog.Conn) -> None:
     """SETUP FIXES ITSELF: with no sites typed on the card, find them in PostHog, once a week. A real site is a host
     with page views; a preview, a laptop or the box itself is not. Never raises: the typed list, the last list
@@ -74,10 +86,7 @@ def _find_sites(conn: posthog.Conn) -> None:
     except ValueError:
         pass
     try:
-        # A HOST WITH A PORT OR A TRAILING DOT IS NOT A PUBLIC SITE (localhost:3000, 192.168.1.20:3000, example.com.):
-        # PostHog records $host with the port, and a day query matches $host exactly, so it is dropped, not cleaned.
-        hosts = [h for h, _ in posthog.hosts(conn)
-                 if ":" not in h and not h.endswith(".") and not _NOT_A_SITE.search(h)][:MAX_FOUND]
+        hosts = site_hosts(conn)
     except posthog.Refused as e:
         log.info("website.find_sites_skipped", why=str(e)[:120])
         return
@@ -131,6 +140,13 @@ def sync(upto: date | None = None, *, force: bool = False) -> dict:
     store.prune()
     settings.set_sync_state(error=out["error"], last_run=_now_iso(), upto=upto.isoformat(),
                             synced=out["synced"], note="")
+    # THE MORNING REVIEW CARRIES THE NUMBERS: yesterday closed at midnight, before this sync could know its visits, so
+    # the website row for the day just synced is re-reported while that day's review hasn't been started
+    # (report.late). AFTER the sync state is written, so the row reads this run's outcome, never the last one's.
+    if out["synced"]:
+        from core import report as _report
+        from .report import MACHINE as _MACHINE
+        _report.late(_MACHINE, upto)
     return out
 
 

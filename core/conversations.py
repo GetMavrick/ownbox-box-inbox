@@ -10,14 +10,28 @@ import (`provide`), and the SDK asks this module, never the inbox. A box with no
 every call says so in a sentence a builder can act on.
 
 WHAT A PROVIDER ANSWERS (all keyword arguments; `machine` is the caller's key, `title` its display name):
-  claim(machine=, title=, conversation=, days=)   -> bool    hold it; the inbox stops drafting it
+  claim(machine=, title=, conversation=, days=, trigger=)
+                                                  -> bool    hold it; the inbox stops drafting it. Never back
+                                                             after a person took it over, unless the owner hands
+                                                             it back or `trigger` is a comment the box itself read,
+                                                             from that person, newer than the takeover
   release(machine=, conversation=, note=)         -> bool    hand it back, with what the person should know
   holder(conversation=)                           -> dict | None
   messages(conversation=, since=, limit=)         -> list[{"id", "direction", "sent_by", "body", "at"}]
-  send(machine=, conversation=, text=, key=)      -> {"status": "sent" | "duplicate" | "refused" | "unknown",
+  send(machine=, conversation=, text=, key=, buttons=, quick_replies=)
+                                                  -> {"status": "sent" | "duplicate" | "refused" | "unknown",
                                                       "message_id", "reason"}
+  comments(post=, since=, posts=, per_post=)      -> list[{"id", "post", "account", "space", "text",
+                                                           "author": {"id", "username", "name"}, "at"}]
+  reply_to_comment(machine=, comment=, text=, key=, quick_replies=)
+                                                  -> the same answer as send: the private reply that opens a
+                                                     conversation with someone who commented
+  conversation_for(comment=)                      -> the commenter's DM conversation id, or None (not yet)
+  follows_you(conversation=)                      -> True | False | None (the platform didn't say)
   opted_out(conversation=)                        -> bool    this person said STOP on this box; never contact
                                                              them, by any channel (OSDev1's review of #1810)
+The three reads (comments, conversation_for, follows_you) NEVER RAISE: a Space or a read that fails is skipped
+or answers None, logged with its reason, so one bad key never breaks every Space (OSDev1's review of #1789).
 """
 from __future__ import annotations
 
@@ -26,7 +40,8 @@ from core.logging import get_logger
 log = get_logger(__name__)
 
 _PROVIDER = None
-_NEEDED = ("claim", "release", "holder", "messages", "send", "opted_out")
+_NEEDED = ("claim", "release", "holder", "messages", "send", "opted_out", "comments", "reply_to_comment",
+           "conversation_for", "follows_you")
 
 
 class NoProvider(RuntimeError):

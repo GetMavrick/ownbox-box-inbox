@@ -19,7 +19,7 @@ that writes a reply is a separate architectural decision (§8.4) and it is not m
 """
 from __future__ import annotations
 
-from core import cost_guard
+from core import cost_guard, state
 from core.logging import get_logger
 from core.vendors import zernio
 
@@ -76,7 +76,8 @@ def idem_for(space: str, zcid: str, user_id: str, nonce: str) -> str:
     return f"reply:{space}:{zcid}:{user_id}:{nonce}"
 
 
-def _deliver(*, space: str, zcid: str, conv: dict, account_id: str, text: str, idem: str) -> str:
+def _deliver(*, space: str, zcid: str, conv: dict, account_id: str, text: str, idem: str,
+             buttons: list | None = None, quick_replies: list | None = None) -> str:
     """Send `text` on a ledger row the caller has ALREADY CLAIMED, and resolve that row. -> the message id.
 
     Shared by a person's reply (`send_reply`) and a machine's (`send_for_machine`), so both get the same
@@ -124,7 +125,12 @@ def _deliver(*, space: str, zcid: str, conv: dict, account_id: str, text: str, i
                 references=tail.get("references") or "")
             sent = {"message_id": mid}
         else:
-            sent = zernio.client(sp).inbox.send(zcid, account_id, text)
+            extra = {}
+            if buttons:
+                extra["buttons"] = buttons
+            if quick_replies:
+                extra["quick_replies"] = quick_replies
+            sent = zernio.client(sp).inbox.send(zcid, account_id, text, **extra)
     except email_channel.EmailSendIndeterminate as e:
         # INVARIANT 4, ON THE MAIL PATH. A timeout or a disconnect after DATA tells us nothing
         # about whether the message was queued, so it is recorded as "may have landed" and
@@ -299,6 +305,12 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
                  extra={"space": space, "idem": idem, "prior": status or "missing"})
         raise ReplyIndeterminate(str(prior.get("error") or "the earlier attempt may have landed"))
 
+    # A PERSON IS ANSWERING, SO ANY AUTOMATION HOLDING THIS CONVERSATION STOPS (OSDev1's reviews of #1753 and
+    # #1790), and it stops BEFORE the vendor call: a machine send that checked a moment ago re-checks after its
+    # own ledger claim (send_for_machine) and finds the claim gone. Ended even if this send then fails: the
+    # person meant to take it over. Never raises.
+    from marketing.customer_voice import claims as _claims
+    _claims.take_over(space, zcid)
     mid = _deliver(space=space, zcid=zcid, conv=conv, account_id=account_id, text=text, idem=idem)
     # `sent_by='human'` is the honesty of the screen: the thread says who said every line, and
     # "the machine" and "you" must never be swapped. §3.3 records WHICH human on the ledger.
@@ -329,7 +341,63 @@ _WINDOW_MARKERS = ("2018278", "outside of allowed window", "outside the allowed 
                    "messaging window", "24-hour window", "24 hour window")
 
 
-def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str) -> dict:
+# ── a machine's buttons and quick replies, in the platform's own shape ──────────────────────────────────────────
+# A machine passes plain values (core names no vendor): a button is {"title", "url"}, a quick reply is its title.
+# Shapes confirmed against Zernio's model (leadmagnet/buttons.py, which this mirrors rather than imports: one
+# machine never imports another). A QUICK REPLY's tap comes back as an inbound message with its title, which is
+# what lets a poll-only box move a conversation on without a webhook; a URL button just opens its link.
+_TITLE_MAX, _MAX_BUTTONS, _MAX_QUICK = 20, 3, 13
+
+
+def _a_list(value, what: str, example: str) -> list:
+    """A machine's list, or a refusal naming the fix. NEVER ITERATE A STRING OR A DICT (OSDev1's review of #1789):
+    quick_replies="Yes" would otherwise send three quick replies, "Y", "e" and "s", to a real person."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    raise ReplyRefused(f"{what} is a list, like {example}")
+
+
+def _https_link(url: str) -> bool:
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    return parts.scheme == "https" and "." in (parts.hostname or "") and " " not in url
+
+
+def _wire_buttons(buttons) -> list:
+    out = []
+    for b in _a_list(buttons, "buttons", '[{"title": "Get the guide", "url": "https://…"}]')[:_MAX_BUTTONS + 1]:
+        if not isinstance(b, dict):
+            raise ReplyRefused('each button is {"title": …, "url": "https://…"}')
+        title, url = str(b.get("title") or "").strip(), str(b.get("url") or "").strip()
+        if not title or not _https_link(url):
+            raise ReplyRefused("a button needs a title and a full https:// link")
+        out.append({"type": "url", "title": title[:_TITLE_MAX].rstrip(), "url": url})
+    if len(out) > _MAX_BUTTONS:
+        raise ReplyRefused(f"a message carries at most {_MAX_BUTTONS} buttons")
+    return out
+
+
+def _wire_quick_replies(replies) -> list:
+    out = []
+    for r in _a_list(replies, "quick_replies", '["Yes"]')[:_MAX_QUICK + 1]:
+        if not isinstance(r, str):
+            raise ReplyRefused('each quick reply is its title, like "Yes"')
+        t = r.strip()[:_TITLE_MAX].rstrip()
+        if not t:
+            raise ReplyRefused("a quick reply needs a title")
+        out.append({"content_type": "text", "title": t, "payload": t})
+    if len(out) > _MAX_QUICK:
+        raise ReplyRefused(f"a message carries at most {_MAX_QUICK} quick replies")
+    return out
+
+
+def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str,
+                     buttons: list | None = None, quick_replies: list | None = None) -> dict:
     """Send one message a MACHINE wrote, on a conversation it has claimed. -> {"status", "message_id", ...}.
 
     docs/PLAN_LEAD_MAGNET_MACHINE.md step 2: an automation's messages go through the Inbox's own send path,
@@ -337,8 +405,9 @@ def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str
     thread; nobody reads this one first, so it passes every gate the Inbox's own automatic send (the opener,
     inbox/handler.py) passes, plus one of its own:
 
-      1. THE MACHINE HOLDS THE CONVERSATION (customer_voice/claims.py). Without a claim it is a stranger
-         writing into someone's inbox.
+      1. THE MACHINE HOLDS THE CONVERSATION (customer_voice/claims.py), AND NO PERSON HAS WRITTEN SINCE IT
+         TOOK IT. Without a claim it is a stranger writing into someone's inbox; after a person's reply it
+         would be talking over them.
       2. NOT OPTED OUT. Someone who said STOP gets nothing, whatever a machine wants.
       3. THE BOX ISN'T STOPPED. Stop everything halts automations, and this is one.
       4. THE CHANNEL'S WINDOW IS OPEN (`window.allowed_send(...) == "freeform"`): on Instagram, within 24
@@ -357,6 +426,7 @@ def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str
     key = clean_nonce(key)
     if not key:
         raise ReplyRefused("a machine's message needs a key: letters, digits, dot, dash or underscore")
+    wire_buttons, wire_quick = _wire_buttons(buttons), _wire_quick_replies(quick_replies)
     conv = store.get_conversation(space, zcid)
     if not conv:
         raise ReplyRefused("no such conversation on this box")
@@ -364,6 +434,11 @@ def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str
     held = claims.holder(space, zcid)
     if not held or held.get("machine") != machine:
         raise ReplyRefused("this machine hasn't claimed this conversation")
+    # A PERSON WROTE SINCE THE CLAIM BEGAN, from the box or from the platform's own app: the conversation is
+    # theirs now. The claim ends with a note, and nothing more is sent (OSDev1's review of #1753).
+    if claims.person_wrote_since(space, zcid, held.get("claimed_at") or ""):
+        claims.take_over(space, zcid)
+        raise ReplyRefused("a person has replied on this conversation, so the machine stopped")
     if conv.get("opted_out"):
         raise ReplyRefused("this person has opted out — nothing is sent to them")
     try:
@@ -395,10 +470,135 @@ def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str
         if prior.get("status") == "failed":
             raise ReplyRefused(str(prior.get("error") or "the message did not send"))
         raise ReplyIndeterminate(str(prior.get("error") or "the earlier attempt may have landed"))
-    mid = _deliver(space=space, zcid=zcid, conv=conv, account_id=account_id, text=text, idem=idem)
+    # RE-CHECKED AFTER THE LEDGER CLAIM (OSDev1's review of #1790): a person's reply that landed between the
+    # first check and here has already ended the claim (send_reply takes over before its own vendor call), so
+    # the machine sends nothing, and the ledger says it provably didn't go.
+    now_held = claims.holder(space, zcid)
+    if (not now_held or now_held.get("machine") != machine
+            or claims.person_wrote_since(space, zcid, now_held.get("claimed_at") or "")):
+        claims.take_over(space, zcid)
+        store.resolve_send(space=space, idem_key=idem, status="failed",
+                           error="a person replied first, so the machine stopped")
+        raise ReplyRefused("a person has replied on this conversation, so the machine stopped")
+    mid = _deliver(space=space, zcid=zcid, conv=conv, account_id=account_id, text=text, idem=idem,
+                   buttons=wire_buttons, quick_replies=wire_quick)
     store.record_message(space=space, zcid=zcid, zmid=mid, direction="out", sent_by="ai", body=text)
     log.info("inbox.machine_sent", extra={"space": space, "conversation": zcid, "machine": machine,
                                           "message_id": mid})
+    return {"status": "ok", "message_id": mid, "idem_key": idem, "duplicate": False}
+
+
+# ── a machine's private reply to a comment: how a conversation starts ──────────────────────────────────────────
+PRIVATE_REPLY_DAYS = 7          # Instagram accepts a private reply to a comment for 7 days after it was written
+
+
+def _commenter_opted_out(space: str, author: dict) -> bool:
+    """Has this commenter said STOP in a conversation on this box? The conversation row carries only `participant`,
+    which on a live box is the person's DISPLAY NAME (read 2026-10-02 through the owner box's own connector: a
+    business's name, not an @handle), so the commenter's display name and @handle are both compared, case-insensitive. Two
+    people can share a display name; that errs toward NOT sending, never toward sending to someone who said STOP."""
+    names = {str(author.get(k) or "").strip().lstrip("@").lower() for k in ("username", "name")} - {""}
+    if not names:
+        return False
+    with state.connect() as c:
+        rows = c.execute("SELECT participant FROM inbox_conversations WHERE space = ? AND opted_out = 1 "
+                         "AND participant IS NOT NULL", (space,)).fetchall()
+    return any(str(r["participant"]).strip().lstrip("@").lower() in names for r in rows)
+
+
+def _age_days(at: str) -> float | None:
+    from datetime import datetime, timezone
+    try:
+        t = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - t).total_seconds() / 86400
+
+
+def reply_to_comment(*, space: str, machine: str, comment: dict, text: str, key: str,
+                     quick_replies: list | None = None) -> dict:
+    """A MACHINE's private reply to an Instagram comment: the first message to someone who has never written,
+    which is how the Lead Magnet's DM 1 opens a conversation (docs/PLAN_LEAD_MAGNET_MACHINE.md; OSDev1 approved
+    the seam 2026-10-02). `comment` is one `m.comments()` returned, unchanged.
+
+    No conversation exists yet, so no claim can gate it. These do:
+      1. THE BOX ISN'T STOPPED (Stop everything).
+      2. THE COMMENTER HASN'T OPTED OUT on this box. The provider (inbox/conversations.py) finds their conversation
+         by id or @handle and reads its opt-out first; `_commenter_opted_out` here is a second net on the names.
+      3. THE COMMENT IS UNDER 7 DAYS OLD, Instagram's window for a private reply. A comment with no time we can
+         read is refused, not guessed.
+      4. THE HOURLY CAP, the same count every send on the box shares.
+      5. ONCE PER COMMENT, ACROSS EVERY MACHINE: Instagram allows one private reply per comment, so the ledger
+         key is the comment, and `key` only names the step for the machine's own records.
+    A refusal raises ReplyRefused (nothing went); a may-have-landed raises ReplyIndeterminate, never resent."""
+    text = str(text or "").strip()
+    if not text:
+        raise ReplyRefused("a message needs words")
+    if not clean_nonce(key):
+        raise ReplyRefused("a machine's message needs a key: letters, digits, dot, dash or underscore")
+    if not isinstance(comment, dict):
+        raise ReplyRefused("pass the comment exactly as m.comments() returned it (the whole dict, not its id)")
+    comment = dict(comment)
+    cid, post, account = (str(comment.get(k) or "").strip() for k in ("id", "post", "account"))
+    if not (cid and post and account):
+        raise ReplyRefused("pass a comment exactly as m.comments() returned it")
+    wire_quick = _wire_quick_replies(quick_replies)
+    try:
+        from core import pause
+        stopped = pause.is_paused()
+    except Exception:                    # noqa: BLE001 — an unreadable switch fails toward silence
+        stopped = True
+    if stopped:
+        raise ReplyRefused("the box is stopped, so no automation sends")
+    author = comment.get("author") if isinstance(comment.get("author"), dict) else {}
+    if _commenter_opted_out(space, author):
+        raise ReplyRefused("this person has opted out — nothing is sent to them")
+    age = _age_days(comment.get("at"))
+    if age is None:
+        raise ReplyRefused("this comment has no time on it, so its reply window can't be checked")
+    if age > PRIVATE_REPLY_DAYS:
+        raise ReplyRefused(f"Instagram only allows a private reply within {PRIVATE_REPLY_DAYS} days of a comment")
+    from core.config import get_config
+    cap = int(((get_config().get("inbox") or {}).get("hourly_send_cap")) or 40)
+    if store.sends_last_hour(space) >= cap:
+        raise ReplyRefused(f"the box has sent its {cap} messages for this hour; try again later")
+
+    idem = f"private_reply:{space}:{cid}"
+    zcid = f"comment:{cid}"
+    if not store.claim_send(space=space, zcid=zcid, idem_key=idem, kind="machine_comment", user_id=machine):
+        prior = store.get_send(space, idem) or {}
+        if prior.get("status") == "ok":
+            return {"status": "ok", "message_id": prior.get("zernio_message_id"), "idem_key": idem,
+                    "duplicate": True}
+        if prior.get("status") == "failed":
+            raise ReplyRefused(str(prior.get("error") or "the reply did not send"))
+        raise ReplyIndeterminate(str(prior.get("error") or "the earlier attempt may have landed"))
+    try:
+        cost_guard.check_vendor("zernio", 1)
+        sp = _space(space)
+        if not sp:
+            raise ReplyRefused("this box cannot resolve the Space that owns this comment")
+    except Exception as e:                # noqa: BLE001 — nothing was sent
+        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
+        raise
+    try:
+        sent = zernio.client(sp).comments.send_private_reply(post, cid, account, text,
+                                                             quick_replies=wire_quick or None)
+    except zernio.ZernioError as e:
+        if e.indeterminate:
+            store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
+            raise ReplyIndeterminate(str(e)) from e
+        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
+        raise ReplyRefused(str(e)) from e
+    except Exception as e:                # noqa: BLE001 — an unexpected raise mid-call is UNKNOWN
+        store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
+        raise ReplyIndeterminate(str(e)) from e
+    mid = (sent or {}).get("message_id")
+    store.resolve_send(space=space, idem_key=idem, status="ok", zernio_message_id=mid)
+    log.info("inbox.machine_comment_reply", extra={"space": space, "comment": cid, "machine": machine,
+                                                   "message_id": mid})
     return {"status": "ok", "message_id": mid, "idem_key": idem, "duplicate": False}
 
 

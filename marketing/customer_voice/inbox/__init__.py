@@ -69,6 +69,10 @@ register_periodic(poller.poll_sweep,
 # restart costs. Quarter-hourly is inside the noise on a $12 box: sixteen hours a day it is
 # arithmetic on the clock that returns before touching the database.
 register_periodic(notices.tick, interval_s=900, name="inbox_notify")
+# THE ONE-TIME FILL of who is on every conversation, archived included (inbox/conversations.py): a private reply's
+# STOP check answers from it. Cheap once filled (a settings read per Space); tried again every 10 minutes until then.
+from . import conversations as _conversations_fill  # noqa: E402
+register_periodic(_conversations_fill.fill_participant_ids, interval_s=600, name="inbox_participant_fill")
 
 # THE READ TOOLS REGISTER EITHER WAY, and that placement is the decision. Everything above is
 # fail-closed on the vendor SDK, correctly: polling and sending on an SDK nobody can verify is the

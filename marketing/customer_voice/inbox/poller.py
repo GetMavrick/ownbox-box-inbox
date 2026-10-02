@@ -353,15 +353,21 @@ def _mirror_page(space: str, ch, zcid: str, msgs: list) -> int:
     # vendor's message id. Cheap, too — this page was already fetched and is capped at
     # `_MSG_PAGE`; the loop adds no vendor call.
     mirrored = 0
+    page_ids = {str(_f(x, "id", "_id", "message_id") or "") for x in msgs} - {""}
     for m in msgs:
         way = _direction_of(m)
         if way is None:
             log.warning("inbox.message_direction_unreadable", space=space,
                         channel=ch.key, conversation=zcid)
             continue
+        zmid = str(_f(m, "id", "_id", "message_id") or "") or None
+        sent_at = str(_f(m, *_SENT_AT_KEYS) or "") or None
+        if way == "out" and store.is_box_echo(space=space, zcid=zcid, zmid=zmid, body=_body(m), sent_at=sent_at,
+                                              page_ids=page_ids):
+            continue                                     # the box's own message, read back under another id
         store.record_message(
             space=space, zcid=zcid,
-            zmid=str(_f(m, "id", "_id", "message_id") or "") or None,
+            zmid=zmid,
             # `sent_by` IS THE DOCUMENTED SET — contact | ai | human — not a fourth word.
             # An outbound message we learn about HERE was sent by a person, from the phone or
             # the Instagram app, so "human" is what it is. The thread renders that by looking
@@ -370,10 +376,19 @@ def _mirror_page(space: str, ch, zcid: str, msgs: list) -> int:
             # sent is already mirrored with sent_by="ai" and wins on INSERT OR IGNORE, so
             # this can never relabel the machine's own words as the owner's.
             direction=way, sent_by="contact" if way == "in" else "human",
-            body=_body(m), sent_at=str(_f(m, *_SENT_AT_KEYS) or "") or None)
+            body=_body(m), sent_at=sent_at)
         mirrored += 1
     log.info("inbox.page_mirrored", space=space, channel=ch.key,
              conversation=zcid, messages=mirrored, of=len(msgs))
+    # A REPLY TYPED IN THE PLATFORM'S OWN APP ENDS A MACHINE'S CLAIM NOW, not at the machine's next send (OSDev1's
+    # review of #1790): otherwise the thread says "<machine> is handling this" for up to its 7 days. Never raises.
+    try:
+        from marketing.customer_voice import claims as _claims
+        held = _claims.holder(space, zcid)
+        if held and _claims.person_wrote_since(space, zcid, held.get("claimed_at") or ""):
+            _claims.take_over(space, zcid)
+    except Exception as e:                               # noqa: BLE001 — bookkeeping never stops a poll
+        log.warning("inbox.take_over_on_poll_failed", space=space, conversation=zcid, error=type(e).__name__)
     return mirrored
 
 
@@ -421,6 +436,13 @@ def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, 
         if not zcid:
             continue
         scanned += 1
+        # WHO THE OTHER PARTY IS, by the platform's own ids, kept on every read: the private reply's STOP check
+        # answers from these, for every conversation the box has seen (OSDev1's review of #1789). Never stops a poll.
+        try:
+            from .conversations import _thread_idents
+            store.remember_participant(space, zcid, _thread_idents(conv))
+        except Exception as e:                       # noqa: BLE001
+            log.warning("inbox.participant_ids_failed", space=space, conversation=zcid, error=type(e).__name__)
         # account_id owns the thread (F-1) — required to fetch messages and to send
         # the opener; it rides into the job payload for the handler. A conversation
         # with no accountId can't be operated on → skip (defensive; every real

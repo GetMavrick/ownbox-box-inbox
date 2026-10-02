@@ -60,14 +60,26 @@ def _stamp(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def claim(space: str, zcid: str, *, machine: str, title: str, days: float = CLAIM_DAYS) -> bool:
+def claim(space: str, zcid: str, *, machine: str, title: str, days: float = CLAIM_DAYS,
+          trigger: str | None = None) -> bool:
     """Claim this conversation for `machine`. -> True when `machine` holds it afterwards.
+
+    NEVER BACK AFTER A PERSON TOOK IT OVER (OSDev1's reviews of #1790). Once a person's reply ended a machine's claim,
+    no machine claims the conversation again, however the conversation goes on: the contact answering the owner is
+    the owner's conversation, not a new start. ENFORCED, NOT TRUSTED: there is no argument a machine can pass to
+    reopen it. Two things can: the owner handing it back (`hand_back`), or a NEW START the box itself can vouch for:
+    `trigger`, the id of a comment the box read from the platform (`inbox_comments_seen`), written by this
+    conversation's person (their id or @handle on `inbox_participant_ids`), newer than the takeover. A time, an id
+    the box never read, someone else's comment or an older one opens nothing.
 
     ATOMIC: one statement inserts the claim, renews the caller's own, or takes over one that was released or
     has expired. It never takes a conversation another machine holds, so two automations can't both run one.
     Renewing extends the expiry; it is how a machine says it is still working on it."""
     days = max(0.01, min(float(days), MAX_DAYS))
     now = datetime.now(timezone.utc)
+    if taken_over(space, zcid) and not _new_start(space, zcid, trigger):
+        log.info("inbox.claim_refused_taken_over", space=space, conversation=zcid, machine=machine)
+        return False
     with state.connect() as c:
         c.execute(
             "INSERT INTO inbox_claims (space, zernio_conversation_id, machine, title, claimed_at, "
@@ -122,3 +134,94 @@ def handed_back(space: str, zcid: str) -> dict | None:
             " WHERE space = ? AND zernio_conversation_id = ? AND released_at IS NOT NULL "
             "   AND note IS NOT NULL AND note != ''", (space, str(zcid))).fetchone()
     return {"title": row["title"], "note": row["note"], "at": row["released_at"]} if row else None
+
+
+TAKEN_OVER = "You replied, so {title} stopped. It's yours from here."
+
+
+def take_over(space: str, zcid: str) -> bool:
+    """A PERSON ANSWERED, so the automation stops (OSDev1's review of #1753). Ends whatever claim is active, with
+    a note saying why, whichever machine holds it. -> True if one was ended. Never raises: the person's reply
+    has already gone, and bookkeeping must not undo it."""
+    try:
+        held = holder(space, zcid)
+        if not held:
+            return False
+        with state.connect() as c:
+            c.execute("INSERT OR REPLACE INTO inbox_takeovers (space, zernio_conversation_id, taken_at) "
+                      "VALUES (?, ?, ?)", (space, str(zcid), _stamp(datetime.now(timezone.utc))))
+        return release(space, zcid, machine=held["machine"], note=TAKEN_OVER.format(title=held["title"]))
+    except Exception as e:                          # noqa: BLE001
+        log.warning("inbox.take_over_failed", space=space, conversation=zcid, error=type(e).__name__)
+        return False
+
+
+def _when(v):
+    try:
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def _new_start(space: str, zcid: str, trigger: str | None) -> bool:
+    """Does `trigger` (a comment id) prove a new start from this conversation's person, after the takeover? If so the
+    takeover is lifted, once."""
+    if not trigger:
+        return False
+    with state.connect() as c:
+        took = c.execute("SELECT taken_at FROM inbox_takeovers WHERE space = ? AND zernio_conversation_id = ?",
+                         (space, str(zcid))).fetchone()
+        seen = c.execute("SELECT author_id, author_handle, at FROM inbox_comments_seen WHERE space = ? "
+                         "AND comment_id = ?", (space, str(trigger))).fetchone()
+        if not took or not seen:
+            return False
+        theirs = {r["ident"] for r in c.execute("SELECT ident FROM inbox_participant_ids WHERE space = ? "
+                                                "AND zernio_conversation_id = ?", (space, str(zcid))).fetchall()}
+        author = {v for v in (seen["author_id"], seen["author_handle"]) if v}
+        new, taken = _when(seen["at"]), _when(took["taken_at"])
+        if not (author & theirs) or new is None or taken is None or new <= taken:
+            return False
+        c.execute("DELETE FROM inbox_takeovers WHERE space = ? AND zernio_conversation_id = ?", (space, str(zcid)))
+    log.info("inbox.takeover_lifted_by_new_comment", space=space, conversation=zcid, comment=str(trigger))
+    return True
+
+
+def taken_over(space: str, zcid: str) -> bool:
+    with state.connect() as c:
+        return c.execute("SELECT 1 FROM inbox_takeovers WHERE space = ? AND zernio_conversation_id = ?",
+                         (space, str(zcid))).fetchone() is not None
+
+
+def hand_back(space: str, zcid: str) -> bool:
+    """The OWNER gives a conversation he took over back to the machines. -> True if it was taken over."""
+    with state.connect() as c:
+        cur = c.execute("DELETE FROM inbox_takeovers WHERE space = ? AND zernio_conversation_id = ?",
+                        (space, str(zcid)))
+        return cur.rowcount > 0
+
+
+def person_wrote_since(space: str, zcid: str, since: str) -> bool:
+    """Has a person written on this conversation since `since` (a claim's `claimed_at`)? Counts a reply sent
+    from the box AND one typed in the platform's own app, which the poller mirrors as sent_by='human'."""
+    from datetime import datetime, timezone
+
+    def _at(v):
+        try:
+            d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+    start = _at(since)
+    if start is None:
+        return False
+    with state.connect() as c:
+        # WHEN IT WAS SENT, NOT WHEN THE BOX MIRRORED IT: a poll that catches up on an old reply must not read
+        # as a person answering just now. The platform's own stamp where there is one, else the mirror's.
+        rows = c.execute("SELECT COALESCE(s.sent_at, m.created_at) AS at FROM inbox_messages m "
+                         "LEFT JOIN inbox_message_sent s ON s.message_id = m.id "
+                         "WHERE m.space = ? AND m.zernio_conversation_id = ? AND m.direction = 'out' "
+                         "AND m.sent_by = 'human'", (space, str(zcid))).fetchall()
+    return any((_at(r["at"]) or start) > start for r in rows)
+

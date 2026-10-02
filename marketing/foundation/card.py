@@ -14,7 +14,7 @@ from __future__ import annotations
 import html
 import json
 import re
-from datetime import datetime
+from datetime import date, datetime
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -91,6 +91,38 @@ def _last_sync() -> str:
     return "Not yet. The first sync runs after 06:00, or press Sync now."
 
 
+def _day_row() -> str:
+    """THE NUMBERS WHERE THEY WERE CONNECTED (OSDev1, after #1815): the last synced day, one line per site, from the
+    seam the Morning Review reads, in its words: "ownbox.io: 412 visits, 38 from AI answers, 3 conversions
+    (Checkout click 2, Booking click 1)." Nothing that is zero is said, a site with no visits has no line, and with
+    no numbers at all there is no row (owner, 2026-09-29: "If a line doesn't have data, it should not be
+    displayed")."""
+    from . import seam, sync
+    try:
+        d = date.fromisoformat(str(settings.sync_state().get("upto") or ""))
+    except ValueError:
+        return ""
+    lines = []
+    for site in seam.sites():
+        got = seam.day(site, d)
+        visits = int(((got or {}).get("totals") or {}).get("sessions") or 0)
+        if not visits:
+            continue
+        parts = [f"{site}: {visits:,} visit{'s' if visits != 1 else ''}"]
+        ai = int((got.get("by_source") or {}).get("ai") or 0)
+        if ai:
+            parts.append(f"{ai:,} from AI answers")
+        converted = int(got["totals"].get("converted") or 0)
+        if converted:
+            named = ", ".join(f"{name} {n:,}" for name, n, _ in (got.get("conversions") or [])[:2] if n)
+            parts.append(f"{converted:,} conversion{'s' if converted != 1 else ''}" + (f" ({named})" if named else ""))
+        lines.append(_esc(", ".join(parts) + "."))
+    if not lines:
+        return ""
+    label = "Yesterday" if d == sync.yesterday() else f"{d:%b} {d.day}"
+    return f'<dt>{label}</dt><dd>{"<br>".join(lines)}</dd>'
+
+
 def _own_events(site: str) -> list[dict]:
     own = _own("conversions") or {}
     items = own.get(site) if isinstance(own, dict) else None
@@ -122,12 +154,20 @@ def render(note=None) -> str:
              f'<dt>Websites</dt><dd>{" &middot; ".join(_esc(s) for s in sites) or "None yet. Add them below."}</dd>'
              f'<dt>PostHog</dt><dd>{checking or ph}</dd>'
              f'<dt>Search Console</dt><dd>{_search_console()}</dd>'
-             f'<dt>Last sync</dt><dd>{_syncing(syncing) if syncing else _last_sync()}</dd></dl>'
+             f'<dt>Last sync</dt><dd>{_syncing(syncing) if syncing else _last_sync()}</dd>'
+             + _day_row() + '</dl>'
              '<div class="ui-acts">' + (_busy("Syncing") if syncing else _post("sync", "Sync now")) + '</div>')
+    shown = chr(10).join(_own("sites") or sites)
+    # WHERE THE LIST CAME FROM, said on the box (OSDev1, first setup): the box found these in PostHog until a person
+    # types their own, and a list saved as it was shown stays found (handle "sites"), so it keeps updating itself.
+    found_note = ('<p class="quiet">Found in your PostHog. Type your own list to choose.</p>'
+                  if settings.sites_source() == "found" else "")
     sites_form = (_form("sites",
                         '<label for="wa-sites">Your websites, each on its own row</label>'
+                        + found_note +
                         f'<textarea id="wa-sites" name="sites" rows="3" autocapitalize="off" spellcheck="false" '
-                        f'placeholder="ownbox.io">{_esc(chr(10).join(_own("sites") or sites))}</textarea>'
+                        f'placeholder="ownbox.io">{_esc(shown)}</textarea>'
+                        f'<input type="hidden" name="shown" value="{_esc(shown)}">'
                         '<p class="quiet">As each appears in the address bar: ownbox.io and www.ownbox.io are '
                         'counted apart.</p>', "Save websites"))
     radios = "".join(f'<label class="consent"><input type="radio" name="region" value="{k}"'
@@ -216,14 +256,21 @@ def _syncing(js: list[dict]) -> str:
     """"Syncing, started 09:41: ownbox.io done, brian-macdonald.com waiting." from the run and its queued jobs."""
     run = jobs.sync_run()
     done = run.get("done") or {}
-    waiting = []
+    now_on = ""
     for j in js:
         try:
-            waiting.append(str(json.loads(j.get("raw_text") or "{}").get("site") or ""))
+            if j.get("status") == "running":
+                now_on = str(json.loads(j.get("raw_text") or "{}").get("site") or "")
         except ValueError:
             pass
-    bits = [f"{_esc(s)} done" for s in run.get("sites") or [] if s in done and done[s].get("outcome") == "ok"]
-    bits += [f"{_esc(s)} waiting" for s in waiting if s]
+    # ONE SITE AT A TIME (jobs.start_sync): the run's own list says which are done, which is being synced, and which
+    # wait their turn; only one of them is ever in the queue.
+    bits = []
+    for s in run.get("sites") or []:
+        if s in done:
+            bits.append(f"{_esc(s)} {'done' if done[s].get('outcome') == 'ok' else 'stopped'}")
+        else:
+            bits.append(f"{_esc(s)} {'syncing' if s == now_on else 'waiting'}")
     return (f"Syncing, started {_esc(_when(run.get('started') or js[0]['created_at']))}"
             + (": " + ", ".join(bits) if bits else "") + ".")
 
@@ -269,6 +316,9 @@ def handle(do: str, form, by: str) -> tuple[bool, str]:
         if bad:
             return False, f"“{bad[0][:60]}” is not a website address. Type it like ownbox.io."
         out = list(dict.fromkeys(clean))
+        was = [c for c in (_clean_site(x) for x in re.split(r"[\s,]+", str(form.get("shown") or "")) if x) if c]
+        if settings.sites_source() == "found" and out == list(dict.fromkeys(was)):
+            return True, "Nothing changed. The box keeps finding your websites in your PostHog."
         if len(out) > MAX_SITES:
             return False, f"Up to {MAX_SITES} websites. Remove one, then save."
         box_settings.put(settings.NS, "sites", out, set_by=by)
@@ -321,9 +371,8 @@ def handle(do: str, form, by: str) -> tuple[bool, str]:
 
 
 def _posthog(form, by: str) -> tuple[bool, str]:
-    sites = settings.sites()
-    if not sites:
-        return False, "Add your websites first, so the box can check PostHog sees them."
+    # NO SITE NEEDED FIRST (OSDev1, for a new buyer's first setup): with none typed or found, the check asks PostHog
+    # which sites it sees (jobs.do_check).
     try:
         host = _api_host(str(form.get("region") or "us"), str(form.get("own_host") or ""))
     except ValueError as e:

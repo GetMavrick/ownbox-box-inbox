@@ -5,11 +5,11 @@ machine's: *"If it doesn't expose enough for a user to actually be in full comma
 then we need to upgrade the MCP immediately."* He agreed to the plan's first step the same morning
 (`docs/PLAN_AEO_MACHINE_UPGRADE.md` §1.1, #1793): *"Agree. go."*
 
-THIS FILE IS THAT FIRST STEP: SEVEN READS, NO WRITES. A buyer's own AI can see what the machine is
-doing, what it needs, what it published, why anything stopped, and how the site is doing, the same
-answers the AEO screens give. Proposing a topic, a retry or a settings change comes next, behind a
-person's one tap; it needs the seat decision that is OSDev1's (the owner's connector is a `read`
-seat today, and `write:proposals` is held only by `act` and `service`).
+SEVEN READS AND THREE PROPOSALS. A buyer's own AI can see what the machine is doing, what it needs,
+what it published, why anything stopped, and how the site is doing, the same answers the AEO screens
+give. It can also ASK for a topic, a retry or a settings change: each waits in the box's approvals
+queue until a person taps Approve (proposals.py). The proposals are `write:proposals`, `act` and up,
+under OSDev1's 2026-10-02 seat ruling: a person's own-AI seat is `act` by default.
 
 `read:aeo` IS GRANTED TO EVERY ROLE by the one `tools.grant` line at the bottom (OSDev1's ruling,
 #1798): core never names a machine, and an ungranted capability stays invisible to every seat.
@@ -103,9 +103,18 @@ def status():
         "left_this_week": max(0, cap - published_week),
         "topics": count,
         "waiting_on_you": count["refused"] + count["failed"],
+        "suggestions_waiting_for_ok": _suggestions_waiting(),
         "note": ("The machine publishes on its own, within the weekly number, once nothing is "
                  "missing. Articles that stopped are listed by aeo.articles with the reason."),
     }
+
+
+def _suggestions_waiting() -> int:
+    try:
+        from . import proposals
+        return proposals.waiting()
+    except Exception:                                   # noqa: BLE001 — a count, never the answer
+        return 0
 
 
 def articles(status=None, limit=None):
@@ -254,5 +263,46 @@ tools.register(
     fn=sources, machine=MACHINE, min_role="read", capability=CAPABILITY,
     description="Whether Sanity, Airtable, PostHog and Google Search Console are connected, and "
                 "which table and site. Never a credential.")
+# THE PROPOSALS. Each asks; only a person's Approve on Waiting for you runs it (proposals.py).
+from . import proposals  # noqa: E402
+
+tools.register(
+    "propose_topic", title="Suggest an AEO topic for you to approve",
+    fn=proposals.propose_topic, machine=MACHINE, min_role="act", capability="write:proposals",
+    wants_seat=True,
+    description="Ask the owner to add a topic to the AEO Machine's plan. It is NOT added: it waits on "
+                "Waiting for you until the owner approves or declines. With now=true, an approved topic "
+                "goes next and is written and published within minutes.",
+    args={"question": {"type": "string", "required": True,
+                       "description": "The question the article answers, as a customer would ask it."},
+          "topic": {"type": "string", "required": False,
+                    "description": "A short topic name. Defaults to the question."},
+          "now": {"type": "boolean", "required": False,
+                  "description": "Ask for it to be written first, once approved. Defaults to false."}})
+tools.register(
+    "propose_retry", title="Suggest trying an AEO article again",
+    fn=proposals.propose_retry, machine=MACHINE, min_role="act", capability="write:proposals",
+    wants_seat=True,
+    description="Ask the owner to try again an article that was held back or did not publish. Nothing "
+                "is retried until the owner approves. Fix the reason first if it was held back.",
+    args={"id": {"type": "integer", "required": True,
+                 "description": "The article's id, from aeo.articles."}})
+tools.register(
+    "propose_setting", title="Suggest an AEO settings change",
+    fn=proposals.propose_setting, machine=MACHINE, min_role="act", capability="write:proposals",
+    wants_seat=True,
+    description="Ask the owner to change one AEO setting: the website (site_url) or articles a week "
+                "(weekly_cap) with change=set, or one entry added to or removed from facts, "
+                "allowed_numbers, never_words, never_phrases or competitors. Nothing changes until the "
+                "owner approves. Connections and keys can't be changed this way.",
+    args={"name": {"type": "string", "required": True,
+                   "description": "site_url, weekly_cap, facts, allowed_numbers, never_words, "
+                                  "never_phrases or competitors."},
+          "value": {"type": "string", "required": True,
+                    "description": "The new value, or the one entry to add or remove."},
+          "change": {"type": "string", "required": False,
+                     "description": "set (site_url, weekly_cap), add or remove (the lists). "
+                                    "Defaults to set or add."}})
+
 # Every role sees the reads above. Explicit, so a reviewer sees it (core/connector/tools.py grant()).
 tools.grant(CAPABILITY)

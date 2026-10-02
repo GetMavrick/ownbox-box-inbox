@@ -202,6 +202,143 @@ claims.claim(SPACE, "d5", machine="my_other", title="Other")
 ok("NEVER ON A CONVERSATION ANOTHER MACHINE HOLDS",
    not m.claim("d5", title="Lead magnets") and m.send_dm("d5", "x", key="k")["status"] == "refused")
 
+print("\n— a person answers, so the machine stops (OSDev1's review of #1753) —")
+conv("h1")
+m.claim("h1", title="Lead magnets")
+U = state.add_user("owner@example.com", name="Owner")["id"]
+reply.send_reply(space=SPACE, zcid="h1", text="I'll take this one", user_id=U, nonce="n1")
+back = claims.handed_back(SPACE, "h1") or {}
+ok("A REPLY FROM THE BOX ENDS THE CLAIM, with a note saying the person took over",
+   claims.holder(SPACE, "h1") is None and "You replied" in back.get("note", ""), str(back))
+n = len(INBOX.sent)
+r = m.send_dm("h1", "Want the guide?", key="ask")
+ok("...and the machine can't send on it", r["status"] == "refused" and len(INBOX.sent) == n, str(r))
+
+conv("h2")
+m.claim("h2", title="Lead magnets")
+store.record_message(space=SPACE, zcid="h2", zmid="app-1", direction="out", sent_by="human",
+                     body="Replied from the Instagram app", sent_at=(NOW + timedelta(minutes=1)).isoformat())
+n = len(INBOX.sent)
+r = m.send_dm("h2", "Want the guide?", key="ask")
+ok("A REPLY TYPED IN THE PLATFORM'S OWN APP STOPS IT TOO: refused, and the claim ends",
+   r["status"] == "refused" and "person has replied" in r["reason"] and len(INBOX.sent) == n
+   and claims.holder(SPACE, "h2") is None, str(r))
+conv("h3")
+store.record_message(space=SPACE, zcid="h3", zmid="old-1", direction="out", sent_by="human",
+                     body="An old reply", sent_at=(NOW - timedelta(days=2)).isoformat())
+m.claim("h3", title="Lead magnets")
+_r3 = m.send_dm("h3", "Hi", key="k")
+ok("a person's reply from BEFORE the claim doesn't stop it", _r3["status"] == "sent", str(_r3))
+
+print("\n— OSDev1's review of #1790: taking it back, the race, the app reply, the echo —")
+# 1. A conversation a person took over can't be re-claimed until the contact writes again.
+ok("THE MACHINE CAN'T TAKE BACK A CONVERSATION A PERSON TOOK OVER", not m.claim("h1", title="Lead magnets")
+   and m.send_dm("h1", "Back again", key="again")["status"] == "refused")
+store.record_message(space=SPACE, zcid="h1", zmid="in-h1-again", direction="in", sent_by="contact",
+                     body="Thanks!", sent_at=(datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat())
+ok("...not even when the contact answers the person: that is still the person's conversation",
+   not m.claim("h1", title="Lead magnets"))
+import inspect  # noqa: E402
+ok("...and a machine has no time it can pass to reopen it (OSDev1: enforce, don't trust)",
+   set(inspect.signature(m.claim).parameters) <= {"conversation", "title", "days", "trigger"}
+   and not m.claim("h1", title="Lead magnets", trigger=datetime.now(timezone.utc).isoformat()))
+conv("hb1")
+m.claim("hb1", title="Lead magnets")
+reply.send_reply(space=SPACE, zcid="hb1", text="Mine now", user_id=U, nonce="hb-1")
+ok("...or the owner handing it back", not m.claim("hb1", title="Lead magnets")
+   and claims.hand_back(SPACE, "hb1") and m.claim("hb1", title="Lead magnets"))
+
+# 2. The race: a person's reply lands after the machine's checks, before its vendor call.
+from marketing.customer_voice.inbox import reply as _reply  # noqa: E402
+conv("r1")
+m.claim("r1", title="Lead magnets")
+_real_claim_send = store.claim_send
+
+
+def _person_slips_in(**kw):
+    took = _real_claim_send(**kw)
+    if kw.get("kind") == "machine":
+        _reply.send_reply(space=SPACE, zcid="r1", text="Got it, I'll answer", user_id=U, nonce="race-1")
+    return took
+
+
+store.claim_send = _person_slips_in
+n = len(INBOX.sent)
+r = m.send_dm("r1", "Want the guide?", key="ask")
+store.claim_send = _real_claim_send
+led = store.get_send(SPACE, "machine:my_lead_magnet:" + SPACE + ":r1:ask") or {}
+ok("A PERSON'S REPLY BETWEEN THE CHECK AND THE SEND STOPS THE MACHINE: only the person's message went",
+   r["status"] == "refused" and len(INBOX.sent) == n + 1 and INBOX.sent[-1][1] == "Got it, I'll answer", str(r))
+ok("...and the ledger says the machine's provably didn't go", led.get("status") == "failed", str(led))
+
+# 3. A reply typed in the Instagram app ends the claim when the poller reads it, not at the next send.
+from marketing.customer_voice.inbox import poller as _poller  # noqa: E402
+conv("p1")
+m.claim("p1", title="Lead magnets")
+_ch = type("Ch", (), {"key": "instagram"})()
+_poller._mirror_page(SPACE, _ch, "p1", [{"id": "app-p1", "direction": "outgoing", "text": "On it, from my phone",
+                                         "createdAt": (datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat()}])
+ok("A REPLY TYPED IN THE APP ENDS THE CLAIM AS SOON AS THE POLLER SEES IT",
+   claims.holder(SPACE, "p1") is None and "You replied" in (claims.handed_back(SPACE, "p1") or {}).get("note", ""))
+
+# The machine's own message read back by the poller, under a DIFFERENT id than its send returned.
+conv("echo1")
+m.claim("echo1", title="Lead magnets")
+r = m.send_dm("echo1", "Want the guide? Reply with your email.", key="ask")
+_poller._mirror_page(SPACE, _ch, "echo1", [{"id": "vendor-other-id", "direction": "outgoing",
+                                         "text": "Want the guide? Reply with your email.",
+                                         "createdAt": datetime.now(timezone.utc).isoformat()}])
+outs = [x for x in store.messages_for(SPACE, "echo1", limit=50) if x["direction"] == "out"]
+ok("THE MACHINE'S OWN MESSAGE READ BACK UNDER ANOTHER ID IS NOT A PERSON'S: one copy, still the machine's",
+   r["status"] == "sent" and len(outs) == 1 and outs[0]["sent_by"] == "ai", str(outs))
+ok("...so the machine keeps the conversation and can send its next step",
+   claims.holder(SPACE, "echo1") is not None and m.send_dm("echo1", "Thanks!", key="thanks")["status"] == "sent")
+_poller._mirror_page(SPACE, _ch, "echo1", [{"id": "app-echo1", "direction": "outgoing", "text": "Hey, it's me, not the bot",
+                                         "createdAt": (datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat()}])
+ok("...while different words from the app are still a person taking over", claims.holder(SPACE, "echo1") is None)
+
+# OSDev1's re-review: the echo check must never swallow a person's real reply.
+def _outs(z):
+    return [x for x in store.messages_for(SPACE, z, limit=50) if x["direction"] == "out"]
+
+
+conv("echo2")
+m.claim("echo2", title="Lead magnets")
+m.send_dm("echo2", "Thanks!", key="t1")
+_now = datetime.now(timezone.utc)
+_poller._mirror_page(SPACE, _ch, "echo2", [{"id": "rb-1", "direction": "outgoing", "text": "Thanks!",
+                                            "createdAt": _now.isoformat()}])
+_poller._mirror_page(SPACE, _ch, "echo2", [{"id": "rb-1", "direction": "outgoing", "text": "Thanks!",
+                                            "createdAt": _now.isoformat()},
+                                           {"id": "person-2", "direction": "outgoing", "text": "Thanks!",
+                                            "createdAt": (_now + timedelta(minutes=2)).isoformat()}])
+o = _outs("echo2")
+ok("A PERSON REPEATING THE SAME WORDS IS NOT A SECOND ECHO: one read-back per box send",
+   [x["sent_by"] for x in o] == ["ai", "human"] and claims.holder(SPACE, "echo2") is None, str(o))
+conv("echo3")
+m.claim("echo3", title="Lead magnets")
+m.send_dm("echo3", "Thanks!", key="t1")
+_poller._mirror_page(SPACE, _ch, "echo3", [{"id": "rb-3", "direction": "outgoing", "text": "Thanks!"}])
+ok("...a read-back with no time is never an echo: it reaches the thread as the person's",
+   [x["sent_by"] for x in _outs("echo3")] == ["ai", "human"], str(_outs("echo3")))
+conv("echo4")
+m.claim("echo4", title="Lead magnets")
+_r4 = m.send_dm("echo4", "Thanks!", key="t1")
+_poller._mirror_page(SPACE, _ch, "echo4", [{"id": _r4["message_id"], "direction": "outgoing", "text": "Thanks!",
+                                            "createdAt": datetime.now(timezone.utc).isoformat()},
+                                           {"id": "rb-4", "direction": "outgoing", "text": "Thanks!",
+                                            "createdAt": datetime.now(timezone.utc).isoformat()}])
+ok("...and when the box's own send is on the page under its own id, the same words beside it are a person's",
+   [x["sent_by"] for x in _outs("echo4")] == ["ai", "human"], str(_outs("echo4")))
+store.record_message(space=SPACE, zcid="comment:c-77", zmid="pr-77", direction="out", sent_by="ai", body="Hey!")
+store.record_send(space=SPACE, zcid="comment:c-77", idem_key="private_reply:x:c-77", kind="private_reply",
+                  status="ok", zernio_message_id="pr-77")
+conv("echo5")
+_poller._mirror_page(SPACE, _ch, "echo5", [{"id": "rb-5", "direction": "outgoing", "text": "Hey!",
+                                            "createdAt": datetime.now(timezone.utc).isoformat()}])
+ok("...and the box's words in ANOTHER conversation (a private reply) never make a person's message an echo",
+   [x["sent_by"] for x in _outs("echo5")] == ["human"], str(_outs("echo5")))
+
 msgs = m.messages("d1")
 ok("m.messages reads the conversation, oldest first, in plain fields",
    [x["direction"] for x in msgs] == ["in", "out"] and msgs[0]["body"] == "hi there"

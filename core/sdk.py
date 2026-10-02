@@ -47,6 +47,10 @@ import functools
 import pathlib
 import re
 
+from core.logging import get_logger
+
+log = get_logger(__name__)
+
 VERSION = 1
 
 # The manifest fields a machine may rely on, and the seams above by name. `scripts/ownbox.py check`
@@ -54,6 +58,7 @@ VERSION = 1
 MANIFEST_FIELDS = ("name", "version", "requires_foundation", "needs", "sdk")
 SEAMS = ("machine", "think", "reporter", "tool", "menu", "screen", "page", "setting",
          "save_setting", "data_dir", "every", "panel", "claim", "release", "messages", "send_dm",
+         "comments", "reply_to_comment", "conversation_for", "follows_you", "person", "touch", "secret",
          "STYLE_CLASSES", "VERSION")
 
 # The style classes a screen may use. Our markup changes; these names keep their meaning.
@@ -82,6 +87,16 @@ def page(path: str, *, title: str, lede: str, body: str) -> str:
     """The box's own page around `body`: its menu, a title, one plain sentence, then your cards."""
     from core.dash.home import chrome
     return chrome(path, title=title, lede=lede, body=body)
+
+
+def _space(space: str | None) -> str | None:
+    """The Space a person belongs to: the one named, or this box's only one. None when the box runs several and
+    none was named, so a person is never filed under a business it doesn't belong to."""
+    from core import spaces
+    names = [s["name"] for s in spaces.all_spaces() if isinstance(s, dict) and s.get("name")]
+    if space:
+        return space if space in names else None
+    return names[0] if len(names) == 1 else None
 
 
 class Machine:
@@ -175,6 +190,27 @@ class Machine:
         from core import box_settings
         box_settings.put(self.key, key, value, set_by=by or self.slug)
 
+    # ── secrets ───────────────────────────────────────────────────────────────────────────────
+    def secret(self, name: str, *, label: str | None = None, help: str = "") -> str:
+        """A key this machine needs (an API token), or "" until the owner saves one.
+
+        Declare it once, at the top of `__init__.py`, with the words the owner reads:
+
+            m.secret("sanity_token", label="Sanity write token", help="Sanity → API → Tokens → Editor")
+
+        and read it where you use it: `m.secret("sanity_token")`. The box gives your machine one Keys page,
+        `m.keys_page` (owner only), with a field for each secret you declared; a saved value is never shown back.
+        Never put a key in a setting, a file or your code: a setting is not a secret, and code is shared."""
+        from core import machine_secrets
+        if label is not None:
+            machine_secrets.declare(self.key, name, label=label, help=help)
+        return machine_secrets.get(self.key, name)
+
+    @property
+    def keys_page(self) -> str:
+        """Where the owner saves this machine's secrets: link to it from your own screen."""
+        return f"/settings/machines/{self.slug}/keys"
+
     # ── scheduled jobs ────────────────────────────────────────────────────────────────────────
     def every(self, seconds, fn=None, *, name: str | None = None):
         """Run `fn()` every `seconds` (15 or more) in the box's worker. Either form works:
@@ -207,15 +243,23 @@ class Machine:
         panels.register(slot, machine=self.key, title=title, render=render)
 
     # ── conversations in the box's inbox ──────────────────────────────────────────────────────
-    def claim(self, conversation: str, *, title: str, days: float = 7) -> bool:
+    def claim(self, conversation: str, *, title: str, days: float = 7, trigger: dict | None = None) -> bool:
         """Take charge of a conversation in the inbox. -> True if this machine holds it.
 
         While held, the inbox doesn't draft it, greet it or count it as waiting on a person; it shows it as
         "Handled by <title>". It is never taken from another machine. Calling again renews it; it lets go by
-        itself after `days` (at most 30), so a stalled machine can't silence anyone for good."""
+        itself after `days` (at most 30), so a stalled machine can't silence anyone for good.
+
+        Once a PERSON replied and took it over, it is theirs: no machine claims it again, however the conversation
+        goes on, until the owner hands it back, or the person starts again: pass `trigger`, the comment
+        `m.comments()` returned for their NEW comment. The box checks it read that comment itself, that this person
+        wrote it, and that it is newer than the takeover; anything else opens nothing."""
         from core import conversations
+        kw = {}
+        if trigger is not None:
+            kw["trigger"] = str(trigger.get("id") or "") if isinstance(trigger, dict) else ""
         return bool(conversations.provider().claim(machine=self.key, title=title, conversation=conversation,
-                                                   days=days))
+                                                   days=days, **kw))
 
     def release(self, conversation: str, *, note: str = "") -> bool:
         """Let go of a conversation. With a `note`, it is HANDED BACK: the note is shown to whoever answers it
@@ -229,16 +273,92 @@ class Machine:
         from core import conversations
         return conversations.provider().messages(conversation=conversation, since=since)
 
-    def send_dm(self, conversation: str, text: str, *, key: str) -> dict:
+    def send_dm(self, conversation: str, text: str, *, key: str, buttons: list | None = None,
+                quick_replies: list | None = None) -> dict:
         """Send one message on a conversation this machine has claimed, through the inbox's own send path.
 
         `key` names the step ("ask_email"): the same key on the same conversation is never sent twice. The
-        inbox refuses when the person opted out, the box is stopped, the channel's window is closed (on
+        inbox refuses when a person has replied since you claimed it (the claim ends and the conversation is
+        theirs: don't claim it again), the person opted out, the box is stopped, the channel's window is closed (on
         Instagram, 24 hours after their own message) or the hourly cap is reached. -> {"status": "sent" |
         "duplicate" | "refused" | "unknown", "message_id", "reason"}. "unknown" means it may have gone: don't
-        send it again."""
+        send it again.
+
+        `buttons`: up to 3 links, each {"title": "Get the guide", "url": "https://…"} (titles cut at 20 characters).
+        `quick_replies`: up to 13 titles ("I just followed you!"). A tap SENDS the title back as their message,
+        which `m.messages` then shows you: that is how a conversation moves on without a webhook."""
         from core import conversations
-        return conversations.provider().send(machine=self.key, conversation=conversation, text=text, key=key)
+        return conversations.provider().send(machine=self.key, conversation=conversation, text=text, key=key,
+                                             buttons=buttons, quick_replies=quick_replies)
+
+    def comments(self, *, post: str | None = None, since: str | None = None) -> list[dict]:
+        """Recent comments on the box's Instagram account (or one `post`), read-only: {"id", "post", "account",
+        "space", "text", "author": {"id", "username", "name"}, "at"}. Pass one back, unchanged, to
+        `reply_to_comment`. `since` is an `at` a previous call returned: only newer comments come back, so a poll
+        doesn't re-read everything. Replies under a comment and your account's own comments are left out. Never
+        raises: a Space or a post the box can't read right now is skipped and logged, and comes back next time."""
+        from core import conversations
+        return conversations.provider().comments(post=post, since=since)
+
+    def conversation_for(self, comment: dict) -> str | None:
+        """The DM conversation with whoever wrote `comment`, or None until there is one (it appears once they
+        write back or tap a quick reply). Matched on their account id and @handle, never a display name.
+        Never raises: if the box can't look right now, it is None too."""
+        from core import conversations
+        return conversations.provider().conversation_for(comment=comment)
+
+    def follows_you(self, conversation: str) -> bool | None:
+        """Does the person on this conversation follow your account? True or False, or None when Instagram
+        didn't say, which is common on a polled inbox (or the box couldn't look): decide what None means for your
+        machine."""
+        from core import conversations
+        return conversations.provider().follows_you(conversation=conversation)
+
+    def reply_to_comment(self, comment: dict, text: str, *, key: str, quick_replies: list | None = None) -> dict:
+        """Answer a comment with a private message: the first message to someone who has never written to you,
+        and the start of a conversation you can then `claim`. Instagram allows ONE private reply per comment,
+        within 7 days of it; the inbox also refuses when the box is stopped, the person opted out, or the hourly
+        cap is reached. Same answer as `send_dm`."""
+        from core import conversations
+        return conversations.provider().reply_to_comment(machine=self.key, comment=comment, text=text, key=key,
+                                                         quick_replies=quick_replies)
+
+    # ── ONE PERSON, EVERY MACHINE (docs/SCOPE_ONE_PERSON_RECORD.md): the two calls a machine needs, nothing more
+    # (OSDev1's ruling A1 on docs/PLAN_OWNBOX_RUNS_ON_OWNBOX.md, 2026-10-02). A machine of your own adds the people it
+    # meets and says what happened, and every other machine and the Morning Review see the same person.
+
+    def person(self, kind: str, value, *, name: str = "", space: str | None = None) -> str | None:
+        """The person behind an id, made the first time any machine meets them: `m.person("email", "ava@x.com")`.
+
+        `kind` is how you know them: "email", "phone", "instagram", "messenger", "facebook", "prospect" or "web".
+        Returns their person id, the same whichever machine asks, or None for an id that isn't one. Never raises.
+        `space` matters only on a box that runs more than one; on one that does, name it, or nothing is recorded."""
+        try:
+            from core import people
+            sp = _space(space)
+            return people.identify(sp, str(kind or ""), value, machine=self.key, name=str(name or "")[:120]) \
+                if sp else None
+        except Exception as e:                           # noqa: BLE001 — the promise is "never raises"
+            log.warning("sdk.person_failed", machine=self.key, error=type(e).__name__)
+            return None
+
+    def touch(self, person: str | None, kind: str, ref: str = "") -> bool:
+        """Record what happened to this person: `m.touch(pid, "guide_sent", ref="reel-42")`.
+
+        `kind` is lowercase letters and underscores ("email_sent", "booked"); a step or a campaign goes in `ref`.
+        The event is filed with the person's own Space, so it never lands under another business. The same thing
+        told twice is recorded once. Returns False for a bad call or a repeat. Never raises."""
+        try:
+            from core import people
+            if not isinstance(person, str) or not isinstance(kind, str):
+                return False
+            who = people.person(person)
+            if not who or not who.get("space"):
+                return False
+            return people.touch(who["space"], person, machine=self.key, kind=kind, ref=str(ref or ""))
+        except Exception as e:                           # noqa: BLE001 — the promise is "never raises"
+            log.warning("sdk.touch_failed", machine=self.key, error=type(e).__name__)
+            return False
 
     def data_dir(self) -> pathlib.Path:
         """A folder of this machine's own, for its own SQLite file or anything larger than a setting.

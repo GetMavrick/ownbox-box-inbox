@@ -631,6 +631,109 @@ def _sent_utc(v) -> str | None:
     return d.isoformat()
 
 
+def remember_participant(space: str, zcid: str, idents) -> None:
+    """The other party's ids on this conversation (lowercased id and @handle), kept for the STOP check."""
+    rows = [(space, str(zcid), str(i).strip().lower().lstrip("@")) for i in (idents or ()) if str(i or "").strip()]
+    if not rows:
+        return
+    with state.connect() as c:
+        c.executemany("INSERT OR IGNORE INTO inbox_participant_ids (space, zernio_conversation_id, ident) "
+                      "VALUES (?, ?, ?)", rows)
+
+
+def remember_comment(space: str, comment: dict) -> None:
+    """A comment the box read from the platform itself (the only writer is the comments read)."""
+    a = comment.get("author") or {}
+    with state.connect() as c:
+        c.execute("INSERT OR IGNORE INTO inbox_comments_seen (space, comment_id, author_id, author_handle, at) "
+                  "VALUES (?, ?, ?, ?, ?)", (space, str(comment["id"]),
+                                             str(a.get("id") or "").strip().lower(),
+                                             str(a.get("username") or "").strip().lower().lstrip("@"),
+                                             str(comment.get("at") or "")))
+
+
+def known_ident(space: str, idents) -> bool:
+    """Has the box seen a conversation with this person (by id or @handle)?"""
+    want = sorted({str(i).strip().lower().lstrip("@") for i in (idents or ()) if str(i or "").strip()})
+    if not want:
+        return False
+    marks = ",".join("?" * len(want))
+    with state.connect() as c:
+        return c.execute(f"SELECT 1 FROM inbox_participant_ids WHERE space = ? AND ident IN ({marks}) LIMIT 1",
+                         (space, *want)).fetchone() is not None
+
+
+def opted_out_by_ident(space: str, idents) -> bool:
+    """Did the person with any of these ids say STOP on any conversation in this Space? Read from the box alone."""
+    want = sorted({str(i).strip().lower().lstrip("@") for i in (idents or ()) if str(i or "").strip()})
+    if not want:
+        return False
+    marks = ",".join("?" * len(want))
+    with state.connect() as c:
+        row = c.execute(
+            "SELECT 1 FROM inbox_participant_ids p JOIN inbox_conversations k ON k.space = p.space "
+            "  AND k.zernio_conversation_id = p.zernio_conversation_id "
+            f"WHERE p.space = ? AND p.ident IN ({marks}) AND k.opted_out = 1 LIMIT 1", (space, *want)).fetchone()
+    return row is not None
+
+
+ECHO_MINUTES = 15
+
+
+def is_box_echo(*, space: str, zcid: str, zmid: str | None, body: str | None, sent_at: str | None,
+                page_ids=()) -> bool:
+    """Is this outbound message, read back by the poller, one THE BOX ITSELF SENT under a different id?
+
+    The poller labels every outbound it finds `human` (a reply typed in the platform's app), and a machine's
+    claim ends on a person's reply. If the vendor's id for the read-back differed from the id its send call
+    returned, the machine's own message would come back as the owner's and stop the machine after one send
+    (OSDev1's review of #1790). Equal ids are already handled by INSERT OR IGNORE; this covers unequal ones.
+
+    STRICT, because the cost of a wrong "yes" is a person's real reply never reaching the thread (OSDev1's
+    re-review): it is an echo only when ALL of these hold, and the pairing is then kept, so it holds once:
+      * the read-back has its own time (no time is never an echo);
+      * a box send in THIS conversation (on the send ledger, `ok`) has the same words, within ECHO_MINUTES;
+      * that send's own id is NOT on the page being mirrored (if it is, the read-back is a different message);
+      * that send hasn't already been paired with another read-back (one echo per send, ever).
+    Never raises; an error is "not an echo"."""
+    text, echo = (body or "")[:2000], (zmid or "").strip()
+    at = _sent_utc(sent_at)
+    if not text.strip() or not echo or not at:
+        return False
+    on_page = {str(i) for i in (page_ids or ()) if i}
+    from datetime import datetime, timezone
+
+    def t(v):
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    try:
+        when = t(at)
+        with state.connect() as c:
+            paired = c.execute("SELECT box_message_id FROM inbox_echoes WHERE space = ? AND echo_id = ?",
+                               (space, echo)).fetchone()
+            if paired:
+                return True                              # paired on an earlier poll: still the box's own
+            rows = c.execute(
+                "SELECT m.zernio_message_id AS box_id, m.created_at FROM inbox_messages m "
+                "JOIN inbox_send_ledger l ON l.space = m.space AND l.zernio_message_id = m.zernio_message_id "
+                "WHERE m.space = ? AND m.zernio_conversation_id = ? AND m.direction = 'out' AND m.body = ? "
+                "  AND l.status = 'ok' AND m.zernio_message_id != ? "
+                "  AND NOT EXISTS (SELECT 1 FROM inbox_echoes e WHERE e.space = m.space "
+                "                  AND e.box_message_id = m.zernio_message_id) "
+                "ORDER BY m.created_at", (space, str(zcid), text, echo)).fetchall()
+            for r in rows:
+                if str(r["box_id"]) in on_page:
+                    continue
+                if abs((when - t(r["created_at"])).total_seconds()) > ECHO_MINUTES * 60:
+                    continue
+                cur = c.execute("INSERT OR IGNORE INTO inbox_echoes (space, box_message_id, echo_id) "
+                                "VALUES (?, ?, ?)", (space, str(r["box_id"]), echo))
+                return cur.rowcount > 0
+    except Exception:                                    # noqa: BLE001
+        return False
+    return False
+
+
 def record_message(*, space: str, zcid: str, zmid: str | None, direction: str,
                    sent_by: str, body: str | None, sent_at: str | None = None,
                    detail: dict | None = None) -> None:

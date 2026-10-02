@@ -78,7 +78,10 @@ def found_at() -> str:
 
 
 def set_found(hosts: list[str], at: str) -> None:
-    box_settings.put(NS, FOUND_KEY, {"hosts": list(hosts), "at": at}, set_by="website")
+    """What the box found in PostHog. THE TIME IS KEPT ONLY WHEN SOMETHING WAS FOUND (OSDev1's review of #1815): an
+    empty find stamped it, so the box did not look again for a week, right after telling a new buyer to add the
+    snippet. With nothing found it looks again at the next sync, and the card's own check looks at once."""
+    box_settings.put(NS, FOUND_KEY, {"hosts": list(hosts), "at": at if hosts else ""}, set_by="website")
 
 
 def posthog() -> Conn | None:

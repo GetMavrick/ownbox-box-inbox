@@ -51,16 +51,30 @@ def _enqueue(intent: str, key: str, payload: dict) -> None:
 # ── Sync now ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 def start_sync() -> tuple[bool, str]:
-    """One job per site, for yesterday. Refused while a sync is queued or running."""
+    """A job per site, for yesterday, ONE AT A TIME: only the first is queued, and each queues the next when it
+    finishes (OSDev1's review of #1813), so anything else waiting for the worker, an inbox draft say, waits behind
+    one site at most, never all ten. Refused while a sync is queued or running."""
     if running(SYNC):
         return False, "A sync is already running. Its result shows here when it finishes."
-    sites = settings.sites()
+    sites = list(dict.fromkeys(settings.sites()))
     run = uuid.uuid4().hex[:10]
     box_settings.put(settings.NS, RUN, {"run": run, "started": _now(), "sites": sites, "done": {}},
                      set_by="website")
-    for site in sites:
-        _enqueue(SYNC, f"{SYNC}:{run}:{site}", {"run": run, "site": site})
+    if sites:
+        _enqueue(SYNC, f"{SYNC}:{run}:{sites[0]}", {"run": run, "site": sites[0]})
     return True, "Syncing now. The result shows here when it finishes, and you can leave this page."
+
+
+def _queue_next(run: str, site: str) -> None:
+    """The run's next site after `site`, queued before this one's result is written, so a run is never left with
+    no job and an unfinished list. An older run (a newer press replaced it) queues nothing."""
+    r = sync_run()
+    if r.get("run") != run:
+        return
+    sites = list(dict.fromkeys(r.get("sites") or []))             # a site listed twice is synced once
+    if site in sites and sites.index(site) + 1 < len(sites):
+        nxt = sites[sites.index(site) + 1]
+        _enqueue(SYNC, f"{SYNC}:{run}:{nxt}", {"run": run, "site": nxt})
 
 
 def sync_run() -> dict:
@@ -82,6 +96,16 @@ def _finish_site(run: str, site: str, outcome: str, upto: str, n: int = 0) -> No
         errors = [v["outcome"] for v in done.values() if v["outcome"] != "ok"]
         settings.set_sync_state(error=errors[0] if errors else "", last_run=_now(), upto=upto,
                                 synced={s: v["days"] for s, v in done.items() if v["outcome"] == "ok"}, note="")
+        # SYNC NOW REACHES THE REVIEW TOO (report.late): pressed between midnight and 06:00, it is the only sync of
+        # that day, since the 06:00 pass then finds the day already done.
+        if len(errors) < len(done):                     # at least one site synced: a run that failed whole adds nothing
+            try:
+                from datetime import date as _date
+                from core import report as _report
+                from .report import MACHINE as _MACHINE
+                _report.late(_MACHINE, _date.fromisoformat(upto))
+            except (ValueError, TypeError):
+                pass
 
 
 def do_sync(job: dict) -> dict:
@@ -92,14 +116,17 @@ def do_sync(job: dict) -> dict:
     upto = sync.yesterday()
     conn = settings.posthog()
     if conn is None:
+        _queue_next(run, site)
         _finish_site(run, site, "Connect PostHog first; the sync reads from it.", upto.isoformat())
         return {"site": site, "synced": 0}
     try:
         n = sync.sync_one(conn, site, upto, force=True)
     except posthog.Refused as e:
+        _queue_next(run, site)
         log.warning("website.sync_now_refused", site=site, why=str(e)[:160])
         _finish_site(run, site, str(e), upto.isoformat())
         return {"site": site, "synced": 0, "error": str(e)[:200]}
+    _queue_next(run, site)
     _finish_site(run, site, "ok", upto.isoformat(), n)
     return {"site": site, "synced": n}
 
@@ -109,6 +136,7 @@ def sync_failed(job: dict, error: Exception) -> None:
     try:
         p = json.loads(job.get("raw_text") or "{}")
         from . import sync
+        _queue_next(str(p.get("run") or ""), str(p.get("site") or ""))     # one site's failure never ends the run
         _finish_site(str(p.get("run") or ""), str(p.get("site") or ""),
                      "The sync stopped before it finished. Press Sync now to try again.", sync.yesterday().isoformat())
     except Exception as e:                               # noqa: BLE001 — a failure hook never compounds a failure
@@ -140,8 +168,9 @@ def _said_check(ok: bool, said: str) -> None:
 
 
 def do_check(job: dict) -> dict:
-    """The worker's half of Check and save: one real query per site through what was typed. Saved only when PostHog
-    answers; 0 page views says the snippet isn't on that site yet. A refusal saves nothing."""
+    """The worker's half of Check and save: one real query per site through what was typed, or, with no site yet,
+    the sites PostHog sees. Saved only when PostHog answers; 0 page views says the snippet isn't on that site yet. A
+    refusal saves nothing."""
     p = json.loads(job.get("raw_text") or "{}")
     host, project, new_key = str(p.get("host") or ""), str(p.get("project") or ""), bool(p.get("new_key"))
     key = box_secrets.get(PENDING_SECRET) if new_key else box_secrets.get(settings.SECRET)
@@ -150,8 +179,15 @@ def do_check(job: dict) -> dict:
             _said_check(False, f"Paste your PostHog personal API key. It needs the {posthog.SCOPE} scope.")
             return {"ok": False}
         conn = posthog.Conn(host=host, project=project, key=key)
+        sites = settings.sites()
         try:
-            seen = [(s, posthog.check(conn, s, settings.tz())) for s in settings.sites()]
+            if sites:
+                seen = [(s, posthog.check(conn, s, settings.tz())) for s in sites]
+            else:
+                # SETUP FIXES ITSELF (owner, 2026-10-01; OSDev1's #1812): a new buyer connects PostHog before typing a
+                # site, so the check asks PostHog which sites it sees, with the sync's own rule for a real site.
+                from . import sync
+                found = sync.site_hosts(conn)
         except posthog.Refused as e:
             _said_check(False, f"{e} Nothing was saved.")
             return {"ok": False}
@@ -159,12 +195,22 @@ def do_check(job: dict) -> dict:
         box_settings.put(settings.NS, "posthog_project", project, set_by="website")
         if new_key:
             box_secrets.put(settings.SECRET, key, user_id="website")
+        if not sites:
+            settings.set_found(found, _now())
+            _said_check(True, ("Connected: we see visits on " + _and(found) + "." if found else
+                               "Connected, but no visits yet. Add the PostHog snippet to your site, then press Check and save again."))
+            return {"ok": True, "found": found}
         parts = [f"{s}: {n:,} page views" if n else f"{s}: none yet, so the PostHog snippet isn't on that site yet"
                  for s, n in seen]
         _said_check(True, "PostHog is connected. In the last 30 days, " + "; ".join(parts) + ".")
         return {"ok": True}
     finally:
         box_secrets.clear(PENDING_SECRET)
+
+
+def _and(items: list[str]) -> str:
+    """"a", "a and b", "a, b and c"."""
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
 def check_failed(job: dict, error: Exception) -> None:

@@ -285,6 +285,38 @@ def snapshot(day: date | None = None) -> dict:
     return out
 
 
+def late(machine: str, day: date) -> bool:
+    """A machine's numbers for a closed day arrived late: re-report that one row, while the day's review hasn't been
+    started. Returns True when the row was rewritten. Never raises.
+
+    THE DAY CLOSES AT MIDNIGHT, BUT SOME NUMBERS DON'T EXIST UNTIL MORNING. Measured on the owner's box 2026-10-02:
+    the website sync for yesterday runs at 06:00 (the day must be over in PostHog), hours after `close_open_days`
+    froze yesterday's rows, so the Morning Review never carried a website line. Search Console lags by days. The
+    review is built once, from these rows (core/review_brief.py), so until it is started they can still become
+    true; once it has been, the day is what was sent and stays so. Only the named machine's row is touched.
+    """
+    try:
+        r = REPORTERS.get(machine)
+        if not r or machine == METERS:
+            return False
+        from core import review_brief
+        d = day.isoformat()
+        with state.connect() as c:
+            if c.execute("SELECT 1 FROM daily_reports WHERE day = ? AND machine = ?",
+                         (d, review_brief.BRIEF)).fetchone():
+                return False                       # the review for that day is built or being built: it stays
+            rep = _normalize(machine, r["title"], r["fn"](day))
+            blob = json.dumps(rep, sort_keys=True)
+            c.execute("INSERT INTO daily_reports (day, machine, report_json, written_at, final) VALUES (?,?,?,?,1) "
+                      "ON CONFLICT(day, machine) DO UPDATE SET report_json = excluded.report_json, "
+                      "written_at = excluded.written_at", (d, machine, blob, state._now()))
+        log.info("report.late_numbers", machine=machine, day=d)
+        return True
+    except Exception as e:                         # noqa: BLE001 — late numbers must never break a sync
+        log.warning("report.late_failed", machine=machine, error=type(e).__name__)
+        return False
+
+
 def close_open_days(now: datetime | None = None) -> list[str]:
     """Any row whose day is before today and still `final = 0` gets one last snapshot and is
     closed — NOT a midnight window (§2.3): a box that was down across midnight would otherwise

@@ -34,7 +34,9 @@ def _line(site: str, w: dict) -> str:
         # conversions by name with their own counts.
         named = ", ".join(f"{name} {n:,}" for name, n in w["conversions"][:2] if n)
         parts.append(f"{t['converted']:,} conversion{'s' if t['converted'] != 1 else ''}" + (f" ({named})" if named else ""))
-    return ", ".join(parts) + "."
+    # NO FULL STOP: the Morning Review joins a machine's lines with commas (review_brief._moving), so a line that
+    # ended in one read "...AI answers., brian-macdonald.com: ..." on the owner's first review with websites.
+    return ", ".join(parts)
 
 
 def report(day: date) -> dict:

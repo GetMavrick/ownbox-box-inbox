@@ -132,6 +132,24 @@ class _AccountsResource:
                 out[plat] = aid
         return out
 
+    def identities(self) -> dict:
+        """THIS Space's own identity per platform -> {platform: {id, @handle, …} lowercased}, so a reader can
+        tell the account's own comments from a person's. Read-only, profile-scoped like discover()."""
+        s = self._s
+        r = transport.call(
+            "accounts.list",
+            lambda: transport.raw_client(s.key).accounts.list(profile_id=s.profile_id))
+        out: dict = {}
+        for a in model.items(r, "accounts", "data", "items"):
+            plat = model.platform_value(a)
+            if not plat:
+                continue
+            for f in ("platformUserId", "platformAccountId", "userId", "username", "platformUsername"):
+                v = str(model.field(a, f) or "").strip().lower().lstrip("@")
+                if v:
+                    out.setdefault(plat, set()).add(v)
+        return out
+
     def health(self) -> dict:
         """Connected-account health for THIS Space (watchdog/diagnostic feed).
         PROFILE-SCOPED like discover(): under the target one-key model a bare
