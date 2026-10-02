@@ -16,10 +16,14 @@ from urllib.parse import urlsplit
 
 from flask import redirect, request
 
+from core import source_cards
 from core.connections import oauth, store
 from core.dash import blueprint
 from core.dash.box_settings import _admit, _back, _esc, _is_owner, _who
 from core.dash.home import chrome
+from core.logging import get_logger
+
+log = get_logger(__name__)
 
 DOOR = "/settings/sources"
 _TITLE = "Data Sources"          # the menu row's name, so the page and its row agree
@@ -165,6 +169,15 @@ def box_sources():
                            + _back()), 403
     who = str(_who().get("id") or "owner")
     note, kept = "", {}
+    if request.method == "POST" and source_cards.get(request.form.get("card")):
+        # A BUILT-IN CARD'S OWN FORM (core/source_cards.py): its handler acts and says what happened, on the card.
+        key = str(request.form.get("card"))
+        try:
+            said = source_cards.get(key)["handle"](str(request.form.get("do") or ""), request.form, who)
+        except Exception as e:                   # noqa: BLE001 — a card's failure is said on it, never a 500
+            log.warning("sources.card_failed", card=key, error=type(e).__name__)
+            said = (False, "That did not work, and nothing was changed. Try again in a minute.")
+        return _render("", {}, cards={key: said})
     if request.method == "POST":
         f = request.form
         action, slug = str(f.get("do") or ""), str(f.get("app") or "")
@@ -245,11 +258,27 @@ def box_sources_signed_in():
     return redirect(f"{DOOR}?added={rec['slug']}", code=303)
 
 
-def _render(note: str, kept: dict):
+def _built_in(said: dict) -> list[str]:
+    """The cards registered by code that is not core (core/source_cards.py), each drawn by
+    its owner. One that fails to draw says so in a sentence; the page still opens."""
+    out = []
+    for key, spec in source_cards.cards():
+        try:
+            out.append(spec["render"](said.get(key)))
+        except Exception as e:                   # noqa: BLE001
+            log.warning("sources.card_unavailable", card=key, error=type(e).__name__)
+            out.append(f'<div class="card"><h2>{_esc(spec["title"])}</h2><p>This could not be shown just now. '
+                       'Nothing about it has changed; open this page again in a minute.</p></div>')
+    return out
+
+
+def _render(note: str, kept: dict, cards: dict | None = None):
     items = store.load()["items"]
     body = []
     if note:
         body.append(f'<div class="card"><p>{_esc(note)}</p></div>')
+    # THE BUILT-IN SOURCES FIRST: they are what the box reads on its own, every day.
+    body += _built_in(cards or {})
     for flag, said in (("added", "Connected. The tools that only read are on."), ("saved", "Saved."),
                        ("checked", "Checked. Its tools are up to date.")):
         rec = items.get(str(request.args.get(flag) or ""))
@@ -272,4 +301,5 @@ def _render(note: str, kept: dict):
                     '<a href="/approvals">Waiting for you &rarr;</a></p></div>')
     body.append(_connect_form(kept))
     body.append(_back())
-    return chrome(DOOR, title=_TITLE, lede=LEDE, body=_CSS + "".join(body)), (400 if note else 200)
+    bad = note or any(v and not v[0] for v in (cards or {}).values())
+    return chrome(DOOR, title=_TITLE, lede=LEDE, body=_CSS + "".join(body)), (400 if bad else 200)

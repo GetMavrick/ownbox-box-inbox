@@ -233,3 +233,67 @@ tools.register(
     description="What this box has spent against its ceiling this billing cycle, with the window "
                 "it is measured over, plus metered vendor usage. Not visible to a read seat.",
 )
+
+
+# ── STOP AND START AGAIN, from a chat (docs/SCOPE_INBOX_CONNECTOR.md step 4) ─────────────────────
+# The Dashboard's "Stop everything" and "Start again" buttons, as proposals: the AI asks, the owner taps
+# Approve in the mobile app, and `core.pause` runs exactly as the buttons run it. Owner, 2026-10-02: a buyer
+# runs the box from their own AI ("they need full control capabilities"); for now every change is a tap.
+PAUSE_KIND = "box_pause"
+
+
+def _ask_pause(stop: bool, seat=None) -> dict:
+    from core import approvals, pause
+    if pause.is_paused() == stop:
+        return {"asked": False, "note": f"the box is already {'stopped' if stop else 'running'}"}
+    words = ({"Change": "Stop everything", "Means": "no new messages arrive and nothing runs on its own; "
+              "a person can still reply by hand"} if stop else
+             {"Change": "Start the box again", "Means": "messages arrive and the machines run again"})
+    a = approvals.propose(PAUSE_KIND, machine=MACHINE, title=words["Change"],
+                          detail={"app": "Your box", "arguments": words, "stop": stop},
+                          seat_id=str((seat or {}).get("label") or (seat or {}).get("id") or ""))
+    return {"asked": True, "approval": a["id"], "repeat": bool(a.get("repeat")),
+            "note": "waiting for the owner, who approves or declines in the mobile app. Nothing has changed yet."}
+
+
+def propose_stop(seat=None):
+    """Ask the owner to stop everything, as the Dashboard's button does."""
+    return _ask_pause(True, seat)
+
+
+def propose_start(seat=None):
+    """Ask the owner to start the box again after a stop."""
+    return _ask_pause(False, seat)
+
+
+def _run_pause(detail: dict) -> dict:
+    from core import pause
+    if (detail or {}).get("stop"):
+        pause.halt("approval")
+        log.warning("box_tools.halt_approved")
+        return {"ok": True, "text": "Stopped. Nothing runs on its own until it is started again."}
+    pause.resume()
+    log.info("box_tools.resume_approved")
+    return {"ok": True, "text": "Started again."}
+
+
+from core import approvals as _approvals  # noqa: E402
+
+_approvals.register_kind(PAUSE_KIND, run=_run_pause)
+
+tools.register(
+    "propose_stop",
+    title="Ask before stopping your box",
+    fn=propose_stop, machine=MACHINE, min_role="act",
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to stop everything on this box, as the Dashboard's Stop button does. Nothing "
+                "changes until the owner approves.",
+)
+
+tools.register(
+    "propose_start",
+    title="Ask before starting your box again",
+    fn=propose_start, machine=MACHINE, min_role="act",
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to start this box again after a stop. Nothing changes until the owner approves.",
+)

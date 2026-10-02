@@ -139,6 +139,14 @@ def load(process: str) -> list[dict]:
         name = _module_name(slug)
         version = str(d["manifest"].get("version"))
         try:
+            # THE FOUNDATION IT NEEDS IS IMPORTED FIRST (core/foundations.py), in this process too. `needs:
+            # [foundation:marketing]` was only checked to be on the box; an add-on machine gets its foundation
+            # imported ahead of it from the module list, but the owner's own machines load here, so without
+            # this a box whose only marketing machine is the owner's would run it with the foundation's tables
+            # and seam never registered (OSDev4's review of #1800, 2026-10-02).
+            from core import foundations
+            for fmod in foundations.modules_for(d["manifest"].get("needs")):
+                importlib.import_module(fmod)
             mod = sys.modules.get(name)
             if mod is None:
                 folder = pathlib.Path(d["path"])

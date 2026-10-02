@@ -104,6 +104,11 @@ def validate(m, folder: pathlib.Path | None = None) -> dict:
                 raise MachineError(f"{field}: '{p}' is not under this machine's modules")
     tiers = _strs(m, "tiers", _KEY)
     needs = _strs(m, "needs")
+    from core import foundations
+    for n in foundations.split(needs)[1]:           # `needs: [foundation:marketing]`: the package must be here
+        why = foundations.refused(n)
+        if why:
+            raise MachineError(why)
     menu = m.get("menu")
     if menu is not None:
         if not isinstance(menu, dict):
@@ -230,9 +235,17 @@ def into_config(cfg: dict, *, stage: str) -> dict:
                 base = _deep_merge(base, m["config"])
             return _deep_merge(base, cfg)
         out = dict(cfg)
+        from core import foundations
         for key, field in (("modules", "worker"), ("web_modules", "web")):
             have = [p for p in (out.get(key) or []) if isinstance(p, str)]
-            out[key] = have + [p for m in machines for p in m[field] if p not in have]
+            extra: list = []
+            for m in machines:
+                # THE FOUNDATION A MACHINE NEEDS LOADS BEFORE IT, in both processes, from this one list
+                # (core/foundations.py): a module global set in the worker is not set in the web process.
+                for p in foundations.modules_for(m.get("needs")) + list(m[field]):
+                    if p not in have and p not in extra:
+                        extra.append(p)
+            out[key] = have + extra
         mf = dict(out.get("machine_features") or {}) if isinstance(out.get("machine_features"), dict) else {}
         for m in machines:
             mf.setdefault(m["feature"], list(m["modules"]))

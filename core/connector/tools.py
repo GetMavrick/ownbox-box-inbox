@@ -154,7 +154,44 @@ def held(seat: dict) -> frozenset:
     explicit = seat.get("capabilities")
     if explicit is not None:
         return frozenset(c for c in explicit if ai_may_hold(c))
-    return _ROLE_CAPABILITIES.get(seat.get("role"), frozenset())
+    role = _ROLE_CAPABILITIES.get(seat.get("role"))
+    if role is None:
+        return frozenset()
+    return role | granted()
+
+
+# A MACHINE'S OWN READ CAPABILITY, GRANTED TO EVERY ROLE BY ONE LINE IN THE MACHINE. Owner,
+# 2026-10-02: a person must be in full command of every machine from their own AI, and the first
+# thing that takes is seeing what the machine sees. A machine registers its read tools under
+# `read:<slug>` (read:aeo, read:website) and calls `grant()` beside them; core never names a
+# machine (test_core_boundary), so the table above cannot. EXPLICIT, NEVER AUTOMATIC: a capability
+# nobody granted stays invisible to every seat (test_connector_mcp: read:leads_pii), because the
+# tool most likely to be written in a hurry is the one about people, and the grant line is what a
+# reviewer sees. What the table already decides stays decided: read:spend is withheld from read
+# seats on purpose, and a grant of it is refused.
+_TABLED = frozenset().union(*_ROLE_CAPABILITIES.values())
+_GRANTED: set = set()
+
+
+def grant(capability: str) -> None:
+    """Hold `capability` (a machine's own `read:<slug>`) in every role. Refused for anything the role
+    table already decides, and for anything but a read."""
+    if not (isinstance(capability, str) and _CAPABILITY.match(capability) and capability.startswith("read:")):
+        raise ValueError(f"grant: only a machine's own read capability can be granted, got {capability!r}")
+    if capability in _TABLED:
+        raise ValueError(f"grant: {capability} is decided by the role table, not by a machine")
+    _GRANTED.add(capability)
+    log.info("connector.capability_granted", capability=capability)
+
+
+def granted() -> frozenset:
+    return frozenset(_GRANTED)
+
+
+def machine_reads() -> frozenset:
+    """Every registered `read:` capability the role table does not name."""
+    return frozenset(s["capability"] for s in _REGISTRY.values()
+                     if s["capability"].startswith("read:") and s["capability"] not in _TABLED)
 
 
 # MCP's unspecified annotation defaults are hostile to a product like ours: `destructiveHint` and

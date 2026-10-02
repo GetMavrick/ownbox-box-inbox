@@ -232,6 +232,8 @@ def current() -> dict:
 def needs(wanted) -> tuple[bool, str]:
     """(ok, why) for a machine that says `needs: [...]` (core/packs.py). `why` names the first tier
     that includes every feature wanted, as a person reads it: "needs Base Machine Pro"."""
+    from core import foundations
+    wanted = foundations.split(wanted)[0]          # a foundation is never a plan feature (core/foundations.py)
     missing = [f for f in wanted if f not in features()]
     if not missing:
         return True, ""

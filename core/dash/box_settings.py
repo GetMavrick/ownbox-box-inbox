@@ -1138,8 +1138,18 @@ def _seat_rows(seats_list: list) -> str:
                        f'<span class="quiet">Revoked. It can no longer reach this box.</span>'
                        f'</div>')
         else:
+            # ONE TAP BETWEEN THE TWO (OSDev1, 2026-10-02, #1794 §4): a connection made before
+            # read-and-draft was the default moves up without connecting again, and back down the
+            # same way. Every owner gets the same buttons; nothing here knows whose box it is.
+            to, verb = (("act", "Let it draft replies") if role == "read" else
+                        ("read", "Make it read only") if role == "act" else ("", ""))
+            change = (f'<form method="post" action="/settings/agent" style="margin:0;width:100%">'
+                      f'<input type="hidden" name="do" value="role">'
+                      f'<input type="hidden" name="seat" value="{_esc(s.get("id"))}">'
+                      f'<input type="hidden" name="role" value="{to}">'
+                      f'<button type="submit" class="ghost">{verb}</button></form>') if to else ""
             out.append(f'<div class="row"><b style="flex:1;min-width:0">{label}</b>'
-                       f'<span class="quiet">{_esc(human)}</span>'
+                       f'<span class="quiet">{_esc(human)}</span>{change}'
                        f'<a href="/settings/agent?revoke={_esc(s.get("id"))}">Revoke</a></div>')
     out.append('</div>')
     return "".join(out)
@@ -1211,6 +1221,12 @@ def box_agent():
     revoke = (request.args.get("revoke") or "").strip()
     if revoke:
         seats.revoke(revoke)
+        return redirect("/settings/agent", code=303)
+
+    if request.method == "POST" and str(request.form.get("do") or "") == "role":
+        to = str(request.form.get("role") or "").strip()
+        if to in seats.SETTABLE:
+            seats.set_role(str(request.form.get("seat") or "").strip(), to)
         return redirect("/settings/agent", code=303)
 
     if request.method == "POST" and str(request.form.get("do") or "") == "mint":

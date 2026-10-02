@@ -49,13 +49,20 @@ def _load_web_modules() -> None:
     module directly. Each listed module exposes a Flask `blueprint`."""
     import importlib
 
-    from core import tiers
+    from core import foundations, tiers
     from core.config import get_config
     for path in get_config().get("web_modules", []):
         if not tiers.module_on(path):                  # an add-on machine the plan lacks: no screens
             log.info("dispatch.web_module_not_in_plan", module=path)
             continue
         mod = importlib.import_module(path)
+        if foundations.is_module(path):
+            # A DEPARTMENT FOUNDATION HAS NO SCREENS (core/foundations.py). It is imported here for what it
+            # registers (its tables, its seam, a tool grant), the same import the worker makes, so the two
+            # processes agree. Only a foundation may skip the blueprint: a machine that forgot its blueprint
+            # still fails here, at boot, where somebody is watching.
+            log.info("dispatch.foundation_loaded", module=path)
+            continue
         app.register_blueprint(mod.blueprint)
         log.info("dispatch.web_module_loaded", module=path)
     _load_machine_menus()

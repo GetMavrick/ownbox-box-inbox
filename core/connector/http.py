@@ -276,8 +276,12 @@ def oauth_authorize():
     # but they're always gonna want to give this permission." A draft is not a send — the box
     # cannot send from a connector seat at all — so the cautious default was caution about
     # nothing, and it cost the owner a connection with no draft_reply and no way to see why.
-    # An assistant that explicitly asks for `read` still gets exactly that.
-    pre = "read" if scope == "read" and str(q.get("scope") or "").strip() else "act"
+    # An assistant that asks for `read` no longer preselects it; the person can still choose it below.
+    # AND NOW REGARDLESS OF WHAT THE CLIENT ASKS FOR (OSDev1, 2026-10-02, #1794 §4: a person's own-AI
+    # seat is `act` by default; `read` stays the choice for read-only access). The exception above let
+    # an assistant that ASKED for `read` preselect it, and that is how the owner's own Claude connected
+    # read-only and could not draft a single reply: the request is a hint, this screen is the decision.
+    pre = "act"
     perms = "".join(
         f'<label><input type=radio name=grant value="{v}"{" checked" if v == pre else ""}>'
         f'<b>{t}</b><span>{w}</span></label>'

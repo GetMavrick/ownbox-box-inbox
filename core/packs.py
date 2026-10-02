@@ -202,8 +202,14 @@ def needs_refused(m: dict) -> str:
     # to say what it needs). It means the same as no `needs:` at all, and carries no version floor.
     if not wanted:
         return ""
-    from core import tiers
-    unknown = [f for f in wanted if f not in tiers.FEATURES]
+    from core import foundations, tiers
+    # A DEPARTMENT FOUNDATION IS THE OTHER THING A MACHINE MAY NEED (core/foundations.py): `foundation:marketing`,
+    # validated there, never a plan feature, so no tier can gate it.
+    for f in foundations.split(wanted)[1]:
+        why = foundations.refused(f)
+        if why:
+            return why
+    unknown = [f for f in foundations.split(wanted)[0] if f not in tiers.FEATURES]
     if unknown:
         hint = " (that is a tier; name the feature it includes)" if unknown[0] in tiers.TIERS else ""
         return f"needs: '{unknown[0]}' is not a feature this foundation knows{hint}; known: {sorted(tiers.FEATURES)}"

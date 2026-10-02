@@ -186,6 +186,34 @@ def revoke(seat_id: str) -> bool:
     return changed
 
 
+SETTABLE = ("read", "act")   # what a person may move their own connection between; `service` is ours
+
+
+def set_role(seat_id: str, role: str) -> bool:
+    """Move a live connection between `read` and `act` IN PLACE. -> True if it changed.
+
+    IN PLACE, NOT RE-MINTED (OSDev1, 2026-10-02, #1794 §4: the owner's existing seat is `read`,
+    give him one tap that makes it his own seat "so he doesn't have to mint and re-paste"). A
+    connection made by signing in holds its credential inside the AI app; a new credential would
+    mean connecting all over again. The role is read from this row on every request, so the next
+    call the AI makes already has what the new role grants, and the old one is gone.
+
+    NEVER A RUN SEAT AND NEVER `service`. A run seat holds an exact list for one shift, and moving
+    its role would hand it whatever the role grants beyond that list. `service` is the box's own
+    and no screen grants it. Neither direction can send: no role holds an `act:` capability.
+    """
+    if role not in SETTABLE:
+        raise ValueError(f"role must be one of {SETTABLE}, got {role!r}")
+    with state.connect() as c:
+        cur = c.execute(
+            "UPDATE seats SET role = ? WHERE id = ? AND revoked_at IS NULL AND role IN ('read','act') "
+            "   AND role != ? AND id NOT IN (SELECT seat_id FROM seat_capabilities)",
+            (role, seat_id, role))
+        changed = cur.rowcount > 0
+    log.info("connector.seat_role_set", seat_id=seat_id, role=role, changed=changed)
+    return changed
+
+
 def all_seats(include_revoked: bool = True, include_runs: bool = False) -> list[dict]:
     """Every seat, newest first. Never returns a secret or a hash — there is nothing to show.
 

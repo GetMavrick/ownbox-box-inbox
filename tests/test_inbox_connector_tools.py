@@ -69,8 +69,14 @@ def seed():
                    "there is a leak here too", "2026-09-02T00:00:00Z"))
 
 
-INBOX_TOOLS = ("inbox.list_conversations", "inbox.search", "inbox.read_conversation")
+INBOX_TOOLS = ("inbox.list_conversations", "inbox.search", "inbox.read_conversation",
+               # step 1 of docs/SCOPE_INBOX_CONNECTOR.md (owner, 2026-10-02): what the screens show
+               "inbox.waiting", "inbox.status", "inbox.settings", "inbox.connect")
 WRITE_TOOL = "inbox.draft_reply"
+# STEP 3 (owner, 2026-10-02: "One-tap approve"): proposals, which send nothing until a person approves.
+PROPOSE_TOOLS = ("inbox.propose_reply", "inbox.propose_drafts",
+                 # step 4: the rest of the screen's controls, each a one-tap approval too
+                 "inbox.propose_drafting", "inbox.propose_discard_draft", "inbox.propose_opt_out")
 
 
 def test_the_inbox_is_actually_offered():
@@ -99,7 +105,7 @@ def test_a_seat_can_actually_SEE_them():
     for role in ("read", "act", "service"):
         seen = {s["name"] for s in registry.visible_to({"role": role})}
         missing = [t for t in INBOX_TOOLS if t not in seen]
-        ok(f"a {role} seat sees all three inbox tools", not missing,
+        ok(f"a {role} seat sees every inbox reader", not missing,
            f"hidden from {role}: {missing} — is read:inbox granted to it?")
     # AND THE CONTRAST THAT PROVES THE CHECK MEANS SOMETHING. A role nobody defined holds nothing,
     # so a test that passed for every conceivable seat would not be testing the gate at all.
@@ -169,7 +175,8 @@ def test_nothing_here_can_speak_as_the_business():
        str({n: t.get("capability") for n, t in readers.items()}))
 
     writers = {n: t for n, t in inbox.items() if n not in INBOX_TOOLS}
-    ok("the only write on this lane is draft_reply", set(writers) == {WRITE_TOOL}, str(sorted(writers)))
+    ok("the only writes on this lane are draft_reply and the proposals",
+       set(writers) == {WRITE_TOOL, *PROPOSE_TOOLS}, str(sorted(writers)))
     ok("...and it is act-role, on write:proposals",
        all(t.get("min_role") == "act" and t.get("capability") == "write:proposals"
            for t in writers.values()),
@@ -285,6 +292,169 @@ def test_a_caller_cannot_ask_for_the_whole_box_at_once():
        "error" in inbox_tools.read_conversation())
 
 
+def test_a_chat_sees_what_the_screens_show():
+    """Step 1 of docs/SCOPE_INBOX_CONNECTOR.md. Owner, 2026-10-02: a buyer runs the box from their own AI,
+    so the chat has to see who is waiting, whether the box runs, and how it is set, as the screens do."""
+    print("test_a_chat_sees_what_the_screens_show")
+    import pathlib
+    from core import pause
+    from marketing.customer_voice import claims
+    from marketing.customer_voice.drafter import store as drafts
+
+    # w1: waiting, with a reply written for it. h1: an automation runs it, so it is not waiting on anyone.
+    for zcid, who in (("w1", "Avery Plumbing"), ("h1", "Kai Studio")):
+        store.upsert_conversation(space=SPACE, zcid=zcid, participant=who, platform="instagram",
+                                  last_inbound_at="2026-09-03T00:00:00Z")
+        with state.connect() as c:
+            c.execute("INSERT INTO inbox_messages (id, space, zernio_conversation_id, zernio_message_id,"
+                      " direction, sent_by, body, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                      (str(uuid.uuid4()), SPACE, zcid, f"m-{zcid}", "in", "contact",
+                       "do you have time friday", "2026-09-03T00:00:00Z"))
+    drafts.put(space=SPACE, zcid="w1", in_reply_to="m-w1", body="Friday at 10 works.")
+    claims.claim(SPACE, "h1", machine="lead_magnet", title="Lead Magnet")
+    # one an automation finished with: it is no longer "being handled", and status must not say it is
+    claims.claim(SPACE, "w1", machine="welcome", title="Welcome")
+    claims.release(SPACE, "w1", machine="welcome")
+
+    w = inbox_tools.waiting()
+    who = [c["who"] for c in w["conversations"]]
+    ok("waiting lists the person whose message was last", "Avery Plumbing" in who, str(who))
+    ok("...but not one an automation is running", "Kai Studio" not in who, str(who))
+    ok("...and its count is the screen's own count", w["waiting_on_you"] == store.awaiting_reply(SPACE),
+       f"{w['waiting_on_you']} vs {store.awaiting_reply(SPACE)}")
+    ready = [d for d in w["drafts_ready"] if d["conversation"] == "w1"]
+    ok("the written reply is offered in full, with what it answers",
+       ready and ready[0]["draft"] == "Friday at 10 works." and ready[0]["they_said"] == "do you have time friday",
+       str(w["drafts_ready"]))
+    ok("...and another tenant's conversation never appears",
+       "Someone Else" not in who and all(d["who"] != "Someone Else" for d in w["drafts_ready"]))
+
+    marker = pathlib.Path(tempfile.mkdtemp()) / "PAUSED"
+    real, pause.MARKER = pause.MARKER, marker
+    try:
+        s = inbox_tools.status()
+        ok("status says the box is running", s["box"] == "running", s["box"])
+        pause.halt("test")
+        s = inbox_tools.status()
+        ok("...and says stopped once a person stops it", s["box"] == "stopped", s["box"])
+    finally:
+        pause.MARKER = real
+    ok("status names the automation and whom it is handling",
+       [(h["who"], h["handled_by"]) for h in s["handled_by_automations"]] == [("Kai Studio", "Lead Magnet")],
+       str(s["handled_by_automations"]))
+    ok("...counts sends against the cap", isinstance(s["sent_this_hour"], int) and s["hourly_send_cap"] > 0)
+    ok("...lists the channels this box has heard on, by name",
+       any(ch["name"] == "Instagram" for ch in s["channels"]), str(s["channels"]))
+    ok("...and says whether writing replies is on", s["writing_replies"] in ("on", "off"))
+
+    st = inbox_tools.settings()
+    names = [x["name"] for x in st["settings"]]
+    ok("settings lists every Inbox setting",
+       names == ["writing_replies", "opener", "hourly_send_cap", "mailbox_drafts"], str(names))
+    ok("...each with what it means and where it is changed",
+       all(x.get("means") and x.get("changed_at") for x in st["settings"]))
+    ok("...and the connections, by state only",
+       set(st["connections"]) == {"mailbox", "social_accounts", "ai_account", "set_up_at"},
+       str(st["connections"]))
+    flat = str(st) + str(s)
+    ok("nothing secret is in either answer",
+       not any(w in flat.lower() for w in ("password", "api_key", "token", "sk-ant")), flat[:200])
+
+    seat = {"id": "seat_test", "role": "read", "label": "a test seat"}
+    for name in ("inbox.waiting", "inbox.status", "inbox.settings"):
+        _out, code = registry.call(name, {}, seat)
+        ok(f"a read seat's {name} is answered through the call path", code == 200, str(code))
+    for name in ("inbox.waiting", "inbox.status", "inbox.settings"):
+        t = registry.registry()[name]
+        ok(f"{name} has a title a person reads", registry.plain_title(t.get("title", "")), t.get("title"))
+
+
+def test_a_reply_from_a_chat_waits_for_a_tap():
+    """Step 3 of docs/SCOPE_INBOX_CONNECTOR.md. Owner, 2026-10-02: "One-tap approve". The AI asks; the owner
+    sees the exact words and approves; only then does the screen's own send function run, once."""
+    print("test_a_reply_from_a_chat_waits_for_a_tap")
+    from core import approvals
+    from marketing.customer_voice.drafter import store as drafts
+    from marketing.customer_voice.inbox import reply
+
+    calls = []
+    real = reply.send_reply
+
+    def fake_send(**kw):
+        calls.append(kw)
+        return {"status": "ok", "message_id": f"m{len(calls)}", "idem_key": kw["nonce"]}
+    reply.send_reply = fake_send
+    try:
+        store.upsert_conversation(space=SPACE, zcid="p1", participant="Rowan Bakery", platform="instagram",
+                                  last_inbound_at="2026-09-04T00:00:00Z")
+        with state.connect() as c:
+            c.execute("INSERT INTO inbox_messages (id, space, zernio_conversation_id, zernio_message_id,"
+                      " direction, sent_by, body, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                      (str(uuid.uuid4()), SPACE, "p1", "m-p1", "in", "contact", "are you open sunday",
+                       "2026-09-04T00:00:00Z"))
+
+        seen_read = {t["name"] for t in registry.visible_to({"role": "read"})}
+        seen_act = {t["name"] for t in registry.visible_to({"role": "act"})}
+        ok("a read seat cannot see the proposals", not (set(PROPOSE_TOOLS) & seen_read))
+        ok("...and an act seat can", set(PROPOSE_TOOLS) <= seen_act, str(sorted(seen_act)))
+        ok("...and neither name offers to send", all("send" not in n for n in PROPOSE_TOOLS))
+
+        seat = {"id": "seat_mine", "role": "act", "label": "My Claude"}
+        out, code = registry.call("inbox.propose_reply", {"id": "p1", "body": "Yes, 9 to 2 on Sunday."}, seat)
+        got = (out or {}).get("result", out)
+        ok("asking is answered", code == 200 and got.get("asked") is True, str(out)[:200])
+        ok("...and NOTHING was sent by asking", calls == [], str(calls))
+        a = approvals.get(got.get("approval"))
+        ok("the owner is shown the exact words, the person and the channel",
+           a and a["detail"]["arguments"] == {"To": "Rowan Bakery", "On": "Instagram",
+                                              "Message": "Yes, 9 to 2 on Sunday."}, str(a and a["detail"]))
+        ok("...and who asked", a and a["proposed_by"] == "My Claude", str(a and a["proposed_by"]))
+
+        again = inbox_tools.propose_reply(id="p1", body="Yes, 9 to 2 on Sunday.")
+        ok("the same reply asked twice is one approval", again.get("approval") == a["id"] and again["repeat"])
+
+        approvals.decide(a["id"], False, by="usr_owner")
+        ok("declined: nothing is sent", calls == [])
+
+        b = inbox_tools.propose_reply(id="p1", body="Yes, 9 to 2.")
+        r1 = approvals.decide(b["approval"], True, by="usr_owner")
+        r2 = approvals.decide(b["approval"], True, by="usr_owner")
+        ok("approved: sent through the screen's own send function, once",
+           len(calls) == 1 and calls[0]["zcid"] == "p1" and calls[0]["text"] == "Yes, 9 to 2."
+           and r1["status"] == "done" and r2["ok"] is False, f"{calls} {r1} {r2}")
+        ok("...as the owner, with a stable exactly-once key",
+           calls[0]["user_id"] == state.owner_user()["id"] and calls[0]["nonce"].startswith("chat-"))
+        ok("...and the owner reads what happened", "Sent to Rowan Bakery" in r1["text"], r1["text"])
+
+        ok("an unknown conversation asks for nothing",
+           inbox_tools.propose_reply(id="nosuch", body="hi").get("asked") is False)
+        ok("an empty reply asks for nothing", "error" in inbox_tools.propose_reply(id="p1", body="  "))
+
+        drafts.put(space=SPACE, zcid="p1", in_reply_to="m-p1", body="We open at 9 on Sunday.")
+        d = inbox_tools.propose_drafts(ids="p1, nosuch")
+        ok("written replies are asked for as written, unknown ids named",
+           d.get("asked") and d["skipped"] == ["nosuch"]
+           and approvals.get(d["approval"])["detail"]["sends"][0]["text"] == "We open at 9 on Sunday.", str(d))
+        ok("...with the Waiting screen's own key, so the screen's button and this send once between them",
+           approvals.get(d["approval"])["detail"]["sends"][0]["nonce"].startswith("waiting:"))
+        ok("nothing to send is not an approval",
+           inbox_tools.propose_drafts(ids="nosuch").get("asked") is False)
+
+        def refusing(**kw):
+            raise reply.ReplyRefused("this person has opted out")
+        reply.send_reply = refusing
+        e = inbox_tools.propose_reply(id="p1", body="One more thing.")
+        r = approvals.decide(e["approval"], True, by="usr_owner")
+        ok("a refusal at send time is told in words, not sent", r["status"] == "failed"
+           and "opted out" in r["text"], str(r))
+
+        store.set_opted_out(SPACE, "p1")
+        ok("somebody who asked us to stop is never asked about",
+           inbox_tools.propose_reply(id="p1", body="hello again").get("asked") is False)
+    finally:
+        reply.send_reply = real
+
+
 if __name__ == "__main__":
     seed()
     test_the_inbox_is_actually_offered()
@@ -295,5 +465,7 @@ if __name__ == "__main__":
     test_a_seat_cannot_widen_what_it_sees()
     test_a_caller_cannot_ask_for_the_whole_box_at_once()
     test_a_coworker_can_leave_a_draft_and_nothing_more()
+    test_a_chat_sees_what_the_screens_show()
+    test_a_reply_from_a_chat_waits_for_a_tap()
     print("\nall ok" if not _failed else f"\n{_failed} FAILED")
     sys.exit(1 if _failed else 0)
