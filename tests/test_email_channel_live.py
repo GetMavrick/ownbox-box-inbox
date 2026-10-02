@@ -213,8 +213,21 @@ for f in _reply_side:
         continue
     if _re_guard.search(r"box_mail\.send\s*\(|from\s+core\.box_mail\s+import[^\n]*\bsend\b", t):
         _leaks.append(str(f.relative_to(ROOT)))
+# ONE NAMED SENDER, AND IT CARRIES ITS OWN RULES (OSDev1, 2026-10-02: the welcome email uses "the owner's
+# transport", as a marketing foundation). It never answers a customer's message: it delivers what a person asked
+# for, once, and only with the consent evidence, the suppression check and a working unsubscribe link, which the
+# checks below hold it to. Anything else under marketing/ that reaches box_mail.send still fails this test.
+_MAY_SEND_OWN_TRANSPORT = {"marketing/foundation/outbound_mail.py"}
+_leaks = [x for x in _leaks if x not in _MAY_SEND_OWN_TRANSPORT]
 ok("NO CODE UNDER marketing/ SENDS THROUGH box_mail — it cannot become a way to answer a customer",
    not _leaks, str(sorted(set(_leaks))))
+_om = (ROOT / "marketing" / "foundation" / "outbound_mail.py").read_text()
+ok("...and the one named sender refuses without consent, an unsubscribed address, or a working opt-out",
+   all(k in _om for k in ('consent["conversation"]', "compliance.is_suppressed(", "box_unsubscribe_url(",
+                          '"List-Unsubscribe"')))
+ok("...and it is not in the reply path: nothing in the Inbox imports it",
+   not [str(f.relative_to(ROOT)) for f in (ROOT / "marketing" / "customer_voice").rglob("*.py")
+        if "outbound_mail" in f.read_text()])
 _reply_src = (ROOT / "marketing" / "customer_voice" / "inbox" / "reply.py").read_text()
 ok("...and reply.py does not import box_mail at all", "box_mail" not in _reply_src)
 _ec = (ROOT / "marketing" / "customer_voice" / "inbox" / "email_channel.py").read_text()

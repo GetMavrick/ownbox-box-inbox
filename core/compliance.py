@@ -235,6 +235,18 @@ def unsubscribe_url(email: str) -> str:
     return f"{base}/gtm/unsubscribe?e={urllib.parse.quote(e)}&s={_unsub_sig(e)}"
 
 
+def box_unsubscribe_url(email: str) -> str:
+    """The box's OWN one-click unsubscribe link (core/dash/unsubscribe.py), served on every box.
+
+    `unsubscribe_url` above points at `/gtm/unsubscribe`, which only a box carrying the Lead Machine serves; its
+    links stay where they are, because mail already sent carries them. Anything new that mails a person from a
+    box that may not have the Lead Machine (the marketing foundation's outbound mail) uses this one."""
+    import urllib.parse
+    e = normalize_email(email)
+    base = (getattr(settings, "dashboard_base_url", "") or "").rstrip("/")
+    return f"{base}/unsubscribe?e={urllib.parse.quote(e)}&s={_unsub_sig(e)}"
+
+
 def verify_unsubscribe(email: str, sig: str) -> bool:
     """Constant-time check that this unsubscribe link is authentic."""
     import hmac as _hmac

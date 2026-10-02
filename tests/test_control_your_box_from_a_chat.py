@@ -134,6 +134,59 @@ def test_connect_is_a_read():
     ok("...and holds no secret", not any(w in str(c).lower() for w in ("password\":", "api_key", "token", "sk-ant")))
 
 
+def test_the_reviews_follow_ups():
+    """OSDev1's review of #1803, 2026-10-02: who approved is recorded, an unreadable switch says unknown, a batch
+    too big for one approval says to ask for fewer, and the web process registers both Inbox kinds."""
+    print("test_the_reviews_follow_ups")
+    import subprocess
+    from core import box_settings
+    was = inbox_tools._drafting()
+    a = inbox_tools.propose_drafting(on=not was)
+    approvals.decide(a["approval"], True, by="owner@example.com")
+    ok("the switch records the person who approved", box_settings.describe("inbox", "drafts.enabled")
+       .get("set_by") == "owner@example.com", str(box_settings.describe("inbox", "drafts.enabled")))
+    ok("...and outside an approval nobody is deciding", approvals.decider() == "")
+
+    s = box_tools.propose_stop()
+    approvals.decide(s["approval"], True, by="owner@example.com")
+    ok("a stop says who approved it", "owner@example.com" in pause.status(), pause.status())
+    pause.resume()
+
+    from marketing.customer_voice.drafter import draft as _draft
+    real = _draft.enabled
+    _draft.enabled = lambda: (_ for _ in ()).throw(RuntimeError("settings unreadable"))
+    try:
+        ok("an unreadable switch reads unknown, never on",
+           inbox_tools.status()["writing_replies"] == "unknown"
+           and inbox_tools.settings()["settings"][0]["value"] == "unknown")
+    finally:
+        _draft.enabled = real
+
+    real_propose = approvals.propose
+
+    def too_big(*a, **k):
+        raise ValueError("this proposal is too large to show a person")
+    approvals.propose = too_big
+    try:
+        store.upsert_conversation(space=SPACE, zcid="k2", participant="Remy Cafe", platform="instagram",
+                                  last_inbound_at="2026-09-06T00:00:00Z")
+        r = inbox_tools.propose_reply(id="k2", body="hello")
+        ok("too much for one approval says to ask for fewer", r.get("asked") is False
+           and "fewer" in str(r.get("error")), str(r))
+    finally:
+        approvals.propose = real_propose
+
+    code = ("import os,tempfile; os.environ['AIOS_HERMETIC_TEST']='1'; "
+            "os.environ['AIOS_DB_PATH']=os.path.join(tempfile.mkdtemp(),'w.db'); "
+            "os.environ.setdefault('DISPATCH_BEARER_TOKEN','x'); "
+            "from core import state; state.init_db(); from core.dispatch import app; from core import approvals; "
+            "print(sorted(k for k in ('inbox_send','inbox_control','box_pause') if k in approvals._KINDS))")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         cwd=str(pathlib.Path(__file__).resolve().parents[1])).stdout.strip().splitlines()
+    ok("the web process, where approvals are decided, can run every kind these tools ask for",
+       bool(out) and out[-1] == "['box_pause', 'inbox_control', 'inbox_send']", str(out[-1:]))
+
+
 if __name__ == "__main__":
     seed()
     test_who_sees_them()
@@ -141,6 +194,7 @@ if __name__ == "__main__":
     test_discard_and_opt_out()
     test_stop_and_start()
     test_connect_is_a_read()
+    test_the_reviews_follow_ups()
     _wf = pathlib.Path(__file__).resolve().parents[1] / ".github/workflows/tests.yml"
     if _wf.is_file():
         ok("this file is in the workflow's suite list", "test_control_your_box_from_a_chat" in _wf.read_text())

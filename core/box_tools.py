@@ -269,7 +269,8 @@ def propose_start(seat=None):
 def _run_pause(detail: dict) -> dict:
     from core import pause
     if (detail or {}).get("stop"):
-        pause.halt("approval")
+        from core import approvals
+        pause.halt(f"approval:{approvals.decider() or 'owner'}")
         log.warning("box_tools.halt_approved")
         return {"ok": True, "text": "Stopped. Nothing runs on its own until it is started again."}
     pause.resume()

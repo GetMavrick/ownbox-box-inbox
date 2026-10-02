@@ -20,6 +20,7 @@ Never raises for a bad id or a decided row; it says so.
 """
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import uuid
@@ -39,6 +40,17 @@ _PROVIDERS = {"app_action": "core.connections.gateway", "box_pause": "core.box_t
 # THE LOCK SCREEN NAMES NO APP AND NO MACHINE (core/machine_breaks.py keeps the same rule): the page it opens does.
 PUSH_TITLE = "Ownbox"
 PUSH_BODY = "A coworker is waiting for your OK. Tap to review."
+
+
+# WHO IS DECIDING, while an approved proposal runs. `run(detail)` takes only what was proposed, so a kind that
+# records who changed something (a setting's `set_by`, a stop marker) asks `decider()` instead of writing a
+# word like "approval" where a person belongs (OSDev1's review of #1803, 2026-10-02).
+_DECIDER: contextvars.ContextVar[str] = contextvars.ContextVar("approvals_decider", default="")
+
+
+def decider() -> str:
+    """The person whose approval is running right now, or "" outside one."""
+    return _DECIDER.get()
 
 
 def _now() -> datetime:
@@ -155,11 +167,14 @@ def decide(aid: str, approve: bool, *, by: str) -> dict:
         import importlib
         importlib.import_module(_PROVIDERS[a["kind"]])
     kind = _KINDS.get(a["kind"])
+    token = _DECIDER.set(str(by)[:80])
     try:
         out = kind["run"](a["detail"]) if kind else {"ok": False, "text": "This box can no longer run it."}
     except Exception as e:                       # noqa: BLE001 — the owner reads what happened
         log.error("approvals.run_failed", id=aid, kind=a["kind"], error=f"{type(e).__name__}: {e}"[:200])
         out = {"ok": False, "text": "It couldn't be done. Nothing reports having changed."}
+    finally:
+        _DECIDER.reset(token)
     status = "done" if out.get("ok") else "failed"
     with state.connect() as c:
         c.execute("UPDATE approvals SET status=?, result=? WHERE id=?",

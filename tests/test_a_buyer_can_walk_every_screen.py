@@ -352,6 +352,8 @@ _CLIENT_MODULES = ("core.", "marketing.customer_voice.", "marketing.aeo_machine.
 # below, so this list cannot quietly outlive the screen it excuses or hide one that got a link.
 DOORS: dict[str, str] = {
     "/claim": "the welcome email's link, on a box nobody has signed in to yet (section 4 above)",
+    "/unsubscribe": "the opt-out link in an email the box sent a person who asked for something "
+                    "(marketing/foundation/outbound_mail.py), opened by that person with no account here",
     "/dash/login": "where require_session() sends anyone signed out (core/dash/__init__.py)",
     "/join": "the invite link People sends, /join?t=<token> (core/dash/__init__.py)",
     "/dash/managed": "the Base Machine's Managed card, drawn only on a box sold as Managed",

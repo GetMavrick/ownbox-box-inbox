@@ -22,6 +22,13 @@ cold-prospect suppression list: those two lists are about different relationship
 for the other is how a man who once unsubscribed from a newsletter stops being told his inbox is
 full.
 
+ONE OTHER CALLER, AND IT BRINGS ITS OWN RULE (OSDev1, 2026-10-02: the welcome email uses "the owner's
+transport"). `marketing/foundation/outbound_mail.py` sends one-to-one mail a person asked for: a guide they
+requested in a DM. It never resolves a recipient here; it brings the address with the consent evidence that
+justifies it, checks the suppression list, adds a working unsubscribe link and an exactly-once ledger, and
+passes the one-click opt-out headers through `send(headers=)`. Every other caller still mails only
+`to_box_people`.
+
 EXTRACTED FROM `review_email`, NOT REWRITTEN. The transport below is that module's `send` moved
 here verbatim but for its two hardcoded strings (sender name, ledger note), which are now
 arguments. `review_email.send` delegates to it and its suite is what proves the move was faithful.
@@ -241,8 +248,23 @@ def describe() -> dict:
 ORIGIN_HEADER = "X-Ownbox"
 
 
+def _extra(headers: dict | None) -> dict:
+    """Headers a caller adds, never ours. Only `List-Unsubscribe` and `List-Unsubscribe-Post` (RFC 8058): the
+    marketing foundation's outbound mail must carry a one-click opt-out, and nothing else needs a header today.
+    The origin mark can't be overridden or dropped, and a value with a line break is refused, not sent."""
+    out = {}
+    for k, v in (headers or {}).items():
+        if k not in ("List-Unsubscribe", "List-Unsubscribe-Post"):
+            raise VendorError("mail", "config", f"header {k!r} is not one a caller may set")
+        v = str(v)
+        if "\r" in v or "\n" in v:
+            raise VendorError("mail", "config", f"header {k!r} has a line break")
+        out[k] = v
+    return out
+
+
 def send(to: str, subject: str, text_body: str, html_body: str, *, idem_key: str,
-         sender_name: str, note: str) -> str:
+         sender_name: str, note: str, headers: dict | None = None) -> str:
     """One email through Resend. -> the Resend message id. Raises; the caller decides what a
     failure costs. Metered before the call, recorded after it, exactly once per message id.
 
@@ -250,6 +272,7 @@ def send(to: str, subject: str, text_body: str, html_body: str, *, idem_key: str
     owner's daily number is a floor on new conversations, and a box telling him his inbox is full
     must not spend a slot of it.
     """
+    extra = _extra(headers)
     kind, route = _route()
     if not kind:
         raise VendorError("resend", "config",
@@ -261,7 +284,7 @@ def send(to: str, subject: str, text_body: str, html_body: str, *, idem_key: str
         raise VendorError(kind, "config", f"not an address: {to!r}")
     if kind == "smtp":
         return _send_smtp(route, to, subject, text_body, html_body, idem_key=idem_key,
-                          sender_name=sender_name, note=note)
+                          sender_name=sender_name, note=note, headers=extra)
     key = route["key"]
     cost_guard.check_vendor("resend", 1)
     # EVERY MESSAGE THIS BOX ORIGINATES CARRIES A MARK, and the inbox's sweep skips anything
@@ -283,7 +306,7 @@ def send(to: str, subject: str, text_body: str, html_body: str, *, idem_key: str
     # no address and no customer's words, so a copy landing anywhere is harmless.
     payload = {"from": f"{sender_name} <{sender}>", "to": [to], "subject": subject,
                "text": text_body, "html": html_body,
-               "headers": {ORIGIN_HEADER: "notice"}}
+               "headers": {**extra, ORIGIN_HEADER: "notice"}}
     headers = {"Authorization": f"Bearer {key}", "Idempotency-Key": idem_key, "User-Agent": _UA}
     try:
         status, body = net.post_public(_URL, json=payload, headers=headers, timeout=30)
@@ -307,7 +330,7 @@ _SMTP_TIMEOUT_S = 20
 
 
 def _send_smtp(route: dict, to: str, subject: str, text_body: str, html_body: str, *,
-               idem_key: str, sender_name: str, note: str) -> str:
+               idem_key: str, sender_name: str, note: str, headers: dict | None = None) -> str:
     """One email through the owner's own SMTP service. -> a reference for the ledger row.
 
     AT MOST ONCE, BY CLAIMING BEFORE SENDING. SMTP has no idempotency key, so the ledger is the
@@ -331,6 +354,8 @@ def _send_smtp(route: dict, to: str, subject: str, text_body: str, html_body: st
     msg["To"] = to
     msg["Subject"] = subject
     msg["Message-ID"] = email.utils.make_msgid(domain=route["from"].rsplit("@", 1)[-1])
+    for k, v in (headers or {}).items():
+        msg[k] = v
     msg[ORIGIN_HEADER] = "notice"
     msg.set_content(text_body)
     if html_body:

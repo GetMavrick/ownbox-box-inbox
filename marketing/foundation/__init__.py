@@ -22,3 +22,13 @@ __all__ = ["sites", "day", "week"]
 
 _state.register_schema("marketing_foundation", _DDL)
 _register_periodic(_sync.tick, interval_s=3600, name="website_sync")
+
+
+def _drain_outbound_mail():
+    # Imported per tick so a test can stub the transport first; the module is the foundation's own.
+    from . import outbound_mail
+    return outbound_mail.drain()
+
+
+# An email waiting for the next hour, or for a busy email service, goes by itself (OSDev1's review of #1810).
+_register_periodic(_drain_outbound_mail, interval_s=60, name="outbound_mail_drain")

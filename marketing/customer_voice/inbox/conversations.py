@@ -68,6 +68,14 @@ def messages(*, conversation: str, since: str | None = None, limit: int = 200) -
     return out
 
 
+def opted_out(*, conversation: str) -> bool:
+    """Did this person say STOP on this box? The Inbox's own flag (handler.py sets it on a STOP). An unknown
+    conversation is NOT opted out by this answer; a caller that needs the person to exist checks that itself."""
+    space = _space_of(conversation)
+    row = store.get_conversation(space, str(conversation))
+    return bool(row and row.get("opted_out"))
+
+
 def send(*, machine: str, conversation: str, text: str, key: str) -> dict:
     """One message from `machine`. Never raises for an outcome: the answer says what happened."""
     try:

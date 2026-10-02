@@ -16,6 +16,8 @@ WHAT A PROVIDER ANSWERS (all keyword arguments; `machine` is the caller's key, `
   messages(conversation=, since=, limit=)         -> list[{"id", "direction", "sent_by", "body", "at"}]
   send(machine=, conversation=, text=, key=)      -> {"status": "sent" | "duplicate" | "refused" | "unknown",
                                                       "message_id", "reason"}
+  opted_out(conversation=)                        -> bool    this person said STOP on this box; never contact
+                                                             them, by any channel (OSDev1's review of #1810)
 """
 from __future__ import annotations
 
@@ -24,7 +26,7 @@ from core.logging import get_logger
 log = get_logger(__name__)
 
 _PROVIDER = None
-_NEEDED = ("claim", "release", "holder", "messages", "send")
+_NEEDED = ("claim", "release", "holder", "messages", "send", "opted_out")
 
 
 class NoProvider(RuntimeError):

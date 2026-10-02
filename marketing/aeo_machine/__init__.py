@@ -44,3 +44,11 @@ _register_periodic(_aeo_publish_tick, interval_s=60, name="aeo_publish")
 # THE MORNING REVIEW SEGMENT, registered at import like every machine's: the worker imports this
 # package, and the review's snapshot runs in the worker (core/report.py says why).
 from . import report  # noqa: E402,F401
+
+# THE CONNECTOR'S READ TOOLS (#1793 §1.1). Imported in both processes, like the report; registering
+# touches no vendor. A failure is recorded as absent, never a broken box (core/connector/tools.py).
+try:
+    from . import tools as _tools  # noqa: E402,F401
+except Exception as _tools_err:  # noqa: BLE001
+    from core.connector import tools as _ctools
+    _ctools.note_absent("marketing.aeo_machine.tools", f"{type(_tools_err).__name__}: {_tools_err}")

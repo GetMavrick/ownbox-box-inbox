@@ -179,13 +179,20 @@ tools.register(
 # the same function its screen asks, so the chat and the screen cannot disagree about one fact.
 
 
-def _drafting() -> bool:
-    """The Settings row's own answer (`app._drafting_on` reads exactly this)."""
+def _drafting() -> bool | None:
+    """The Settings row's own answer (`app._drafting_on` reads exactly this), or None when it can't be read.
+
+    NONE, NOT TRUE, ON AN ERROR (OSDev1's review of #1803): a reader that says "on" when it could not look is a
+    status line that lies in the one direction a person would act on."""
     try:
         from marketing.customer_voice.drafter import draft as _draft
         return bool(_draft.enabled())
     except Exception:                    # noqa: BLE001 — a status line, never a failed tool
-        return True
+        return None
+
+
+def _onoff(v) -> str:
+    return "unknown" if v is None else ("on" if v else "off")
 
 
 def _inbox_cfg() -> dict:
@@ -271,7 +278,7 @@ def status():
         "box": "stopped" if stopped else "running",
         "box_note": ("stopped: no new messages arrive and nothing sends on its own; a person can "
                      "still reply by hand" if stopped else "running"),
-        "writing_replies": "on" if _drafting() else "off",
+        "writing_replies": _onoff(_drafting()),
         "sent_this_hour": store.sends_last_hour(space),
         "hourly_send_cap": cap,
         "waiting_on_you": store.awaiting_reply(space),
@@ -288,7 +295,7 @@ def settings():
     autonomy = str(cfg.get("autonomy") or "off").strip().lower()
     return {
         "settings": [
-            {"name": "writing_replies", "value": "on" if _drafting() else "off",
+            {"name": "writing_replies", "value": _onoff(_drafting()),
              "means": "the box writes a reply for each new message, for a person to read and send; "
                       "a written reply never sends on its own",
              "changed_at": "/inbox/settings"},
@@ -436,9 +443,14 @@ def _ask(sends: list, title: str, seat) -> dict:
     words = ({"To": sends[0]["who"], "On": sends[0]["channel"], "Message": sends[0]["text"]}
              if len(sends) == 1 else
              {f"{i}. {s['who']} ({s['channel']})": s["text"] for i, s in enumerate(sends, 1)})
-    a = approvals.propose(KIND, machine=MACHINE, title=title,
-                          detail={"app": "Inbox", "arguments": words, "sends": sends},
-                          seat_id=str((seat or {}).get("label") or (seat or {}).get("id") or ""))
+    try:
+        a = approvals.propose(KIND, machine=MACHINE, title=title,
+                              detail={"app": "Inbox", "arguments": words, "sends": sends},
+                              seat_id=str((seat or {}).get("label") or (seat or {}).get("id") or ""))
+    except ValueError:
+        # THE QUEUE'S OWN SIZE LIMIT, SAID AS WHAT TO DO (OSDev1's review of #1803): an approval has to fit on a
+        # mobile screen, so a batch too long for it is a smaller ask, not an error the model can't read.
+        return {"asked": False, "error": "that is too much for one approval; ask for fewer replies at a time"}
     return {"asked": True, "approval": a["id"], "repeat": bool(a.get("repeat")),
             "note": ("waiting for the owner, who sees these exact words in the mobile app and approves "
                      "or declines. Nothing has been sent. Don't ask again for the same reply.")}
@@ -571,9 +583,12 @@ CONTROL = "inbox_control"
 
 def _ask_control(action: str, target: dict, words: dict, title: str, seat) -> dict:
     from core import approvals
-    a = approvals.propose(CONTROL, machine=MACHINE, title=title[:120],
-                          detail={"app": "Inbox", "arguments": words, "action": action} | target,
-                          seat_id=str((seat or {}).get("label") or (seat or {}).get("id") or ""))
+    try:
+        a = approvals.propose(CONTROL, machine=MACHINE, title=title[:120],
+                              detail={"app": "Inbox", "arguments": words, "action": action} | target,
+                              seat_id=str((seat or {}).get("label") or (seat or {}).get("id") or ""))
+    except ValueError:
+        return {"asked": False, "error": "that is too much for one approval; ask for less at a time"}
     return {"asked": True, "approval": a["id"], "repeat": bool(a.get("repeat")),
             "note": "waiting for the owner, who approves or declines in the mobile app. Nothing has changed yet."}
 
@@ -634,6 +649,11 @@ def connect():
     }
 
 
+def _who_approved() -> str:
+    from core import approvals
+    return approvals.decider() or "approval"
+
+
 def _run_control(detail: dict) -> dict:
     """An approved control, carried out by the same function the screen's button calls."""
     from marketing.customer_voice.drafter import store as drafts
@@ -643,13 +663,17 @@ def _run_control(detail: dict) -> dict:
     if action == "drafting":
         from core import box_settings
         on = bool(detail.get("on"))
-        box_settings.put("inbox", "drafts.enabled", on, set_by="approval")
+        from core import approvals
+        box_settings.put("inbox", "drafts.enabled", on, set_by=approvals.decider() or "approval")
         return {"ok": True, "text": f"Writing replies is {'on' if on else 'off'}."}
     if action == "discard":
         drafts.dismiss(space, str(detail.get("draft_id") or ""))
+        log.info("inbox.draft_discarded_on_approval", conversation=detail.get("conversation"),
+                 by=_who_approved())
         return {"ok": True, "text": "Thrown away. Nothing was sent."}
     if action == "opt_out":
         store.set_opted_out(space, str(detail.get("conversation") or ""))
+        log.info("inbox.opted_out_on_approval", conversation=detail.get("conversation"), by=_who_approved())
         return {"ok": True, "text": "Opted out. Nothing will be sent to them again."}
     return {"ok": False, "text": "This box doesn't know that change, so nothing was done."}
 
