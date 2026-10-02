@@ -34,7 +34,7 @@ import json
 
 from flask import Blueprint, g, jsonify, request
 
-from core.connector import manifest, tools
+from core.connector import manifest, prompts, tools, words
 from core.logging import get_logger
 
 log = get_logger(__name__)
@@ -67,13 +67,39 @@ _INVALID_PARAMS = -32602
 
 
 def _capabilities() -> dict:
-    """What this server does. `tools` only — no resources, no prompts, and no `listChanged`.
+    """What this server does: `tools` and `prompts`. No resources, and no `listChanged` on either.
 
     `listChanged: true` would promise notifications we cannot send: there is no subscription
     stream here (see the GET note above), so advertising it is advertising a doorbell with no
     wire behind it.
+
+    PROMPTS ARE THE READY-MADE ASKS (core/connector/prompts.py; the owner's ruling D3 of
+    docs/SCOPE_SMART_BOX_ANSWERS.md, 2026-10-02): *Morning brief*, *What needs me today* and the
+    rest, in the menu of the buyer's own AI.
     """
-    return {"tools": {}}
+    return {"tools": {}, "prompts": {}}
+
+
+# WHAT EVERY CONNECTED AI IS TOLD, in `server/discover` and in `initialize` (a client built before the
+# current spec reads it there). VENDOR-FACING TEXT, so it must stay true after C1 landed the first
+# propose_* tool. The first draft said "every tool is read-only", a sentence with an expiry date, and the
+# kind that is never revisited because nothing breaks when it goes stale. This says the thing that does not
+# change: a tool may PROPOSE, a person approves, nothing on this box sends or spends by itself. (OSDev1, gate
+# review of #1122.)
+#
+# AND HOW TO ANSWER. Owner, 2026-10-02, handed raw stored numbers by his own AI: *"This is not an AI business
+# machine. This is a dumb box."* Every tool's text is now written to be read (core/connector/words.py), and this
+# asks the AI to keep it that way: lead with what matters and why, never show raw fields, and always offer what
+# to ask next and what the box can start.
+INSTRUCTIONS = ("This is one business's own Ownbox. tools/list says what it can answer. Every tool is typed: "
+                "reads return the box's state, and actions are proposals a person on the box approves; no tool "
+                "sends, publishes or spends on its own. Answer the person in plain words: lead with what matters "
+                "most and why, with the box's real numbers and the full link to the page each comes from. Never "
+                "show raw fields, ids or JSON: each tool's text is already written to be read, and its structured "
+                "data is there for your own work. Always end by offering what to ask next (questions this box can "
+                "answer) and what the box can start for them to approve on Approvals. Ready-made asks are in "
+                "prompts/list: a morning brief, what needs them today, who to follow up with, how their websites "
+                "are doing and what to write next.")
 
 
 def _origin_ok(req) -> bool:
@@ -186,8 +212,34 @@ def _tool_entry(spec: dict) -> dict:
     return entry
 
 
-def _tool_result(payload: dict, status: int) -> dict:
+def _words(spec: dict | None, result, seat: dict | None) -> str | None:
+    """The tool's answer in words (its `render`), or None to send the result as JSON, as before.
+
+    A RENDER THAT FAILS NEVER COSTS THE ANSWER. It raised, or wrote nothing: the AI gets the JSON it always
+    got, and the box says which tool's words broke, never the result (a result is a customer's data).
+    """
+    render = (spec or {}).get("render")
+    if render is None or not isinstance(result, dict):
+        return None
+    try:
+        with words.seat_scope(seat):
+            text = render(result)
+    except Exception as e:                                  # noqa: BLE001 — the JSON still answers
+        log.warning("connector.render_failed", tool=(spec or {}).get("name"), error=type(e).__name__)
+        return None
+    if not isinstance(text, str) or not text.strip():
+        log.warning("connector.render_empty", tool=(spec or {}).get("name"))
+        return None
+    return text
+
+
+def _tool_result(payload: dict, status: int, spec: dict | None = None, seat: dict | None = None) -> dict:
     """Map one `tools.call()` answer onto an MCP result.
+
+    THE TEXT IS THE ANSWER IN WORDS when the tool has a `render`, and the result still travels whole in
+    `structuredContent` for the AI to work with. Owner, 2026-10-02, after his own AI handed him the Morning
+    Review as the serialised record this used to send: *"This is not an AI business machine. This is a dumb
+    box."* A tool without a render (a connected app's, a machine of the owner's own) answers as it always did.
 
     THE ERROR SPLIT IS THE POINT, and getting it backwards is how a coworker tells a customer the
     wrong thing. The spec draws it by who can act on the failure:
@@ -203,7 +255,10 @@ def _tool_result(payload: dict, status: int) -> dict:
     """
     if status == 200 and "result" in payload:
         result = payload["result"]
-        return {"content": [{"type": "text", "text": json.dumps(result, default=str)}],
+        text = _words(spec, result, seat)
+        if text is None:
+            text = json.dumps(result, default=str)
+        return {"content": [{"type": "text", "text": text}],
                 "structuredContent": result,
                 # A CONNECTED APP'S OWN "that failed" (core/connections/gateway.py) stays a tool error, so the
                 # coworker reads the app's words and can correct itself. Opt-in by a key no shipped tool uses.
@@ -227,15 +282,7 @@ def _handle(method: str, params: dict, rpc_id, seat: dict) -> dict | None:
             "capabilities": _capabilities(),
             "_meta": {"io.modelcontextprotocol/serverInfo": {
                 "name": SERVER_NAME, "version": tools.CONTRACT_VERSION}},
-            # VENDOR-FACING TEXT, so it must stay true after C1 lands the first propose_* tool.
-            # The first draft said "every tool is read-only" — a sentence with an expiry date, and
-            # the kind that is never revisited because nothing breaks when it goes stale. This says
-            # the thing that does not change: a tool may PROPOSE, a human approves, nothing on this
-            # box sends or spends by itself. (OSDev1, gate review of #1122.)
-            "instructions": "This is one business's own Ownbox. Call tools/list for what it can "
-                            "answer. Every tool is typed: reads return the box's state, and "
-                            "actions are proposals a person on the box approves; no tool sends, "
-                            "publishes or spends on its own.",
+            "instructions": INSTRUCTIONS,
         })
 
     if method == "initialize":
@@ -247,6 +294,9 @@ def _handle(method: str, params: dict, rpc_id, seat: dict) -> dict | None:
             "protocolVersion": agreed,
             "capabilities": _capabilities(),
             "serverInfo": {"name": SERVER_NAME, "version": tools.CONTRACT_VERSION},
+            # Optional in InitializeResult since 2025-03-26, and the only place a client built before
+            # server/discover looks for it.
+            "instructions": INSTRUCTIONS,
         })
 
     if method == "initialized" or method.startswith("notifications/"):
@@ -282,7 +332,44 @@ def _handle(method: str, params: dict, rpc_id, seat: dict) -> dict | None:
     if method == "tools/call":
         return _call_tool(params or {}, rpc_id, seat)
 
+    # AN EMPTY LIST, NEVER "UNKNOWN METHOD", for the lists a client asks for on every reload. We offer no resources (see
+    # _capabilities; prompts are the ready-made asks, below), but some clients ask anyway, and a JSON-RPC error there can fail the whole reload:
+    # with release .10 (ping fixed) the owner's Claude app still said "Couldn't reload tools from the server" while
+    # listing all 31 tools (2026-10-02). An empty list is a true answer; an error reads as a broken server.
+    if method in _EMPTY_LISTS:
+        return _ok(rpc_id, {_EMPTY_LISTS[method]: []})
+
+    if method == "prompts/list":
+        # THE READY-MADE ASKS THIS SEAT CAN ANSWER, sorted (core/connector/prompts.py). One page: there are a
+        # handful, so `nextCursor` is never sent and a cursor a client sends back is simply the first page.
+        return _ok(rpc_id, {"prompts": prompts.listed(seat)})
+
+    if method == "prompts/get":
+        return _get_prompt(params or {}, rpc_id, seat)
+
     return _err(rpc_id, _METHOD_NOT_FOUND, f"unknown method: {method}")
+
+
+_EMPTY_LISTS = {"resources/list": "resources", "resources/templates/list": "resourceTemplates"}
+
+
+def _get_prompt(params: dict, rpc_id, seat: dict) -> dict:
+    """One ready-made ask as its message. The spec's own error for a name it doesn't know is -32602 (Invalid
+    params), and an ask this seat can't answer is one it doesn't know: listing hides it, so getting it does too."""
+    name = params.get("name")
+    if not name or not isinstance(name, str):
+        return _err(rpc_id, _INVALID_PARAMS, "prompts/get needs a prompt name")
+    args = params.get("arguments")
+    if args is not None and not isinstance(args, dict):
+        return _err(rpc_id, _INVALID_PARAMS, "arguments must be an object")
+    got = prompts.message(name, seat)
+    if got is None:
+        return _err(rpc_id, _INVALID_PARAMS, f"unknown prompt: {name}", data={"prompt": name})
+    # NONE OF THESE ASKS TAKES ARGUMENTS, and an unknown one is refused rather than ignored, as a tool's is
+    # (core/connector/tools.py validate): ignoring it is how a caller believes it asked for something it didn't.
+    if args:
+        return _err(rpc_id, _INVALID_PARAMS, f"{name} takes no arguments", data={"prompt": name})
+    return _ok(rpc_id, got)
 
 
 def _call_tool(params: dict, rpc_id, seat: dict) -> dict:
@@ -302,7 +389,9 @@ def _call_tool(params: dict, rpc_id, seat: dict) -> dict:
         return _err(rpc_id, _INVALID_PARAMS, payload.get("message", f"unknown tool: {name}"),
                     data={"tool": name})
 
-    return _ok(rpc_id, _tool_result(payload, status))
+    # THE SPEC `call()` RAN, by the name the client sent (old spelling included), so its `render` writes the
+    # answer; and the seat, so the answer offers only what this connection may ask for.
+    return _ok(rpc_id, _tool_result(payload, status, tools.lookup(name), seat))
 
 
 @blueprint.get("/mcp")

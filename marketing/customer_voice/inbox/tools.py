@@ -37,13 +37,112 @@ Space from the box's own configuration, exactly as the screen does, and there is
 could widen it. A connector seat that could name its own Space would be the one place an outsider
 picks which client's conversations to read.
 """
-from core.connector import tools
+from core.connector import prompts, tools
+from core.connector import words as say
 from core.logging import get_logger
 
 log = get_logger(__name__)
 
 MACHINE = "inbox"
 MAX_LIMIT = 100
+
+# THE PAGES A PERSON OPENS, so each answer ends at the screen it came from (app.py's tabs).
+MESSAGES_PAGE = "/inbox/inbox"
+REPLIES_PAGE = "/inbox/waiting"
+SETTINGS_PAGE = "/inbox/settings"
+
+# ── ANSWERS IN WORDS (core/connector/words.py) ────────────────────────────────────────────────────
+# Owner, 2026-10-02, handed the Morning Review by his own AI as a block of stored fields: *"This is not an AI
+# business machine. This is a dumb box."* Each tool below has a render beside it: who and what first, in plain
+# words, with the page's full link, then what to ask next and what the box can start. The conversation id stays
+# in each line, in brackets, because the AI needs it to read or answer that person and some apps hand the AI only
+# this text; the server's instructions tell it never to show an id to the person.
+
+
+def _channel(key) -> str:
+    from marketing.customer_voice.inbox import channels as _ch
+    return _ch.name(key, fallback="") if key else ""
+
+
+def _conversation_line(c: dict) -> str:
+    who = str(c.get("who") or "Someone")
+    where = _channel(c.get("channel"))
+    bits = [who + (f" on {where}" if where else "")]
+    if c.get("messages"):
+        bits.append(say.plural(c["messages"], "message"))
+    when = say.ago(c.get("last_inbound_at"))
+    if when:
+        bits.append(f"last wrote {when}")
+    if c.get("opted_out"):
+        bits.append("asked not to be contacted")
+    return ", ".join(bits) + (f" (conversation {c['id']})" if c.get("id") else "")
+
+
+def _first_who(r: dict, key: str = "conversations", field: str = "who") -> str:
+    for c in r.get(key) or []:
+        if isinstance(c, dict) and c.get(field):
+            return str(c[field])
+    return ""
+
+
+def _render_list(r: dict) -> str:
+    convs = [c for c in r.get("conversations") or [] if isinstance(c, dict)]
+    body = (say.section(f"{say.plural(len(convs), 'conversation')}, newest first:",
+                        [_conversation_line(c) for c in convs])
+            if convs else "Nobody has written to this business yet.")
+    who = _first_who(r)
+    return say.answer(
+        body, f"Every conversation: {say.link(MESSAGES_PAGE)}",
+        say.ask_next((f"{MACHINE}.waiting", "Who is waiting on a reply?"),
+                     (f"{MACHINE}.read_conversation", f"What did {who} say?" if who else "What did they say?"),
+                     (f"{MACHINE}.search", "Find who asked about prices")),
+        say.can_start((f"{MACHINE}.propose_reply", say.approve_line("Write a reply to any of them for you to send"))))
+
+
+def _render_search(r: dict) -> str:
+    q = str(r.get("query") or "").strip()
+    convs = [c for c in r.get("conversations") or [] if isinstance(c, dict)]
+    if not q:
+        body = "Nothing was searched: give a word or a name to look for."
+    elif not convs:
+        body = f"Nothing in the inbox matches {say.quoted(q, 60)}."
+    else:
+        body = say.section(f"{say.plural(len(convs), 'conversation')} {'mentions' if len(convs) == 1 else 'mention'} "
+                           f"{say.quoted(q, 60)}:", [_conversation_line(c) for c in convs])
+    who = _first_who(r)
+    return say.answer(
+        body,
+        say.ask_next((f"{MACHINE}.read_conversation", f"What did {who} say?" if who else "Who wrote to us today?"),
+                     (f"{MACHINE}.waiting", "Who is waiting on a reply?"),
+                     (f"{MACHINE}.list_conversations", "Who wrote to us today?")),
+        say.can_start((f"{MACHINE}.propose_reply", say.approve_line("Write a reply to any of them for you to send"))))
+
+
+def _render_read(r: dict) -> str:
+    if r.get("error"):
+        return say.answer(say.plain(r["error"]) + ".", say.ask_next(
+            (f"{MACHINE}.list_conversations", "Who wrote to us today?")))
+    msgs = [m for m in r.get("messages") or [] if isinstance(m, dict)]
+    if not msgs:
+        return say.answer("There are no messages on this box for that conversation.", say.ask_next(
+            (f"{MACHINE}.list_conversations", "Who wrote to us today?"),
+            (f"{MACHINE}.search", "Find a conversation by a name or a word")))
+    lines = []
+    for m in msgs:
+        who = "They wrote" if m.get("direction") == "inbound" else "You replied"
+        when = say.clock(m.get("at"))
+        lines.append(f"{when + ', ' if when else ''}{who}: {say.quoted(m.get('text'), 600)}")
+    waiting = msgs[-1].get("direction") == "inbound"
+    head = (f"The conversation, oldest first ({say.plural(len(msgs), 'message')}). "
+            + ("Their message is the last one, so they are waiting on a reply." if waiting else
+               "Your reply is the last message."))
+    return say.answer(
+        head, say.bullets(lines), f"Open it in your inbox: {say.link(MESSAGES_PAGE)}",
+        say.ask_next((f"{MACHINE}.waiting", "Who else is waiting on a reply?"),
+                     (f"{MACHINE}.search", "Has this person written about anything else?"),
+                     (f"{MACHINE}.list_conversations", "Who wrote to us today?")),
+        say.can_start((f"{MACHINE}.propose_reply", say.approve_line("Write a reply to them for you to send")))
+        if waiting else "")
 
 
 def _space() -> str:
@@ -134,7 +233,7 @@ def read_conversation(id=None, limit=None):
 tools.register(
     "list_conversations",
     title="See who has messaged your business",
-    fn=list_conversations, machine=MACHINE, min_role="read",
+    fn=list_conversations, machine=MACHINE, min_role="read", render=_render_list,
     capability="read:inbox",
     description="Who has spoken to this business, most recent first. Returns conversations, not "
                 "messages — use read_conversation for the text of one.",
@@ -147,7 +246,7 @@ tools.register(
 tools.register(
     "search",
     title="Search your inbox",
-    fn=search, machine=MACHINE, min_role="read",
+    fn=search, machine=MACHINE, min_role="read", render=_render_search,
     capability="read:inbox",
     description="Find conversations by something said in them, or by who said it. Matches message "
                 "text and the participant's name; returns one row per conversation.",
@@ -162,7 +261,7 @@ tools.register(
 tools.register(
     "read_conversation",
     title="Read a conversation in your inbox",
-    fn=read_conversation, machine=MACHINE, min_role="read",
+    fn=read_conversation, machine=MACHINE, min_role="read", render=_render_read,
     capability="read:inbox",
     description="Every message in one conversation, oldest first.",
     args={"id": {"type": "string", "required": True,
@@ -315,10 +414,154 @@ def settings():
     }
 
 
+_STATUS_WORDS = {"connected": "connected", "not_connected": "not connected",
+                 "needs_reauth": "needs you to sign in again", "admin_disabled": "turned off by your email admin"}
+_SEND_WORDS = {"can_send": "and can send", "refused": "but its server refuses to send"}
+
+
+def _status_words(v) -> str:
+    v = str(v or "").strip()
+    return _STATUS_WORDS.get(v) or v.replace("_", " ") or "not known"
+
+
+def _connection_lines(c: dict) -> list:
+    c = c if isinstance(c, dict) else {}
+    lines = []
+    mail = c.get("mailbox") or {}
+    if mail:
+        addr = f" ({mail['address']})" if mail.get("address") else ""
+        send = _SEND_WORDS.get(str(mail.get("can_send") or ""), "")
+        lines.append(f"Your email inbox{addr}: {_status_words(mail.get('status'))}" + (f", {send}" if send else ""))
+    if c.get("social_accounts"):
+        lines.append(f"Instagram and Messenger: {_status_words(c['social_accounts'].get('status'))}")
+    if c.get("ai_account"):
+        lines.append(f"The AI account that writes replies: {_status_words(c['ai_account'].get('status'))}")
+    return lines
+
+
+def _send_written(n: int) -> str:
+    """The offer that maps to propose_drafts, which takes 25 at most in one approval."""
+    if n > MAX_SENDS:
+        return say.approve_line(f"Send the written replies, {MAX_SENDS} at a time ({n} are ready)")
+    return say.approve_line("Send the written reply" if n == 1 else f"Send the {n} written replies")
+
+
+def _render_waiting(r: dict) -> str:
+    count = int(r.get("waiting_on_you") or 0)
+    drafts = [d for d in r.get("drafts_ready") or [] if isinstance(d, dict)]
+    head = (f"{say.plural(count, 'person is', 'people are')} waiting on your reply." if count else
+            "Nobody is waiting on your reply.")
+    if drafts:
+        head += f" {say.plural(len(drafts), 'reply is', 'replies are')} written and ready to send."
+    ready = []
+    for d in drafts[:10]:
+        where = _channel(d.get("channel"))
+        when = say.ago(d.get("they_said_at"))
+        ready.append(f"{d.get('who') or 'Someone'}{f' ({where})' if where else ''}"
+                     f"{f' wrote {when}' if when else ' wrote'}: {say.quoted(d.get('they_said'), 120)}. "
+                     f"The reply written: {say.quoted(d.get('draft'), 160)}"
+                     + (f" (conversation {d['conversation']})" if d.get("conversation") else ""))
+    drafted = {d.get("conversation") for d in drafts}
+    still = [c for c in r.get("conversations") or [] if isinstance(c, dict) and c.get("id") not in drafted]
+    parts = [head,
+             say.section("Written and ready to send:", ready),
+             f"{say.plural(len(drafts) - 10, 'more is', 'more are')} on the page." if len(drafts) > 10 else "",
+             say.section("Still waiting, no reply written yet:", [_conversation_line(c) for c in still[:10]])]
+    if drafts:
+        parts.append(f"Replies to send: {say.link(REPLIES_PAGE)}")
+    if count:
+        parts.append(f"Everyone waiting: {say.link(MESSAGES_PAGE)}")
+    who = _first_who(r, "drafts_ready") or _first_who(r)
+    asks = say.ask_next((f"{MACHINE}.read_conversation", f"What did {who} say?" if who else "Who wrote to us today?"),
+                        (f"{MACHINE}.list_conversations", "Who wrote to us today?"),
+                        (f"{MACHINE}.status", "How is my inbox running?"))
+    starts = []
+    if drafts:
+        starts.append((f"{MACHINE}.propose_drafts", _send_written(len(drafts))))
+    if still:
+        starts.append((f"{MACHINE}.propose_reply", say.approve_line("Write a reply to someone still waiting")))
+    return say.answer(*parts, asks, say.can_start(*starts))
+
+
+def _render_status(r: dict) -> str:
+    stopped = r.get("box") == "stopped"
+    lines = ["Your box is stopped: no new messages arrive and nothing sends on its own. A person can still reply "
+             "by hand." if stopped else "Your box is running."]
+    writing = r.get("writing_replies")
+    lines.append({"on": "Writing replies is on: the box writes a reply to each new message, for a person to read "
+                        "and send.",
+                  "off": "Writing replies is off."}.get(writing, "Whether the box is writing replies could not be "
+                                                                  "read just now."))
+    lines.append(f"Sent this hour: {say.n(r.get('sent_this_hour') or 0)} of the "
+                 f"{say.n(r.get('hourly_send_cap') or 0)} allowed.")
+    waiting = int(r.get("waiting_on_you") or 0)
+    lines.append(f"{say.plural(waiting, 'person is', 'people are')} waiting on your reply: {say.link(MESSAGES_PAGE)}"
+                 if waiting else "Nobody is waiting on your reply.")
+    chans = []
+    for c in r.get("channels") or []:
+        if not isinstance(c, dict):
+            continue
+        when = say.ago(c.get("last_message_in"))
+        chans.append(f"{c.get('name') or _channel(c.get('channel')) or 'Unknown'}: "
+                     f"{say.plural(c.get('conversations') or 0, 'conversation')}"
+                     + (f", the last one came in {when}" if when else ""))
+    held = []
+    for h in r.get("handled_by_automations") or []:
+        if not isinstance(h, dict):
+            continue
+        until = say.clock(h.get("until"))
+        held.append(f"{h.get('who') or 'Someone'}, by {h.get('handled_by') or 'an automation'}"
+                    + (f", until {until}" if until else ""))
+    starts = []
+    if stopped:
+        starts.append(("core.propose_start", say.approve_line("Start the box again")))
+    if writing == "off":
+        starts.append((f"{MACHINE}.propose_drafting", say.approve_line("Turn writing replies on")))
+    return say.answer(
+        say.bullets(lines), say.section("Channels:", chans),
+        say.section("Connections:", _connection_lines(r.get("connections"))),
+        say.section("Being handled by an automation right now:", held),
+        say.ask_next((f"{MACHINE}.waiting", "Who is waiting on a reply?"),
+                     (f"{MACHINE}.settings", "How is my inbox set up?"),
+                     (f"{MACHINE}.connect", "How do I connect another channel?")),
+        say.can_start(*starts))
+
+
+_SETTING_NAMES = {"writing_replies": "Writing replies", "opener": "Sending a first message on its own",
+                  "hourly_send_cap": "Most messages sent in an hour",
+                  "mailbox_drafts": "Copies of replies in your mailbox's Drafts folder"}
+
+
+def _render_settings(r: dict) -> str:
+    lines, writing = [], None
+    for s in r.get("settings") or []:
+        if not isinstance(s, dict):
+            continue
+        name = str(s.get("name") or "")
+        if name == "writing_replies":
+            writing = s.get("value")
+        where = str(s.get("changed_at") or "")
+        how = (f" Change it on {say.link(where)}" if where.startswith("/") else
+               " It is changed in the box's configuration, not on a screen yet.")
+        lines.append(f"{_SETTING_NAMES.get(name) or name.replace('_', ' ').capitalize()}: {say.n(s.get('value'))}. "
+                     f"{say.plain(s.get('means')).rstrip('.')}.{how}")
+    starts = []
+    if writing in ("on", "off"):
+        starts.append((f"{MACHINE}.propose_drafting",
+                       say.approve_line(f"Turn writing replies {'off' if writing == 'on' else 'on'}")))
+    return say.answer(
+        say.section("Your inbox settings:", lines),
+        say.section("Connections:", _connection_lines(r.get("connections"))),
+        say.ask_next((f"{MACHINE}.status", "How is my inbox running?"),
+                     (f"{MACHINE}.connect", "How do I connect another channel?"),
+                     (f"{MACHINE}.waiting", "Who is waiting on a reply?")),
+        say.can_start(*starts))
+
+
 tools.register(
     "waiting",
     title="See who is waiting on a reply",
-    fn=waiting, machine=MACHINE, min_role="read",
+    fn=waiting, machine=MACHINE, min_role="read", render=_render_waiting,
     capability="read:inbox",
     description="Who is waiting on a person (their message was the last one), and every reply "
                 "already written for them and not yet sent, oldest first. Nothing is sent.",
@@ -329,7 +572,7 @@ tools.register(
 tools.register(
     "status",
     title="See how your inbox is running",
-    fn=status, machine=MACHINE, min_role="read",
+    fn=status, machine=MACHINE, min_role="read", render=_render_status,
     capability="read:inbox",
     description="Whether the box is running or stopped, whether it is writing replies, how many "
                 "messages it sent this hour against its cap, each channel and whether it works, "
@@ -339,7 +582,7 @@ tools.register(
 tools.register(
     "settings",
     title="See your inbox settings",
-    fn=settings, machine=MACHINE, min_role="read",
+    fn=settings, machine=MACHINE, min_role="read", render=_render_settings,
     capability="read:inbox",
     description="Every Inbox setting with its value, what it means and where it is changed, plus "
                 "whether the mailbox, social accounts and AI account are connected. Changes nothing.",
@@ -399,10 +642,26 @@ def draft_reply(id=None, body=None):
                      "a draft was already waiting for that message, so this one was not added")}
 
 
+def _render_draft(r: dict) -> str:
+    if r.get("error"):
+        body = say.plain(r["error"]) + "."
+    elif r.get("written"):
+        body = (f"The reply is waiting on the screen. Nothing was sent: you read it, change it if you like, and "
+                f"press send yourself. Replies to send: {say.link(REPLIES_PAGE)}")
+    else:
+        body = f"Nothing was written. {say.plain(r.get('note') or 'the box did not say why').rstrip('.')}."
+    return say.answer(
+        body,
+        say.ask_next((f"{MACHINE}.waiting", "Who else is waiting on a reply?"),
+                     (f"{MACHINE}.list_conversations", "Who wrote to us today?")),
+        say.can_start((f"{MACHINE}.propose_drafts", say.approve_line("Send it as written"))) if r.get("written")
+        else "")
+
+
 tools.register(
     "draft_reply",
     title="Suggest a reply for you to approve",
-    fn=draft_reply, machine=MACHINE, min_role="act",
+    fn=draft_reply, machine=MACHINE, min_role="act", render=_render_draft,
     capability="write:proposals",
     description="Leave a suggested reply waiting on the screen for one conversation. It is NOT "
                 "sent: the person who owns this box reads it, edits it, and presses send "
@@ -546,10 +805,17 @@ def _register_kind():
 
 _register_kind()
 
+
+def _render_proposal(r: dict) -> str:
+    """Every inbox proposal's answer: what now waits on Approvals, or why nothing was asked."""
+    return say.proposal(r, (f"{MACHINE}.waiting", "Who else is waiting on a reply?"),
+                        (f"{MACHINE}.status", "How is my inbox running?"))
+
+
 tools.register(
     "propose_reply",
     title="Ask before sending a reply",
-    fn=propose_reply, machine=MACHINE, min_role="act",
+    fn=propose_reply, machine=MACHINE, min_role="act", render=_render_proposal,
     capability="write:proposals", wants_seat=True,
     description="Ask the owner to approve sending these exact words to one conversation. This does NOT "
                 "send: the owner sees the words in the mobile app and approves or declines, and only an "
@@ -563,7 +829,7 @@ tools.register(
 tools.register(
     "propose_drafts",
     title="Ask before sending written replies",
-    fn=propose_drafts, machine=MACHINE, min_role="act",
+    fn=propose_drafts, machine=MACHINE, min_role="act", render=_render_proposal,
     capability="write:proposals", wants_seat=True,
     description="Ask the owner to approve sending replies already written for these conversations, word for "
                 "word, as one approval. This does NOT send: only the owner's approval does, once each.",
@@ -688,7 +954,7 @@ _register_control()
 tools.register(
     "propose_drafting",
     title="Ask before turning writing replies on or off",
-    fn=propose_drafting, machine=MACHINE, min_role="act",
+    fn=propose_drafting, machine=MACHINE, min_role="act", render=_render_proposal,
     capability="write:proposals", wants_seat=True,
     description="Ask the owner to turn the box's reply writing on or off. Nothing changes until the owner approves.",
     args={"on": {"type": "boolean", "required": True,
@@ -698,7 +964,7 @@ tools.register(
 tools.register(
     "propose_discard_draft",
     title="Ask before throwing away a written reply",
-    fn=propose_discard_draft, machine=MACHINE, min_role="act",
+    fn=propose_discard_draft, machine=MACHINE, min_role="act", render=_render_proposal,
     capability="write:proposals", wants_seat=True,
     description="Ask the owner to throw away the reply written for one conversation, unsent. Nothing changes "
                 "until the owner approves.",
@@ -709,7 +975,7 @@ tools.register(
 tools.register(
     "propose_opt_out",
     title="Ask before opting someone out",
-    fn=propose_opt_out, machine=MACHINE, min_role="act",
+    fn=propose_opt_out, machine=MACHINE, min_role="act", render=_render_proposal,
     capability="write:proposals", wants_seat=True,
     description="Ask the owner to mark one person as opted out, so nothing is ever sent to them again. Nothing "
                 "changes until the owner approves.",
@@ -717,11 +983,57 @@ tools.register(
                  "description": "The conversation id from list_conversations, search or waiting."}},
 )
 
+def _render_connect(r: dict) -> str:
+    how = []
+    for h in r.get("how") or []:
+        if isinstance(h, dict) and h.get("what"):
+            how.append(f"{say.plain(h['what'])}: {say.plain(h.get('steps')).rstrip('.')}. "
+                       f"Open {say.link(h.get('open'))}")
+    return say.answer(
+        say.section("Connected now:", _connection_lines(r.get("connections"))),
+        say.section("How to connect each one:", how),
+        "A sign-in is finished by you, in a browser; a chat can't finish it for you.",
+        say.ask_next((f"{MACHINE}.status", "How is my inbox running?"),
+                     (f"{MACHINE}.settings", "How is my inbox set up?")))
+
+
 tools.register(
     "connect",
     title="See how to connect your channels",
-    fn=connect, machine=MACHINE, min_role="read",
+    fn=connect, machine=MACHINE, min_role="read", render=_render_connect,
     capability="read:inbox",
     description="Whether the mailbox, social accounts and AI account are connected, and the page the owner "
                 "opens to connect each one. A sign-in is finished by the owner in a browser.",
 )
+
+
+# ── WHAT THE INBOX ADDS TO THE MORNING REVIEW'S ANSWER, AND TO THE READY-MADE ASKS ──────────────────────
+# core renders the review and names no machine, so the inbox says what its segment lets the owner ask next and
+# start (core/connector/words.py `review_offers`). "customer_voice" is the segment's key, the machine name
+# marketing/customer_voice/report.py registers it under; `inbox_drafts` is the figure that report writes.
+def _review_offers(segment: dict) -> dict:
+    figures = segment.get("figures") or {}
+    try:
+        ready = int((figures.get("inbox_drafts") or {}).get("value") or 0)
+    except (TypeError, ValueError):
+        ready = 0
+    waiting_now = any((n or {}).get("key") == "waiting" for n in segment.get("needs_you") or [])
+    asks = [(f"{MACHINE}.waiting", "Who is waiting on a reply?")] if (ready or waiting_now) else \
+        [(f"{MACHINE}.list_conversations", "Who wrote to us today?")]
+    starts = [(f"{MACHINE}.propose_drafts", _send_written(ready))] if ready else []
+    return {"ask": asks, "start": starts}
+
+
+say.review_offers("customer_voice", _review_offers)
+
+prompts.register(
+    "who_to_follow_up", title="Who should I follow up with", machine=MACHINE, prefer=("core.ask",),
+    description="The people waiting on you who matter most, why, and which already have a reply written.",
+    ask="Who should I follow up with? Rank the people waiting on me by who matters most to the business, say why, "
+        "and tell me which of them already have a reply written.",
+    uses=[(f"{MACHINE}.waiting", "who is waiting on a reply, and the replies already written for them"),
+          (f"{MACHINE}.read_conversation", "what one person said, to judge how warm they are"),
+          (f"{MACHINE}.list_conversations", "everyone who wrote recently, newest first")])
+prompts.use("morning_brief", f"{MACHINE}.waiting", "who is waiting on a reply, and the replies already written")
+prompts.use("what_needs_me", f"{MACHINE}.waiting",
+            "the people waiting on a reply, and the replies written and ready to send")

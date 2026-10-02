@@ -9,6 +9,8 @@ registry, and the HTTP transport over it.
     tools.py     the registry: one definition, every transport reads it
     manifest.py  what THIS box can answer, derived rather than declared
     http.py      the HTTP transport (the MCP adapter is a second one, over the same functions)
+    words.py     how every tool's answer reads over MCP: plain words, what to ask next, what it can start
+    prompts.py   the ready-made asks a person picks from their AI's menu, registered like tools
 
 Nothing in this package reasons. No brain.think, no vendor call, no spend — identity, registry and
 dispatch are exactly the deterministic work CLAUDE.md section 11-6 says must never route through a

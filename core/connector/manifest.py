@@ -138,6 +138,44 @@ def build(*, seat: dict) -> dict:
     }
 
 
+_BOX_WORDS = {"base": "This is the Base Machine.", "lead": "This box runs the Lead Machine.",
+              "content": "This box runs the Content Machine.", "customer_voice": "This box runs the Unified Inbox."}
+
+
+def _needs_nothing(t: dict) -> bool:
+    return not any((a or {}).get("required") for a in (t.get("args") or {}).values())
+
+
+def render(m: dict) -> str:
+    """What the box can do, in the titles the owner granted on his AI's permission screen. Names no tool: what
+    this connection may use is the manifest's own list, so the words can't promise a door the list keeps shut."""
+    from core.connector import words as say
+    listed = [t for t in (m.get("tools") or []) if isinstance(t, dict)]
+    own = [t for t in listed if not str(t.get("machine") or "").startswith("app_")]
+    apps = [t for t in listed if str(t.get("machine") or "").startswith("app_")]
+    reads = [t for t in own if str(t.get("capability") or "").startswith("read:") and t.get("name") != TOOL]
+    asks = [t for t in own if str(t.get("capability") or "").startswith("write:")]
+    kind = _BOX_WORDS.get(str(m.get("box_type") or ""), "")
+    parts = [f"{kind} Here is what it can do for this connection." if kind else
+             "Here is what your box can do for this connection."]
+    parts.append(say.section("What I can look up:", [t.get("title") for t in reads]))
+    if apps:
+        parts.append(f"From the apps you connected on Data Sources, {say.plural(len(apps), 'more thing', 'more things')}"
+                     f" I can look up, such as: {', '.join(str(t.get('title')) for t in apps[:3])}.")
+    parts.append(say.section("What I can start, for you to approve on Approvals:", [t.get("title") for t in asks]))
+    if m.get("absent"):
+        parts.append(f"{say.plural(len(m['absent']), 'part', 'parts')} of this box did not load, so "
+                     f"{'its questions are' if len(m['absent']) == 1 else 'their questions are'} missing for now.")
+    # ONE QUESTION PER MACHINE, each one that needs nothing more from the person, so the first three asks reach
+    # three different parts of the box rather than three views of one.
+    first, seen = [], set()
+    for t in reads:
+        if t.get("machine") not in seen and _needs_nothing(t):
+            seen.add(t.get("machine"))
+            first.append((t.get("name"), t.get("title")))
+    return say.answer(*parts, say.ask_next(*first))
+
+
 # THE MANIFEST IS ITSELF A TOOL, not only a route, and that is a requirement rather than a
 # flourish: the MCP transport (step 9) supports TOOL CALLS ONLY, so a manifest exposed purely as
 # a resource is invisible to the agent that most needs it — it would have to guess what the box
@@ -161,4 +199,5 @@ tools.register(
     capability="read:manifest",
     # The one tool that must know who is asking, because its whole answer is "what may you call".
     wants_seat=True,
+    render=render,
 )

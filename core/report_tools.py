@@ -31,8 +31,11 @@ TWO THINGS ARE DELIBERATE AND NEITHER IS COSMETIC.
 """
 from datetime import datetime, timezone
 
+import re
+
 from core import report
-from core.connector import tools
+from core.connector import prompts, tools
+from core.connector import words as say
 from core.logging import get_logger
 
 log = get_logger(__name__)
@@ -125,21 +128,205 @@ def report_trend(day: str | None = None, back: int = report.HISTORY_DAYS):
     Only numeric headlines appear. The meters headline is a currency string by design, so it has
     no series — which also means this tool leaks no spend and needs no role check.
     """
-    if not report.days():
+    known = report.days()
+    if not known:
         return _not_started()
     back = max(1, min(int(back), 365))        # a caller asking for ten years gets a year
     series = report.history(day, back=back)
     return {
         "days_back": back,
         "series": series,
+        # WHAT EACH SERIES IS, in the words the review itself uses ("Unified Inbox", "articles published"), from
+        # the newest stored day. A series keyed by a machine's slug is a number nobody can name.
+        "titles": _titles(known[0]),
         "note": "days with no stored report are absent rather than zero; a gap is not a zero",
     }
+
+
+def _titles(day: str) -> dict:
+    try:
+        return {r["machine"]: {"title": str(r.get("title") or ""),
+                               "label": str((r.get("headline") or {}).get("label") or "")}
+                for r in report.read(day) if r.get("machine")}
+    except Exception as e:                    # noqa: BLE001 — the series still answers without names
+        log.warning("report_tools.titles_unreadable", error=type(e).__name__)
+        return {}
+
+
+# ── the answers in words (core/connector/words.py) ─────────────────────────────────────────────────
+# Owner, 2026-10-02, asking his own AI for this review and getting its stored fields back: *"This is not an AI
+# business machine. This is a dumb box."* So the review now answers the way its page reads: what needs him first,
+# every machine's together, then what happened, machine by machine, with the full link to each page, how fresh it
+# is, and what to ask next. Nothing here knows what a machine's numbers mean: a machine says what its segment lets
+# him ask and start (`words.review_offers`), beside its own tools.
+
+_ZERO_BUDGET = re.compile(r"\b0 of 0\b")
+
+
+def _item_line(x: dict) -> str:
+    """One `happened` line, as the page draws it: the number, then the words. "" for a line with nothing in it."""
+    text = str(x.get("text") or "").strip()
+    if not text:
+        return ""
+    v = x.get("value")
+    if v in (None, ""):
+        return say.plain(text)
+    if not report.has_value(v):
+        return ""                                      # "0 messages came in" is not a line (owner, 2026-09-29)
+    return say.plain(f"{say.n(v)} {text}")
+
+
+def _with_link(text: str, href) -> str:
+    return f"{text}: {say.link(href)}" if href else text
+
+
+def _segment(r: dict) -> str:
+    """One machine's part: what happened, where things stand, what is worth watching. "" when it says nothing."""
+    title = str(r.get("title") or r.get("machine") or "").replace("_", " ").strip() or "Your box"
+    if r.get("error"):
+        return f"{title}\n- Could not be read for this day."
+    said = {say.first_number(n.get("text")) for n in (r.get("needs_you") or [])}
+    lines = []
+    for x in r.get("happened") or []:
+        line = _item_line(x) if isinstance(x, dict) else ""
+        if line:
+            said.add(say.first_number(line))
+            lines.append(line)                         # unlinked, as the page draws a happened line
+    h = r.get("headline") or {}
+    if not lines and report.has_value(h.get("value")) and str(h.get("label") or "").strip():
+        # A HEADLINE ONLY WHEN NOTHING ELSE IS SAID: beside its own lines it repeats them in a vaguer way.
+        lines.append(f"{say.n(h['value'])} {h['label']}")
+        said.add(say.first_number(lines[-1]))
+    for f in (r.get("figures") or {}).values():
+        if not isinstance(f, dict) or not report.has_value(f.get("value")):
+            continue
+        if say.first_number(f.get("value")) in said and say.first_number(f.get("value")):
+            continue                                   # already said, in a needs-you or a happened line
+        label = say.plain(f.get("label") or "")
+        if label:
+            lines.append(f"{label}: {say.n(f['value'])}")
+    for w in r.get("watch") or []:
+        if not isinstance(w, dict) or w.get("state") == "ok" or not str(w.get("text") or "").strip():
+            continue
+        num = say.first_number(w.get("text"))
+        if num and num in said:
+            continue
+        lines.append(_with_link(say.plain(w["text"]), w.get("href")))
+    lines += [say.plain(x) for x in (r.get("notes") or []) if str(x or "").strip()]
+    body = say.bullets(lines)
+    return f"{title}\n{body}" if body else ""
+
+
+def _spending(r: dict) -> str:
+    """The meters, for a seat that holds read:spend: only what was used, never a 0-of-0 budget."""
+    if r.get("error"):
+        return "Spending\n- Could not be read for this day."
+    lines = []
+    h = r.get("headline") or {}
+    if report.has_value(h.get("value")):
+        lines.append(f"Spent {h['value']} {str(h.get('label') or '').strip()}".strip())
+    for x in r.get("happened") or []:
+        text = str((x or {}).get("text") or "").strip()
+        if not text or _ZERO_BUDGET.search(text) or not report.has_value(x.get("value")):
+            continue
+        lines.append(f"{text} ({x['value']})")
+    for w in r.get("watch") or []:
+        if isinstance(w, dict) and w.get("state") != "ok" and str(w.get("text") or "").strip():
+            lines.append(say.plain(w["text"]))
+    body = say.bullets(lines)
+    return f"Spending\n{body}" if body else ""
+
+
+def render_day(r: dict) -> str:
+    d = str(r.get("day") or "")
+    today = report.today().isoformat()
+    head = (f"Today's Morning Review ({say.day_words(d)})." if d == today else f"Morning Review for {say.day_words(d)}.")
+    fresh = ("This day is closed, so these are its final numbers." if r.get("final")
+             else say.as_of(r.get("written_at"), bool(r.get("stale"))))
+    segs = [s for s in (r.get("segments") or []) if isinstance(s, dict)]
+    machines = [s for s in segs if s.get("machine") != report.METERS]
+    meters = next((s for s in segs if s.get("machine") == report.METERS), None)
+
+    # NEEDS YOU FIRST, EVERY MACHINE'S TOGETHER: the reason he opens the review (core/dash/review.py `_needs`).
+    needs = []
+    for s in machines:
+        if s.get("error"):
+            continue
+        for it in s.get("needs_you") or []:
+            text = say.plain((it or {}).get("text"))
+            if text:
+                needs.append(_with_link(text, it.get("href")))
+    parts = [f"{head} {fresh}".strip(),
+             say.section("Needs you:", needs) if needs else "Nothing needs you right now."]
+    happened = [b for b in (_segment(s) for s in machines) if b]
+    if happened:
+        parts.append("What happened:\n" + "\n".join(happened))
+    if meters is not None:
+        parts.append(_spending(meters))
+    if any(str(w).startswith(f"{report.METERS}:") for w in r.get("withheld") or []):
+        parts.append("Spending is hidden from this connection.")
+    if not segs and r.get("note"):
+        parts.append(f"No Morning Review was stored for {say.day_words(d)}.")
+    if d:
+        parts.append(f"The full review: {say.link(f'/app/review/{d}')}")
+
+    asks, starts = [], []
+    for s in machines:
+        got = say.offers_for(s)
+        asks += got["ask"]
+        starts += got["start"]
+    asks += [(f"{MACHINE}.report_trend", "How have these numbers changed over the last month?"),
+             (f"{MACHINE}.report_days", "Which other days can I look at?"),
+             ("core.health", "Is my box running?")]
+    return say.answer(*parts, say.ask_next(*asks), say.can_start(*starts))
+
+
+def render_days(r: dict) -> str:
+    days = [str(x) for x in (r.get("days") or [])]
+    if not days:
+        return say.answer("No Morning Review is stored on this box yet.", say.ask_next(
+            ("core.health", "Is my box running?")))
+    span = (f"from {say.day_words(days[-1])} to {say.day_words(days[0])}" if len(days) > 1
+            else f"for {say.day_words(days[0])}")
+    return say.answer(
+        f"Your box has a Morning Review for {say.plural(len(days), 'day')}, {span}.",
+        f"The newest, {say.day_words(days[0])}: {say.link(f'/app/review/{days[0]}')}",
+        "Recent days: " + "; ".join(say.day_words(x) for x in days[:7]) + ".",
+        say.ask_next((f"{MACHINE}.report_day", f"What happened on {say.day_words(days[0])}?"),
+                     (f"{MACHINE}.report_trend", "How have my numbers changed this month?")))
+
+
+def render_trend(r: dict) -> str:
+    series = r.get("series") or {}
+    names = r.get("titles") or {}
+    lines = []
+    for machine in sorted(series):
+        pts = [p for p in series.get(machine) or [] if isinstance(p, dict)]
+        if not pts:
+            continue
+        meta = names.get(machine) or {}
+        title = meta.get("title") or str(machine).replace("_", " ").title()
+        label = f", {meta['label']}" if meta.get("label") else ""
+        last, first = pts[-1], pts[0]
+        line = f"{title}{label}: {say.n(last['value'])} on {say.day_words(last['day'])}"
+        if len(pts) > 1:
+            line += f", from {say.n(first['value'])} on {say.day_words(first['day'])}"
+        peak = max(pts, key=lambda p: p["value"])
+        if len(pts) > 2 and peak is not last and peak["value"] != last["value"]:
+            line += f"; highest {say.n(peak['value'])} on {say.day_words(peak['day'])}"
+        lines.append(line + ".")
+    back = r.get("days_back") or report.HISTORY_DAYS
+    body = (say.section(f"Over the last {say.plural(back, 'day')}:", lines) if lines
+            else f"No numbers are stored for the last {say.plural(back, 'day')} yet.")
+    return say.answer(body, "Days with no review are left out, never counted as zero.", say.ask_next(
+        (f"{MACHINE}.report_day", "What happened on my box yesterday?"),
+        (f"{MACHINE}.report_days", "Which days can I look at?")))
 
 
 tools.register(
     "report_day",
     title="Read a day's Morning Review",
-    fn=report_day, wants_seat=True, machine=MACHINE, min_role="read",
+    fn=report_day, wants_seat=True, machine=MACHINE, min_role="read", render=render_day,
     capability="read:reports",
     description="One day's Morning Review as stored, with its freshness. Defaults to the most "
                 "recent stored day. The meters (spend) segment is withheld from a read seat.",
@@ -150,7 +337,7 @@ tools.register(
 tools.register(
     "report_days",
     title="See which days have a Morning Review",
-    fn=report_days, machine=MACHINE, min_role="read",
+    fn=report_days, machine=MACHINE, min_role="read", render=render_days,
     capability="read:reports",
     description="Every day that has a stored Morning Review, newest first.",
 )
@@ -158,7 +345,7 @@ tools.register(
 tools.register(
     "report_trend",
     title="See how your Morning Review numbers change",
-    fn=report_trend, machine=MACHINE, min_role="read",
+    fn=report_trend, machine=MACHINE, min_role="read", render=render_trend,
     capability="read:reports",
     description="The stored headline per machine over recent days, oldest first. Days with no "
                 "report are absent rather than zero.",
@@ -167,3 +354,33 @@ tools.register(
           "back": {"type": "integer", "required": False,
                    "description": "How many days back, 1-365. Defaults to 30."}},
 )
+
+
+# ── READY-MADE ASKS (core/connector/prompts.py; the owner's ruling D3, 2026-10-02) ───────────────────
+# The three that read the review first. Machines add their own tools to them with `prompts.use` beside their
+# tools (the inbox's waiting replies, the AEO Machine's articles), so this file names none of them. The box's own
+# brief and its own AI answer them whole when this box has them (OSDev4 builds both): preferred by name, looked
+# up when the ask is made, so they are used the day they register.
+_BOX_AI = ("core.brief", "core.ask")
+
+prompts.register(
+    "morning_brief", title="Morning brief", machine=MACHINE, prefer=_BOX_AI,
+    description="Today's Morning Review, thought through: the few things that matter, why, and what to do.",
+    ask="Give me my morning brief from my box: the two or three things that matter most today, why each one "
+        "matters, and what I should do about it.",
+    uses=[(f"{MACHINE}.report_day", "today's Morning Review: what needs me first, then what happened on each "
+                                    "part of the box, with the link to each page")])
+
+prompts.register(
+    "what_needs_me", title="What needs me today", machine=MACHINE, prefer=_BOX_AI,
+    description="Only what is waiting on you, most important first, and what each one needs you to do.",
+    ask="What needs me today? Only what is waiting on me, most important first, and what each one needs me to do.",
+    uses=[(f"{MACHINE}.report_day", "the review's Needs you list, every part of the box's together")])
+
+prompts.register(
+    "websites", title="How are my websites doing", machine=MACHINE, prefer=_BOX_AI[1:],
+    description="Visits from people on each of your sites this week, against the week before, and what moved them.",
+    ask="How are my websites doing this week? Tell me which site is pulling, which is quiet, and why, where the "
+        "box can see it.",
+    uses=[(f"{MACHINE}.report_day", "the review's website lines: visits from people this week, per site, against "
+                                    "the week before")])

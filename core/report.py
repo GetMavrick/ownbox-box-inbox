@@ -194,15 +194,36 @@ def vendor_name(key) -> str:
     return _VENDOR_NAMES.get(str(key)) or str(key).replace("_", " ").strip().title()[:40]
 
 
+def meter_pct(used, cap) -> str:
+    """How full a meter is, in words that never round use away. "9 of 3,000" read "0%" on the owner's review
+    (OSDev1, 2026-10-02), which says nothing was used and hid the line on the page (has_value("0%") is False). So
+    any use under 1% is "<1%", a meter short of its cap never reads "100%", and an uncapped meter says so."""
+    used, cap = float(used or 0), float(cap or 0)
+    if not cap:
+        return "no cap"
+    p = 100.0 * used / cap
+    if 0 < p < 1:
+        return "<1%"
+    return f"{min(p, 99.0) if used < cap else p:.0f}%"
+
+
 def _meters_report(day: date) -> dict:
     """The rail that absorbed the cost digest (§1.7): the same meters, from the same guard the
-    vendors are charged against, stored with the day."""
+    vendors are charged against, stored with the day.
+
+    ONLY A METER IN USE THIS CYCLE IS A LINE. The owner's AI read his review aloud on 2026-10-02 and it listed every
+    vendor in the shipped config: "Instantly 0 of 0", "MyEmailVerifier 0 of 0", "Tomba 0 of 1000", eleven lines and
+    one of them real (OSDev1's assignment, scope #1839). His 2026-09-29 ruling already covers it: "If a line doesn't
+    have data, it should not be displayed." The page filtered them; the stored row, the email and MCP did not, so
+    the rule lives here, once. A cap with no use is not news, and a buyer's box ships caps for vendors he never
+    signed up for. The at-cap and near-cap checks need use, so nothing they say is lost."""
     from core import cost_digest, cost_guard
     at = datetime.combine(day, datetime.min.time(), tzinfo=tz()) + timedelta(hours=23, minutes=59)
     at = min(at, now_local())
-    rows = cost_digest.meters(at)
-    happened = [{"text": f"{vendor_name(r['vendor'])} {r['used']:.0f} of {r['cap']:.0f}",
-                 "value": f"{r['pct']:.0f}%"} for r in rows]
+    rows = [r for r in cost_digest.meters(at) if float(r.get("used") or 0) > 0]
+    happened = [{"text": f"{vendor_name(r['vendor'])} {r['used']:,.0f} of {r['cap']:,.0f}" if r["cap"]
+                 else f"{vendor_name(r['vendor'])} {r['used']:,.0f} used",
+                 "value": meter_pct(r["used"], r["cap"])} for r in rows]
     watch = []
     for r in rows:
         if r["cap"] and r["used"] >= r["cap"]:
@@ -240,15 +261,34 @@ WHERE daily_reports.final = 0
 """
 
 
+def _stored_number(rep) -> int | float | None:
+    """A stored row's headline as a number, or None when it is not one.
+
+    A HEADLINE NOBODY GAVE IS NOT A ZERO. `_normalize` fills value 0 and label "" for a reporter that gives no
+    headline. Until 2026-10-02 the website reporter gave none while saying "179 visits from people this week", so
+    every stored day reads 0. Counted as a zero, the first real headline would read "+185 vs the day before" and its
+    chart would leap from nothing. So an unlabelled headline on a row that had something to say, or that could not
+    report, is no number. A quiet row (nothing happened, no label) keeps its zero: that is the AEO Machine's day
+    with nothing published, and a real zero."""
+    if not isinstance(rep, dict):
+        return None
+    h = rep.get("headline")
+    v = h.get("value") if isinstance(h, dict) else None
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None                             # bool is an int in Python; it is not a headline
+    if not str(h.get("label") or "").strip() and (rep.get("happened") or rep.get("error")):
+        return None
+    return v
+
+
 def _previous_headline(c, day: date, machine: str):
     row = c.execute("SELECT report_json FROM daily_reports WHERE day = ? AND machine = ?",
                     ((day - timedelta(days=1)).isoformat(), machine)).fetchone()
     if not row:
         return None
     try:
-        v = (json.loads(row["report_json"]).get("headline") or {}).get("value")
-        return v if isinstance(v, (int, float)) else None
-    except (ValueError, AttributeError):
+        return _stored_number(json.loads(row["report_json"]))
+    except ValueError:
         return None
 
 
@@ -264,10 +304,16 @@ def snapshot(day: date | None = None) -> dict:
     with state.connect() as c:
         for machine, r in list(REPORTERS.items()):
             try:
-                rep = _normalize(machine, r["title"], r["fn"](day))
-                if rep["headline"].get("delta") is None and isinstance(rep["headline"]["value"], (int, float)):
+                raw = r["fn"](day)
+                rep = _normalize(machine, r["title"], raw)
+                # A REPORTER THAT SAYS ITS OWN CHANGE, EVEN "NONE", IS NOT SECOND-GUESSED. The website says none when a
+                # site has no week ending the day before; filled from yesterday's row, that site's whole week would
+                # read as growth.
+                said = isinstance(raw, dict) and isinstance(raw.get("headline"), dict) and "delta" in raw["headline"]
+                head = rep["headline"]
+                if not said and head.get("delta") is None and isinstance(head["value"], (int, float)):
                     prev = _previous_headline(c, day, machine)
-                    rep["headline"]["delta"] = (rep["headline"]["value"] - prev) if prev is not None else None
+                    head["delta"] = (head["value"] - prev) if prev is not None else None
             except Exception as e:  # noqa: BLE001 — one bad machine is one line, never the page
                 log.warning("report.reporter_failed", machine=machine, error=type(e).__name__)
                 rep = _normalize(machine, r["title"], {"title": r["title"]})
@@ -449,11 +495,11 @@ def history(day: date | str | None = None, back: int = HISTORY_DAYS) -> dict:
             "WHERE day >= ? AND day <= ? ORDER BY day ASC", (start, end.isoformat())).fetchall()
     for r in rows:
         try:
-            v = (json.loads(r["report_json"]).get("headline") or {}).get("value")
-        except (ValueError, AttributeError):
+            v = _stored_number(json.loads(r["report_json"]))
+        except ValueError:
             continue
-        if isinstance(v, bool) or not isinstance(v, (int, float)):
-            continue                            # bool is an int in Python; it is not a headline
+        if v is None:
+            continue
         out.setdefault(r["machine"], []).append({"day": r["day"], "value": v})
     return out
 
@@ -899,6 +945,10 @@ def refresh() -> dict:
     """The 15-minute periodic: today's row, rewritten. `beat=` on the registration means a
     stalled worker AGES this heartbeat and the watchdog pages on it (§2.2b)."""
     out = snapshot(today())
+    # TODAY'S BRIEF IS WRITTEN HERE, AHEAD (core/brief.py, #1839): from the rows just stored, so `core.brief` never
+    # waits on an AI. It rewrites only when the numbers moved, and its AI at most hourly. Never raises.
+    from core import brief
+    out["brief"] = brief.refresh().get("status")
     return {"status": "ok" if not out["failed"] else f"failed:{','.join(out['failed'])}", **out}
 
 

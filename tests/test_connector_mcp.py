@@ -182,6 +182,11 @@ ok("tools/call with no name is invalid params",
    r.get_json()["error"]["code"] == -32602)
 r = rpc("nonsense/method")
 ok("an unknown method is method-not-found", r.get_json()["error"]["code"] == -32601)
+# prompts/list is answered by the ready-made asks (#1841, core/connector/prompts.py), never by an empty list here.
+for _method, _key in (("resources/list", "resources"), ("resources/templates/list", "resourceTemplates")):
+    _r = rpc(_method, rpc_id=70)
+    ok(f"{_method} gets an empty list, never 'unknown method' (a reload asks for it whatever we advertise)",
+       (_r.get_json().get("result") or {}).get(_key) == [] and "error" not in _r.get_json(), _r.get_json())
 r = rpc("ping", rpc_id=7)
 ok("ping gets an empty result, as the spec requires (a client checks the connection with it)",
    r.status_code == 200 and r.get_json().get("id") == 7 and "error" not in r.get_json()

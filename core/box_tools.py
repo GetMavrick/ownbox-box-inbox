@@ -33,9 +33,10 @@ NOTHING HERE REASONS. No brain.think, no vendor call, no spend of its own. CLAUD
 """
 from datetime import datetime, timedelta, timezone
 
-from core import cost_guard, state
+from core import cost_guard, report, state
 from core.config import settings
-from core.connector import tools
+from core.connector import prompts, tools
+from core.connector import words as say
 from core.logging import get_logger
 
 log = get_logger(__name__)
@@ -115,11 +116,17 @@ def health():
     never takes the answer down. A pulse that cannot answer while something is wrong is a pulse
     that only works when you do not need it.
     """
+    from core import version
     from core.connector import manifest as _manifest
 
     out = {"checked_at": datetime.now(timezone.utc).isoformat(),
            "box_id": _manifest.box_id(),
            "box_type": _manifest.box_type(),
+           # WHICH RELEASE IS RUNNING, from the same place the box's HTTP /health reads it (core/version.py, the
+           # tag box_update.sh wrote before the restart). The daily check of the owner's box, 2026-10-02: /health
+           # named the release and this answer did not, so his AI could not say which version he was on. None on
+           # a box that never installed a verified release, which is the truth about it.
+           "release": version.RUNNING_RELEASE,
            "degraded": []}
 
     try:
@@ -214,10 +221,128 @@ def spend():
     return out
 
 
+# ── the answers in words (core/connector/words.py) ─────────────────────────────────────────────────
+# Owner, 2026-10-02: *"This is not an AI business machine. This is a dumb box."* Each tool below answers in plain
+# words over the connector; the fields above still travel beside the words for the AI to work with.
+
+_AI_WORDS = {
+    "ok": "Your AI account is signed in and answering.",
+    "not_probed": "Your AI account has not been checked yet. The box checks it within the hour.",
+    "unchecked": "The last check of your AI account did not get through. The next one, within the hour, decides.",
+    "stale_ok": "Your AI account answered at its last check, but that was a while ago.",
+}
+
+
+def _seconds_ago(s) -> str:
+    if not isinstance(s, (int, float)) or isinstance(s, bool) or s < 0:
+        return ""
+    return say.ago((datetime.now(timezone.utc) - timedelta(seconds=s)).isoformat())
+
+
+def _release_words(tag) -> str:
+    """`release/2026.10.02.10` -> `2026.10.02.10`, as a person reads a version."""
+    t = str(tag or "").strip()
+    return t.split("/", 1)[1] if t.startswith("release/") else t
+
+
+def _render_health(r: dict) -> str:
+    ok = r.get("ok")
+    head = ("Your box is running, and everything it checks is working." if ok is True else
+            "Your box is running, but something needs attention." if ok is False else
+            "Your box is up, but some of what it checks is unknown right now.")
+    lines = []
+    brain = r.get("brain") or {}
+    st = brain.get("state")
+    if st == "no_ai_key":
+        lines.append(f"No AI account is signed in yet, so nothing on the box can write. Sign in on Settings: "
+                     f"{say.link('/settings/ai')}")
+    elif st in _AI_WORDS:
+        lines.append(_AI_WORDS[st])
+    elif st:
+        lines.append(f"Your AI account is not answering. Sign in again on Settings: {say.link('/settings/ai')}")
+    for key, name in (("worker", "The box's background work"), ("slack", "Slack")):
+        d = r.get(key)
+        if not isinstance(d, dict):
+            continue
+        if d.get("state") == "running":
+            lines.append(f"{name} is running.")
+        elif d.get("state") == "no_beat_yet":
+            lines.append(f"{name} has not started yet. A new box takes a few minutes.")
+        elif d.get("state") == "silent":
+            when = _seconds_ago(d.get("beat_s_ago"))
+            lines.append(f"{name} has gone quiet" + (f": last heard {when}." if when else "."))
+    q = r.get("queue")
+    if isinstance(q, dict):
+        bits = [f"{say.n(q.get('queued', 0))} waiting" if q.get("queued") else "",
+                f"{say.n(q.get('running', 0))} running" if q.get("running") else "",
+                f"{say.n(q.get('failed_24h', 0))} failed in the last day" if q.get("failed_24h") else ""]
+        bits = [b for b in bits if b]
+        lines.append("Jobs: " + ", ".join(bits) + "." if bits else "No jobs are waiting or failing.")
+    failing = (r.get("alerts") or {}).get("failing") or []
+    if failing:
+        names = ", ".join(str(k).replace("_", " ").replace(":", " ").strip() for k in failing[:5])
+        lines.append(f"{say.plural(len(failing), 'check is', 'checks are')} failing: {names}.")
+    last = r.get("last_error")
+    if isinstance(last, dict):
+        when = _seconds_ago(last.get("s_ago"))
+        if when:
+            lines.append(f"The last job that failed did so {when}.")
+    if r.get("degraded"):
+        lines.append("Some of the box's records could not be read just now, so this answer is partial.")
+    release = _release_words(r.get("release"))
+    foot = " ".join(x for x in (f"Running release {release}." if release else "", say.as_of(r.get("checked_at")))
+                    if x)
+    return say.answer(
+        head, say.bullets(lines), foot,
+        say.ask_next(("morning_review.report_day", "What happened on my box yesterday?"),
+                     ("core.spend", "What has my box spent on AI this month?"),
+                     ("core.manifest", "What can my box do for me?")))
+
+
+def _money(v) -> str:
+    try:
+        return f"${float(v):,.2f}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _render_spend(r: dict) -> str:
+    parts = []
+    c = r.get("claude")
+    if isinstance(c, dict):
+        since = say.day_words(str(c.get("cycle_started") or "")[:10])
+        line = (f"This billing cycle{f' (since {since})' if since else ''}, your box has spent "
+                f"{_money(c.get('cycle_to_date_usd'))} on AI against a ceiling of {_money(c.get('ceiling_usd'))}, "
+                f"so {_money(c.get('remaining_usd'))} is left.")
+        if c.get("at_ceiling"):
+            line += " It has reached its ceiling: the AI stops until the next cycle starts."
+        parts.append(line)
+    vendors = [v for v in (r.get("vendors") or []) if isinstance(v, dict)]
+    # A METER NOTHING HAS USED IS NOT A LINE (owner, 2026-09-29, on the review: "If a line doesn't have data, it
+    # should not be displayed"), and a 0-of-0 budget is the same nothing.
+    used = [v for v in vendors if (v.get("units_used") or 0) > 0]
+    if used:
+        parts.append(say.section("Paid services this cycle:", [
+            f"{report.vendor_name(v.get('vendor'))}: {say.n(v.get('units_used'))} of {say.n(v.get('units_cap'))} used"
+            if v.get("units_cap") else f"{report.vendor_name(v.get('vendor'))}: {say.n(v.get('units_used'))} used"
+            for v in used]))
+    elif vendors:
+        parts.append("None of the paid services the box meters has been used this cycle.")
+    else:
+        parts.append("No paid service is metered on this box, so AI is the only spend.")
+    if r.get("degraded"):
+        parts.append("Some of the spend records could not be read just now, so this answer is partial.")
+    parts.append(say.as_of(r.get("checked_at")))
+    return say.answer(*parts, say.ask_next(
+        ("morning_review.report_day", "What happened on my box yesterday?"),
+        ("morning_review.report_trend", "How have my numbers changed this month?"),
+        ("core.health", "Is my box running?")))
+
+
 tools.register(
     "health",
     title="See whether your box is running",
-    fn=health, machine=MACHINE, min_role="read",
+    fn=health, machine=MACHINE, min_role="read", render=_render_health,
     # Its own capability, not read:manifest. The manifest describes CAPABILITY and never changes
     # between two calls a second apart; this is live state. A seat allowed to ask what the box can
     # do is not automatically a seat allowed to watch whether it is up.
@@ -230,7 +355,7 @@ tools.register(
 tools.register(
     "spend",
     title="See what your box has spent on AI",
-    fn=spend, machine=MACHINE, min_role="act",
+    fn=spend, machine=MACHINE, min_role="act", render=_render_spend,
     # NOT held by a read seat, deliberately and consistently: core/report_tools.py already
     # withholds the meters segment from a read seat because the box's spend is the owner's
     # business. Exposing the same number here under a capability `read` holds would reopen that
@@ -288,10 +413,17 @@ from core import approvals as _approvals  # noqa: E402
 
 _approvals.register_kind(PAUSE_KIND, run=_run_pause)
 
+
+def _render_pause(r: dict) -> str:
+    """What now waits on Approvals, or why nothing was asked (the box is already that way)."""
+    return say.proposal(r, ("core.health", "Is my box running?"),
+                        ("morning_review.report_day", "What happened on my box yesterday?"))
+
+
 tools.register(
     "propose_stop",
     title="Ask before stopping your box",
-    fn=propose_stop, machine=MACHINE, min_role="act",
+    fn=propose_stop, machine=MACHINE, min_role="act", render=_render_pause,
     capability="write:proposals", wants_seat=True,
     description="Ask the owner to stop everything on this box, as the Dashboard's Stop button does. Nothing "
                 "changes until the owner approves.",
@@ -300,7 +432,12 @@ tools.register(
 tools.register(
     "propose_start",
     title="Ask before starting your box again",
-    fn=propose_start, machine=MACHINE, min_role="act",
+    fn=propose_start, machine=MACHINE, min_role="act", render=_render_pause,
     capability="write:proposals", wants_seat=True,
     description="Ask the owner to start this box again after a stop. Nothing changes until the owner approves.",
 )
+
+# WHAT NEEDS THE OWNER TODAY includes a box that is not well (core/connector/prompts.py; the ask is registered in
+# core/report_tools.py beside the review it reads first).
+prompts.use("what_needs_me", "core.health", "whether the box itself is running, and anything on it that is "
+                                            "failing or needs signing in again")

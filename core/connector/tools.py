@@ -257,7 +257,7 @@ def plain_title(title: str) -> bool:
 def make_spec(name: str, *, fn, description: str, machine: str, capability: str,
               min_role: str = "read", args: dict | None = None,
               wants_seat: bool = False, output: dict | None = None, title: str | None = None,
-              input_schema: dict | None = None, replacing=frozenset()) -> dict:
+              input_schema: dict | None = None, replacing=frozenset(), render=None) -> dict:
     """Declare one question this box can answer: every rule `register` keeps, returned as the spec and not
     yet registered. `replacing` names machines whose tools `swap` is about to replace, so their names and
     titles don't count as taken.
@@ -275,6 +275,12 @@ def make_spec(name: str, *, fn, description: str, machine: str, capability: str,
     `args` is {name: {"type": "string"|"integer"|"boolean", "required": bool, "description": str}}.
     Deliberately small: a schema language would be a dependency and an argument about which
     dialect, and every Tier 1 question so far takes a date or an id.
+
+    `render(result) -> str` writes the answer a person reads (core/connector/words.py). Owner, 2026-10-02,
+    handed his own Morning Review as a block of stored fields: *"This is not an AI business machine. This is a
+    dumb box."* The MCP transport sends this text, and the result travels beside it untouched. Optional, so a
+    machine of the owner's own (SDK v1) and a connected app's tools keep answering as they did. It never leaves
+    the box: the manifest, `tools/list` and the HTTP API each build their own fields and none carries it.
     """
     # THE PUBLIC NAME IS COMPUTED, never hand-written: `<machine>.<name>`, so a call site cannot spell
     # it differently from its neighbour and the machine in the name is always the one that owns it.
@@ -313,6 +319,8 @@ def make_spec(name: str, *, fn, description: str, machine: str, capability: str,
                          f"'write:proposals' or 'act:send_email', got {capability!r}")
     if not callable(fn):
         raise ValueError(f"tool {name!r} needs a callable")
+    if render is not None and not callable(render):
+        raise ValueError(f"tool {name!r}: render must be a function that takes the result and returns words")
     for arg, spec in (args or {}).items():
         if spec.get("type") not in _ARG_TYPES:
             raise ValueError(f"tool {name!r} arg {arg!r}: type must be one of {sorted(_ARG_TYPES)}")
@@ -332,18 +340,21 @@ def make_spec(name: str, *, fn, description: str, machine: str, capability: str,
                        # AN APP'S OWN SCHEMA, passed through untouched (core/connections/gateway.py). Our
                        # small `args` vocabulary can't describe another app's tools, and translating it
                        # would be guessing; the app validates its own arguments.
-                       "input_schema": input_schema if isinstance(input_schema, dict) else None}
+                       "input_schema": input_schema if isinstance(input_schema, dict) else None,
+                       # THE ANSWER IN WORDS (see the docstring). A function, like `fn`: kept here for the
+                       # transport, never serialised.
+                       "render": render}
 
 
 def register(name: str, *, fn, description: str, machine: str, capability: str,
              min_role: str = "read", args: dict | None = None,
              wants_seat: bool = False, output: dict | None = None, title: str | None = None,
-             input_schema: dict | None = None) -> None:
+             input_schema: dict | None = None, render=None) -> None:
     """Declare one question this box can answer (the rules are `make_spec`'s). A name or title already taken
     is refused here, at import, where somebody is watching."""
     spec = make_spec(name, fn=fn, description=description, machine=machine, capability=capability,
                      min_role=min_role, args=args, wants_seat=wants_seat, output=output, title=title,
-                     input_schema=input_schema)
+                     input_schema=input_schema, render=render)
     _REGISTRY[spec["name"]] = spec
     log.info("connector.tool_registered", tool=spec["name"], title=spec["title"], machine=machine,
              min_role=min_role, capability=capability)
@@ -451,6 +462,22 @@ def validate(spec: dict, raw: dict | None) -> dict:
 OLD_PREFIX = "aios."      # the public names before #1743; still answered, never listed (see call)
 
 
+def lookup(name: str) -> dict | None:
+    """The spec `call()` runs for `name`, by its old spelling too, or None. The MCP transport reads the tool's
+    `render` through this, so an old name gets the same answer in words as the new one."""
+    spec = _REGISTRY.get(name)
+    if spec is None and isinstance(name, str) and name.startswith(OLD_PREFIX):
+        # AN OLD NAME STILL ANSWERS (2026-10-02). #1743 dropped the `aios.` prefix from every public name, and a
+        # client that listed the tools before then keeps calling `aios.<machine>.<tool>`. Measured that day: OSDev1's own
+        # connector to the owner's box answered EVERY call with "this box does not serve", the evening before he
+        # films his investor demo. So the old name reaches the same tool, through the SAME gates in call() (capability,
+        # role, arguments); tools/list and the manifest still show only the new names. The audit row keeps the
+        # name the client sent, so seat_actions shows when old names stop arriving (keep this until 2027-10,
+        # the 12-month rule for contracts partners and owners build on).
+        spec = _REGISTRY.get(name[len(OLD_PREFIX):])
+    return spec
+
+
 def call(name: str, raw_args: dict | None, seat: dict) -> tuple[dict, int]:
     """Invoke a tool for a seat. Returns (body, http_status). ALWAYS writes one audit row.
 
@@ -460,16 +487,7 @@ def call(name: str, raw_args: dict | None, seat: dict) -> tuple[dict, int]:
     """
     from core.connector import seats as _seats
 
-    spec = _REGISTRY.get(name)
-    if spec is None and name.startswith(OLD_PREFIX):
-        # AN OLD NAME STILL ANSWERS (2026-10-02). #1743 dropped the `aios.` prefix from every public name, and a
-        # client that listed the tools before then keeps calling `aios.<machine>.<tool>`. Measured that day: OSDev1's own
-        # connector to the owner's box answered EVERY call with "this box does not serve", the evening before he
-        # films his investor demo. So the old name reaches the same tool, through the SAME gates below (capability,
-        # role, arguments); tools/list and the manifest still show only the new names. The audit row keeps the
-        # name the client sent, so seat_actions shows when old names stop arriving (keep this until 2027-10,
-        # the 12-month rule for contracts partners and owners build on).
-        spec = _REGISTRY.get(name[len(OLD_PREFIX):])
+    spec = lookup(name)
     if spec is None:
         # A tool that is absent is absent at STARTUP; by here the honest answer is that this box
         # does not serve it, which is a different sentence from "that failed".

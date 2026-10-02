@@ -6,7 +6,7 @@ One `happened` item per site with a stored week: "ownbox.io: 1,204 visits this w
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from core.report import register_reporter
 
@@ -45,17 +45,36 @@ def _line(site: str, w: dict) -> str:
     return ", ".join(parts)
 
 
+def _people(site: str, day: date) -> int | None:
+    w = seam.week(site, day)
+    return int(w["totals"]["sessions"] or 0) if w and w["days"] else None
+
+
 def report(day: date) -> dict:
-    """The day's line per site, or {} when no site has a stored week ending that day."""
-    happened = []
+    """The day's line per site, or {} when no site has a stored week ending that day.
+
+    THE HEADLINE IS THE WEEK'S VISITS FROM PEOPLE, ACROSS HIS SITES (OSDev1's assignment, 2026-10-02, scope #1839).
+    The owner's AI read this segment's headline as label "" and value 0 beside "179 visits from people this week".
+    It is the sum of the per-site numbers below it, people only (visitors.py), so the two can never disagree. The
+    delta is this week against the week ending the day before, from the store, not from yesterday's stored row:
+    every row stored before this fix says 0, and "+185 vs the day before" would be a number nobody earned. A site
+    without a week ending the day before means no change at all: its whole week would read as growth."""
+    happened, total, before, sites = [], 0, 0, 0
     for site in seam.sites():
         w = seam.week(site, day)
         if not w or not w["days"]:
             continue
         happened.append({"text": _line(site, w), "href": "/settings/sources"})
+        total += int(w["totals"]["sessions"] or 0)
+        sites += 1
+        prev = _people(site, day - timedelta(days=1))
+        before = None if (before is None or prev is None) else before + prev
     out: dict = {}
     if happened:
-        out = {"title": TITLE, "happened": happened}
+        label = (f"visit{'s' if total != 1 else ''} from people this week"
+                 + (f" across {sites} sites" if sites > 1 else ""))
+        out = {"title": TITLE, "happened": happened,
+               "headline": {"value": total, "label": label, "delta": (total - before) if before is not None else None}}
     err = settings.sync_state().get("error") or ""
     if err:
         out.setdefault("title", TITLE)
