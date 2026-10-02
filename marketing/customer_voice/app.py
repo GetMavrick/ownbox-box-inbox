@@ -1821,6 +1821,10 @@ def _tag_list(k: dict) -> list:
     """
     plat = str(k.get("platform") or "")
     out = []
+    # AN AUTOMATION IS HANDLING IT (customer_voice/claims.py), so it isn't waiting on him: said first,
+    # because it is why this row isn't in his count.
+    if k.get("held_by") and not k.get("opted_out"):
+        out.append((f'Handled by {k["held_by"]}', "draft"))
     if k.get("opted_out"):
         # THE ONE MISTAKE THIS SCREEN CAN HELP HIM MAKE is replying to someone who said STOP.
         out.append(("Opted out", "stop"))
@@ -2502,7 +2506,7 @@ def r_inbox():
         # WIDE ON THE EMPTIES TOO. Every branch above still draws the chip row, so a reader who
         # filtered to Instagram and found nothing must keep the rail that got them there —
         # otherwise the layout moves under them at the exact moment they need to change filter.
-        return _shell(_stopped_note() + body, wide=True), 200
+        return _shell(_stopped_note() + body + _panels(), wide=True), 200
 
     # WHICH ROWS HAVE A REPLY READY — one query for the page, not one per row.
     try:
@@ -2575,11 +2579,30 @@ def r_inbox():
                   f'{_hits(q, channel, len(convs), page=page, more=more)}'
                   f'<div class="card">{"".join(rows)}</div>'
                   f'{_pager(q=q, channel=channel, page=page, more=more, waiting=waiting, from_ad=from_ad)}'
+                  + _panels()
                   # THIS BRANCH IS THE ONE WITH CONVERSATIONS IN IT, which is the whole condition
                   # the owner set. The four empty states above render none of this.
                   + _NOTIFY_OFFER
                   + f'<script>{_push_client_js()}</script><script>{_NOTIFY_JS}</script>',
                   wide=True), 200
+
+
+def _panels() -> str:
+    """THE INBOX'S SLOT FOR OTHER MACHINES' SECTIONS (`m.panel("inbox", ...)`, core/panels.py).
+
+    Owner, 2026-10-01: "the main way to control it will be within the unified inbox." A machine that runs
+    conversations here (the owner's Lead Magnet Machine first) adds its controls as a card in this slot, and
+    this screen never names it. BELOW THE CONVERSATIONS, because on a mobile screen the conversations are the
+    screen: a control panel above them would push every person waiting on him down past the fold.
+
+    Rendered inside this signed-in route, so a panel is shown to exactly who the Inbox is shown to. A panel
+    that raises is a quiet card (core/panels.py); a registry that can't be read is no panels at all."""
+    try:
+        from core import panels
+        return panels.render("inbox")
+    except Exception as e:                       # noqa: BLE001 — the Inbox must render without them
+        log.warning("voice.panels_unreadable", extra={"error": f"{type(e).__name__}"[:80]})
+        return ""
 
 
 @blueprint.get("/inbox/inbox/<path:zcid>")
@@ -2647,6 +2670,22 @@ def r_thread(zcid):
     if conv.get("ad_title"):
         head.append(f'<div class="card"><div class="row"><span class="t">Came from '
                     f'<b>{_esc(conv["ad_title"])}</b></span></div></div>')
+    # WHO IS HANDLING IT, AND WHY IT CAME BACK (customer_voice/claims.py). While an automation holds the
+    # conversation it says so, so he knows the box is answering and he needn't. When it hands one back, its
+    # note says what it couldn't answer, above the thread he's about to reply in.
+    try:
+        from marketing.customer_voice import claims as _claims
+        _held = _claims.holder(space, zcid)
+        _back = None if _held else _claims.handed_back(space, zcid)
+    except Exception as e:                       # noqa: BLE001 — a thread must still open
+        log.warning("voice.claim_unreadable", extra={"error": f"{type(e).__name__}"[:80]})
+        _held = _back = None
+    if _held:
+        head.append(f'<div class="card"><div class="row"><span class="t"><b>{_esc(_held["title"])}</b> is '
+                    'handling this conversation. Anything it can\'t answer comes back here.</span></div></div>')
+    elif _back:
+        head.append(f'<div class="card needs"><div class="row"><span class="t">Handed back by '
+                    f'<b>{_esc(_back["title"])}</b>: {_esc(_back["note"])}</span></div></div>')
 
     if not msgs:
         head.append('<div class="quiet">No messages have been mirrored for this conversation '

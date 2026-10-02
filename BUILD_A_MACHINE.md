@@ -74,6 +74,7 @@ blueprint = m.blueprint               # the box mounts this when it starts
 | keep a small value | `m.setting(key, default)` and `m.save_setting(key, value)` |
 | keep more than that | your own SQLite file in `m.data_dir()`, inside your machine's folder |
 | run work on a schedule | `m.every(seconds, fn)`: every 15 seconds or more, in the box's worker. Each run has its own thread and a time budget; a run that fails is shown on the Add a Machine page, and the next one goes ahead. Keep progress in `m.data_dir()`. For work an AI does on a shift (Pro), ship a **coworker** instead: `coworkers/<name>/coworker.yaml`, hired on the Shifts page. |
+| run conversations in the inbox | `m.claim(conversation, title=)` takes charge of one: the inbox stops drafting it and shows "Handled by <title>". `m.messages(conversation, since=)` reads it, `m.send_dm(conversation, text, key=)` answers through the inbox's own checks (opted out, Stop everything, the channel's 24-hour window, the hourly cap; one `key` is sent once), and `m.release(conversation, note=)` lets go, or hands it back to a person with a note. Needs the Unified Inbox on the box. |
 | add a section to another machine's screen | `m.panel(slot, title=, render=)`. `render()` returns the card's HTML. A machine's guide names the slots its screens offer. If it raises, the card says it couldn't load and the screen is unharmed. Keep `render()` to a quick read of what you already have: the screen waits for it, so do the slow work in `m.every`. |
 
 A tiny working example:

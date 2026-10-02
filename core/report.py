@@ -614,76 +614,69 @@ def has_value(v) -> bool:
     return not re.match(r"^[$€£]?0(?:[.,]0+)?(?:\s|%|$)", t)
 
 
-def render(day: date, now: datetime | None = None) -> str:
-    """The message: Needs you → Yesterday → Watch → Meters (spec §2.4). A phone, at breakfast,
-    in eight seconds; urgency first. The PAGE orders by machine instead, and the divergence is
-    deliberate — somebody will one day 'fix' one to match the other, and the fix is the bug.
+def _slack_escape(t) -> str:
+    """Slack's three control characters, and nothing else: anything typed into the box reads as words."""
+    return str(t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    `day` is the day the message is ABOUT (yesterday, closed); needs_you and watch are read from
-    today's row, which `run` refreshes right before sending."""
+
+def slack_text(b: dict) -> str:
+    """The stored brief as a Slack message: the same words as the email and the app page (core/review_email.py,
+    core/dash/review.py), short. The date, the day's quote, the good news, then Worth your time today, Already
+    moving and Ideas to try, numbered, each item on one line. No buttons, no markers, no zeros."""
+    from core import review_email
+    link = str(b.get("link") or "")
+    base = link.split("/app/review")[0]
+    lines = [f"*{_slack_escape(b.get('date_label'))}*", f"> _{_slack_escape(b.get('quote'))}_"]
+    if b.get("good_news"):
+        lines += ["", _slack_escape(b["good_news"])]
+    for key, heading in review_email.SECTIONS:
+        items = [it for it in b.get(key) or [] if str(it.get("title") or "").strip()]
+        if not items:
+            continue
+        lines += ["", f"*{heading}*"]
+        for n, it in enumerate(items, 1):
+            title, machine = _slack_escape(it["title"]), _slack_escape(it.get("machine"))
+            if key == "moving" and machine:
+                title = f"{machine}: {title}"          # what a machine did reads machine first, as on the page
+            # A LINK SLACK CAN OPEN, OR NONE: a whole web address with nothing in it that could break the markup.
+            href = review_email._href(str(it.get("href") or ""), base)
+            if href.startswith(("https://", "http://")) and not re.search(r"[\s<>|]", href):
+                title = f"<{href}|{title}>"
+            why = _slack_escape(it.get("why"))
+            lines.append(f"{n:02d}  {title}" + (f" — {why}" if why else ""))
+    if b.get("ideas_from") == "ai" and b.get("ideas"):
+        lines += ["", "_The ideas come from your box's AI, based only on yesterday's numbers._"]
+    whole = link.startswith(("https://", "http://")) and not re.search(r"[\s<>|]", link)
+    lines += ["", f"<{link}|Open the full review>" if whole else "The full review is in your box's app."]
+    return "\n".join(lines).rstrip()
+
+
+def render(day: date, now: datetime | None = None) -> str:
+    """THE MORNING SLACK MESSAGE, FROM THE SAME STORED BRIEF AS THE EMAIL AND THE PAGE.
+
+    OSDev1, 2026-10-02, assigning it: this still sent the old text, with "!!" markers, and repeated every standing
+    item every morning, against the owner's ruling for the review: *"Light and optimistic ... if they're stale
+    information in there that they can't instantly change then we don't continue to harass and annoy them every
+    day."* So it reads `review_brief.ensure(day)`, the brief `run` builds once and stores, and the no-repeat rule
+    that decides the email's list decides this one. "" on a morning with nothing to say: nothing is sent, as for the
+    email. A brief that can't be built still tells him the review is there, in one line, never the old shape.
+
+    `day` is the day the message is ABOUT (yesterday, closed)."""
     now = now or now_local()
-    yday = read(day)
-    tday = read(today(now))
-    segs = lambda rows: [r for r in rows                                     # noqa: E731
-                         if r.get("machine") and r.get("machine") != METERS]
-    needs = [(r["title"], n) for r in segs(tday) for n in r.get("needs_you") or []]
-    lines = [f"Morning review, {now:%a %d %b}"]
-    if needs:
-        lines.append(f"Needs you ({len(needs)})")
-        lines += [f"  • {n.get('text', '')}  [{t}]" for t, n in needs]
-    else:
-        lines.append("Nothing needs you this morning.")
-    lines.append(f"Yesterday, {day:%a %d %b}")
-    said = 0
-    for r in segs(yday):
-        if r.get("error"):
-            lines.append(f"  {r['title']}: ⚠ {r['error']}")
-            said += 1
-            continue
-        # A LINE WITHOUT DATA IS NOT SENT (owner, 2026-09-29: "If a line doesn't have data, it
-        # should not be displayed"), and a machine with no line left is not named at all.
-        h = r.get("headline") or {}
-        happened = [x for x in r.get("happened") or [] if str(x.get("text") or "").strip()
-                    and (x.get("value") in (None, "") or has_value(x.get("value")))]
-        if not (has_value(h.get("value")) or happened):
-            continue
-        said += 1
-        delta = h.get("delta")
-        dtxt = f" ({'+' if delta > 0 else ''}{_fmt_value(delta)} vs the day before)" if isinstance(delta, (int, float)) and delta else ""
-        lines.append(f"  {r['title']}: {_fmt_value(h['value'])} {h.get('label', '')}{dtxt}".rstrip()
-                     if has_value(h.get("value")) else f"  {r['title']}")
-        for x in happened:
-            v = x.get("value")
-            lines.append(f"    · {x.get('text', '')}" + (f" — {_fmt_value(v)}" if v not in (None, "") else ""))
-    if not segs(yday):
-        lines.append("  (no machine reported yesterday — the first full day lands tomorrow)")
-    elif not said:
-        lines.append("  A quiet day.")
-    # METERS ARE IN THE WATCH LIST, not only in the rail at the bottom. SMOKETESTED against the
-    # live box 2026-09-09: google_places read 201 of 200 — AT CAP, every further call refused —
-    # and the message did not say so anywhere, because this list was built from the SEGMENTS and
-    # meters is not a segment. The one line the owner most needs at breakfast was the one line
-    # the digest-absorption dropped. Failures first, because a cap that has already bitten
-    # outranks a warning about one that might.
-    watch = [(r["title"], w) for r in tday for w in r.get("watch") or [] if w.get("state") != "ok"]
-    watch.sort(key=lambda tw: {"fail": 0, "warn": 1, "connect": 2}.get(tw[1].get("state"), 3))
-    if watch:
-        lines.append("Watch")
-        lines += [f"  {'!!' if w.get('state') == 'fail' else '→' if w.get('state') == 'connect' else ' !'} "
-                  f"{w.get('text', '')}  [{t}]" for t, w in watch]
-    meters = next((r for r in tday if r.get("machine") == METERS), None)
-    if meters and not meters.get("error") and has_value((meters.get("headline") or {}).get("value")):
-        # SPEND ONLY WHEN THERE IS SOME, and only the meters in use.
-        h = meters.get("headline") or {}
-        lines.append(f"Spend  {_fmt_value(h.get('value', ''))} {h.get('label', '')}".rstrip())
-        lines += [f"  {x.get('text', '')} ({x.get('value', '')})" for x in meters.get("happened") or []
-                  if has_value(x.get("value"))]
-    lines.append(page_url(day))
-    text = "\n".join(lines)
+    try:
+        from core import review_brief
+        b = review_brief.ensure(day, now)
+    except Exception as e:  # noqa: BLE001 — the morning still gets its link
+        log.warning("report.slack_brief_failed", about=day.isoformat(), error=f"{type(e).__name__}: {str(e)[:160]}")
+        return f"Your Morning Review is ready.\n<{page_url(day)}|Open the review>"
+    if b.get("empty"):
+        return ""
+    text = slack_text(b)
     if len(text) > SLACK_LIMIT:
-        # chat.postMessage REFUSES over 4000 characters, so an unbounded digest is not a long
-        # message — it is NO message, on the morning it had the most to say. Cut at a line
-        # boundary and keep the link, which is the whole point of the last line.
+        # chat.postMessage REFUSES over 4000 characters, so an unbounded message is not a long message, it is NO
+        # message, on the morning it had the most to say. Cut at a line boundary and keep the link, which is the
+        # whole point of the last line.
+        lines = text.split("\n")
         link = lines[-1]
         keep = text[: SLACK_LIMIT - len(link) - 40].rsplit("\n", 1)[0]
         text = keep + "\n… (trimmed — the page has all of it)\n" + link
@@ -822,7 +815,13 @@ def run(now: datetime | None = None, send=None, send_email=None, send_app=None) 
         log.warning("report.brief_failed", about=yday.isoformat(), error=f"{type(e).__name__}: {str(e)[:160]}")
     out = {"status": "send_failed", "about": yday.isoformat()}
     if want_dm:
-        if send(render(yday, now)):
+        msg = render(yday, now)
+        if not msg:
+            # NOTHING TO SAY, NOTHING SENT, as for the email: done for the morning, so it isn't retried every hour.
+            st["sent"] = mark
+            out["dm"] = "quiet"
+            log.info("report.dm_quiet", day=t.isoformat(), about=yday.isoformat())
+        elif send(msg):
             st["sent"] = mark
             out["dm"] = "sent"
             log.info("report.sent", day=t.isoformat(), about=yday.isoformat())
@@ -838,7 +837,7 @@ def run(now: datetime | None = None, send=None, send_email=None, send_app=None) 
             st["pushed"] = mark
             log.info("report.app_notified", day=t.isoformat(), about=yday.isoformat())
     _write_state(st)
-    if "sent" in (out.get("dm"), out.get("email"), out.get("app")):
+    if "sent" in (out.get("dm"), out.get("email"), out.get("app")) or out.get("dm") == "quiet":
         out["status"] = "sent"
     return out
 

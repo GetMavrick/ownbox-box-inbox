@@ -15,9 +15,9 @@ Three rules that keep it honest:
     machine with no row renders nothing (owner: "that section is just blank for now"); a rail
     the client owns but has not connected renders its `connect` line, never a failure (§2.4).
 
-The message (core.report.render) orders by URGENCY; this page orders by MACHINE. Different
-surfaces, on purpose — somebody will one day "fix" one to match the other, and the fix is the
-bug (spec §2.4).
+The page, the email (core/review_email.py) and the Slack message (core.report.render) are all the one stored
+brief (core/review_brief.py) since 2026-10-02: the same words, drawn for each. Only the numbers under the page's
+fold still go by machine.
 """
 import html
 import re

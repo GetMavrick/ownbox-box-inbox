@@ -18,6 +18,8 @@ import uuid
 from core import state
 from core.logging import get_logger
 
+from marketing.customer_voice.claims import HELD_BY as _HELD_BY, UNCLAIMED as _UNCLAIMED
+
 log = get_logger(__name__)
 
 
@@ -153,7 +155,10 @@ def get_conversation(space: str, zcid: str) -> dict | None:
 # filter by them, and the count and the list MUST agree: a header that says "3 waiting on you" over
 # a filtered list of five is a screen nobody trusts again. So both are this one string, including
 # the opted-out carve-out — somebody who said STOP is not waiting for a reply.
-_WAITING = f"k.opted_out = 0 AND {_NEWEST_IS_INBOUND}"
+# AND NOBODY ELSE IS HANDLING IT. A conversation an automation has claimed (customer_voice/claims.py) is the
+# automation's until it hands it back or the claim expires, so it is not waiting on a person: the
+# header, the filter, the morning count and the notice all leave it out, through this one string.
+_WAITING = f"k.opted_out = 0 AND {_NEWEST_IS_INBOUND} AND {_UNCLAIMED}"
 
 # CAME FROM AN AD HE PAID FOR. `ad_meta_id` and `ad_title` are written by the poller at INSERT for
 # a click-to-message conversation and by nothing else; the row already wears a "From <ad_title>"
@@ -218,7 +223,8 @@ def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
             f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply, "
             f"       ({_NEWEST_BODY}) AS preview, "
             f"       ({_HAS_INBOUND}) AS has_inbound, "
-            f"       ({_UNREAD}) AS unread "
+            f"       ({_UNREAD}) AS unread, "
+            f"       {_HELD_BY} AS held_by "
             "  FROM inbox_conversations k "
             f" WHERE {where} "
             " ORDER BY (k.last_inbound_at IS NULL), k.last_inbound_at DESC, k.id ASC "
@@ -309,7 +315,8 @@ def search_conversations(space: str, query: str, *, limit: int = 50,
             f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply, "
             f"       ({_NEWEST_BODY}) AS preview, "
             f"       ({_HAS_INBOUND}) AS has_inbound, "
-            f"       ({_UNREAD}) AS unread "
+            f"       ({_UNREAD}) AS unread, "
+            f"       {_HELD_BY} AS held_by "
             "  FROM inbox_conversations k "
             f" WHERE {where} "
             "   AND ( COALESCE(k.participant, '') LIKE ? ESCAPE '\\' "

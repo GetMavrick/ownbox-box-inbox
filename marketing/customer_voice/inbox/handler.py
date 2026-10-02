@@ -127,6 +127,13 @@ def handle(job: dict) -> dict:
         last_inbound_at=req.get("inbound_at"))
     if conv.get("opted_out"):
         return {"status": "opted_out", "conversation": zcid}
+    # AN AUTOMATION THAT CLAIMED THIS CONVERSATION SPEAKS FOR IT (customer_voice/claims.py). The opener
+    # is the Inbox's own automatic send, and two automations greeting one person is the double message
+    # a claim exists to prevent.
+    from marketing.customer_voice import claims
+    held = claims.holder(space_name, zcid)
+    if held:
+        return {"status": "claimed", "conversation": zcid, "by": held.get("machine")}
 
     # THE ROW OUTRANKS THE PAYLOAD. The row is what the screen renders and what a person
     # reading this thread believes; a payload can be a requeue of a job written by an older

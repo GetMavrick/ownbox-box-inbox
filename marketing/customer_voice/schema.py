@@ -240,4 +240,19 @@ CREATE TABLE IF NOT EXISTS inbox_state (
   updated_at  TEXT NOT NULL,
   PRIMARY KEY (space, zernio_conversation_id)
 );
+
+-- WHO IS HANDLING A CONVERSATION (customer_voice/claims.py, docs/PLAN_LEAD_MAGNET_MACHINE.md step 2). One row per
+-- conversation: its current or latest claim. While a claim is active the Inbox doesn't draft it, send its
+-- opener or count it as waiting. A NEW table, so no migration number (the rule above).
+CREATE TABLE IF NOT EXISTS inbox_claims (
+  space       TEXT NOT NULL,
+  zernio_conversation_id TEXT NOT NULL,
+  machine     TEXT NOT NULL,          -- the claiming machine's key, e.g. my_lead_magnet
+  title       TEXT NOT NULL,          -- what the conversation's tag says: "Lead magnets"
+  claimed_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,          -- YYYY-MM-DDTHH:MM:SS UTC, compared with strftime('now') in SQL
+  released_at TEXT,                   -- NULL while held
+  note        TEXT,                   -- why it was handed back, shown to the person; NULL = finished
+  PRIMARY KEY (space, zernio_conversation_id)
+);
 """

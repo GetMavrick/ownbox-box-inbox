@@ -33,6 +33,9 @@ WHAT IS PROMISED (§9.2), AND WHAT IS NOT:
   * panels           m.panel(slot, title=, render=): a card on another machine's screen, in a slot
                      that screen offers; one that fails shows a quiet card (core.panels). Added in
                      SDK 1, owner 2026-10-01.
+  * conversations    m.claim / m.release / m.messages / m.send_dm: work with the box's inbox through
+                     its own send path and gates (core.conversations). A conversation a machine claims
+                     isn't drafted or counted as waiting by the inbox. Added in SDK 1, owner 2026-10-01.
   * the manifest     machine.yaml: name, version, requires_foundation, needs:, sdk
   NOT promised: worker.register / register_periodic (use m.every; a job on the worker's own loop
   holds up every other one), state.register_schema (a company's tables would block our migrations:
@@ -50,7 +53,8 @@ VERSION = 1
 # and core/machine_breaks.py read these, so there is one list of what we promised.
 MANIFEST_FIELDS = ("name", "version", "requires_foundation", "needs", "sdk")
 SEAMS = ("machine", "think", "reporter", "tool", "menu", "screen", "page", "setting",
-         "save_setting", "data_dir", "every", "panel", "STYLE_CLASSES", "VERSION")
+         "save_setting", "data_dir", "every", "panel", "claim", "release", "messages", "send_dm",
+         "STYLE_CLASSES", "VERSION")
 
 # The style classes a screen may use. Our markup changes; these names keep their meaning.
 STYLE_CLASSES = ("card", "quiet", "addr", "consent")
@@ -201,6 +205,40 @@ class Machine:
         Link to your own pages under `m.home` for anything more than a card."""
         from core import panels
         panels.register(slot, machine=self.key, title=title, render=render)
+
+    # ── conversations in the box's inbox ──────────────────────────────────────────────────────
+    def claim(self, conversation: str, *, title: str, days: float = 7) -> bool:
+        """Take charge of a conversation in the inbox. -> True if this machine holds it.
+
+        While held, the inbox doesn't draft it, greet it or count it as waiting on a person; it shows it as
+        "Handled by <title>". It is never taken from another machine. Calling again renews it; it lets go by
+        itself after `days` (at most 30), so a stalled machine can't silence anyone for good."""
+        from core import conversations
+        return bool(conversations.provider().claim(machine=self.key, title=title, conversation=conversation,
+                                                   days=days))
+
+    def release(self, conversation: str, *, note: str = "") -> bool:
+        """Let go of a conversation. With a `note`, it is HANDED BACK: the note is shown to whoever answers it
+        ("Asked about refunds while waiting for their email"). Without one, it simply finished."""
+        from core import conversations
+        return bool(conversations.provider().release(machine=self.key, conversation=conversation, note=note))
+
+    def messages(self, conversation: str, *, since: str | None = None) -> list[dict]:
+        """A conversation's messages, oldest first: {"id", "direction" ("in"/"out"), "sent_by", "body", "at"}.
+        Pass the last `at` you saw as `since` to get only what is new."""
+        from core import conversations
+        return conversations.provider().messages(conversation=conversation, since=since)
+
+    def send_dm(self, conversation: str, text: str, *, key: str) -> dict:
+        """Send one message on a conversation this machine has claimed, through the inbox's own send path.
+
+        `key` names the step ("ask_email"): the same key on the same conversation is never sent twice. The
+        inbox refuses when the person opted out, the box is stopped, the channel's window is closed (on
+        Instagram, 24 hours after their own message) or the hourly cap is reached. -> {"status": "sent" |
+        "duplicate" | "refused" | "unknown", "message_id", "reason"}. "unknown" means it may have gone: don't
+        send it again."""
+        from core import conversations
+        return conversations.provider().send(machine=self.key, conversation=conversation, text=text, key=key)
 
     def data_dir(self) -> pathlib.Path:
         """A folder of this machine's own, for its own SQLite file or anything larger than a setting.

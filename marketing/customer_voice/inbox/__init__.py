@@ -90,3 +90,14 @@ except Exception as _tools_err:          # noqa: BLE001
                             f"{type(_tools_err).__name__}: {_tools_err}")
     except Exception:                    # noqa: BLE001 — bookkeeping never breaks the loader
         pass
+
+# THE BOX'S CONVERSATIONS, OFFERED TO MACHINES THROUGH CORE (core/conversations.py, inbox/conversations.py).
+# A machine of the owner's own claims, reads and writes to conversations through the SDK, and core may not
+# name this machine, so the Inbox registers itself. Either way, like the read tools: claims and reading touch
+# no vendor, and a machine's send still goes through reply.py's own gates. Never takes the department down.
+try:
+    from core import conversations as _core_conversations
+    from . import conversations as _conversations
+    _core_conversations.provide(_conversations)
+except Exception as _conv_err:           # noqa: BLE001
+    log.error("inbox.conversations_provider_failed", error=f"{type(_conv_err).__name__}: {_conv_err}")

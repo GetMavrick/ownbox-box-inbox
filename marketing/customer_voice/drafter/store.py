@@ -6,6 +6,14 @@ import uuid
 from core import state
 from core.logging import get_logger
 
+# A CONVERSATION AN AUTOMATION HAS CLAIMED (customer_voice/claims.py) IS NOT DRAFTED. The predicate is COPIED,
+# not imported, because this directory may think and so may import only core and stdlib
+# (tests/test_customer_voice.py: reasoning and sending never meet). tests/test_inbox_claims.py holds the
+# copy equal to claims.UNCLAIMED, so the drafter and the Inbox can never disagree about who holds one.
+_UNCLAIMED = ("NOT EXISTS (SELECT 1 FROM inbox_claims c WHERE c.space = k.space "
+              "AND c.zernio_conversation_id = k.zernio_conversation_id AND c.released_at IS NULL "
+              "AND c.expires_at > strftime('%Y-%m-%dT%H:%M:%S','now'))")
+
 
 log = get_logger(__name__)
 
@@ -113,6 +121,9 @@ def needs_a_draft(space: str, *, limit: int = 5) -> list[dict]:
             # `IS NOT 1` RATHER THAN `= 0`, because NULL means nobody has looked yet and an
             # unjudged thread must still get its draft. Only a thread PROVEN automated is skipped.
             " WHERE k.space = ? AND k.opted_out = 0 AND k.automated IS NOT 1 "
+            # A CONVERSATION AN AUTOMATION IS RUNNING IS NOT DRAFTED (customer_voice/claims.py, owner
+            # 2026-10-01, decision 2): it would be a model call for a reply nobody should send.
+            f"   AND {_UNCLAIMED} "
             "   AND m.created_at = (SELECT MAX(m2.created_at) FROM inbox_messages m2 "
             "                        WHERE m2.space = k.space "
             "                          AND m2.zernio_conversation_id = k.zernio_conversation_id "
@@ -184,6 +195,8 @@ def waiting(space: str, *, limit: int = 50) -> list[dict]:
             # written before the column existed is still sitting in that table.
             " WHERE d.space = ? AND d.dismissed_at IS NULL AND k.opted_out = 0 "
             "   AND k.automated IS NOT 1 "
+            # A draft written before an automation claimed the conversation isn't offered either.
+            f"   AND {_UNCLAIMED} "
             "   AND NOT EXISTS (SELECT 1 FROM inbox_messages o "
             "                    WHERE o.space = d.space "
             "                      AND o.zernio_conversation_id = d.zernio_conversation_id "

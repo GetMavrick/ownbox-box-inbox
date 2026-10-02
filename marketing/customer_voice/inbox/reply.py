@@ -76,6 +76,104 @@ def idem_for(space: str, zcid: str, user_id: str, nonce: str) -> str:
     return f"reply:{space}:{zcid}:{user_id}:{nonce}"
 
 
+def _deliver(*, space: str, zcid: str, conv: dict, account_id: str, text: str, idem: str) -> str:
+    """Send `text` on a ledger row the caller has ALREADY CLAIMED, and resolve that row. -> the message id.
+
+    Shared by a person's reply (`send_reply`) and a machine's (`send_for_machine`), so both get the same
+    transport choice, metering and outcome handling, which were paid for once and must not drift apart.
+    Raises ReplyRefused (nothing went) or ReplyIndeterminate (it may have gone), with the row resolved."""
+    # FROM HERE WE OWN THE ROW, and every exit below must resolve it. A claim we abandon reads
+    # as "may have landed" forever (store.claim_send), which would block the person's honest
+    # retry over something that never reached the vendor — so the two pre-send refusals resolve
+    # to `failed` first, exactly as `release_opener` releases an opener claim whose send
+    # DETERMINATELY failed.
+    # WHICH TRANSPORT. Email leaves this box through the buyer's own mailbox and everything else
+    # through Zernio, and the difference starts here rather than at the call: email has no vendor
+    # to meter (no spend, so nothing to check or record) and no Space to resolve (no Zernio
+    # account is involved at all). Metering a vendor that is not in the path would put a charge in
+    # the ledger for a message Google sent for free.
+    is_email = str(conv.get("platform") or "").strip().lower() == "email"
+    sp, cred, tail = None, {}, {}
+    try:
+        if is_email:
+            from core import box_secrets
+            cred = box_secrets.email_credential()
+            if not cred:
+                raise ReplyRefused("this box is not connected to a mailbox")
+            tail = email_channel.thread_tail(space, zcid)
+            if "@" not in str(tail.get("to") or ""):
+                raise ReplyRefused("there is no address on this thread to reply to")
+        else:
+            cost_guard.check_vendor("zernio", 1)
+            sp = _space(space)
+            if not sp:
+                # FAIL CLOSED ON AN UNRESOLVED SPACE. Never fall through to a default — see _space.
+                raise ReplyRefused("this box cannot resolve the Space that owns this conversation")
+    except Exception as e:                # noqa: BLE001 — nothing was sent on either path
+        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
+        raise
+
+    try:
+        if is_email:
+            # THE SUBJECT IS FETCHED HERE, INSIDE THE CLAIM, and a failure to read it costs a
+            # subject line rather than the reply — `subject_for` never raises.
+            mid = email_channel.send(
+                cred, to=tail["to"],
+                subject=email_channel.subject_for(cred, tail.get("in_reply_to") or ""),
+                body=text, in_reply_to=tail.get("in_reply_to") or "",
+                references=tail.get("references") or "")
+            sent = {"message_id": mid}
+        else:
+            sent = zernio.client(sp).inbox.send(zcid, account_id, text)
+    except email_channel.EmailSendIndeterminate as e:
+        # INVARIANT 4, ON THE MAIL PATH. A timeout or a disconnect after DATA tells us nothing
+        # about whether the message was queued, so it is recorded as "may have landed" and
+        # nothing here ever resends it.
+        store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
+        log.error("inbox.reply_indeterminate", extra={"space": space, "conversation": zcid,
+                                                      "error": str(e)[:160]})
+        raise ReplyIndeterminate(str(e)) from e
+    except email_channel.EmailSendRefused as e:
+        # THE SERVER ANSWERED NO. Determinate, so the row says failed and the person may retry —
+        # which is exactly what the generic `except Exception` below must NOT do for it, because
+        # that arm means "we have no idea" and would leave an honest retry blocked forever.
+        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
+        raise ReplyRefused(str(e)) from e
+    except email_channel.EmailAuthError as e:
+        # DETERMINATE: Google refused the credential, so nothing was sent. Recorded on the
+        # mailbox row as well, in the same words the set-up screen already renders, because the
+        # buyer cannot fix this from the thread — the poller would otherwise be the only thing
+        # that ever noticed, on its own schedule.
+        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
+        try:
+            from core import box_secrets
+            box_secrets.note_email_status(e.status, e.detail)
+        except Exception:                 # noqa: BLE001 — recording a reason never changes the
+            pass                          # outcome of a send that provably did not happen
+        raise ReplyRefused(e.detail) from e
+    except zernio.ZernioError as e:
+        if e.indeterminate:              # always set by ZernioError.__init__, as handler.py:169 reads it
+            # MAY HAVE LANDED. Record it, tell the caller, and never resend on our own.
+            store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
+            log.error("inbox.reply_indeterminate", extra={"space": space, "conversation": zcid,
+                                                          "error": str(e)[:160]})
+            raise ReplyIndeterminate(str(e)) from e
+        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
+        raise ReplyRefused(_refusal_sentence(conv, e)) from e
+    except Exception as e:                # noqa: BLE001 — an unexpected raise mid-call is UNKNOWN
+        # A non-ZernioError escaping the gateway (a bug, a socket the SDK did not wrap) tells us
+        # nothing about whether the vendor took the message. The row must not be left `sending`
+        # for the watchdog to find hours later when we can say the honest thing right now.
+        store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
+        log.error("inbox.reply_unexpected", extra={"space": space, "conversation": zcid,
+                                                   "error": str(e)[:160]})
+        raise ReplyIndeterminate(str(e)) from e
+
+    mid = sent.get("message_id")
+    store.resolve_send(space=space, idem_key=idem, status="ok", zernio_message_id=mid)
+    return mid
+
+
 def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
                account_id: str | None = None) -> dict:
     """Send one human-typed reply. Returns {"status", "message_id"|None, "idem_key"}.
@@ -201,95 +299,7 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
                  extra={"space": space, "idem": idem, "prior": status or "missing"})
         raise ReplyIndeterminate(str(prior.get("error") or "the earlier attempt may have landed"))
 
-    # FROM HERE WE OWN THE ROW, and every exit below must resolve it. A claim we abandon reads
-    # as "may have landed" forever (store.claim_send), which would block the person's honest
-    # retry over something that never reached the vendor — so the two pre-send refusals resolve
-    # to `failed` first, exactly as `release_opener` releases an opener claim whose send
-    # DETERMINATELY failed.
-    # WHICH TRANSPORT. Email leaves this box through the buyer's own mailbox and everything else
-    # through Zernio, and the difference starts here rather than at the call: email has no vendor
-    # to meter (no spend, so nothing to check or record) and no Space to resolve (no Zernio
-    # account is involved at all). Metering a vendor that is not in the path would put a charge in
-    # the ledger for a message Google sent for free.
-    is_email = str(conv.get("platform") or "").strip().lower() == "email"
-    sp, cred, tail = None, {}, {}
-    try:
-        if is_email:
-            from core import box_secrets
-            cred = box_secrets.email_credential()
-            if not cred:
-                raise ReplyRefused("this box is not connected to a mailbox")
-            tail = email_channel.thread_tail(space, zcid)
-            if "@" not in str(tail.get("to") or ""):
-                raise ReplyRefused("there is no address on this thread to reply to")
-        else:
-            cost_guard.check_vendor("zernio", 1)
-            sp = _space(space)
-            if not sp:
-                # FAIL CLOSED ON AN UNRESOLVED SPACE. Never fall through to a default — see _space.
-                raise ReplyRefused("this box cannot resolve the Space that owns this conversation")
-    except Exception as e:                # noqa: BLE001 — nothing was sent on either path
-        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
-        raise
-
-    try:
-        if is_email:
-            # THE SUBJECT IS FETCHED HERE, INSIDE THE CLAIM, and a failure to read it costs a
-            # subject line rather than the reply — `subject_for` never raises.
-            mid = email_channel.send(
-                cred, to=tail["to"],
-                subject=email_channel.subject_for(cred, tail.get("in_reply_to") or ""),
-                body=text, in_reply_to=tail.get("in_reply_to") or "",
-                references=tail.get("references") or "")
-            sent = {"message_id": mid}
-        else:
-            sent = zernio.client(sp).inbox.send(zcid, account_id, text)
-    except email_channel.EmailSendIndeterminate as e:
-        # INVARIANT 4, ON THE MAIL PATH. A timeout or a disconnect after DATA tells us nothing
-        # about whether the message was queued, so it is recorded as "may have landed" and
-        # nothing here ever resends it.
-        store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
-        log.error("inbox.reply_indeterminate", extra={"space": space, "conversation": zcid,
-                                                      "error": str(e)[:160]})
-        raise ReplyIndeterminate(str(e)) from e
-    except email_channel.EmailSendRefused as e:
-        # THE SERVER ANSWERED NO. Determinate, so the row says failed and the person may retry —
-        # which is exactly what the generic `except Exception` below must NOT do for it, because
-        # that arm means "we have no idea" and would leave an honest retry blocked forever.
-        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
-        raise ReplyRefused(str(e)) from e
-    except email_channel.EmailAuthError as e:
-        # DETERMINATE: Google refused the credential, so nothing was sent. Recorded on the
-        # mailbox row as well, in the same words the set-up screen already renders, because the
-        # buyer cannot fix this from the thread — the poller would otherwise be the only thing
-        # that ever noticed, on its own schedule.
-        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
-        try:
-            from core import box_secrets
-            box_secrets.note_email_status(e.status, e.detail)
-        except Exception:                 # noqa: BLE001 — recording a reason never changes the
-            pass                          # outcome of a send that provably did not happen
-        raise ReplyRefused(e.detail) from e
-    except zernio.ZernioError as e:
-        if e.indeterminate:              # always set by ZernioError.__init__, as handler.py:169 reads it
-            # MAY HAVE LANDED. Record it, tell the caller, and never resend on our own.
-            store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
-            log.error("inbox.reply_indeterminate", extra={"space": space, "conversation": zcid,
-                                                          "error": str(e)[:160]})
-            raise ReplyIndeterminate(str(e)) from e
-        store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
-        raise ReplyRefused(_refusal_sentence(conv, e)) from e
-    except Exception as e:                # noqa: BLE001 — an unexpected raise mid-call is UNKNOWN
-        # A non-ZernioError escaping the gateway (a bug, a socket the SDK did not wrap) tells us
-        # nothing about whether the vendor took the message. The row must not be left `sending`
-        # for the watchdog to find hours later when we can say the honest thing right now.
-        store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
-        log.error("inbox.reply_unexpected", extra={"space": space, "conversation": zcid,
-                                                   "error": str(e)[:160]})
-        raise ReplyIndeterminate(str(e)) from e
-
-    mid = sent.get("message_id")
-    store.resolve_send(space=space, idem_key=idem, status="ok", zernio_message_id=mid)
+    mid = _deliver(space=space, zcid=zcid, conv=conv, account_id=account_id, text=text, idem=idem)
     # `sent_by='human'` is the honesty of the screen: the thread says who said every line, and
     # "the machine" and "you" must never be swapped. §3.3 records WHICH human on the ledger.
     store.record_message(space=space, zcid=zcid, zmid=mid, direction="out",
@@ -317,6 +327,79 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
 #   developers.facebook.com/docs/messenger-platform/error-codes  (code 10 / subcode 2018278)
 _WINDOW_MARKERS = ("2018278", "outside of allowed window", "outside the allowed window",
                    "messaging window", "24-hour window", "24 hour window")
+
+
+def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str) -> dict:
+    """Send one message a MACHINE wrote, on a conversation it has claimed. -> {"status", "message_id", ...}.
+
+    docs/PLAN_LEAD_MAGNET_MACHINE.md step 2: an automation's messages go through the Inbox's own send path,
+    not straight to the vendor. A person's reply (`send_reply` above) is checked by the person reading the
+    thread; nobody reads this one first, so it passes every gate the Inbox's own automatic send (the opener,
+    inbox/handler.py) passes, plus one of its own:
+
+      1. THE MACHINE HOLDS THE CONVERSATION (customer_voice/claims.py). Without a claim it is a stranger
+         writing into someone's inbox.
+      2. NOT OPTED OUT. Someone who said STOP gets nothing, whatever a machine wants.
+      3. THE BOX ISN'T STOPPED. Stop everything halts automations, and this is one.
+      4. THE CHANNEL'S WINDOW IS OPEN (`window.allowed_send(...) == "freeform"`): on Instagram, within 24
+         hours of the person's own message. The funnel this replaces never checked it.
+      5. THE HOURLY CAP the opener keeps (`inbox.hourly_send_cap`), counted over every send on the box.
+      6. EMAIL IS NOT SENT BY MACHINES on this path yet: a person's mailbox is theirs to write from.
+      7. EXACTLY ONCE, keyed on (machine, conversation, `key`): the machine names the step ("ask_email"), so a
+         retry of the same step can never send it twice, and the ledger answers what happened last time.
+
+    The message is mirrored as `sent_by='ai'`, which the thread labels "the machine": who said every line
+    is never in doubt. A refusal raises ReplyRefused (nothing went); a may-have-landed raises
+    ReplyIndeterminate, and nothing here ever resends it."""
+    text = str(text or "").strip()
+    if not text:
+        raise ReplyRefused("a message needs words")
+    key = clean_nonce(key)
+    if not key:
+        raise ReplyRefused("a machine's message needs a key: letters, digits, dot, dash or underscore")
+    conv = store.get_conversation(space, zcid)
+    if not conv:
+        raise ReplyRefused("no such conversation on this box")
+    from marketing.customer_voice import claims
+    held = claims.holder(space, zcid)
+    if not held or held.get("machine") != machine:
+        raise ReplyRefused("this machine hasn't claimed this conversation")
+    if conv.get("opted_out"):
+        raise ReplyRefused("this person has opted out — nothing is sent to them")
+    try:
+        from core import pause
+        stopped = pause.is_paused()
+    except Exception:                    # noqa: BLE001 — an unreadable switch fails toward silence
+        stopped = True
+    if stopped:
+        raise ReplyRefused("the box is stopped, so no automation sends")
+    platform = str(conv.get("platform") or "").strip().lower()
+    if platform == "email":
+        raise ReplyRefused("machines don't send email from this inbox")
+    if window.allowed_send(conv.get("last_inbound_at"), platform=platform) != "freeform":
+        raise ReplyRefused("this channel's window to reply is closed")
+    from core.config import get_config
+    cap = int(((get_config().get("inbox") or {}).get("hourly_send_cap")) or 40)
+    if store.sends_last_hour(space) >= cap:
+        raise ReplyRefused(f"the box has sent its {cap} messages for this hour; try again later")
+    account_id = conv.get("account_id") or ""
+    if not account_id:
+        raise ReplyRefused("this conversation has no account to send from")
+
+    idem = f"machine:{machine}:{space}:{zcid}:{key}"
+    if not store.claim_send(space=space, zcid=zcid, idem_key=idem, kind="machine", user_id=machine):
+        prior = store.get_send(space, idem) or {}
+        if prior.get("status") == "ok":
+            return {"status": "ok", "message_id": prior.get("zernio_message_id"), "idem_key": idem,
+                    "duplicate": True}
+        if prior.get("status") == "failed":
+            raise ReplyRefused(str(prior.get("error") or "the message did not send"))
+        raise ReplyIndeterminate(str(prior.get("error") or "the earlier attempt may have landed"))
+    mid = _deliver(space=space, zcid=zcid, conv=conv, account_id=account_id, text=text, idem=idem)
+    store.record_message(space=space, zcid=zcid, zmid=mid, direction="out", sent_by="ai", body=text)
+    log.info("inbox.machine_sent", extra={"space": space, "conversation": zcid, "machine": machine,
+                                          "message_id": mid})
+    return {"status": "ok", "message_id": mid, "idem_key": idem, "duplicate": False}
 
 
 def _refusal_sentence(conv: dict, exc: Exception) -> str:
