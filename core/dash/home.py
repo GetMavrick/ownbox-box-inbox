@@ -1676,47 +1676,46 @@ shell.register_section("add_machine", order=1000, machine="core", title="Add a M
 # `owner_only`, so a member is shown a shorter menu rather than doors that refuse them.
 shell.register_section("settings", order=10, machine="core", title="System Settings",
                        href="/settings", icon=_GEAR_ICON,
-                       # FOUR GROUPS, EACH NAMED ABOVE ITS ROWS (owner, 2026-10-02: "rename and
-                       # re-organize some things to clean up the user experience", approved from a
-                       # preview). Named now, where D4 (2026-09-29) left only a gap: ten rows read as
-                       # one list. The order inside AI and Connections is the order a new buyer sets
-                       # a box up in, in his words: "connect to their AI account, figure out how to do
-                       # the inbound MCP server set up and then add outbound MCP data connections.
-                       # And then set up the mobile app."
-                       group_labels={"ai": "AI", "connect": "Connections", "team": "Team",
-                                     "server": "Server"},
+                       # FOUR GROUPS, EACH NAMED ABOVE ITS ROWS (owner, 2026-10-02: "rename and re-organize some
+                       # things to clean up the user experience", approved from a preview).
+                       #
+                       # THE AI GROUP IN HIS ORDER (owner, 2026-10-02: "The order of the menu should go AI account,
+                       # MCP server, data sources, and then coworkers", approved from a preview): the account that
+                       # writes, the box's MCP server your own AI connects to, the apps the box reads from, and the
+                       # coworkers that work on the box. It is the order a box is set up in: "connect to their AI
+                       # account, figure out how to do the inbound MCP server set up and then add outbound MCP data
+                       # connections. And then set up the mobile app."
+                       group_labels={"ai": "AI", "reach": "Reaching you", "team": "Team", "server": "Server"},
                        items=[
                            {"key": "overview", "label": "Overview", "href": "/settings"},
-                           # AI: the account that writes, the MCP server your own AI connects to, and the
-                           # coworkers that work on the box.
                            {"key": "ai", "label": "AI Account", "href": "/settings/ai",
                             "owner_only": True, "group": "ai"},
-                           # MCP SERVER, WHERE IT READ "COWORKERS (AGENTS)" (owner, 2026-10-02, from the
-                           # preview): the page is the box's inbound door for the AI a person already
-                           # pays for. The page and its address are unchanged.
+                           # MCP SERVER, ON EVERY BOX (owner, 2026-10-02: "standard base machines should be able to
+                           # have a menu choice called MCP server"). It read "Coworkers (Agents)"; the page and its
+                           # address are unchanged.
                            {"key": "agent", "label": "MCP Server", "href": "/settings/agent",
                             "owner_only": True, "group": "ai"},
-                           # COWORKERS, WHERE IT READ "SHIFTS" (same ruling): coworkers on the box, on
-                           # their schedules. Pro only, so on a box without it the row stays, with "a
-                           # little pro badge", and opens onto the upgrade (core/dash/shifts.py).
+                           # DATA SOURCES: the apps the box reads from, each through its own MCP server
+                           # (docs/SCOPE_CONNECTIONS_MCP_FIRST.md), and ideas for what to connect.
+                           {"key": "sources", "label": "Data Sources", "href": "/settings/sources",
+                            "owner_only": True, "group": "ai"},
+                           # COWORKERS, WHERE IT READ "SHIFTS": coworkers on the box, on their schedules. Pro only, so
+                           # on a box without it the row stays, with "a little pro badge", and opens onto the upgrade
+                           # (core/dash/shifts.py).
                            {"key": "shifts", "label": "Coworkers", "href": "/settings/shifts",
                             "group": "ai", "feature": "coworkers"},
-                           # CONNECTIONS: what the box reads from (Data Sources, each app through its own
-                           # MCP server: docs/SCOPE_CONNECTIONS_MCP_FIRST.md), the app on your mobile,
-                           # and the address the box sends from (Morning Review, alerts): "Sending
-                           # Email", so it is not taken for an inbox.
-                           {"key": "sources", "label": "Data Sources", "href": "/settings/sources",
-                            "owner_only": True, "group": "connect"},
+                           # REACHING YOU: the app on your mobile, and the address the box sends from (Morning Review,
+                           # alerts): "Sending Email", so it is not taken for an inbox.
                            {"key": "mobile", "label": "Mobile App", "href": "/settings/mobile",
-                            "group": "connect"},
+                            "group": "reach"},
                            {"key": "email", "label": "Sending Email", "href": "/settings/email",
-                            "owner_only": True, "group": "connect"},
-                           # TEAM. PEOPLE HAD NO DOOR once: the page existed and nothing on a box linked
-                           # to it, so inviting a colleague meant knowing the address.
+                            "owner_only": True, "group": "reach"},
+                           # TEAM. PEOPLE HAD NO DOOR once: the page existed and nothing on a box linked to it, so
+                           # inviting a colleague meant knowing the address.
                            {"key": "people", "label": "People", "href": "/settings/people",
                             "owner_only": True, "group": "team"},
-                           # SERVER: what it runs, and who can sign in to it. MOVE YOUR BOX IS NOT A ROW
-                           # (owner, 2026-09-30): it is in the danger zone at the foot of Server Access.
+                           # SERVER: what it runs, and who can sign in to it. MOVE YOUR BOX IS NOT A ROW (owner,
+                           # 2026-09-30): it is in the danger zone at the foot of Server Access.
                            {"key": "updates", "label": "Updates", "href": "/settings/updates",
                             "group": "server"},
                            {"key": "access", "label": "Server Access",

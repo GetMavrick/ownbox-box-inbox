@@ -234,10 +234,6 @@ def oauth_authorize():
         # error to it would be doing the exact thing the check exists to prevent.
         return jsonify({"error": "invalid_request", "error_description": str(e)}), 400
 
-    scope = (str(q.get("scope") or "read").strip().lower().split() or ["read"])[0]
-    if scope not in oauth.ROLES:
-        scope = "read"
-
     try:
         who = dash.session_user(request) or {}
     except Exception:                                    # noqa: BLE001
@@ -255,9 +251,8 @@ def oauth_authorize():
             back = str(q.get("redirect_uri")) + sep + urlencode(
                 {"error": "access_denied", "state": str(q.get("state") or "")})
             return redirect(back, code=303)
-        granted = str(request.form.get("grant") or scope).strip().lower()
-        if granted not in oauth.ROLES:
-            granted = "read"
+        # EVERY AI CONNECTION READS AND DRAFTS (owner, 2026-10-02: Read only removed). Whatever the client asked for.
+        granted = "act"
         code = oauth.issue_code(client_id=cl["client_id"],
                                 redirect_uri=str(q.get("redirect_uri")),
                                 code_challenge=str(q.get("code_challenge")),
@@ -267,30 +262,13 @@ def oauth_authorize():
             {"code": code, "state": str(q.get("state") or "")})
         return redirect(back, code=303)
 
-    # THE OWNER CHOOSES, NOT THE CLIENT. The first version took `scope` from the query string,
-    # so an assistant that asked for nothing got `read` — which is why Claude connected with
-    # seven tools and no `draft_reply` on 2026-09-22, and the owner could not tell why. A client
-    # asking for less than it needs is a support ticket; a client asking for MORE than the owner
-    # wants is worse. The request is a hint; this screen is the decision.
-    # DEFAULTS TO READ-AND-DRAFT (owner, 2026-09-22): "people don't have to send their drafts
-    # but they're always gonna want to give this permission." A draft is not a send — the box
-    # cannot send from a connector seat at all — so the cautious default was caution about
-    # nothing, and it cost the owner a connection with no draft_reply and no way to see why.
-    # An assistant that asks for `read` no longer preselects it; the person can still choose it below.
-    # AND NOW REGARDLESS OF WHAT THE CLIENT ASKS FOR (OSDev1, 2026-10-02, #1794 §4: a person's own-AI
-    # seat is `act` by default; `read` stays the choice for read-only access). The exception above let
-    # an assistant that ASKED for `read` preselect it, and that is how the owner's own Claude connected
-    # read-only and could not draft a single reply: the request is a hint, this screen is the decision.
-    pre = "act"
-    perms = "".join(
-        f'<label><input type=radio name=grant value="{v}"{" checked" if v == pre else ""}>'
-        f'<b>{t}</b><span>{w}</span></label>'
-        for v, t, w in (
-            ("read", "Read only",
-             "It can read your conversations and your morning report. It cannot write anything."),
-            ("act", "Read and draft replies",
-             "Everything above, plus it can leave a suggested reply waiting on the screen. "
-             "It still cannot send — you press send, or you do not.")))
+    # ONE PERMISSION, SAID PLAINLY. The owner, 2026-10-02: an AI connection that can't draft should never exist ("That
+    # should never be off!"), and Read only is gone as a choice ("If they want safety, they can build it themselves").
+    # The client's requested scope is ignored: the box decides, and it decides read-and-draft. A draft is never a
+    # send: no seat can send, and a suggested reply waits for a person.
+    perms = ('<p><b>Read and draft replies.</b> It can read your conversations, your morning report and how your '
+             'box is running, and it can leave a suggested reply waiting on the screen. It cannot send: you press '
+             'send, or you do not.</p>')
     hidden = "".join(
         f'<input type=hidden name="{escape(k)}" value="{escape(str(v))}">'
         for k, v in q.items(True) if k not in ("decision", "grant"))

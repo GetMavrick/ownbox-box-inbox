@@ -127,8 +127,9 @@ sec = next((s for s in shell.sections() if s.key == "settings"), None)
 labels = [i.label for i in sec.items] if sec else []
 # "COWORKERS", WHERE IT READ "SHIFTS", right after "MCP Server", where it read "Coworkers (Agents)" (owner, 2026-10-02,
 # approved from the System Settings preview). The address stays /settings/shifts.
-ok("Coworkers is in System Settings, right after MCP Server, in the AI group",
-   "Coworkers" in labels and labels.index("Coworkers") == labels.index("MCP Server") + 1
+# HIS ORDER (owner, 2026-10-02): "AI account, MCP server, data sources, and then coworkers".
+ok("Coworkers is in System Settings, right after Data Sources, in the AI group",
+   "Coworkers" in labels and labels.index("Coworkers") == labels.index("Data Sources") + 1
    and next(i for i in sec.items if i.label == "Coworkers").group == "ai", str(labels))
 _cw = next(i for i in sec.items if i.label == "Coworkers")
 ok("...open to a member, who may look", not _cw.owner_only and _cw.href == "/settings/shifts")
@@ -144,12 +145,14 @@ _ag = owner.get("/settings/agent").get_data(as_text=True)
 ok("Coworkers explains both kinds and points at the MCP Server",
    "Two kinds of coworker" in _sh and 'href="/settings/agent">MCP Server &rarr;' in _sh
    and "From outside." in _sh)
-ok("MCP Server explains both kinds and points at Coworkers",
-   "Two kinds of coworker" in _ag and 'href="/settings/shifts">Coworkers &rarr;' in _ag and "On this box." in _ag)
+# THE MCP SERVER PAGE LEADS WITH THE ADDRESS (owner, 2026-10-02: "they should be able to clearly see the address of
+# the MCP server on how to add it to their favorite chat bo[t]"); the two kinds are said on Coworkers, the Pro page.
+ok("MCP Server leads with its address and how to add it to each AI, not the two kinds",
+   "Two kinds of coworker" not in _ag and _ag.index("Your box's MCP address") < _ag.index("Add it to your AI")
+   and "Copy address" in _ag, _ag[_ag.find("<h1>"):][:400])
 ok("...and neither page says its old name", "Coworkers (Agents)" not in _sh + _ag
    and not re.search(r"<h1>Shifts</h1>|&larr; Shifts<", _sh + _ag))
-ok("...each naming its own kind first",
-   _sh.index("On this box.") < _sh.index("From outside.") and _ag.index("From outside.") < _ag.index("On this box."))
+ok("...Coworkers naming its own kind first", _sh.index("On this box.") < _sh.index("From outside."))
 _msh = member.get("/settings/shifts").get_data(as_text=True)
 ok("a member reads both kinds on Shifts, with no link to the page that would refuse them",
    "From outside." in _msh and 'href="/settings/agent"' not in _msh)

@@ -1107,15 +1107,13 @@ def device_card() -> str:
 # SPEND (core/box_tools.py), and a role described as "read your conversations" while it can also
 # read the billing figure is a consent screen that misleads. Whenever _ROLE_CAPABILITIES grows,
 # this text grows with it.
+# ONE PERMISSION (owner, 2026-10-02): every AI connection reads and drafts. Read only is gone as a choice, and a
+# connection made read-only before is moved up the next time this screen opens or it is used (core.connector.seats).
 _ROLE_CHOICES = (
-    ("read", "Read only",
-     "It can read your conversations, your morning report, whether the box is running, and the apps "
-     "you connected on Data Sources. It cannot write anything, and it cannot see what the box is "
-     "spending."),
     ("act", "Read and draft replies",
-     "Everything above, plus what the box has spent against its monthly ceiling, and it can "
-     "leave a suggested reply waiting on the screen. It still cannot send - you press send, or "
-     "you do not."),
+     "It can read your conversations, your morning report, whether the box is running, what the box has spent "
+     "against its monthly ceiling, and the apps you connected on Data Sources, and it can leave a suggested reply "
+     "waiting on the screen. It still cannot send - you press send, or you do not."),
 )
 
 
@@ -1132,22 +1130,14 @@ def _seat_rows(seats_list: list) -> str:
     for s in seats_list:
         label = _esc(s.get("label"))
         role = str(s.get("role") or "")
-        human = next((t for r, t, _ in _ROLE_CHOICES if r == role), role)
+        human = next((t for r, t, _ in _ROLE_CHOICES if r == role), "Read and draft replies" if role == "read"
+                     else role)
         if s.get("revoked_at"):
             out.append(f'<div class="row"><b style="flex:1;min-width:0">{label}</b>'
                        f'<span class="quiet">Revoked. It can no longer reach this box.</span>'
                        f'</div>')
         else:
-            # ONE TAP BETWEEN THE TWO (OSDev1, 2026-10-02, #1794 §4): a connection made before
-            # read-and-draft was the default moves up without connecting again, and back down the
-            # same way. Every owner gets the same buttons; nothing here knows whose box it is.
-            to, verb = (("act", "Let it draft replies") if role == "read" else
-                        ("read", "Make it read only") if role == "act" else ("", ""))
-            change = (f'<form method="post" action="/settings/agent" style="margin:0;width:100%">'
-                      f'<input type="hidden" name="do" value="role">'
-                      f'<input type="hidden" name="seat" value="{_esc(s.get("id"))}">'
-                      f'<input type="hidden" name="role" value="{to}">'
-                      f'<button type="submit" class="ghost">{verb}</button></form>') if to else ""
+            change = ""                          # nothing to switch: every connection reads and drafts
             out.append(f'<div class="row"><b style="flex:1;min-width:0">{label}</b>'
                        f'<span class="quiet">{_esc(human)}</span>{change}'
                        f'<a href="/settings/agent?revoke={_esc(s.get("id"))}">Revoke</a></div>')
@@ -1156,15 +1146,9 @@ def _seat_rows(seats_list: list) -> str:
 
 
 def _seat_form(note: str = "") -> str:
-    opts = "".join(
-        f'<label style="display:block;margin:8px 0"><input type="radio" name="role" '
-        # READ-AND-DRAFT BY DEFAULT — #1419 (OSDev1), carried across. Owner, 2026-09-22: "we're
-        # always going to want to read and draft." A draft is not a send; nothing reachable from
-        # a seat can send, so defaulting to `read` protected nobody and cost him a connection
-        # with no draft_reply. The choice stays; only the preselected answer moves.
-        f'value="{r}"{" checked" if r == "act" else ""}> <b>{t}</b><br>'
-        f'<span class="quiet" style="margin-left:22px">{w}</span></label>'
-        for r, t, w in _ROLE_CHOICES)
+    # ONE PERMISSION, SAID, NOT CHOSEN (owner, 2026-10-02: Read only removed). It names everything the key can do.
+    opts = "".join(f'<input type="hidden" name="role" value="{r}"><p><b>{t}.</b> {w}</p>'
+                   for r, t, w in _ROLE_CHOICES)
     return (note +
             '<form method="post" action="/settings/agent" class="card">'
             '<input type="hidden" name="do" value="mint">'
@@ -1172,7 +1156,7 @@ def _seat_form(note: str = "") -> str:
             '<p class="quiet">A name you will recognise later, so you know what you are '
             'revoking.</p>'
             '<input id="seat-label" name="label" maxlength="60" placeholder="Grok on X" required>'
-            '<p><b>What may it do?</b></p>' + opts +
+            '<p><b>What it can do</b></p>' + opts +
             '<button type="submit">Create the connection</button></form>')
 
 
@@ -1231,9 +1215,7 @@ def box_agent():
 
     if request.method == "POST" and str(request.form.get("do") or "") == "mint":
         label = str(request.form.get("label") or "").strip()[:60]
-        role = str(request.form.get("role") or "act").strip()
-        if role not in [r for r, _, _ in _ROLE_CHOICES]:
-            role = "read"
+        role = "act"                                     # every AI connection reads and drafts (owner, 2026-10-02)
         try:
             _sid, credential = seats.mint(label, role)
         except ValueError as e:
@@ -1261,37 +1243,33 @@ def box_agent():
     clients = "".join(f'<div class="row"><b style="flex:1;min-width:0">{_esc(c["name"])}</b>'
                       f'<span class="quiet">{_esc(c["how"])}</span></div>'
                       for c in getattr(box_secrets, "AGENT_CLIENTS", ()))
-    from core.dash.home import coworkers_two_kinds
-    body = (coworkers_two_kinds("agents") +
-            # WHO THEY ARE IS SAID ABOVE, in the two kinds; this card says what holds them.
-            '<div class="card"><p>You give each one a key, you choose what it may do, and you can '
-            'take that key away at any moment.</p>'
-            '<p class="quiet">Nothing you connect here can send a message as your business. The '
-            'most a coworker can do is leave a reply waiting on the screen for you.</p></div>'
-            # THERE IS NO KEY TO COPY, and this sentence said there was. Owner, 2026-09-22, after
-            # connecting Claude himself: "we're gonna have totally different instructions where we
-            # just enter the MCP server and it authorizes." Since the OAuth front door (#1419) that
-            # is what happens — the assistant is sent here to sign in — and a line telling a buyer
-            # to fetch a key first sends them to the hard path we stopped needing. The form below
-            # still exists for an assistant that cannot sign in; it is a fallback, not the route.
-            '<div class="card"><p><b>This box\'s address</b> — paste this into whichever '
-            'AI agent you use. It will send you here to sign in; there is no key to copy.</p>'
-            # A PLACE TO BREAK AT EACH SLASH, so a long address wraps between its parts on a
-            # mobile screen rather than mid-word ("…/mc" then "p"). <wbr> copies as nothing.
-            f'<p class="addr">{_esc(root).replace("/", "/<wbr>")}/<wbr>mcp'
-            '</p></div>'
-            # EVERY ONE OF THESE IS LIVE. They connect TO the box over MCP; the box never calls
-            # them and holds nothing of theirs, which is why this list needs nothing greyed out.
-            + (f'<div class="card"><p><b>Works with</b></p>{clients}</div>' if clients else "")
-            # THE STEPS BEFORE THE FORM, AND THE FORM DEMOTED — #1419 (OSDev1), carried across
-            # while this screen moved into core. Every assistant worth naming signs in now
-            # (core/connector/oauth.py), and the owner's words after doing it were "people will
-            # probably just choose sign in". A screen that opens with a secret to copy teaches the
-            # harder path first. The three steps are core's own words (`box_secrets.AGENT_STEPS`).
+    # THE ADDRESS FIRST, THEN HOW TO ADD IT TO EACH AI (owner, 2026-10-02: "standard base machines should be able to
+    # have a menu choice called MCP server and they should be able to clearly see the address of the MCP server on
+    # how to add it to their favorite chat bo[t]", approved from a preview). The two kinds of coworker are said on
+    # Coworkers, the Pro page; this page is the box's own door for the AI a person already uses, on every box.
+    addr = f"{root}/mcp"
+    body = ('<div class="card"><h2>Your box\'s MCP address</h2>'
+            # THERE IS NO KEY TO COPY (owner, 2026-09-22: "we just enter the MCP server and it authorizes"): the
+            # assistant is sent here to sign in, since the OAuth front door (#1419).
+            '<p class="quiet">Paste this into your AI. It sends you back here to sign in and approve, so there is '
+            'no key to copy.</p>'
+            # A PLACE TO BREAK AT EACH SLASH, so a long address wraps between its parts on a mobile screen rather
+            # than mid-word ("…/mc" then "p"). <wbr> copies as nothing.
+            f'<p class="addr">{_esc(root).replace("/", "/<wbr>")}/<wbr>mcp</p>'
+            # ONE PRESS TO COPY IT. Where the browser can't, the address above is plain text to select.
+            f'<button type="button" class="ghost" data-copy="{_esc(addr)}" onclick="var b=this;'
+            'navigator.clipboard&amp;&amp;navigator.clipboard.writeText(b.dataset.copy).then(function()'
+            '{b.textContent=\'Copied\'})">Copy address</button></div>'
+            # EVERY ONE OF THESE IS LIVE. They connect TO the box over MCP; the box never calls them and holds
+            # nothing of theirs, which is why this list needs nothing greyed out.
+            + (f'<div class="card"><h2>Add it to your AI</h2>{clients}</div>' if clients else "")
             + '<div class="card"><ol style="padding-left:20px;margin:0">'
             + "".join(f'<li style="margin:6px 0">{_esc(t)}</li>'
                       for t in getattr(box_secrets, "AGENT_STEPS", ()))
             + '</ol></div>'
+            + '<div class="card"><p>You choose what each AI may do, and you can take it back at any moment.</p>'
+              '<p class="quiet">Nothing that connects here can send a message as your business. The most it can do '
+              'is leave a reply waiting on the screen for you.</p></div>'
             + '<details style="margin-top:18px"><summary style="cursor:pointer">'
               'Or make a key by hand</summary>'
               '<p class="quiet" style="margin:10px 0">For a script, or an AI agent that cannot '
@@ -1299,10 +1277,10 @@ def box_agent():
               'above is easier and revoking it is the same button.</p>'
             + _seat_form(note)
             + '</details>'
-            + _seat_rows(seats.all_seats())
+            + _seat_rows((seats.promote_all(), seats.all_seats())[1])
             + _back())
     return chrome("/settings/agent", title="MCP Server",
-                  lede="Let an AI agent you already pay for read this box.",
+                  lede="Use your box from the AI you already use: Claude, ChatGPT, Gemini or Grok.",
                   body=body), 200
 
 

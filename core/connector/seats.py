@@ -186,11 +186,28 @@ def revoke(seat_id: str) -> bool:
     return changed
 
 
-SETTABLE = ("read", "act")   # what a person may move their own connection between; `service` is ours
+# EVERY AI CONNECTION DRAFTS. Owner, 2026-10-02, on 'Let it draft replies': "That should never be off! It should
+# default to on." Asked whether Read only should stay a choice, he chose to remove it ("If they want safety, they can
+# build it themselves"), and to switch every existing read-only connection up. A draft is never a send: no role
+# holds an `act:` capability, and a suggested reply waits for a person. So `act` is the one role a person's AI
+# connection can be set to; `read` lasts only until the box next starts or the MCP Server screen opens.
+SETTABLE = ("act",)
+
+
+def promote_all() -> int:
+    """Move every live, read-only AI connection up to read-and-draft, in place. -> how many moved. Idempotent.
+    Run seats (a coworker's shift, the box's self-test) hold their own exact lists and are never touched."""
+    with state.connect() as c:
+        cur = c.execute("UPDATE seats SET role = 'act' WHERE role = 'read' AND revoked_at IS NULL "
+                        "AND id NOT IN (SELECT seat_id FROM seat_capabilities)")
+        moved = cur.rowcount
+    if moved:
+        log.info("connector.seats_promoted", count=moved)
+    return moved
 
 
 def set_role(seat_id: str, role: str) -> bool:
-    """Move a live connection between `read` and `act` IN PLACE. -> True if it changed.
+    """Move a live read-only connection up to `act` IN PLACE. -> True if it changed.
 
     IN PLACE, NOT RE-MINTED (OSDev1, 2026-10-02, #1794 §4: the owner's existing seat is `read`,
     give him one tap that makes it his own seat "so he doesn't have to mint and re-paste"). A

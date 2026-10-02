@@ -273,7 +273,9 @@ ok("...the same one the listing screen shows",
 # draft"), the three sign-in steps come from `box_secrets.AGENT_STEPS`, and the by-hand key form
 # is folded away behind the sign-in path rather than leading the screen.
 _ag = oc.get("/settings/agent").get_data(as_text=True)
-ok("read-and-draft is the preselected role", 'value="act" checked' in _ag and 'value="read" checked' not in _ag)
+# NOW THE ONLY ROLE (owner, 2026-10-02: Read only removed): the key form carries act, and offers no other.
+ok("read-and-draft is the only role the key form carries", 'name="role" value="act"' in _ag
+   and 'value="read"' not in _ag and "Read only" not in _ag)
 ok("...and a mint with no role given lands as read-and-draft",
    (lambda r: r.status_code == 200 and any(
        s_.get("role") == "act" for s_ in seats.all_seats() if s_.get("label") == "Default role"))(

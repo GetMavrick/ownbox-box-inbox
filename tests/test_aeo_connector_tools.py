@@ -97,6 +97,27 @@ ok("not ready, and the AI account is named first among what's missing",
 ok("...with the AI state as the box reports it", res["ai"]["state"] == "no_ai_key")
 ok("the weekly number and what is left of it", res["articles_a_week"] == 4 and res["left_this_week"] == 4)
 
+print("\ntest_status_asks_the_brain_not_the_heartbeat")
+from core import box_tools as _bt, brain as _brain  # noqa: E402
+_real_ct, _real_h = _brain.can_think, _bt.health
+_brain.can_think = lambda: (True, "claude_code")          # signed in to Claude, no API key
+_bt.health = lambda: {"brain": {"state": "no_ai_key", "ok": None, "note": "no AI key is set"}}
+res = call("aeo.status")[0]["result"]
+ok("a box signed in to Claude is NOT told its AI account is missing, though the heartbeat says no_ai_key "
+   "(the owner's box, 2026-10-02)", not any("AI account" in x for x in res["missing"])
+   and res["ai"]["state"] == "ok", res)
+_bt.health = lambda: {"brain": {"state": "fail", "ok": False,
+                                "note": "Claude sign-in expired: sign in again on Settings → AI"}}
+res = call("aeo.status")[0]["result"]
+ok("...but an AI the box saw FAIL is named, with the box's own reason", res["ai"]["state"] == "fail"
+   and any("sign in again" in x for x in res["missing"]), res)
+_brain.can_think = lambda: (False, "no token is connected")
+_bt.health = lambda: {"brain": {"state": "ok", "ok": True}}
+res = call("aeo.status")[0]["result"]
+ok("...and a box that can't think is told so even if an old beat said ok",
+   res["missing"][0].startswith("a signed-in AI account"), res)
+_brain.can_think, _bt.health = _real_ct, _real_h
+
 print("\ntest_articles_and_why_they_stopped")
 a = plan.add("Scope", "What should a statement of work include?")
 plan.mark(a, "published", slug="sow", url="https://northwind.example/articles/sow",

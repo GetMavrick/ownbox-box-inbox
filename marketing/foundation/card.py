@@ -410,4 +410,7 @@ def summary() -> dict:
             "connected": bool(conn)}
 
 
-source_cards.register(KEY, title="Website analytics", render=render, handle=handle, order=10, summary=summary)
+source_cards.register(KEY, title="Website analytics", render=render, handle=handle, order=10, summary=summary,
+                      category="From your PostHog",
+                      idea="Each website's visits, where they came from and what they led to, in your Morning Review "
+                           "every day.")

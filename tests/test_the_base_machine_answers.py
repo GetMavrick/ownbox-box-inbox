@@ -193,14 +193,15 @@ print("\n— the consent screen names what it is granting —")
 # sentences that would be wrong, not on the whole copy.
 from core.dash import box_settings  # noqa: E402
 _choices = {r: d for r, _t, d in box_settings._ROLE_CHOICES}
-ok("read-only says out loud that it CANNOT see spending",
-   "cannot see what the box is spending" in _choices["read"], _choices["read"])
-# A read seat reads the apps the owner connected (read:apps, #1751); the screen says so before the key is minted
-# (OSDev4, review of #1751). "Everything above" carries it to the act role.
-ok("read-only says it reads the apps connected on Data Sources",
-   "the apps you connected on Data Sources" in _choices["read"], _choices["read"])
-ok("and the role that CAN see it says so before the key is minted",
+# ONE PERMISSION NOW (owner, 2026-10-02: Read only removed; every AI connection reads and drafts), so the one
+# sentence has to name everything the key reaches: the spend figure and the apps connected on Data Sources.
+ok("there is no read-only choice to offer any more", "read" not in _choices and list(_choices) == ["act"],
+   str(list(_choices)))
+ok("the one permission says it can see what the box has spent",
    "spent against its monthly ceiling" in _choices["act"], _choices["act"])
+ok("...and that it reads the apps connected on Data Sources",
+   "the apps you connected on Data Sources" in _choices["act"], _choices["act"])
+ok("...and that it cannot send", "cannot send" in _choices["act"], _choices["act"])
 ok("every role offered on that screen exists in the capability table",
    all(r in tools.ROLE_RANK for r in _choices), str(list(_choices)))
 

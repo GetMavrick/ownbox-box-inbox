@@ -42,6 +42,16 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 # init_db() is idempotent and BEGIN IMMEDIATE serializes the 2 gunicorn workers.
 state.init_db()
 
+# EVERY AI CONNECTION DRAFTS (owner, 2026-10-02: "That should never be off!", and asked, he chose to switch every
+# existing read-only connection up and to remove Read only as a choice). Once at start, which is the first start
+# after an update: idempotent, in place, so no AI app has to connect again. Run seats are never touched.
+try:
+    from core.connector import seats as _seats
+    _seats.promote_all()
+except Exception as _e:                                  # noqa: BLE001 — never what stops the box starting
+    import logging as _logging
+    _logging.getLogger(__name__).warning("dispatch.promote_seats_failed: %s", type(_e).__name__)
+
 
 def _load_web_modules() -> None:
     """Register department web blueprints named in config `web_modules:` — the same

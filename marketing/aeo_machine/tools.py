@@ -82,10 +82,23 @@ def status():
         brain = (box_tools.health() or {}).get("brain") or {}
     except Exception:                                   # noqa: BLE001 — a section, never the answer
         brain = {}
-    ai_ready = brain.get("state") == "ok" or brain.get("ok") is True
-    # One failed check of the sign-in (`unchecked`) is not a missing account: the next check decides.
-    if not ai_ready and brain.get("state") != "unchecked":
+    # ASK THE BRAIN, NOT THE HEARTBEAT (the connector strike's audit, 2026-10-02). The watchdog's beat is
+    # minutes old at best and was wrong for a whole box until #1820: a box signed in to Claude read "no AI
+    # key" there, so this said the AI account was missing while the box was drafting. `can_think()` is the
+    # brain's own answer (the saved sign-in, a key, or ChatGPT), and costs nothing. The beat still counts
+    # when it saw the AI actually FAIL, which can_think() cannot know (an expired sign-in, say).
+    try:
+        from core import brain as _brain
+        can, why = _brain.can_think()
+    except Exception as e:                              # noqa: BLE001 — unknown is not ready
+        can, why = False, f"the box couldn't check its AI account ({type(e).__name__})"
+    # One failed check of the sign-in (`unchecked`, #1820) is not a failure: its ok is None, and the next check decides.
+    failing = brain.get("state") == "fail" or brain.get("ok") is False
+    ai_ready = can and not failing
+    if not can:
         need.insert(0, "a signed-in AI account (System Settings → AI account)")
+    elif failing:
+        need.insert(0, "an AI account that answers: " + (brain.get("note") or "the box's last check of it failed"))
     try:
         cap = max(0, int(settings.get().get("weekly_cap") or 0))
     except (TypeError, ValueError):
@@ -97,7 +110,8 @@ def status():
     return {
         "ready": not need and writer_installed() and cap > 0,
         "missing": need,
-        "ai": {"state": brain.get("state") or "unknown", "note": brain.get("note")},
+        "ai": ({"state": "ok", "note": f"ready ({why})"} if ai_ready else
+               {"state": brain.get("state") or "not_ready", "note": brain.get("note") or why}),
         "articles_a_week": cap,
         "paused": cap == 0,
         "published_last_7_days": published_week,

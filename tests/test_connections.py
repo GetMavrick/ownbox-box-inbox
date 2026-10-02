@@ -294,7 +294,7 @@ member = app.test_client()
 member.set_cookie(dash.COOKIE, dash.new_session(state.add_user("sam@glowmedspa.co", name="Sam", role="member")["id"]))
 page = owner.get("/settings/sources")
 ok("the owner opens Data Sources, with the form to connect an app", page.status_code == 200
-   and "Connect an app" in page.get_data(as_text=True) and "MCP address" in page.get_data(as_text=True))
+   and "Connect any app" in page.get_data(as_text=True) and "MCP address" in page.get_data(as_text=True))
 ok("a member can't", member.get("/settings/sources").status_code in (302, 303, 403))
 r = owner.post("/settings/sources", data={"do": "add", "name": "Clinic Notes", "url": f"{BASE}/mcp",
                                           "token": "wrong-token"})

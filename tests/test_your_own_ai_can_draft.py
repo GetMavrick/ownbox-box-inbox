@@ -58,8 +58,8 @@ def _role(seat_id):
     return next((s["role"] for s in seats.all_seats(include_runs=True) if s["id"] == seat_id), None)
 
 
-def test_the_consent_screen_starts_at_draft():
-    print("test_the_consent_screen_starts_at_draft")
+def test_the_consent_screen_grants_read_and_draft():
+    print("test_the_consent_screen_grants_read_and_draft")
     reg = oauth.register({"client_name": "Claude", "redirect_uris": ["https://claude.ai/cb"]})
     v = secrets.token_urlsafe(48)
     chal = base64.urlsafe_b64encode(hashlib.sha256(v.encode()).digest()).decode().rstrip("=")
@@ -69,59 +69,82 @@ def test_the_consent_screen_starts_at_draft():
         if asked:
             q["scope"] = asked
         page = _owner().get("/oauth/authorize?" + urlencode(q)).get_data(as_text=True)
-        ok(f"asked for {asked or 'nothing'}: read-and-draft is preselected",
-           'value="act" checked' in page, page[:200])
-        ok("...and read only is still offered", 'value="read"' in page and 'value="read" checked' not in page)
+        ok(f"asked for {asked or 'nothing'}: the screen says read and draft replies",
+           "Read and draft replies" in page, page[:200])
+        ok("...and offers no read-only choice (owner, 2026-10-02: removed)", "type=radio" not in page
+           and "Read only" not in page)
+        r = _owner().post("/oauth/authorize?" + urlencode(q), data={**q, "decision": "allow", "grant": "read"})
+        code = dict(x.split("=", 1) for x in r.headers.get("Location", "").split("?", 1)[1].split("&"))["code"]
+        from core import state
+        with state.connect() as c:
+            role = c.execute("SELECT role FROM oauth_codes WHERE code = ?", (code,)).fetchone()["role"]
+        ok("...and grants read-and-draft even when the form or the app asks for read", role == "act", role)
 
 
-def test_one_tap_moves_a_connection_in_place():
-    print("test_one_tap_moves_a_connection_in_place")
+def test_read_only_connections_move_up():
+    print("test_read_only_connections_move_up")
     sid, cred = seats.mint("Claude", "read")
-    page = _owner().get("/settings/agent").get_data(as_text=True)
-    ok("a read-only connection offers the tap", "Let it draft replies" in page, page[-600:])
-
-    r = _owner().post("/settings/agent", data={"do": "role", "seat": sid, "role": "act"})
-    ok("the tap answers with the screen again", r.status_code == 303, str(r.status_code))
+    import ast
+    import pathlib
+    src = ast.parse(pathlib.Path(seats.__file__).resolve().parents[1].joinpath("dispatch.py").read_text())
+    top = [n for n in src.body if isinstance(n, ast.Try)]
+    ok("the box moves them up when it starts (core/dispatch.py calls seats.promote_all at import)",
+       any("promote_all" in ast.unparse(n) for n in top))
+    seats.promote_all()                                  # what that start does
     seat = seats.verify(cred)
-    ok("the SAME credential now holds act: nothing to reconnect", seat and seat["role"] == "act", str(seat))
+    ok("a read-only connection is read-and-draft once the box starts after the update, same credential",
+       seat and seat["role"] == "act" and _role(sid) == "act", str(seat))
+    ok("the move happens once: starting again moves nothing", seats.promote_all() == 0)
+    sid2, _ = seats.mint("Grok", "read")
     page = _owner().get("/settings/agent").get_data(as_text=True)
-    ok("...and the screen offers the way back", "Make it read only" in page)
-
+    ok("opening the MCP Server screen moves every one up", _role(sid2) == "act")
+    ok("...and it offers no way down, nor a toggle", "Make it read only" not in page
+       and "Let it draft replies" not in page and 'value="read"' not in page, page[-600:])
     _owner().post("/settings/agent", data={"do": "role", "seat": sid, "role": "read"})
-    ok("one tap back down, same credential", (seats.verify(cred) or {}).get("role") == "read")
+    ok("asking for read changes nothing", _role(sid) == "act")
+    try:
+        seats.set_role(sid, "read")
+        ok("...not even by calling it directly", False, "accepted")
+    except ValueError:
+        ok("...not even by calling it directly", True)
+    r = _owner().post("/settings/agent", data={"do": "mint", "label": "A script", "role": "read"})
+    newest = next(s for s in seats.all_seats() if s["label"] == "A script")
+    ok("a key made by hand reads and drafts, whatever the form says", newest["role"] == "act", newest)
 
 
 def test_what_it_never_touches():
     print("test_what_it_never_touches")
-    run_id, _ = seats.mint("a shift", "act", capabilities=["read:inbox"])
-    _owner().post("/settings/agent", data={"do": "role", "seat": run_id, "role": "read"})
-    ok("a run seat keeps its role and its list", _role(run_id) == "act")
+    run_id, run_cred = seats.mint("a shift", "read", capabilities=["read:inbox"])
+    seats.promote_all()
+    ok("a run seat keeps its role and its exact list", _role(run_id) == "read")
 
     svc, _ = seats.mint("the box's own", "service")
+    seats.promote_all()
     _owner().post("/settings/agent", data={"do": "role", "seat": svc, "role": "act"})
     ok("a service seat is never moved", _role(svc) == "service")
 
-    sid, _ = seats.mint("old", "read")
+    sid, _ = seats.mint("old", "act")
     _owner().post("/settings/agent", data={"do": "role", "seat": sid, "role": "service"})
-    ok("nothing can be raised to service", _role(sid) == "read")
+    ok("nothing can be raised to service", _role(sid) == "act")
     try:
         seats.set_role(sid, "service")
         ok("...not even by calling it directly", False, "accepted")
     except ValueError:
         ok("...not even by calling it directly", True)
 
-    seats.revoke(sid)
-    ok("a revoked connection stays revoked and unchanged", seats.set_role(sid, "act") is False
-       and _role(sid) == "read")
+    gone, _ = seats.mint("gone", "read")
+    seats.revoke(gone)
+    seats.promote_all()
+    ok("a revoked connection stays revoked and unchanged", _role(gone) == "read")
 
     sid2, _ = seats.mint("someone's", "read")
-    anon = app.test_client().post("/settings/agent", data={"do": "role", "seat": sid2, "role": "act"})
-    ok("somebody who is not signed in changes nothing", _role(sid2) == "read", str(anon.status_code))
+    anon = app.test_client().get("/settings/agent")
+    ok("somebody who is not signed in moves nothing", _role(sid2) == "read", str(anon.status_code))
 
 
 if __name__ == "__main__":
-    test_the_consent_screen_starts_at_draft()
-    test_one_tap_moves_a_connection_in_place()
+    test_the_consent_screen_grants_read_and_draft()
+    test_read_only_connections_move_up()
     test_what_it_never_touches()
     import pathlib
     _wf = pathlib.Path(__file__).resolve().parents[1] / ".github/workflows/tests.yml"

@@ -347,7 +347,9 @@ _state4.init_db()
 _c4 = _app4.test_client()
 _c4.set_cookie(_dash4.COOKIE, _dash4.new_session(_state4.owner_user()["id"]), domain="localhost")
 _agent = _c4.get("/settings/agent").get_data(as_text=True)
-ok("the connector screen renders", "This box" in _agent, _agent[:120])
+# "YOUR BOX'S MCP ADDRESS", FIRST ON THE PAGE since 2026-10-02 (owner, approved from a preview).
+ok("the connector screen renders, leading with the box's MCP address", "Your box's MCP address" in _agent,
+   _agent[:120])
 ok("...and does NOT tell the buyer to bring a key", "a key from below" not in _agent)
 ok("...it says the assistant is sent here to sign in", "there is no key to copy" in _agent)
 ok("...and the sign-in step is still the one it teaches first", "will SIGN IN" in _agent)

@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from flask import redirect, request
 
 from core import source_cards
+from core.connections import ideas as _ideas
 from core.connections import oauth, store
 from core.dash import blueprint
 from core.dash.box_settings import _admit, _back, _esc, _is_owner, _who
@@ -36,6 +37,20 @@ LEDE = "Connect the apps your business runs on, so your coworkers can read from 
 # buttons. Columns with a heading on a wide screen; on a mobile, two lines — the name, then the rest.
 _CSS = """<style>
 .src{padding-bottom:6px}
+.ideas{width:100%;border-collapse:collapse}
+.ideas th{text-align:left;font-size:calc(13 * var(--px, 1px));font-weight:600;color:var(--ink-3);padding:0 12px 8px 0}
+.ideas td{border-top:1px solid var(--hairline);padding:12px 12px 12px 0;vertical-align:top}
+.ideas td.app{width:14em}
+.ideas td.app b{display:block;font-size:calc(16 * var(--px, 1px))}
+.ideas td.app span{color:var(--ink-3);font-size:calc(13 * var(--px, 1px))}
+.ideas td.what{color:var(--ink-2);font-size:calc(15 * var(--px, 1px));line-height:1.45}
+.ideas td.go{width:6em;text-align:right;white-space:nowrap;padding-right:0}
+.ideas td.go a{color:var(--link);font-weight:600;text-decoration:none}
+.ideas .tag{display:inline-block;margin-left:6px;padding:0 6px;border:1px solid var(--hairline);border-radius:999px;
+font-size:calc(11 * var(--px, 1px));color:var(--ink-3);font-weight:600;vertical-align:1px}
+@media (max-width:640px){.ideas td.app{width:auto}.ideas tr{display:grid;grid-template-columns:1fr auto;
+border-top:1px solid var(--hairline);padding:8px 0}.ideas td{border-top:0;padding:4px 0}
+.ideas td.what{grid-column:1 / -1}.ideas thead{display:none}}
 .src-head,.card .src-row>summary,.card a.src-link{display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px}
 .card a.src-link{border-top:1px solid var(--hairline);padding:12px 0;min-height:48px;color:var(--ink);
 text-decoration:none}
@@ -152,8 +167,13 @@ def _app_row(slug: str, rec: dict, opened: bool = False) -> str:
 
 
 def _connect_form(kept: dict) -> str:
+    # PRESSING CONNECT ON AN IDEA FILLS THIS IN (owner, 2026-10-02, approved from a preview): its name and its
+    # vendor's MCP address, from core/connections/ideas.py, never from anything typed in the address bar.
+    picked = _ideas.get(str(request.args.get("idea") or ""))
+    if picked and not kept:
+        kept = {"name": picked["name"], "url": picked["url"]}
     return (
-        '<div class="card"><h2>Connect an app</h2>'
+        '<div class="card" id="connect"><h2>Connect any app</h2>'
         "<p class=\"quiet\">Use the app's own MCP server. Its address is in the app's settings or help pages, "
         "usually under MCP, AI or connectors. If the app has its own sign-in, Connect takes you there and "
         'back. Your coworkers can read from it. Actions come in the next step, with your approval each '
@@ -270,6 +290,57 @@ def box_sources_signed_in():
     return redirect(f"{DOOR}?added={rec['slug']}", code=303)
 
 
+def _search_console_on() -> bool:
+    """The box's own Google Search Console connection (core/vendors/google_search_console.py), on every box."""
+    try:
+        from core.vendors import google_search_console as gsc
+        return bool(gsc.status().get("connected"))
+    except Exception:                            # noqa: BLE001 — a status, never a failure
+        return False
+
+
+def _search_console_row() -> str:
+    try:
+        from core.vendors import google_search_console as gsc
+        prop = str(gsc.status().get("property") or "")
+    except Exception:                            # noqa: BLE001
+        prop = ""
+    what = prop.removeprefix("sc-domain:") if prop else "No site picked yet"
+    return (f'<a class="src-link" href="{_ideas.SEARCH_CONSOLE}"><span class="src-name">Google Search Console</span>'
+            f'<span class="src-host">{_esc(what)}</span><span class="src-when"></span>'
+            f'<span class="src-on">Connected</span><span class="src-meta">Connected</span>'
+            f'<span class="src-chev">{_CHEVRON}</span></a>')
+
+
+def _ideas_card(items: dict, on: set) -> str:
+    """IDEAS FOR WHAT TO CONNECT (owner, 2026-10-02: "a clean Page for customers to arrive at which gives them lots of
+    ideas for things to connect", "a table format where it's like name of the app and then a sentence on what you can
+    do with it and what business use case and outcome"; approved from a preview). The box's own sources not yet set up
+    come first, then the official MCP servers of popular apps (core/connections/ideas.py), each leaving the list once
+    it is connected."""
+    rows = []
+    if not _search_console_on():
+        name, cat, what = _ideas.SEARCH_CONSOLE_IDEA
+        rows.append((name, cat, what, _ideas.SEARCH_CONSOLE, "Set up", True))
+    for key, spec in source_cards.cards():
+        if key not in on and spec.get("idea"):
+            rows.append((spec["title"], spec.get("category") or "", spec["idea"], f"{DOOR}/{key}", "Set up", True))
+    hosts = {str(r.get("host") or "").lower() for r in items.values() if isinstance(r, dict)}
+    for i in _ideas.not_connected(hosts):
+        rows.append((i["name"], i["category"], i["what"], f"{DOOR}?idea={i['slug']}#connect", "Connect", False))
+    if not rows:
+        return ""
+    body = "".join(
+        f'<tr><td class="app"><b>{_esc(name)}{"<span class=tag>Built in</span>" if built else ""}</b>'
+        f'<span>{_esc(cat)}</span></td><td class="what">{_esc(what)}</td>'
+        f'<td class="go"><a href="{_esc(href)}">{press}</a></td></tr>'
+        for name, cat, what, href, press, built in rows)
+    return ('<div class="card"><h2>Ideas for what to connect</h2><p class="quiet">Popular apps with their own secure '
+            'connection, an MCP server. Your coworkers can read from them, and change nothing without your OK.</p>'
+            '<table class="ideas"><thead><tr><th>App</th><th>What it does for your business</th><th></th></tr></thead>'
+            f'<tbody>{body}</tbody></table></div>')
+
+
 def _source_row(key: str, spec: dict) -> str:
     """A built-in source as one row of the table, opening its card's own page."""
     s = source_cards.summary(key)
@@ -346,9 +417,15 @@ def _render(note: str, kept: dict, cards: dict | None = None):
     # The built-in sources come first, as rows that open their cards' own pages; then the apps connected through
     # their own MCP servers, which open in place as before. Core names no source: each built-in row is its card's
     # own summary (core/source_cards.py).
-    built = [_source_row(key, spec) for key, spec in source_cards.cards()]
+    #
+    # ONLY WHAT IS CONNECTED IS A ROW (owner, 2026-10-02: "We need to suggest things, but not assume everybody is going
+    # to want to connect"); everything else is an idea, below.
+    on = {k for k, _ in source_cards.cards() if source_cards.summary(k)["connected"] is not False}
+    built = [_source_row(key, spec) for key, spec in source_cards.cards() if key in on]
+    if _search_console_on():
+        built.insert(0, _search_console_row())
     if built or rows:
-        body.append('<div class="card src">'
+        body.append('<div class="card src"><h2>Connected</h2>'
                     '<div class="src-head" aria-hidden="true"><span>Source</span><span>Reads from</span>'
                     '<span>Last read</span><span>Status</span><span></span></div>'
                     + "".join(built) + "".join(rows) + '</div>')
@@ -358,6 +435,7 @@ def _render(note: str, kept: dict, cards: dict | None = None):
                     'receipt. Anything a coworker asks to change waits for you.</p>'
                     '<p><a href="/settings/shifts">Coworkers &rarr;</a> &nbsp; '
                     '<a href="/approvals">Waiting for you &rarr;</a></p></div>')
+    body.append(_ideas_card(items, on))
     body.append(_connect_form(kept))
     body.append(_back())
     bad = note

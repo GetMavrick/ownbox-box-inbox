@@ -10,17 +10,20 @@ from __future__ import annotations
 
 from typing import Callable
 
-# key -> {"title", "render", "handle", "summary", "order", "owner"}
+# key -> {"title", "render", "handle", "summary", "idea", "category", "order", "owner"}
 _CARDS: dict[str, dict] = {}
 
 
 def register(key: str, *, title: str, render: Callable, handle: Callable, order: int = 50,
-             summary: Callable | None = None) -> None:
+             summary: Callable | None = None, idea: str = "", category: str = "") -> None:
     """`render(note) -> html`: the card, with `note` ((ok, sentence) or None) saying what the last action did.
     `handle(do, form, by) -> (ok, sentence)`: one action, posted to Data Sources as card=<key>, do=<action>.
     `summary() -> {"what", "when", "status", "connected"}`: the card's one row in the Data Sources table (owner,
     2026-10-02: one table, a row per source, each opening its own page, so the page never grows a card per
     source). Words only; the row links to the card's own page, /settings/sources/<key>.
+    `idea`, `category`: until it is connected the card is not a row but an idea, with this sentence of what it does
+    for the business (owner, 2026-10-02: "name of the app and then a sentence on what you can do with it and what
+    business use case and outcome"); suggested, never assumed.
 
     REFUSED FOR A KEY ANOTHER MODULE ALREADY HOLDS, as core/onboarding.register_step is, so one department's card
     can never silently replace another's. The same module registering again (a reload) replaces its own."""
@@ -29,7 +32,8 @@ def register(key: str, *, title: str, render: Callable, handle: Callable, order:
     if held is not None and held["owner"] != owner:
         raise ValueError(f"Data Sources card {key!r} is already registered by {held['owner']!r}")
     _CARDS[str(key)] = {"title": str(title), "render": render, "handle": handle, "order": int(order),
-                        "owner": owner, "summary": summary}
+                        "owner": owner, "summary": summary, "idea": str(idea or ""),
+                        "category": str(category or "")}
 
 
 def summary(key: str) -> dict:
@@ -40,7 +44,9 @@ def summary(key: str) -> dict:
         try:
             got = dict(spec["summary"]() or {})
         except Exception:                                # noqa: BLE001 — a row is never worth a broken page
-            got = {"status": "Could not be read just now"}
+            # NOT KNOWN IS NOT "NOT CONNECTED": a source whose summary can't be read stays a row, saying so, rather
+            # than dropping into the ideas as if it had never been set up.
+            return {"what": "", "when": "", "status": "Could not be read just now", "connected": None}
     return {"what": str(got.get("what") or ""), "when": str(got.get("when") or ""),
             "status": str(got.get("status") or ""), "connected": bool(got.get("connected"))}
 

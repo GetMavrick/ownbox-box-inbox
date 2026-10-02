@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 from core import source_cards
 
-from . import instantly, jobs, outreach_sync, seam, settings
+from . import instantly, jobs, outreach_seam as seam, outreach_sync, settings
 from .card import _CSS as _WA_CSS        # the foundation's card styles: each card is on its own page now
 
 KEY = "outreach"
