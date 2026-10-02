@@ -1,25 +1,13 @@
-"""The Morning Review as an email: one section per machine, in the owner's order.
+"""The Morning Review as an email: the day's quote, then what's worth your time, what's moving, and ideas.
 
-Owner, 2026-09-10: "Wish it was an email with the 3 sections." Asked which three, he chose the
-machines, in the order he set for the products page the same night (Lead, Content, Customer
-Voice), sent to his own address, with the Slack message kept as well. The Slack message orders
-by URGENCY on purpose (core/report.render: Needs you, Yesterday, Watch, Meters); this orders by
-MACHINE on purpose. Neither is a bug in the other, and nobody should "fix" one to match.
+Rebuilt 2026-10-01 (docs/SCOPE_MORNING_REVIEW_V2.md, owner: "Ok go"). His words: "Light and optimistic. That's
+what we want." and "a short motivational quote for every day of the year ... That should be the headline", and
+"please get rid of those nasty black buttons". So the mail draws the stored brief (core/review_brief.py), the same
+words the app page shows, on a light page with quiet links and no zeros. A morning with nothing to say sends
+nothing.
 
-EACH SECTION carries that machine's headline for yesterday, what needs him today, what happened
-yesterday, and anything on its watch list that is not fine. After the three: one meters line,
-because a vendor at its cap is the thing he most needs at breakfast and meters is not a machine,
-then the link to the review page. The SUBJECT carries how many things need him, so the urgency
-the machine ordering gives up is still the first thing he reads.
-
-DELIVERY is Resend on the box's verified sending domain, through core.net's public POST (no
-redirects, a capped response), metered against the `resend` cap. The caller passes an
-Idempotency-Key per day and recipient, so a tick that retries after a timeout cannot send the
-same morning twice. It is a message from the box to its own owner: no unsubscribe footer, no
-tracking, no marketing copy.
-
-THE ADDRESS IS PER BOX. Shipped config leaves `review.email_to` empty, which means no email;
-the owner's address lives in my/settings.yaml, never in source.
+DELIVERY is unchanged: the box's own transport (core.box_mail), an Idempotency-Key per day and recipient, and no
+unsubscribe footer, tracking or marketing copy, because it is a message from a box to its own owner.
 """
 from __future__ import annotations
 
@@ -30,136 +18,86 @@ from core.logging import get_logger
 
 log = get_logger(__name__)
 
-# The owner's reading order, 2026-09-09 ("lead machine, content machine, and then customer voice
-# machine"), confirmed for this email 2026-09-10. core.report.ORDER is the registry's list and the
-# page's; it is not his reading order, so it is not reused here.
-ORDER = ("lead_machine", "content_machine", "customer_voice")
 SENDER_NAME = "Morning Review"
-# THE TRANSPORT CONSTANTS MOVED WITH THE TRANSPORT (core.box_mail): the Resend URL, the
-# User-Agent that Cloudflare requires, and the retryable status set. They are not duplicated here,
-# because two copies of a retryable-status set is one of them being wrong later.
-_RANK = {"fail": 0, "warn": 1, "connect": 2}
-_MARK = {"fail": "!!", "warn": "!", "connect": "→"}
 
-
-def _fmt(v) -> str:
-    return report._fmt_value(v)
-
-
-def _headline(row: dict) -> str:
-    h = row.get("headline") or {}
-    delta = h.get("delta")
-    dtxt = (f" ({'+' if delta > 0 else ''}{_fmt(delta)} vs the day before)"
-            if isinstance(delta, (int, float)) and not isinstance(delta, bool) and delta else "")
-    return f"{_fmt(h.get('value', 0))} {h.get('label', '')}{dtxt}".strip()
-
-
-def _watch(row: dict | None) -> list:
-    items = [(w.get("state"), w.get("text", "")) for w in (row or {}).get("watch") or []
-             if w.get("state") != "ok" and w.get("text")]
-    return sorted(items, key=lambda sw: _RANK.get(sw[0], 3))
+# The mockup's palette (docs/mockups/morning-review-v2.html), inline because mail clients drop <style>.
+_INK, _SOFT, _GREY, _HAIR, _BG, _WASH = "#2e2c27", "#6b6a63", "#b4b3a8", "#e4e3dc", "#fcfcfb", "#f9f9f7"
+_SERIF = "'Iowan Old Style','Palatino Linotype',Georgia,serif"
+_SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+SECTIONS = (("worth", "Worth your time today"), ("moving", "Already moving"), ("ideas", "Ideas to try"))
 
 
 def build(day, now=None) -> dict:
-    """The email as data. `day` is the day it is ABOUT (yesterday, closed); needs and watch come
-    from today's row, which report.run refreshes right before sending, the split render() uses."""
-    now = now or report.now_local()
-    yday = {r.get("machine"): r for r in report.read(day)}
-    tday = {r.get("machine"): r for r in report.read(report.today(now))}
-    machines, needs_total = [], 0
-    for m in ORDER:
-        y, t = yday.get(m), tday.get(m)
-        if not (y or t):
-            continue                          # a machine this box does not run gets no empty section
-        needs = [n.get("text", "") for n in (t or {}).get("needs_you") or [] if n.get("text")]
-        needs_total += len(needs)
-        # A LINE WITHOUT DATA IS NOT SENT (owner, 2026-09-29), and a machine with nothing left to
-        # say gets no section — the rule the page and the morning message follow (report.has_value).
-        happened = [(x.get("text", ""), x.get("value")) for x in (y or {}).get("happened") or []
-                    if x.get("text") and (x.get("value") in (None, "") or report.has_value(x.get("value")))]
-        headline = (_headline(y) if y and not y.get("error")
-                    and report.has_value((y.get("headline") or {}).get("value")) else "")
-        watch, error = _watch(t), (y or {}).get("error")
-        if not (needs or headline or happened or watch or error):
-            continue
-        machines.append({
-            "machine": m, "title": (y or t).get("title") or m, "needs": needs, "watch": watch,
-            "error": error, "headline": headline, "happened": happened,
-        })
-    mrow = tday.get(report.METERS)
-    meters = ({"headline": _headline(mrow), "watch": _watch(mrow)}
-              if mrow and not mrow.get("error")
-              and (report.has_value((mrow.get("headline") or {}).get("value")) or _watch(mrow)) else None)
-    when = f"{now:%a %d %b}"
-    if needs_total:
-        subject = (f"Morning review, {when}: {needs_total} thing{'s' if needs_total != 1 else ''} "
-                   f"need{'s' if needs_total == 1 else ''} you")
-    else:
-        subject = f"Morning review, {when}: nothing needs you"
-    return {"subject": subject, "needs": needs_total, "machines": machines, "meters": meters,
-            "link": report.page_url(day)}
+    """The email as data: the stored brief for `day` (built the first time), with a subject. `skip` is True on a
+    morning with nothing to say, and then nothing is sent."""
+    from core import review_brief
+    b = review_brief.ensure(day, now)
+    return {**b, "subject": f"Your Morning Review: {b['quote']}", "skip": bool(b.get("empty"))}
 
 
 def text(e: dict) -> str:
-    lines = [e["subject"], ""]
-    for s in e["machines"]:
-        lines.append(s["title"].upper())
-        if s["error"]:
-            lines.append(f"  Could not report yesterday: {s['error']}")
-        elif s["headline"]:
-            lines.append(f"  Yesterday: {s['headline']}")
-        if s["needs"]:
-            lines.append("  Needs you")
-            lines += [f"    • {n}" for n in s["needs"]]
-        if s["happened"]:
-            lines.append("  What happened")
-            lines += [f"    · {t}" + (f": {_fmt(v)}" if v not in (None, "") else "") for t, v in s["happened"]]
-        if s["watch"]:
-            lines.append("  Watch")
-            lines += [f"    {_MARK.get(st, '·')} {w}" for st, w in s["watch"]]
-        lines.append("")
-    if not e["machines"]:
-        lines += ["No machine reported yesterday. The first full day lands tomorrow.", ""]
-    if e["meters"]:
-        lines.append(f"Spend: {e['meters']['headline']}")
-        lines += [f"  {_MARK.get(st, '·')} {w}" for st, w in e["meters"]["watch"]]
+    lines = [e["date_label"], "", e["quote"], ""]
+    if e.get("good_news"):
+        lines += [e["good_news"], ""]
+    for key, heading in SECTIONS:
+        items = e.get(key) or []
+        if not items:
+            continue
+        lines.append(heading.upper())
+        for n, it in enumerate(items, 1):
+            lines.append(f"  {n:02d}  {it['title']}")
+            if it.get("why"):
+                lines.append(f"      {it['why']}")
+            if it.get("machine"):
+                lines.append(f"      {it['machine']}")
         lines.append("")
     lines.append(f"The full review: {e['link']}")
     return "\n".join(lines)
 
 
-def _list(heading: str, items: list, colour: str = "#1d2330") -> str:
-    li = "".join(f'<li style="margin:2px 0">{i}</li>' for i in items)
-    return (f'<p style="margin:10px 0 2px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;'
-            f'color:{colour}">{_html.escape(heading)}</p><ul style="margin:0;padding-left:20px">{li}</ul>')
+def _href(h: str, base: str) -> str:
+    if not h:
+        return ""
+    return h if h.startswith("http") else base.rstrip("/") + "/" + h.lstrip("/")
 
 
 def html(e: dict) -> str:
     esc = _html.escape
-    out = ['<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1d2330;'
-           'max-width:620px;font-size:15px;line-height:1.45">',
-           f'<p style="margin:0 0 16px;color:#5b6475;font-size:13px">{esc(e["subject"])}</p>']
-    for s in e["machines"]:
-        out.append(f'<h2 style="font-size:18px;margin:24px 0 6px;padding-bottom:4px;'
-                   f'border-bottom:1px solid #e3e6ec">{esc(s["title"])}</h2>')
-        if s["error"]:
-            out.append(f'<p style="margin:4px 0;color:#9b2c2c">Could not report yesterday: {esc(str(s["error"]))}</p>')
-        elif s["headline"]:
-            out.append(f'<p style="margin:4px 0"><strong>Yesterday:</strong> {esc(s["headline"])}</p>')
-        if s["needs"]:
-            out.append(_list("Needs you", [esc(n) for n in s["needs"]], "#9b2c2c"))
-        if s["happened"]:
-            out.append(_list("What happened", [esc(t) + (f": <strong>{esc(_fmt(v))}</strong>" if v not in (None, "") else "")
-                                               for t, v in s["happened"]]))
-        if s["watch"]:
-            out.append(_list("Watch", [f"{esc(_MARK.get(st, '·'))} {esc(w)}" for st, w in s["watch"]], "#8a5a00"))
-    if not e["machines"]:
-        out.append("<p>No machine reported yesterday. The first full day lands tomorrow.</p>")
-    if e["meters"]:
-        out.append(f'<p style="margin:24px 0 2px"><strong>Spend:</strong> {esc(e["meters"]["headline"])}</p>')
-        if e["meters"]["watch"]:
-            out.append(_list("Vendors", [f"{esc(_MARK.get(st, '·'))} {esc(w)}" for st, w in e["meters"]["watch"]], "#8a5a00"))
-    out.append(f'<p style="margin:24px 0 0"><a href="{esc(e["link"], quote=True)}">Open the full review</a></p></div>')
+    base = e["link"].split("/app/review")[0]
+    out = [f'<div style="background:{_BG};color:{_INK};font-family:{_SANS};font-size:16px;line-height:1.6">'
+           f'<div style="background:{_WASH};border-bottom:1px solid {_HAIR};padding:28px 20px 24px">'
+           f'<div style="max-width:600px;margin:0 auto">'
+           f'<div style="font-size:13px;letter-spacing:.05em;color:{_SOFT}">{esc(e["date_label"])}</div>'
+           f'<div style="font-family:{_SERIF};font-size:27px;line-height:1.25;margin:12px 0 0">{esc(e["quote"])}</div>'
+           f'<div style="border-top:1px solid {_SOFT};margin:22px 0 0;width:100%"></div>']
+    if e.get("good_news"):
+        out.append(f'<p style="color:{_SOFT};margin:14px 0 0">{esc(e["good_news"])}</p>')
+    out.append('</div></div><div style="max-width:600px;margin:0 auto;padding:8px 20px 40px">')
+    for key, heading in SECTIONS:
+        items = e.get(key) or []
+        if not items:
+            continue
+        out.append(f'<p style="margin:30px 0 4px;font-size:12px;font-weight:600;letter-spacing:.14em;'
+                   f'text-transform:uppercase;color:{_SOFT}">{esc(heading)}</p>'
+                   '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">')
+        for n, it in enumerate(items, 1):
+            title = esc(it["title"])
+            href = _href(it.get("href") or "", base)
+            if href:
+                title = (f'<a href="{esc(href, quote=True)}" style="color:{_INK};text-decoration:none;'
+                         f'border-bottom:1px solid {_HAIR}">{title}</a>')
+            why = f'<div style="color:{_SOFT};margin-top:4px">{esc(it["why"])}</div>' if it.get("why") else ""
+            who = (f'<div style="color:{_GREY};font-size:13px;margin-top:2px">{esc(it["machine"])}</div>'
+                   if it.get("machine") else "")
+            out.append(f'<tr><td style="width:30px;vertical-align:top;padding:14px 0;color:{_GREY};font-size:13px">'
+                       f'{n:02d}</td><td style="padding:14px 0"><div style="font-weight:600">{title}</div>{why}{who}'
+                       '</td></tr>')
+        out.append("</table>")
+    if e.get("ideas_from") == "ai":
+        out.append(f'<p style="color:{_GREY};font-size:13px;margin:28px 0 0">The ideas come from your box\'s AI, '
+                   'based only on yesterday\'s numbers.</p>')
+    out.append(f'<p style="margin:24px 0 0"><a href="{esc(e["link"], quote=True)}" style="color:{_INK}">'
+               'Open the full review</a></p></div></div>')
     return "".join(out)
 
 

@@ -207,9 +207,10 @@ def _meters_report(day: date) -> dict:
     for r in rows:
         if r["cap"] and r["used"] >= r["cap"]:
             watch.append({"text": f"{vendor_name(r['vendor'])} is AT CAP — calls are refused until the cycle resets",
-                          "state": "fail"})
+                          "state": "fail", "vendor": vendor_name(r["vendor"]), "pct": round(float(r["pct"]))})
         elif r["pct"] >= cost_digest.WARN_PCT:
-            watch.append({"text": f"{vendor_name(r['vendor'])} is at {r['pct']:.0f}% of its cap", "state": "warn"})
+            watch.append({"text": f"{vendor_name(r['vendor'])} is at {r['pct']:.0f}% of its cap", "state": "warn",
+                          "vendor": vendor_name(r["vendor"]), "pct": round(float(r["pct"]))})
     usd = None
     try:
         usd = {"spend": float(cost_guard.month_to_date_spend(at)), "ceiling": float(cost_guard.ceiling())}
@@ -218,7 +219,10 @@ def _meters_report(day: date) -> dict:
     return {"title": "Meters",
             "headline": {"value": f"${usd['spend']:.0f}" if usd else "—",
                          "label": f"of ${usd['ceiling']:.0f} this cycle" if usd else "USD unknown"},
-            "happened": happened, "watch": watch}
+            "happened": happened, "watch": watch,
+            # THE TWO NUMBERS THE MORNING BRIEF WEIGHS (core/review_brief.py: spend over half the ceiling).
+            "figures": ({"spend": {"value": round(usd["spend"], 2), "label": "Spent this cycle"},
+                         "ceiling": {"value": round(usd["ceiling"], 2), "label": "Monthly ceiling"}} if usd else {})}
 
 
 REPORTERS[METERS] = {"title": "Meters", "fn": _meters_report}
@@ -356,7 +360,9 @@ def read(day: date | str, machine: str | None = None) -> list[dict]:
         if machine:
             rows = c.execute("SELECT * FROM daily_reports WHERE day = ? AND machine = ?", (d, machine)).fetchall()
         else:
-            rows = c.execute("SELECT * FROM daily_reports WHERE day = ?", (d,)).fetchall()
+            # THE STORED BRIEF IS NOT A MACHINE (core/review_brief.py): every reader of the day's segments
+            # gets the machines only; the brief is read by name.
+            rows = c.execute("SELECT * FROM daily_reports WHERE day = ? AND machine != 'brief'", (d,)).fetchall()
     out = []
     for r in rows:
         try:
@@ -806,6 +812,14 @@ def run(now: datetime | None = None, send=None, send_email=None, send_app=None) 
     close_open_days(now)
     snapshot(t)
     yday = t - timedelta(days=1)
+    # THE MORNING'S BRIEF IS BUILT AND STORED HERE, WHATEVER THE CHANNEL (OSDev1's review of #1779): only the
+    # email used to build it, so a box with just the app never remembered what it had shown, and "152 scripts
+    # waiting" came back every morning. Once per day: `ensure` returns the stored one after the first time.
+    try:
+        from core import review_brief
+        review_brief.ensure(yday, now)
+    except Exception as e:  # noqa: BLE001 — a brief that can't be built never costs the DM or the push
+        log.warning("report.brief_failed", about=yday.isoformat(), error=f"{type(e).__name__}: {str(e)[:160]}")
     out = {"status": "send_failed", "about": yday.isoformat()}
     if want_dm:
         if send(render(yday, now)):
@@ -836,6 +850,11 @@ def _email(to: str, yday: date, now: datetime, t: date, send_email=None) -> str:
     try:
         from core import review_email
         e = review_email.build(yday, now)
+        if e.get("skip"):
+            # NOTHING TO SAY, NOTHING SENT (owner-approved, docs/SCOPE_MORNING_REVIEW_V2.md decision 4). Marked
+            # done for the morning, so it isn't retried every hour.
+            log.info("report.email_quiet", day=t.isoformat(), about=yday.isoformat())
+            return "sent"
         sender = send_email or review_email.send
         sender(to, e["subject"], review_email.text(e), review_email.html(e),
                idem_key=f"morning-review:{t.isoformat()}:{to.lower()}")

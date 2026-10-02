@@ -285,8 +285,9 @@ def report(day: date, space: str | None = None) -> dict:
             # minute. `awaiting_reply` is about DIRECTION, not a clock, so an old one counts —
             # being ignored for a week is worse than being ignored since breakfast, not resolved.
             noun = "conversation is" if waiting == 1 else "conversations are"
+            # `person`: people waiting on him, so the Morning Review says it again whenever it grows.
             needs_you.append({"text": f"{waiting} {noun} waiting on your reply",
-                              "href": "/inbox/inbox"})
+                              "href": "/inbox/inbox", "key": "waiting", "value": waiting, "person": True})
             watch.append({"text": f"Inbox — {waiting} waiting on you", "state": rails.WARN})
         elif counts["inbound"]:
             # ANSWERED, SAID PLAINLY. The good state has to be visible or the segment only ever

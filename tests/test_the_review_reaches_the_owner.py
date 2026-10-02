@@ -289,6 +289,14 @@ ok("no device, no email, no Slack: the review says it has nobody, rather than pr
    report.run(at8 + timedelta(days=2))["status"] == "no_operator")
 
 mailed = []
+# A MORNING WITH SOMETHING TO SAY: since the review was rebuilt (docs/SCOPE_MORNING_REVIEW_V2.md, owner-approved
+# 2026-10-01), a morning with nothing in it sends no email, so this check gives the box one thing to report.
+# This suite stubs the snapshot, so the row is written as the snapshot would have written it.
+import json as _json  # noqa: E402
+with state.connect() as _c:
+    _c.execute("INSERT OR REPLACE INTO daily_reports (day, machine, report_json, written_at, final) VALUES (?,?,?,?,0)",
+               ("2026-09-26", "customer_voice", _json.dumps({"machine": "customer_voice", "title": "Unified Inbox",
+                "needs_you": [{"text": "2 people would love a reply", "href": "/inbox"}]}), "2026-09-26T15:00:00"))
 box_mail.put_own({"kind": "resend", "from": "hello@acme.co", "key": "re_OwnersOwnKey123"}, user_id=OWNER)
 r = report.run(at8 + timedelta(days=2), send_email=lambda to, *a, **k: mailed.append(to))
 ok("WITH EMAIL SET UP, the review is mailed to the OWNER'S OWN sign-in address",

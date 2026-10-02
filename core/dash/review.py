@@ -30,6 +30,9 @@ from flask import redirect, request
 from core import dash as _dash
 from core import report
 from core.dash import blueprint
+from core.logging import get_logger
+
+log = get_logger(__name__)
 
 TITLES = {"customer_voice": "Unified Inbox", "content_machine": "Content", "lead_machine": "Lead"}
 
@@ -126,6 +129,61 @@ _CSS_SRC = """
 }
 """
 CSS = re.sub(r"\s*/\*.*?\*/", "", _CSS_SRC, flags=re.S)
+
+# THE MORNING REVIEW, AS ONE LIGHT PAGE (docs/SCOPE_MORNING_REVIEW_V2.md; the owner's mock-up approved
+# 2026-10-01, "Light and optimistic. That's what we want. We want to motivate and inspire people."). A quote
+# set in a book face on a quiet band, a small drawing of a morning, one good-news sentence, then three short
+# numbered lists. Everything from the box's tokens, so it is as light in dark mode as it is in light. The
+# words are core/review_brief.py's, drawn exactly; this decides only how they look.
+_BRIEF_CSS_SRC = """
+.mr{--mr-serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;max-width:720px}
+.mr-band{background:var(--card);border:1px solid var(--card-edge);border-radius:var(--r-md,22px);
+padding:26px 22px 22px;margin:4px 0 6px}
+.mr-quote{margin:0;font-family:var(--mr-serif);font-weight:500;font-size:calc(26 * var(--px, 1px));
+line-height:1.28;letter-spacing:-.005em;color:var(--ink);text-wrap:balance}
+.mr-scene{display:block;width:100%;max-width:360px;height:46px;margin:20px 0 2px;color:var(--ink-3)}
+.mr-scene .sun{color:var(--link)}
+.mr-good{margin:12px 0 0;color:var(--ink-2);font-size:calc(17 * var(--px, 1px));line-height:1.55}
+.mr-sec{margin-top:30px}
+.mr-sec h2{margin:0 0 2px;font-size:calc(13 * var(--px, 1px));font-weight:600;letter-spacing:.14em;
+text-transform:uppercase;color:var(--ink-3)}
+.mr-sec ol{list-style:none;margin:0;padding:0}
+.mr-sec li{display:grid;grid-template-columns:34px minmax(0,1fr);padding:14px 0;border-bottom:1px solid var(--hairline)}
+.mr-sec li:last-child{border-bottom:0}
+.mr-n{font-size:calc(14 * var(--px, 1px));color:var(--ink-3);padding-top:2px;font-variant-numeric:tabular-nums}
+.mr-t{font-weight:600;color:var(--ink);font-size:calc(17 * var(--px, 1px));line-height:1.4}
+a.mr-t{text-decoration:underline;text-decoration-color:var(--hairline);text-decoration-thickness:1px;
+text-underline-offset:4px}
+a.mr-t:hover,a.mr-t:focus-visible{text-decoration-color:var(--ink-3)}
+.mr-w{margin:5px 0 0;color:var(--ink-2);font-size:calc(16 * var(--px, 1px));line-height:1.55}
+.mr-quiet{margin:26px 0 0;color:var(--ink-2);font-size:calc(17 * var(--px, 1px))}
+.mr-none{margin:4px 0 16px}
+.mr-sign{margin:30px 0 0;color:var(--ink-3);font-size:calc(14 * var(--px, 1px))}
+.mr-days{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:30px;max-width:720px;
+color:var(--ink-3);font-size:calc(15 * var(--px, 1px))}
+.mr-days form{margin:0}
+.mr-days select{min-height:44px;padding:8px 12px;border-radius:10px;font-size:max(16px, calc(15 * var(--px, 1px)))}
+.mr-more{margin-top:26px;border-top:1px solid var(--hairline);padding-top:6px}
+.mr-more>summary{color:var(--link);font-weight:600;font-size:calc(16 * var(--px, 1px));list-style:none}
+.mr-more>summary::-webkit-details-marker{display:none}
+.mr-more>summary::after{content:"+";margin-left:6px;font-weight:400}
+.mr-more[open]>summary::after{content:"\2212"}
+.mr-more[open]>summary{margin-bottom:10px}
+@media (min-width:720px){
+  .mr-band{padding:40px 44px 32px}
+  .mr-quote{font-size:calc(34 * var(--px, 1px))}
+}
+"""
+BRIEF_CSS = re.sub(r"\s*/\*.*?\*/", "", _BRIEF_CSS_SRC, flags=re.S)
+
+# A MORNING, DRAWN ONCE: a low sun, two birds, still water. Thin strokes in the page's own greys, the sun in its
+# one warm colour. Decoration only, so a screen reader skips it.
+_SCENE = ('<svg class="mr-scene" viewBox="0 0 360 46" fill="none" stroke="currentColor" stroke-width="1.2" '
+          'stroke-linecap="round" preserveAspectRatio="xMidYMid meet" aria-hidden="true">'
+          '<g class="sun"><circle cx="44" cy="20" r="7"/>'
+          '<path d="M44 6v4M44 30v4M30 20h4M54 20h4M34 10l3 3M51 27l3 3M34 30l3-3M51 13l3-3"/></g>'
+          '<path d="M300 18c3-3 6-3 9 0M314 14c2-2 4-2 6 0" stroke-width="1"/>'
+          '<path d="M4 40c60-6 120-6 180-2s120 4 172-1" stroke-width="1.4"/></svg>')
 
 
 def _esc(v) -> str:
@@ -426,7 +484,7 @@ def _admit(*, owner_only: bool = True):
 
 def body(v: dict, *, action: str = "/app/review", heading: str = "Morning Review",
          show_money: bool = False,
-         box: bool = False) -> tuple[str, int]:
+         box: bool = False, picker: bool = True) -> tuple[str, int]:
     """The review itself — everything inside the chrome, and the status it should be served with.
 
     ONE BUILDER, TWO SURFACES. The same review is drawn on the app's first tab and on
@@ -450,8 +508,9 @@ def body(v: dict, *, action: str = "/app/review", heading: str = "Morning Review
     # INSIDE THE BOX, THE BOX'S SHELL SAYS THE TITLE. `chrome()` draws one h1 and the menu; the
     # review keeps only its day picker, and its colours come from the box's tokens (`on-box`). In
     # the lead app's tab it keeps its own heading and its own dark defaults, unchanged.
-    head = (f'<div class="rv-top">{_picker(v, action)}</div>' if box else
-            f'<div class="rv-top"><h1>{_esc(heading)}</h1>{_picker(v, action)}</div>')
+    days = _picker(v, action) if picker else ""
+    head = ((f'<div class="rv-top">{days}</div>' if days else "") if box else
+            f'<div class="rv-top"><h1>{_esc(heading)}</h1>{days}</div>')
     open_ = f'<style>{CSS}</style><div class="rv{" on-box" if box else ""}">'
 
     if not v["exists"]:
@@ -492,17 +551,112 @@ def body(v: dict, *, action: str = "/app/review", heading: str = "Morning Review
     return f"{open_}{head}{lede}{segs}{money}</div>", 200
 
 
-def render(day: str, now: datetime | None = None) -> tuple[str, int]:
+_LOCAL = re.compile(r"^/(?![/\\])[^\s\\]*$")
+
+
+def _brief_items(heading: str, items: list, *, moving: bool = False) -> str:
+    """One numbered list, or nothing at all when it is empty: no heading over an empty list (owner,
+    2026-09-29: "If a line doesn't have data, it should not be displayed")."""
+    rows = []
+    for i, it in enumerate(items or [], 1):
+        title, why = str(it.get("title") or "").strip(), str(it.get("why") or "").strip()
+        if moving:
+            # WHAT A MACHINE DID reads machine first: "Lead Machine" over "7 companies found".
+            title, why = (str(it.get("machine") or "").strip() or title), (title if it.get("machine") else why)
+        if not title:
+            continue
+        href = str(it.get("href") or "")
+        # A LINK ONLY EVER STAYS ON THIS BOX: a path, never "//elsewhere" or "/\\elsewhere" (both leave the site
+        # in a browser) and never a scheme. Anything else is drawn as words.
+        head = (f'<a class="mr-t" href="{_esc(href)}">{_esc(title)}</a>' if _LOCAL.match(href) else
+                f'<span class="mr-t">{_esc(title)}</span>')
+        rows.append(f'<li><span class="mr-n">{i:02d}</span><div>{head}'
+                    + (f'<p class="mr-w">{_esc(why)}</p>' if why else "") + '</div></li>')
+    if not rows:
+        return ""
+    return f'<section class="mr-sec"><h2>{_esc(heading)}</h2><ol>{"".join(rows)}</ol></section>'
+
+
+def brief_html(b: dict | None, *, live: bool, first: str = "") -> str:
+    """The light page: the day's quote, a morning drawn small, the good news, then what is worth his time,
+    what is already moving and ideas to try. Exactly the words of core/review_brief.py's contract."""
+    if not b:
+        return ""
+    lists = (_brief_items("Worth your time today", b.get("worth"))
+             + _brief_items("Already moving", b.get("moving"), moving=True)
+             + _brief_items("Ideas to try", b.get("ideas")))
+    good = str(b.get("good_news") or "").strip()
+    # `first` IS DAY ONE'S SENTENCE, from report.view: no report yet, and when the first one comes.
+    quiet = "" if lists else (
+        f'<p class="mr-quiet">{_esc(first)}</p>' if first else
+        '<p class="mr-quiet">A calm start. Nothing new needs you this morning.</p>' if live else
+        '<p class="mr-quiet">A quiet day. Nothing new needed you.</p>')
+    sign = ('<p class="mr-sign">From your box. The ideas come from its AI, based only on yesterday&rsquo;s '
+            'numbers.</p>' if b.get("ideas_from") == "ai" and b.get("ideas") else "")
+    quote = str(b.get("quote") or "").strip()
+    return (f'<style>{BRIEF_CSS}</style><div class="mr"><section class="mr-band">'
+            + (f'<p class="mr-quote">&ldquo;{_esc(quote)}&rdquo;</p>' if quote else "")
+            + _SCENE + (f'<p class="mr-good">{_esc(good)}</p>' if good else "")
+            + '</section>' + lists + quiet + sign + '</div>')
+
+
+def _brief_for(day: str, live: bool, now: datetime | None):
+    """WHICH MORNING'S BRIEF. The menu's Morning Review is this morning's, about yesterday: the one the email
+    sent and links to. A day's own address is that day's. A brief is never about a day still going on, whose
+    plain line would begin "Yesterday"."""
+    try:
+        from core import review_brief
+        about = (report.today(now) - _timedelta(days=1)) if live else _date.fromisoformat(day)
+        return review_brief.for_page(about, now)
+    except Exception as e:                       # noqa: BLE001 — the page still renders its numbers
+        log.warning("review.brief_unavailable", error=type(e).__name__)
+        return None
+
+
+def _stored_brief(day: str) -> bool:
+    try:
+        from core import review_brief
+        return review_brief.get(day) is not None
+    except Exception:                            # noqa: BLE001
+        return False
+
+
+def render(day: str, now: datetime | None = None, *, live: bool | None = None) -> tuple[str, int]:
     """The page for one day, in the dash chrome. ONE read — `report.view` — which has already
     decided live/final/stale, built the picker and counted what needs him."""
     v = report.view(day, now)
-    inner, status = body(v, show_money=_dash.privileged(), box=True)
+    live = v["live"] if live is None else live
+    # A PAST DAY IS ITS OWN STORED BRIEF OR NONE. A preview of a past day is built from TODAY's decisions (what
+    # needs him now), so drawing one showed today's list under that day's date (OSDev1's review of #1782). A
+    # day with no stored brief says so plainly, above its numbers; with no numbers either, it is the 404.
+    b = _brief_for(day, live, now) if (live or _stored_brief(day)) else None
+    page = brief_html(b, live=live, first="" if v["exists"] or v["days"][1:] else str(v.get("empty_line") or ""))
+    if not page:                                 # no brief to draw: the numbers page, as it was
+        page, status = body(v, show_money=_dash.privileged(), box=True)
+        if not live and v["exists"]:
+            page = (f'<style>{BRIEF_CSS}</style><div class="mr"><p class="mr-quiet mr-none">No Morning Review was '
+                    f'written for {_esc(v.get("label") or day)}. Here are that day&rsquo;s numbers.</p></div>' + page)
+    else:
+        # THE LIGHT PAGE FIRST, THE NUMBERS ONE TAP DOWN. The owner asked for a page that motivates, not "such a
+        # harsh looking report"; the per-machine detail, its charts and the spend stay, closed, under it, and
+        # only when there are numbers to show: an empty fold is a dead area (owner, 2026-09-29).
+        inner, status = body(v, show_money=_dash.privileged(), box=True, picker=False)
+        if len(v.get("days") or []) > 1:
+            page += f'<div class="mr-days"><span>Another morning</span>{_picker(v)}</div>'
+        if v["exists"]:
+            page += (f'<details class="mr-more"><summary>{"Today so far, in full" if live else "The full numbers"}'
+                     f'</summary>{inner}</details>')
+        status = 200 if (live or not b.get("empty") or v["exists"]) else status
     # THE BOX'S SHELL, NOT THE OPERATOR CONSOLE. This is the page the 8 AM notification opens on a
     # buyer's box; it wore `page()`, the dark console, while every other buyer screen wears the box's
     # look (owner's order, 2026-09-24, relayed by OSDev1). Now it has the menu and the tokens.
     from core.dash.home import chrome
-    return chrome("/app/review", title="Morning Review",
-                  lede="What needs you, and what your box did.", body=inner), status
+    # THE MORNING IT WAS READ, from the brief that went out; a past day with no stored brief (before these
+    # existed) is named as the day it is about, since a preview carries today's date.
+    stored = bool(b) and not live and _stored_brief(day)
+    lede = ((b or {}).get("date_label") if (live or stored) else v.get("label")) or \
+        "What needs you, and what your box did."
+    return chrome("/app/review", title="Morning Review", lede=lede, body=page), status
 
 
 @blueprint.get("/app/review")
@@ -522,7 +676,8 @@ def review_day(day: str):
     refused = _admit()
     if refused is not None:
         return refused
-    body, status = render(day)
+    # TODAY'S OWN ADDRESS IS THE LIVE PAGE (the day picker offers today first): its brief is this morning's.
+    body, status = render(day, live=True if day == report.today().isoformat() else None)
     return body, status
 
 

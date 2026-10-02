@@ -171,6 +171,188 @@ def scan_token(text: str) -> tuple[str, bool]:
     return (tok, complete) if len(tok) >= 30 else ("", False)
 
 
+_CSI = re.compile(r"\[([0-9;?<>=]*)[ -/]*([@-~])")
+DEFAULT_COLUMNS = 80      # what the CLI lays out for when the pty reports no size, which is how the helper opens it
+
+
+def _draw(raw: bytes, width: int = DEFAULT_COLUMNS) -> tuple[list[str], list[list[int]]]:
+    """What a terminal would SHOW for this output: its rows, as text.
+
+    THE CLI DRAWS A SCREEN, IT DOES NOT PRINT LINES. Measured 2026-10-02 on the real 2.1.278 `setup-token`, on a pty
+    the way this helper opens it, answered by a local stand-in for Anthropic's token server with a 108-character
+    token: the token is drawn as 79 characters, then `\r\x1b[1B` (back to column 0, down one row), a space of
+    indent and the last 29, then `\r\x1b[1C\x1b[2B` before "Store this token securely". Strip the escapes and you
+    get the two halves joined by a SPACE and the sentence glued to the end ("...uIAAStore"). Read as text, that is a
+    79-character token: refused as incomplete, on every sign-in, which is what the owner was shown that night.
+    So the output is replayed into rows the way a terminal would place it, and the token is read off those rows.
+
+    Cursor moves (A B C D E F G d H f), erase line and erase display (K J), save and restore (ESC 7, ESC 8) are
+    followed; colours, modes and hyperlink escapes draw nothing and are skipped. An escape still arriving at the end
+    of what has been read draws nothing yet.
+
+    Returns the rows and, for every cell, WHEN it was drawn (the count of characters drawn before it; -1 never).
+    """
+    text = raw.decode("utf-8", "replace")
+    rows: dict[int, list[str]] = {}
+    when: dict[int, list[int]] = {}
+    drawn = 0
+    r = c = 0
+    saved = (0, 0)
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\x1b":
+            if i + 1 >= n:
+                break
+            nx = text[i + 1]
+            if nx == "[":
+                m = _CSI.match(text, i + 1)
+                if not m:
+                    break                                # the rest of this escape has not arrived
+                i = m.end()
+                p, fin = m.group(1), m.group(2)
+                if p[:1] in ("?", "<", ">", "="):
+                    continue                             # a mode switch: it draws nothing
+                nums = [int(x) if x.isdigit() else 0 for x in p.split(";")] if p else []
+                a = (nums[0] if nums else 0) or 1
+                if fin == "A":
+                    r = max(0, r - a)
+                elif fin == "B":
+                    r += a
+                elif fin == "C":
+                    c = min(width - 1, c + a)
+                elif fin == "D":
+                    c = max(0, c - a)
+                elif fin == "E":
+                    r, c = r + a, 0
+                elif fin == "F":
+                    r, c = max(0, r - a), 0
+                elif fin == "G":
+                    c = min(width - 1, a - 1)
+                elif fin == "d":
+                    r = a - 1
+                elif fin in "Hf":
+                    r = (nums[0] or 1) - 1 if nums else 0
+                    c = min(width - 1, (nums[1] or 1) - 1) if len(nums) > 1 else 0
+                elif fin == "K":
+                    line, at = rows.setdefault(r, []), when.setdefault(r, [])
+                    k = nums[0] if nums else 0
+                    if k == 0:
+                        del line[c:], at[c:]
+                    elif k == 1:
+                        line[:c + 1] = [" "] * min(len(line), c + 1)
+                        at[:c + 1] = [-1] * min(len(at), c + 1)
+                    else:
+                        line.clear()
+                        at.clear()
+                elif fin == "J":
+                    k = nums[0] if nums else 0
+                    if k == 0:
+                        del rows.setdefault(r, [])[c:], when.setdefault(r, [])[c:]
+                        for q in [q for q in rows if q > r]:
+                            del rows[q], when[q]
+                    elif k == 1:
+                        for q in [q for q in rows if q < r]:
+                            del rows[q], when[q]
+                    else:
+                        rows.clear()
+                        when.clear()
+                continue
+            if nx == "]":                                # a hyperlink or title: its visible text is drawn separately
+                ends = [e for e in (text.find("\x07", i + 2), text.find("\x1b\\", i + 2)) if e != -1]
+                if not ends:
+                    break
+                e = min(ends)
+                i = e + (1 if text[e] == "\x07" else 2)
+                continue
+            if nx == "7":
+                saved = (r, c)
+            elif nx == "8":
+                r, c = saved
+            elif nx in "()":
+                i += 1                                   # a character-set choice takes one more character
+            i += 2
+            continue
+        if ch == "\r":
+            c = 0
+        elif ch == "\n":
+            r, c = r + 1, 0                              # the pty turns a newline into CR LF on its way out
+        elif ch == "\b":
+            c = max(0, c - 1)
+        elif ch == "\t":
+            c = min(width - 1, (c // 8 + 1) * 8)
+        elif ch >= " ":
+            if c >= width:                               # the terminal wraps a full row onto the next
+                r, c = r + 1, 0
+            line, at = rows.setdefault(r, []), when.setdefault(r, [])
+            if len(line) <= c:
+                line.extend(" " * (c + 1 - len(line)))
+                at.extend([-1] * (c + 1 - len(at)))
+            line[c], at[c] = ch, drawn
+            drawn += 1
+            c += 1
+        i += 1
+    top = max(rows) if rows else -1
+    return ["".join(rows.get(q, [])) for q in range(top + 1)], [when.get(q, []) for q in range(top + 1)]
+
+
+def screen(raw: bytes, width: int = DEFAULT_COLUMNS) -> list[str]:
+    """The rows a terminal would show for this output, as text (see `_draw`)."""
+    return [row.rstrip() for row in _draw(raw, width)[0]]
+
+
+def token_on_screen(raw: bytes, width: int = DEFAULT_COLUMNS) -> str:
+    """The token as the CLI drew it, joined across the rows it wrapped onto; "" if there is none.
+
+    ONLY CHARACTERS DRAWN ONE AFTER ANOTHER, IN ONE GO. The CLI draws its new frame over the old one, so until it
+    has finished, the cells beside and below a half-drawn token still hold the OLD frame: measured on the real
+    output cut mid-token, the row read "...tY9uI0oPcode_challenge_method=S256&state=..." (the sign-in link's tail).
+    Those are token-shaped characters. Each cell remembers when it was drawn, so the token stops where the drawing
+    stopped, and a wrapped piece is joined only when it was drawn straight after the row before it (its indent
+    between). Old cells are never part of a token, so a token cut short is only ever SHORTER, never wrong: and too
+    short is refused by `box_secrets.put_claude_oauth`, so it is never stored.
+    """
+    rows, when = _draw(raw, width)
+    for i, row in enumerate(rows):
+        m = _TOKEN_START.search(row)
+        if not m:
+            continue
+        at = when[i]
+        start, end = m.start(), m.start() + 1
+        while end < m.end() and at[end] == at[end - 1] + 1:
+            end += 1
+        tok, j, last = row[start:end], i, at[end - 1]
+        while end >= width and j + 1 < len(rows):        # it filled its row: the rest may be on the next one
+            nxt, nat = rows[j + 1], when[j + 1]
+            body = nxt.lstrip(" ")
+            k = len(nxt) - len(body)
+            piece = _TOKEN_LINE.match(body)
+            # drawn straight after the row above, with nothing but its indent drawn in between
+            if not piece or nat[k] <= last or nat[k] - last > k + 1:
+                break
+            e = k + 1
+            while e < k + piece.end() and nat[e] == nat[e - 1] + 1:
+                e += 1
+            if nxt[e:].strip() and e == k + piece.end():
+                break                                    # the row goes on with more than the token: prose
+            tok += nxt[k:e]
+            j, end, last = j + 1, e, nat[e - 1]
+        return tok if len(tok) >= 30 else ""
+    return ""
+
+
+def _pty_width(fd: int) -> int:
+    """The columns the CLI lays out for: the pty's own size, or the CLI's default when the pty reports none."""
+    try:
+        import fcntl
+        import struct
+        import termios
+        cols = struct.unpack("HHHH", fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8))[1]
+    except Exception:                                    # noqa: BLE001 — a size we cannot read is the default
+        cols = 0
+    return cols or DEFAULT_COLUMNS
+
+
 def redact(text: str) -> str:
     """Everything secret-shaped, replaced — before a transcript is written or read.
 
@@ -819,6 +1001,11 @@ def _serve(d: pathlib.Path) -> int:
         return fail("The sign-in stopped before the code reached it. Please try again.")
 
     # ── 3. the token, or the reason there is not one ─────────────────────────────────────────
+    # READ OFF THE SCREEN, AND ONLY ONCE CLAUDE HAS FINISHED. `screen` says why the screen and not the text. Waiting
+    # for the CLI to end is what makes "whole" certain: it exits by itself as soon as the token is drawn (measured on
+    # 2.1.278), so the wait costs nothing, and a frame can never be read half-drawn. Saving at first sight saved
+    # half a token on 2026-10-01; reading the text refused a whole one on 2026-10-02.
+    width = _pty_width(master)
     deadline = time.time() + FINISH_TIMEOUT_S
     while time.time() < deadline:
         r, _, _ = select.select([master], [], [], 1.0)
@@ -830,20 +1017,7 @@ def _serve(d: pathlib.Path) -> int:
             if not chunk:
                 break
             buf += chunk
-        text = _clean(buf)
-        # THE TOKEN IS SEARCHED FOR IN THE WHOLE TRANSCRIPT, not only the newest chunk: it is
-        # printed across a wrapped line, and a chunk boundary can land in the middle of it.
-        # WHOLE, AND NOTHING MORE — see find_token for the night this line cost. AND ONLY ONCE IT IS
-        # COMPLETE (scan_token): saving at first sight saved half a token on 2026-10-01.
-        found, complete = scan_token(text)
-        if found and (complete or proc.poll() is not None):
-            # BOTH HALVES OF THIS LINE WERE FIXED TONIGHT, BY TWO PEOPLE, AN HOUR APART, and a
-            # merge that kept either one alone would have quietly undone the other. `found` is
-            # #1422's — the token captured whole and nothing that came after it. The consent is
-            # this branch's — read from the login's own directory rather than asserted, because
-            # the tick a buyer is shown now sits beside Connect and has to survive the round trip.
-            return save(found)
-        flat = _squash(text)
+        flat = _squash(_clean(buf))
         if flat.count("pastecodehere") > asked_before:
             proc.kill()
             os.close(master)
@@ -860,21 +1034,31 @@ def _serve(d: pathlib.Path) -> int:
                 return fail(said + " Start again and paste the new code promptly.")
         keep_transcript()
         if proc.poll() is not None:
-            # THE CLI FINISHED AND WE FOUND NO TOKEN — a DIFFERENT failure from a refusal, and it
-            # is named separately because it points somewhere else entirely: either the CLI
-            # stopped PRINTING the token (its output format is not a contract we control) or it
-            # stored the credential itself. Reported as a timeout, that reads as our bug when it
-            # is a shape change, and the transcript beside it is what settles which.
-            keep_transcript()
-            os.close(master)
-            return fail("Claude finished the sign-in but this box did not recognise a token in "
-                        "what it printed. Nothing is wrong with your account. Paste a token "
-                        "instead, and tell support the sign-in ended without one.")
-    # THE OUTPUT ENDED OR TIME RAN OUT WITH A TOKEN ON SCREEN: the CLI closing its output ends the loop above before
-    # a last look, so look now. Too short a token is refused by `put_claude_oauth`, never stored.
-    found, _complete = scan_token(_clean(buf))
+            break                                        # it has finished: drain what it wrote, then read it below
+    # CLAUDE HAS FINISHED, OR TIME RAN OUT: drain whatever it wrote last, then read the token off the screen.
+    # Too short a token is refused by `put_claude_oauth`, never stored.
+    while True:
+        try:
+            r, _, _ = select.select([master], [], [], 0.2)
+            chunk = os.read(master, 65536) if r else b""
+        except OSError:
+            chunk = b""
+        if not chunk:
+            break
+        buf += chunk
+    found = token_on_screen(buf, width)
     if found:
         return save(found)
+    if proc.poll() is not None:
+        # THE CLI FINISHED AND NO TOKEN IS ON ITS SCREEN — a DIFFERENT failure from a refusal, and it is named
+        # separately because it points somewhere else entirely: either the CLI stopped PRINTING the token (its
+        # output format is not a contract we control) or it stored the credential itself. Reported as a timeout,
+        # that reads as our bug when it is a shape change, and the transcript beside it is what settles which.
+        keep_transcript()
+        os.close(master)
+        return fail("Claude finished the sign-in but this box did not recognise a token in "
+                    "what it printed. Nothing is wrong with your account. Paste a token "
+                    "instead, and tell support the sign-in ended without one.")
     if proc.poll() is None:
         proc.kill()
     os.close(master)

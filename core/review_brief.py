@@ -1,0 +1,437 @@
+"""The Morning Review, as one light page: a quote, a good-news line, what's worth his time, what's moving, ideas.
+
+docs/SCOPE_MORNING_REVIEW_V2.md, approved by the owner 2026-10-01 ("Ok go"). His words that shaped it:
+  * "display the data points that we have and make suggestions on how to improve"
+  * "Light and optimistic. That's what we want. We want to motivate and inspire people."
+  * "if they're stale information in there that they can't instantly change then we don't continue to harass
+    and annoy them every day."
+  * "a short motivational quote for every day of the year and it goes out to everybody. That should be the
+    headline"
+
+WHAT THIS IS. A rendering of the rows the reporters already store (core/report.py). A reporter needs no change:
+three OPTIONAL fields on a needs_you item sharpen it (below), and `m.reporter` keeps its SDK promise. The brief for a morning is BUILT ONCE, when the review goes out, and STORED
+as one more row of the day it is about (`daily_reports`, machine "brief"), so the email, the app page, the
+mobile notification and the owner's AI read the same words, and the page never pays for the AI.
+
+THE CONTRACT (what `get` and `build` return; WebDev2's page draws exactly this):
+
+    {
+      "about":      "YYYY-MM-DD",            the day the review is about (yesterday)
+      "date_label": "Thursday · October 1, 2026",   the morning it is read, on the buyer's clock
+      "quote":      "A new month, a clean slate, a bright start.",
+      "good_news":  "…" | "",                one optimistic sentence on yesterday; "" when there is none
+      "worth":      [item …],                worth your time today: decisions only he can make, new or changed
+      "moving":     [item …],                what the machines did, one per machine, only what happened
+      "ideas":      [item …],                two or three from the box's AI, grounded in the numbers above
+      "ideas_from": "ai" | "",               "ai" when the ideas came from the box's AI
+      "empty":      True | False,            nothing in worth, moving or ideas: no email goes out
+      "link":       "https://…/app/review/YYYY-MM-DD",
+      "built_at":   ISO time,
+    }
+    item = {"title": str, "why": str, "href": str, "machine": str}   (href "" when there is nowhere to go)
+
+NEVER THE SAME NAG TWICE (owner, 2026-10-01). A decision is in `worth` when it is new, or when its number has
+gone up enough that something really changed. One that sits unchanged ("152 scripts waiting") is said once, then
+stays on its machine's own screen. The box remembers what it has seen (`SEEN`, box settings); a key not seen for
+FORGET_DAYS counts as new again. An idea is not offered again within IDEA_DAYS. A needs_you item may carry:
+    "key":    a stable name for it (else its words, numbers out, plurals folded)
+    "value":  its count (else the number its text OPENS with; a number mid-sentence is an age, not a count)
+    "person": True when the count is people waiting on him: any rise is news ("a new message always counts")
+
+SPEND (scope decision 3): over half the monthly ceiling, or a vendor near or at its cap, is worth his time too.
+
+NO AI, NO PROBLEM. With no AI signed in, the AI call refused, the ceiling reached, or an answer that fails the
+checks, the review still goes out on time with a plain good-news line and no ideas.
+"""
+from __future__ import annotations
+
+import json
+import math
+import os
+import re
+from datetime import date, datetime, timedelta, timezone
+
+from core import report, state
+from core.logging import get_logger
+
+log = get_logger(__name__)
+
+BRIEF = "brief"                 # the reserved machine key of the stored brief (report.read leaves it out)
+NS = "core"
+SEEN = "review_seen"            # {key: {"v": number | None, "day": "YYYY-MM-DD"}}
+IDEAS_SEEN = "review_ideas"     # {normalised idea title: "YYYY-MM-DD"}
+FORGET_DAYS = 14
+IDEA_DAYS = 7
+MAX_WORTH, MAX_MOVING, MAX_IDEAS = 5, 5, 3
+AI_TASK = "review"              # config models: -> haiku
+
+# THE WORDS RESERVED FOR THE RECEPTIONIST MACHINE (CLAUDE.md, owner 2026-09-22) never reach a buyer from here,
+# whoever wrote them. An AI line carrying one is dropped.
+_RESERVED = re.compile(r"\b(phone|phones|ring|rings|ringing|call|calls|calling|called|dial|dialing|line|lines|"
+                       r"voice|voices|engine)\b", re.I)
+_NUM = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+# ── what happened, in sentences ─────────────────────────────────────────────────────────────────────────────
+def _phrase(item: dict) -> str:
+    """One happened item as words: "7 companies found", "PageSpeed score: 87". "" when it has no value."""
+    text, v = str(item.get("text") or "").strip(), item.get("value")
+    if not text:
+        return ""
+    if v in (None, ""):
+        return text
+    if not report.has_value(v):
+        return ""
+    v = report._fmt_value(v)
+    if str(v) in _NUM.findall(text):                    # "4 reels published" already says it; never "…: 4"
+        return text
+    return f"{v} {text}" if text[:1].islower() else f"{text}: {v}"
+
+
+def _moving(rows: list[dict]) -> list[dict]:
+    out = []
+    for r in rows:
+        if r.get("error"):
+            continue
+        bits = [p for p in (_phrase(x) for x in r.get("happened") or []) if p]
+        if not bits:
+            continue
+        title = ", ".join(bits[:3])
+        out.append({"title": title[:1].upper() + title[1:], "why": "", "href": "",
+                    "machine": str(r.get("title") or r.get("machine") or "")})
+    return out[:MAX_MOVING]
+
+
+# ── worth your time: new or changed, never the same nag twice ───────────────────────────────────────────────
+# AN ITEM IS ITS MACHINE'S `key` WHEN IT GIVES ONE, else its words with the numbers taken out and the plurals
+# folded, so "1 reply waiting" and "2 replies waiting" are one item and "X last ran 4d ago" is the same item on
+# day 5. Its COUNT is the item's `value`, else the number it OPENS with ("152 scripts"); a number inside the
+# sentence is an age or a date, never a count (OSDev1's review of #1779: "last ran 4d ago" read as a rise of one,
+# every morning, for 8 mornings).
+_FILLER = {"is", "are", "was", "were", "has", "have", "a", "an", "the"}
+_LEAD_NUM = re.compile(r"\s*(\d[\d,]*(?:\.\d+)?)")
+
+
+def _singular(w: str) -> str:
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def _key(machine: str, text: str, given=None) -> str:
+    if given:
+        return f"{machine}:{given}"
+    words = re.findall(r"[a-z#]+", _NUM.sub("#", text.lower()))
+    return f"{machine}:{' '.join(_singular(w) for w in words if w not in _FILLER)}"
+
+
+def _value(item: dict, text: str):
+    v = item.get("value")
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    m = _LEAD_NUM.match(text)
+    return float(m.group(1).replace(",", "")) if m else None
+
+
+def _changed_enough(before, now, person: bool = False) -> bool:
+    """Has a standing count gone up enough that something new really happened? A step of at least one for a
+    small count, and of a tenth for a large one, so "152 scripts" becoming 153 stays quiet. A count of PEOPLE
+    waiting on him rises by any amount and it is news: the scope's "a new message from a person always counts"."""
+    if before is None or now is None:
+        return False
+    if person:
+        return now > before
+    return now - before >= max(1.0, math.ceil(before * 0.10))
+
+
+def _candidates(rows: list[dict]) -> list[dict]:
+    out = []
+    for r in rows:
+        machine = str(r.get("machine") or "")
+        title = str(r.get("title") or machine)
+        if r.get("error"):
+            # A MACHINE THAT COULD NOT BE READ IS SAID, not silently left out: a morning where every reporter
+            # failed would otherwise read as a quiet one and be marked sent.
+            out.append({"key": f"unread:{machine}", "v": None, "person": False,
+                        "item": {"title": f"Couldn't read {title} this morning",
+                                 "why": "Its numbers will be back here once it reports again.", "href": "",
+                                 "machine": title}})
+            continue
+        items = list(r.get("needs_you") or [])
+        # A FAILING CHECK IS SOMETHING TO ACT ON; a warning or a set-up prompt is not (it is a standing nag).
+        items += [w for w in r.get("watch") or [] if w.get("state") == "fail"]
+        for it in items:
+            text = str(it.get("text") or "").strip()
+            if not text or it.get("truncated"):
+                continue
+            out.append({"key": _key(machine, text, it.get("key")), "v": _value(it, text),
+                        "person": bool(it.get("person")),
+                        "item": {"title": text, "why": str(it.get("why") or ""), "href": str(it.get("href") or ""),
+                                 "machine": title}})
+    return out
+
+
+def _meter_candidates(meters: dict | None) -> list[dict]:
+    """SPEND, ONLY WHEN IT'S WORTH READING (scope decision 3, approved): over half the monthly ceiling, or a vendor
+    near or at its cap. Said in plain words; the meters' own lines are written for the operator."""
+    if not meters or meters.get("error"):
+        return []
+    out = []
+    figs = meters.get("figures") or {}
+    spend = (figs.get("spend") or {}).get("value")
+    ceiling = (figs.get("ceiling") or {}).get("value")
+    if isinstance(spend, (int, float)) and isinstance(ceiling, (int, float)) and ceiling > 0 and spend > ceiling / 2:
+        out.append({"key": "meters:spend", "v": float(spend), "person": False,
+                    "item": {"title": f"${spend:.0f} of your ${ceiling:.0f} monthly budget is used",
+                             "why": "Past the halfway mark for this cycle; worth a glance at what is using it.",
+                             "href": "", "machine": "Spend"}})
+    for w in meters.get("watch") or []:
+        vendor, pct = str(w.get("vendor") or ""), w.get("pct")
+        if not vendor or w.get("state") not in ("fail", "warn"):
+            continue
+        if w.get("state") == "fail":
+            out.append({"key": f"meters:cap:{vendor}", "v": None, "person": False,
+                        "item": {"title": f"{vendor} has reached its monthly limit",
+                                 "why": "It picks up again when the cycle resets, or raise its limit to keep going.",
+                                 "href": "", "machine": "Spend"}})
+        elif isinstance(pct, (int, float)):
+            out.append({"key": f"meters:near:{vendor}", "v": float(pct), "person": False,
+                        "item": {"title": f"{vendor} has used {pct:.0f}% of its monthly limit",
+                                 "why": "", "href": "", "machine": "Spend"}})
+    return out
+
+
+def _worth(rows: list[dict], about: date, seen: dict, meters: dict | None = None) -> tuple[list[dict], dict]:
+    """The items to show, and the remembered state after seeing today's. Pure: the caller stores it."""
+    seen = {k: v for k, v in (seen or {}).items()
+            if isinstance(v, dict) and _days_since(v.get("day"), about) <= FORGET_DAYS}
+    show = []
+    for c in _candidates(rows) + _meter_candidates(meters):
+        was = seen.get(c["key"])
+        if was is None or _changed_enough(was.get("v"), c["v"], c["person"]):
+            show.append(c["item"])
+        seen[c["key"]] = {"v": c["v"], "day": about.isoformat()}
+    return show[:MAX_WORTH], seen
+
+
+def _days_since(d, about: date) -> int:
+    try:
+        return (about - date.fromisoformat(str(d))).days
+    except (TypeError, ValueError):
+        return 10 ** 6
+
+
+# ── the box's AI: one good-news sentence and two or three ideas ─────────────────────────────────────────────
+_SYSTEM = ("You write two parts of a small business owner's morning review: one warm, optimistic sentence about "
+           "what went well yesterday, and two or three short ideas for what they could do differently. Use ONLY "
+           "the facts given; never invent a number, a name or an event. Every idea must be something they can "
+           "do today, and must name a number from the facts. Never scold, never list problems, never repeat an "
+           "idea from the 'already suggested' list. Plain, friendly words; no jargon, no exclamation marks. "
+           "Reply with JSON only: {\"good_news\": \"…\", \"ideas\": [{\"title\": \"…\", \"why\": \"…\"}]}. "
+           "A title is under 60 characters; a why is one or two sentences.")
+
+
+def _facts(rows_y: list[dict], rows_t: list[dict], worth: list[dict], moving: list[dict]) -> dict:
+    def figs(r):
+        return {k: v.get("value") for k, v in (r.get("figures") or {}).items()
+                if isinstance(v, dict) and report.has_value(v.get("value"))}
+    return {
+        "what_happened_yesterday": [f"{m['machine']}: {m['title']}" for m in moving],
+        "worth_their_time_today": [f"{w['machine']}: {w['title']}" for w in worth],
+        "figures": {str(r.get("title") or r.get("machine")): figs(r) for r in rows_y + rows_t if figs(r)},
+    }
+
+
+def _grounded(text: str, facts_text: str) -> bool:
+    """Every number in an AI line must appear in the facts it was given, and no reserved word may appear."""
+    if _RESERVED.search(text):
+        return False
+    have = {n.replace(",", "") for n in _NUM.findall(facts_text)}
+    return all(n.replace(",", "") in have for n in _NUM.findall(text))
+
+
+def _ai(facts: dict, recent_ideas: list[str], think=None) -> tuple[str, list[dict]]:
+    """("good news", [ideas]) from one cheap call, or ("", []) when there is no AI or its answer fails a check."""
+    if not (facts["what_happened_yesterday"] or facts["worth_their_time_today"]):
+        return "", []
+    prompt = json.dumps({"facts": facts, "already_suggested": recent_ideas[:20]}, ensure_ascii=False)
+    try:
+        if think is None:
+            # A TEST NEVER SPENDS (the AIOS_HERMETIC_TEST convention, as core/slack.py and core/checkin.py): the
+            # suite passes `think` when it wants the AI path.
+            if os.environ.get("AIOS_HERMETIC_TEST"):
+                return "", []
+            from core import brain
+            ready, why = brain.can_think()
+            if not ready:
+                log.info("review_brief.no_ai", why=why[:120])
+                return "", []
+            think = brain.think
+        # A BOUNDED WAIT: this runs in the worker's send tick, and a review a minute late with no ideas beats one
+        # that holds every other periodic.
+        raw = think(AI_TASK, prompt, system=_SYSTEM, max_tokens=600, timeout=60)
+        got = json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
+    except Exception as e:                                   # noqa: BLE001 — no AI is a plain review, on time
+        log.info("review_brief.ai_skipped", why=type(e).__name__)
+        return "", []
+    facts_text = json.dumps(facts, ensure_ascii=False)
+    good = str(got.get("good_news") or "").strip()[:240]
+    if not _grounded(good, facts_text):
+        good = ""
+    ideas = []
+    for i in got.get("ideas") or []:
+        if not isinstance(i, dict):
+            continue
+        t, w = str(i.get("title") or "").strip()[:80], str(i.get("why") or "").strip()[:300]
+        if t and _grounded(t + " " + w, facts_text):
+            ideas.append({"title": t, "why": w, "href": "", "machine": ""})
+    return good, ideas[:MAX_IDEAS]
+
+
+def _norm_idea(t: str) -> str:
+    return re.sub(r"[^a-z ]", "", t.lower()).strip()
+
+
+# ── build, store, read ──────────────────────────────────────────────────────────────────────────────────────
+def _label(d: date) -> str:
+    return f"{d:%A} · {d:%B} {d.day}, {d.year}"
+
+
+def _morning(about: date, now: datetime) -> date:
+    """The morning the brief is read, ON THE BUYER'S CLOCK (`report._send_clock`, the same answer the send uses).
+    A sold box runs on UTC: at 8am in Sydney the box still says yesterday, and the date and quote must not
+    (OSDev1's review of #1779). A brief about an older day is read the morning after it."""
+    read = report._send_clock(now).date()
+    return read if about < read <= about + timedelta(days=2) else about + timedelta(days=1)
+
+
+def _compose(about: date, now: datetime | None, *, think=None, ai: bool = True) -> tuple[dict, dict, dict]:
+    """(brief, what was seen, the idea log after it). Pure apart from the reads and the one AI call: the caller
+    decides whether anything is remembered."""
+    now = now or report.now_local()
+    t = report.today(now)
+    rows_y = [r for r in report.read(about) if r.get("machine") != report.METERS]
+    rows_t_all = report.read(t)
+    rows_t = [r for r in rows_t_all if r.get("machine") != report.METERS]
+    meters = next((r for r in rows_t_all if r.get("machine") == report.METERS), None)
+    from core import box_settings
+    seen = box_settings.get(NS, SEEN, default={}) or {}
+    worth, seen_after = _worth(rows_t, about, seen, meters)
+    moving = _moving(rows_y)
+    idea_log = {k: v for k, v in (box_settings.get(NS, IDEAS_SEEN, default={}) or {}).items()
+                if _days_since(v, about) < IDEA_DAYS}
+    good, ideas = ("", [])
+    if ai:
+        good, ideas = _ai(_facts(rows_y, rows_t, worth, moving), list(idea_log), think=think)
+        ideas = [i for i in ideas if _norm_idea(i["title"]) not in idea_log]
+    if not good and moving:
+        good = f"Yesterday, {moving[0]['machine']}: {moving[0]['title']}."     # plain, true, and never a zero
+    m = _morning(about, now)
+    brief = {
+        "about": about.isoformat(), "date_label": _label(m), "quote": _quote(m),
+        "good_news": good, "worth": worth, "moving": moving, "ideas": ideas,
+        "ideas_from": "ai" if ideas else "", "empty": not (worth or moving or ideas),
+        "link": report.page_url(about), "built_at": state._now(),
+    }
+    for i in ideas:
+        idea_log[_norm_idea(i["title"])] = about.isoformat()
+    return brief, seen_after, idea_log
+
+
+def _remember(seen_after: dict, idea_log: dict) -> None:
+    from core import box_settings
+    box_settings.put(NS, SEEN, seen_after, set_by="morning_review")
+    box_settings.put(NS, IDEAS_SEEN, idea_log, set_by="morning_review")
+
+
+def build(about: date, now: datetime | None = None, *, think=None, remember: bool = True) -> dict:
+    """The brief for the morning after `about`. Reads the stored rows: what happened from `about`'s, what needs
+    him from today's. `remember=False` builds a preview that changes nothing and asks no AI (the page, before
+    the send). The send goes through `ensure`, which stores it once."""
+    brief, seen_after, idea_log = _compose(about, now, think=think, ai=remember)
+    if remember:
+        _remember(seen_after, idea_log)
+    return brief
+
+
+def _quote(d: date) -> str:
+    from core import review_quotes
+    return review_quotes.quote_for(d)
+
+
+# THE ROW IS CLAIMED BEFORE THE AI IS ASKED (OSDev1's review of #1779: two sends at once paid for the AI twice and
+# both wrote "already seen"). The claim is a placeholder in the brief's own row; whoever inserts it builds, and
+# anyone else gets a preview. A claim older than STALE_CLAIM_S belongs to a build that died, and is taken over.
+# EACH CLAIM IS ITS OWN (OSDev1's re-review): a build slower than STALE_CLAIM_S may have been taken over while it
+# waited on the AI, so the final write lands only if the row still holds THIS claim, and only the build that
+# stored the brief records what was seen.
+_BUILDING = '{"building": true}'
+_CLAIM_LIKE = '{"building"%'
+STALE_CLAIM_S = 600
+
+
+def _claim() -> str:
+    import uuid
+    return json.dumps({"building": uuid.uuid4().hex})
+
+
+def _is_claim(text: str) -> bool:
+    return str(text or "").startswith('{"building"')
+
+
+def ensure(about: date, now: datetime | None = None, *, think=None) -> dict:
+    """The stored brief for `about`, building and storing it the first time. Once stored it never changes, so a
+    retried send, the page and the email all show the same words, and the AI is paid for once. Called by the
+    send whatever the channel (email, app, Slack), so a box with only the app remembers what it has shown."""
+    have = get(about)
+    if have is not None:
+        return have
+    d, mine = about.isoformat(), _claim()
+    stale = (datetime.now(timezone.utc) - timedelta(seconds=STALE_CLAIM_S)).isoformat()   # state._now()'s form
+    with state.connect() as c:
+        # final = 1, like every past day, so close_open_days never reopens the day for the claim.
+        held = c.execute("INSERT OR IGNORE INTO daily_reports (day, machine, report_json, written_at, final) "
+                         "VALUES (?, ?, ?, ?, 1)", (d, BRIEF, mine, state._now())).rowcount == 1
+        if not held:
+            held = c.execute("UPDATE daily_reports SET report_json = ?, written_at = ? WHERE day = ? AND machine = ? "
+                             "AND report_json LIKE ? AND written_at < ?",
+                             (mine, state._now(), d, BRIEF, _CLAIM_LIKE, stale)).rowcount == 1
+    if not held:
+        return get(about) or build(about, now, remember=False)
+    try:
+        brief, seen_after, idea_log = _compose(about, now, think=think)
+    except Exception:
+        with state.connect() as c:
+            c.execute("DELETE FROM daily_reports WHERE day = ? AND machine = ? AND report_json = ?", (d, BRIEF, mine))
+        raise
+    with state.connect() as c:
+        stored = c.execute("UPDATE daily_reports SET report_json = ?, written_at = ? WHERE day = ? AND machine = ? "
+                           "AND report_json = ?",
+                           (json.dumps(brief, sort_keys=True), state._now(), d, BRIEF, mine)).rowcount == 1
+    if not stored:
+        log.info("review_brief.claim_lost", about=d)
+        return get(about) or brief
+    _remember(seen_after, idea_log)
+    return brief
+
+
+def get(about: date | str) -> dict | None:
+    """The stored brief, or None (none yet, or one still being built). Pure SQL: the page's call."""
+    d = about.isoformat() if isinstance(about, date) else str(about)
+    with state.connect() as c:
+        row = c.execute("SELECT report_json FROM daily_reports WHERE day = ? AND machine = ?", (d, BRIEF)).fetchone()
+    if not row or _is_claim(row["report_json"]):
+        return None
+    try:
+        return json.loads(row["report_json"])
+    except ValueError:
+        return None
+
+
+def for_page(about: date | str, now: datetime | None = None) -> dict:
+    """What the page shows for `about`: the stored brief, or a preview of it (no AI, nothing remembered) for a
+    morning whose review hasn't gone out yet."""
+    d = date.fromisoformat(about) if isinstance(about, str) else about
+    return get(d) or build(d, now, remember=False)
