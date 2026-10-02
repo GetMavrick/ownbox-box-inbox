@@ -46,13 +46,26 @@ def sites() -> list[str]:
     so a box whose PostHog already holds two sites watches both without anyone typing them.
     """
     own = _own("sites") or []
-    out = [str(h).strip().lower() for h in own if isinstance(h, str) and _HOST.match(str(h).strip().lower())]
+    out = _one_each([str(h).strip().lower() for h in own
+                     if isinstance(h, str) and _HOST.match(str(h).strip().lower())])
     if out:
         return out
     out = [h for h in found() if _HOST.match(h)]
     aeo = str(box_settings.get(_AEO_NS, "host") or "").strip().lower()
-    if _HOST.match(aeo) and aeo not in out:
+    if _HOST.match(aeo):
         out.insert(0, aeo)
+    return _one_each(out)
+
+
+def _one_each(hosts: list[str]) -> list[str]:
+    """ONE SITE, ONE ENTRY (OSDev1's review of #1826): a host and its www twin are one site (posthog.host_is matches
+    both), so a list holding both spellings would give two lines each carrying the whole site's numbers. The first
+    spelling is kept, as typed."""
+    out: list[str] = []
+    for h in hosts:
+        bare = h[4:] if h.startswith("www.") else h
+        if not any((o[4:] if o.startswith("www.") else o) == bare for o in out):
+            out.append(h)
     return out
 
 
@@ -128,3 +141,27 @@ def sync_state() -> dict:
 
 def set_sync_state(**kw) -> None:
     box_settings.put(NS, "sync_state", {**sync_state(), **kw}, set_by="website")
+
+
+# ── outreach: Instantly, read only (docs/PLAN_OWNBOX_RUNS_ON_OWNBOX.md §5 step 3) ───────────────────────────────
+
+OUT_NS = "outreach"                              # box_settings namespace; storage name for keeps
+OUT_SECRET = "INSTANTLY_API_KEY_OUTREACH"        # the workspace's Instantly API v2 key, read scopes only
+
+
+def instantly():
+    """The Instantly connection in force, or None. ONE PLACE PER SETTING (OSDev1's A3): the key the owner pasted on the
+    Outreach card, and nothing else. The INSTANTLY_API_KEY in a box's .env belongs to the Lead Machine's own client
+    (marketing/lead_machine/instantly_client.py) and is never read here."""
+    from .instantly import Conn
+    key = box_secrets.get(OUT_SECRET) if box_secrets.is_set(OUT_SECRET) else ""
+    return Conn(key=key) if key else None
+
+
+def pull_state() -> dict:
+    s = box_settings.get(OUT_NS, "pull_state")
+    return s if isinstance(s, dict) else {}
+
+
+def set_pull_state(**kw) -> None:
+    box_settings.put(OUT_NS, "pull_state", {**pull_state(), **kw}, set_by="outreach")

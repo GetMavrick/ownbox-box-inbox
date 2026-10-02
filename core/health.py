@@ -98,7 +98,7 @@ def report() -> str:
         spent, cap = cost_guard.month_to_date_spend(), cost_guard.ceiling()
         budget = [f"claude ${spent:.2f}/${cap:.0f}"]
         for v in cost_guard.metered_vendors():
-            budget.append(f"{v} {cost_guard.vendor_usage(v):g}/{cost_guard.vendor_cap(v):g}u")
+            budget.append(f"{v} {cost_guard.vendor_usage(v):g}u/{cost_guard.vendor_limit_label(v)}")
         lines.append("• budget: " + " · ".join(budget))
     except Exception as e:  # noqa: BLE001
         lines.append(f"• (budget read degraded: {str(e)[:80]})")

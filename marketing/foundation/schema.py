@@ -1,5 +1,8 @@
 """The marketing foundation's own tables: a site's day, as numbers (docs/PLAN_ANALYTICS_FOUNDATION_PHASE1.md §2).
 
+The outreach source's tables (`out_*`) follow the same rules: keyed by Instantly's campaign id, replaced per
+(campaign, day) and per (campaign, week), read through the seam.
+
 One row per site and day, and the day's named things (conversions, pages, UTM sources, referring sites) in one
 items table keyed by kind. Every row carries its site, so two sites on one box never mix. A re-sync of a day
 replaces that day's rows (marketing/foundation/store.py), so the store is idempotent per (site, day).
@@ -61,4 +64,46 @@ CREATE TABLE IF NOT EXISTS outbound_mail (
 );
 CREATE INDEX IF NOT EXISTS idx_outbound_mail_due ON outbound_mail (status, next_at);
 CREATE INDEX IF NOT EXISTS idx_outbound_mail_tried ON outbound_mail (last_try_at);
+-- outreach_store.py: the outreach source (Instantly), read only. Every row is keyed by Instantly's campaign id, never
+-- its name, so a renamed campaign keeps its history (OSDev1's review); the name is a label, refreshed each pull.
+CREATE TABLE IF NOT EXISTS out_campaigns (
+    campaign_id TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    status      INTEGER,                      -- Instantly's: 0 draft, 1 active, 2 paused, 3 completed, ...
+    pulled_through TEXT,                      -- the last day its steps were pulled for; NULL until its backfill
+    synced_at   TEXT NOT NULL
+);
+-- one campaign's step on one of the buyer's days. The day's unique counts are that day's.
+CREATE TABLE IF NOT EXISTS out_step_days (
+    campaign_id TEXT NOT NULL,
+    day         TEXT NOT NULL,                -- YYYY-MM-DD, the buyer's calendar day
+    step        TEXT NOT NULL,                -- as Instantly numbers it; '' when it can't tell
+    sent        INTEGER NOT NULL DEFAULT 0,
+    opened      INTEGER NOT NULL DEFAULT 0,   -- unique, as are clicked and replied
+    clicked     INTEGER NOT NULL DEFAULT 0,
+    replied     INTEGER NOT NULL DEFAULT 0,
+    booked      INTEGER NOT NULL DEFAULT 0,
+    synced_at   TEXT NOT NULL,
+    PRIMARY KEY (campaign_id, day, step)
+);
+-- a week asked for AS A WEEK: unique counts never add up over days, so a week is never summed from out_step_days.
+-- step '' is the whole campaign (/campaigns/analytics); any other step is that step's (/campaigns/analytics/steps).
+CREATE TABLE IF NOT EXISTS out_weeks (
+    campaign_id   TEXT NOT NULL,
+    start_day     TEXT NOT NULL,
+    end_day       TEXT NOT NULL,              -- inclusive: seven of the buyer's days
+    step          TEXT NOT NULL,
+    sent          INTEGER NOT NULL DEFAULT 0,
+    contacted     INTEGER NOT NULL DEFAULT 0,
+    opened        INTEGER NOT NULL DEFAULT 0,
+    clicked       INTEGER NOT NULL DEFAULT 0,
+    replied       INTEGER NOT NULL DEFAULT 0,
+    bounced       INTEGER NOT NULL DEFAULT 0,
+    unsubscribed  INTEGER NOT NULL DEFAULT 0,
+    opportunities INTEGER NOT NULL DEFAULT 0,
+    booked        INTEGER NOT NULL DEFAULT 0,
+    synced_at     TEXT NOT NULL,
+    PRIMARY KEY (campaign_id, start_day, end_day, step)
+);
+CREATE INDEX IF NOT EXISTS idx_out_weeks_end ON out_weeks (end_day, step);
 """

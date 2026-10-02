@@ -63,10 +63,32 @@ def vendor_cap(vendor: str) -> float | None:
 
 
 def metered_vendors() -> list[str]:
-    """Vendors with a monthly_unit_cap configured."""
+    """Vendors whose usage every report shows: a monthly_unit_cap, or `metered: true` with no cap.
+
+    `metered: true` is for a paid vendor the owner has chosen not to cap (MyEmailVerifier,
+    owner 2026-09-26: "I just need to purchase more when we get low"). It is never enforced:
+    check_vendor still returns None for it. It exists so an uncapped vendor stays in the
+    spend line, the digest and the health card, because "buy more when we get low" needs
+    somebody to see the usage.
+    """
     vendors = get_config().get("vendors", {}) or {}
     return [v for v, cfg in vendors.items()
-            if (cfg or {}).get("monthly_unit_cap") is not None]
+            if (cfg or {}).get("monthly_unit_cap") is not None
+            or as_bool((cfg or {}).get("metered"), default=False)]
+
+
+def vendor_soft_goal(vendor: str) -> float | None:
+    """`vendors.<v>.soft_goal`: monthly units reported against, never enforced (owner 2026-09-26:
+    soft goals, reconsidered when they block something valuable)."""
+    g = (get_config().get("vendors", {}).get(vendor, {}) or {}).get("soft_goal")
+    return float(g) if g is not None else None
+
+
+def vendor_limit_label(vendor: str) -> str:
+    """How a report writes the vendor's ceiling: the cap, or 'no cap', plus any soft goal."""
+    cap, goal = vendor_cap(vendor), vendor_soft_goal(vendor)
+    out = f"{cap:g}" if cap is not None else "no cap"
+    return out + (f", goal {goal:g}" if goal is not None else "")
 
 
 def vendor_alerts_enabled(vendor: str) -> bool:

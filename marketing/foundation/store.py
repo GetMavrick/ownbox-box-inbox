@@ -9,15 +9,19 @@ from core import state
 
 def write_day(site: str, day: date, *, traffic: tuple[int, int, int], conversions: list[tuple[str, int, int]],
               pages: list[tuple[str, int]], utms: list[tuple[str, int]],
-              referrers: list[tuple[str, int, list[tuple[str, int]]]]) -> None:
-    """Replace everything stored for (site, day) in one transaction, so a reader never sees half a day."""
+              referrers: list[tuple[str, int, list[tuple[str, int]]]],
+              left_out: dict[str, int] | None = None, unchecked: int = 0) -> None:
+    """Replace everything stored for (site, day) in one transaction, so a reader never sees half a day. `left_out` is
+    the visits visitors.py left out, by reason; `unchecked` the kept visits whose address couldn't be checked."""
     d = day.isoformat()
     pv, visitors, sessions = (int(x or 0) for x in traffic)
     converted = sum(int(s or 0) for _, _, s in conversions)
     rows = ([(site, d, "conversion", name, int(s or 0), str(int(n or 0))) for name, n, s in conversions]
             + [(site, d, "page", path, int(n or 0), None) for path, n in pages]
             + [(site, d, "utm", src, int(n or 0), None) for src, n in utms]
-            + [(site, d, "referrer", ref, int(v or 0), json.dumps(pg)) for ref, v, pg in referrers])
+            + [(site, d, "referrer", ref, int(v or 0), json.dumps(pg)) for ref, v, pg in referrers]
+            + [(site, d, "left_out", why, int(n or 0), None) for why, n in (left_out or {}).items() if n]
+            + ([(site, d, "unchecked", "visits", int(unchecked), None)] if unchecked else []))
     with state.connect() as c:
         c.execute("DELETE FROM web_site_day_items WHERE site = ? AND day = ?", (site, d))
         c.executemany("INSERT OR REPLACE INTO web_site_day_items (site, day, kind, name, n, detail) "

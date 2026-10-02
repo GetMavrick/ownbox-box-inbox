@@ -166,19 +166,26 @@ vendors:
   # ever asks, every pre-send verify then returns a `capped` hold, and the day sends ZERO
   # while every guard still reports healthy. These credits are spendable ONLY by the send
   # path (drip.py, purpose='send'); every other caller defaults to discovery and cannot
-  # reach them. RAISE THIS ALONGSIDE THE EFFECTIVE SEND CAP — it is a floor of guaranteed
-  # pre-send verifies, one per send, and today the owner's `send cap 2` needs only 2.
+  # reach them. (Set to 0 below: with no daily cap there is nothing to reserve.)
+  # OWNER, 2026-09-26, replacing the 50/day above: "Stop saying that my email verifier can only
+  # spend 50 credits a day… I have 10,000 credits in the account. I just need to purchase more
+  # when we get low… We want better results and we're OK paying for them." And the same day: "don't
+  # put any limits that are just gonna hang around… Let's just not do the hard limit." So there is
+  # NO cap on this account: the credits in it are the budget. Every lookup is still recorded in the
+  # vendor ledger, so spend reports show the burn. The account balance itself is not read by any
+  # report; check it on the vendor dashboard before it runs low.
   mev_wallet:
-    daily_unit_cap: 50        # credits/day for the WHOLE account. 0 disables (monthly still applies).
-    send_reserve: 10          # of those 50, reserved for pre-send verification
+    daily_unit_cap: 0         # 0 = no daily cap (owner, 2026-09-26)
+    send_reserve: 0           # nothing to reserve when nothing is capped
 
   # Pre-send email verification (MyEmailVerifier — owner decision 2026-08-04, cheapest
-  # per API request). Metered in LOOKUPS. At the pinned 2/day send cap that is ~60 a
-  # month, so 500 leaves headroom for batch-scoring a list too while still refusing a
-  # runaway. The free tier refills 100 credits DAILY, which covers the send path outright.
-  # Raise only alongside daily_send_cap — they scale together, one lookup per send.
+  # per API request). Metered in LOOKUPS. Uncapped since 2026-09-26 (see mev_wallet above):
+  # usage is reported, never enforced.
   email_verify:
-    monthly_unit_cap: 500
+    # no monthly_unit_cap: uncapped on the owner's word, 2026-09-26 (see mev_wallet above).
+    # `metered: true` keeps it in every spend report (digest, health, watchdog, check_budget):
+    # "buy more when we get low" needs the usage seen. Reported, never enforced.
+    metered: true
     # DAILY PACING. Owner, 2026-09-12, after a cycle burn of 1247 of 1500 units: "We only have
     # 100 leads in the entire system!!! And we only try to add 20 per day so we shouldn't burn
     # more than 50 per day!!!!"
@@ -190,7 +197,7 @@ vendors:
     # finder_sweep 20, times twelve, plus verify_sweep 100 and the drip's 2. One day eats the
     # month. Enforced in email_verify.verify(), the single chokepoint all six callers use; a
     # breach returns the same 'capped' hold they already handle, and a hold never sends.
-    daily_unit_cap: 50          # units/day. 0 disables the daily cap (monthly still applies).
+    daily_unit_cap: 0           # 0 = no daily cap (owner, 2026-09-26)
     est_usd_per_unit: 0.0025    # published per-request rate; the daily free 100 cost $0
   # MyEmailVerifier LEADS API (list factory, OUTREACH_STACK_V5 §3) — same vendor
   # account as email_verify but a different credit economy: search 5, reveal 10,
@@ -199,14 +206,19 @@ vendors:
   # agency batches — the whole purchased balance (4,456) cannot be burned in one
   # runaway month.
   mev_leads:
-    monthly_unit_cap: 2000
+    # no monthly_unit_cap: same account as email_verify, uncapped on the owner's word, 2026-09-26
+    metered: true
     est_usd_per_unit: 0.004     # ≈ purchase price ÷ credits; refine from the invoice
   google_places:
-    monthly_unit_cap: 200       # Places (New) requests per cycle. Text Search Pro is
-                                # ~$32/1,000 → 200 req ≈ $6.40/mo, and each request
-                                # returns up to 20 businesses (≈4,000 discovered/mo).
-                                # Sized against the owner's infra budget — RAISE ONLY
-                                # WITH HIS SIGN-OFF, it is real per-call money.
+    # SOFT GOAL, not a limit. Owner, 2026-09-26: "Let's just use 10 bucks a month or something"
+    # (~310 Text Search Pro requests at ~$32/1,000), then: "Don't put limits on that are gonna
+    # fuck us up… we should definitely put in soft goals that are flexible and reconsidered if
+    # we're bumping up against something valuable." The $10 goal is reported on the Friday
+    # scoreboard. The number below is NOT the goal: core refuses to call a paid Google API with no
+    # number at all (cost_guard._MUST_BE_METERED), so it sits at 10x the goal (~$99), far enough
+    # away that it only ever stops a runaway loop. Crossing the goal is a scoreboard line, not a stop.
+    monthly_unit_cap: 3100
+    soft_goal: 310              # the $10/mo goal, shown beside usage in every spend report
     est_usd_per_unit: 0.032
   prospeo:
     # Free tier: 100 credits a month, renewing on the 9th, and a credit is spent ONLY
@@ -249,6 +261,14 @@ vendors:
   resend:
     monthly_unit_cap: 3000      # Resend free tier ≈ 3,000/mo, 100/day. The gtm
                                 # daily_send_cap is the tighter day-to-day guardrail.
+    est_usd_per_unit: 0.0
+  instantly:
+    # THE OUTREACH PULL, READ ONLY (marketing/foundation/instantly.py). Instantly bills a flat
+    # plan, so a request costs nothing. No monthly_unit_cap: no hard limits that get in the way
+    # (owner's ruling, relayed by OSDev1 2026-10-02). `metered: true` keeps every request in the
+    # spend reports (plan rule 6). A unit is one API request: about 3 an hour per sending
+    # campaign plus 3, ~13,000 a month at five campaigns, plus 28 once per new campaign.
+    metered: true
     est_usd_per_unit: 0.0
 
 # Department web dashboards loaded by the dispatch app (data-not-code seam,

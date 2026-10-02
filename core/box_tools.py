@@ -196,6 +196,7 @@ def spend():
             vendors.append({"vendor": v,
                             "units_used": cost_guard.vendor_usage(v),
                             "units_cap": cost_guard.vendor_cap(v),
+                            "units_soft_goal": cost_guard.vendor_soft_goal(v),
                             "usd_per_unit": cost_guard.vendor_usd_rate(v)})
     except Exception as e:                           # noqa: BLE001
         out["degraded"].append(f"vendor meters unreadable: {type(e).__name__}")

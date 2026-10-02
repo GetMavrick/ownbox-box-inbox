@@ -10,7 +10,7 @@ from datetime import date
 
 from core.report import register_reporter
 
-from . import seam, settings
+from . import seam, settings, visitors
 
 MACHINE = "website"
 TITLE = "Website"
@@ -24,8 +24,14 @@ def _pct(now: int, before: int) -> str:
 
 def _line(site: str, w: dict) -> str:
     t, prev = w["totals"], w["before"]["totals"]
-    parts = [f"{site.removeprefix('www.')}: {t['sessions']:,} visit{'s' if t['sessions'] != 1 else ''} this week"
-             f"{_pct(t['sessions'], prev['sessions'])}"]
+    # PEOPLE ONLY, AND SAID (OSDev1's ruling, after #1822): the visits counted are people's, and what was left out is
+    # named in the same breath, so the number never looks smaller for no reason. "Visits from people", not "people":
+    # the store keeps each day's distinct people, and a week of them added up would count a returning visitor twice.
+    pct = _pct(t["sessions"], prev["sessions"]).strip(" ()")
+    left = visitors.say(w.get("left_out") or [])
+    aside = "; ".join(x for x in (pct, f"{left} left out" if left else "") if x)
+    parts = [f"{site.removeprefix('www.')}: {t['sessions']:,} visit{'s' if t['sessions'] != 1 else ''} from people "
+             f"this week" + (f" ({aside})" if aside else "")]
     ai = w["by_source"].get("ai", 0)
     if ai:
         parts.append(f"{ai:,} from AI answers")

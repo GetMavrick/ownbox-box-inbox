@@ -18,5 +18,5 @@ if __name__ == "__main__":
         est = used * rate
         total_est += est
         priced = f"  ≈ ${est:.2f}" if rate else "   (est_usd_per_unit not set)"
-        print(f"{vendor:<9} {used:g} / {vcap:g} units{priced}")
+        print(f"{vendor:<9} {used:g} / {cost_guard.vendor_limit_label(vendor)} units{priced}")
     print(f"{'TOTAL':<9} ≈ ${total_est:.2f} this cycle (estimate)")

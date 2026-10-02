@@ -50,16 +50,19 @@ def _enqueue(intent: str, key: str, payload: dict) -> None:
 
 # ── Sync now ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-def start_sync() -> tuple[bool, str]:
+def start_sync(*, days: int = 1, rule: str = "") -> tuple[bool, str]:
     """A job per site, for yesterday, ONE AT A TIME: only the first is queued, and each queues the next when it
     finishes (OSDev1's review of #1813), so anything else waiting for the worker, an inbox draft say, waits behind
-    one site at most, never all ten. Refused while a sync is queued or running."""
+    one site at most, never all ten. Refused while a sync is queued or running.
+
+    `days` and `rule` are the one-time re-count (sync.recount): the 28 days ending yesterday, and the counting rule
+    that, once a site has synced, the sync state then records as in force."""
     if running(SYNC):
         return False, "A sync is already running. Its result shows here when it finishes."
     sites = list(dict.fromkeys(settings.sites()))
     run = uuid.uuid4().hex[:10]
-    box_settings.put(settings.NS, RUN, {"run": run, "started": _now(), "sites": sites, "done": {}},
-                     set_by="website")
+    box_settings.put(settings.NS, RUN, {"run": run, "started": _now(), "sites": sites, "done": {},
+                                        "days": max(int(days), 1), "rule": rule}, set_by="website")
     if sites:
         _enqueue(SYNC, f"{SYNC}:{run}:{sites[0]}", {"run": run, "site": sites[0]})
     return True, "Syncing now. The result shows here when it finishes, and you can leave this page."
@@ -96,6 +99,9 @@ def _finish_site(run: str, site: str, outcome: str, upto: str, n: int = 0) -> No
         errors = [v["outcome"] for v in done.values() if v["outcome"] != "ok"]
         settings.set_sync_state(error=errors[0] if errors else "", last_run=_now(), upto=upto,
                                 synced={s: v["days"] for s, v in done.items() if v["outcome"] == "ok"}, note="")
+        if r.get("rule") and len(errors) < len(done):
+            # THE RE-COUNT IS DONE once any site was re-counted; a run that failed whole is tried again next hour.
+            settings.set_sync_state(rule=r["rule"])
         # SYNC NOW REACHES THE REVIEW TOO (report.late): pressed between midnight and 06:00, it is the only sync of
         # that day, since the 06:00 pass then finds the day already done.
         if len(errors) < len(done):                     # at least one site synced: a run that failed whole adds nothing
@@ -120,7 +126,7 @@ def do_sync(job: dict) -> dict:
         _finish_site(run, site, "Connect PostHog first; the sync reads from it.", upto.isoformat())
         return {"site": site, "synced": 0}
     try:
-        n = sync.sync_one(conn, site, upto, force=True)
+        n = sync.sync_one(conn, site, upto, force=True, days=int(sync_run().get("days") or 1))
     except posthog.Refused as e:
         _queue_next(run, site)
         log.warning("website.sync_now_refused", site=site, why=str(e)[:160])

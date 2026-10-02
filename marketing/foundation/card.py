@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 from core import box_secrets, box_settings, source_cards
 
-from . import jobs, posthog, settings
+from . import jobs, posthog, settings, visitors
 
 KEY = "website"
 CLOUD = {"us": "https://us.posthog.com", "eu": "https://eu.posthog.com"}
@@ -102,16 +102,23 @@ def _day_row() -> str:
         d = date.fromisoformat(str(settings.sync_state().get("upto") or ""))
     except ValueError:
         return ""
-    lines = []
+    lines, no_addresses = [], False
     for site in seam.sites():
         got = seam.day(site, d)
-        visits = int(((got or {}).get("totals") or {}).get("sessions") or 0)
-        if not visits:
+        totals = (got or {}).get("totals") or {}
+        people, visits = int(totals.get("visitors") or 0), int(totals.get("sessions") or 0)
+        if not people:
             continue
-        parts = [f"{site}: {visits:,} visit{'s' if visits != 1 else ''}"]
+        # PEOPLE ONLY, AND SAID (OSDev1's ruling, after #1822): one day's distinct people, then what was left out.
+        left = visitors.say(got.get("left_out") or [])
+        parts = [f"{site}: {people:,} {'person' if people == 1 else 'people'} visited"
+                 + (f" ({left} left out)" if left else "")]
+        # A POSTHOG THAT KEEPS NO ADDRESSES can't have its scanners told apart: every visit counts as a person, said
+        # once below, on this card only (OSDev1's ruling), never on the review.
+        no_addresses = no_addresses or (visits > 0 and int(got.get("unchecked") or 0) >= visits)
         ai = int((got.get("by_source") or {}).get("ai") or 0)
         if ai:
-            parts.append(f"{ai:,} from AI answers")
+            parts.append(f"{ai:,} visit{'s' if ai != 1 else ''} from AI answers")
         converted = int(got["totals"].get("converted") or 0)
         if converted:
             named = ", ".join(f"{name} {n:,}" for name, n, _ in (got.get("conversions") or [])[:2] if n)
@@ -120,7 +127,9 @@ def _day_row() -> str:
     if not lines:
         return ""
     label = "Yesterday" if d == sync.yesterday() else f"{d:%b} {d.day}"
-    return f'<dt>{label}</dt><dd>{"<br>".join(lines)}</dd>'
+    note = ('<p class="quiet">Your PostHog does not keep visitors\' addresses, so mail scanners can\'t be told apart '
+            'from people, and every visit is counted as a person.</p>' if no_addresses else "")
+    return f'<dt>{label}</dt><dd>{"<br>".join(lines)}{note}</dd>'
 
 
 def _own_events(site: str) -> list[dict]:
@@ -168,8 +177,8 @@ def render(note=None) -> str:
                         f'<textarea id="wa-sites" name="sites" rows="3" autocapitalize="off" spellcheck="false" '
                         f'placeholder="ownbox.io">{_esc(shown)}</textarea>'
                         f'<input type="hidden" name="shown" value="{_esc(shown)}">'
-                        '<p class="quiet">As each appears in the address bar: ownbox.io and www.ownbox.io are '
-                        'counted apart.</p>', "Save websites"))
+                        '<p class="quiet">As each appears in the address bar. ownbox.io and www.ownbox.io are '
+                        'one website, counted once.</p>', "Save websites"))
     radios = "".join(f'<label class="consent"><input type="radio" name="region" value="{k}"'
                      f'{" checked" if k == region else ""}> {_esc(lab)}</label>' for k, lab in _REGIONS)
     ph_form = _form("posthog",

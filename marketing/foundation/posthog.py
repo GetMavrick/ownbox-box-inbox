@@ -15,6 +15,8 @@ from datetime import date
 
 from core import net
 
+from . import visitors
+
 # The one permission the key needs, in PostHog's own name.
 SCOPE = "query:read"
 
@@ -37,13 +39,17 @@ class Conn:
     key: str         # the personal API key; in memory for the one call, never logged
 
 
-def q(conn: Conn, hogql: str) -> list:
-    """One HogQL query -> its rows. Raises Refused."""
+def q(conn: Conn, hogql: str, *, test_accounts_out: bool = False) -> list:
+    """One HogQL query -> its rows. Raises Refused. `test_accounts_out` applies the project's own test-account filters
+    where the query says {filters} (visitors.py: the owner's visits are left out by his own PostHog's rule too)."""
+    query: dict = {"kind": "HogQLQuery", "query": hogql}
+    if test_accounts_out:
+        query["filters"] = {"filterTestAccounts": True}
     try:
         status, body = net.post_public(
             f"{conn.host.rstrip('/')}/api/projects/{conn.project}/query/",
             headers={"Authorization": f"Bearer {conn.key}", "Content-Type": "application/json"},
-            json={"query": {"kind": "HogQLQuery", "query": hogql}}, timeout=90)
+            json={"query": query}, timeout=90)
     except net.PostRefused:
         raise Refused(UNREACHABLE) from None
     problem = {200: None, 401: BAD_KEY, 403: NO_ACCESS, 404: NO_PROJECT}.get(
@@ -64,46 +70,86 @@ def _lit(s: str) -> str:
     return "'" + str(s).replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
+def twin(host: str) -> str:
+    """The same site under its other spelling: "www.ownbox.io" for "ownbox.io", and back."""
+    h = str(host or "").strip().lower()
+    return h[4:] if h.startswith("www.") else "www." + h
+
+
+def host_is(host: str, col: str = "properties.$host") -> str:
+    """A SITE IS ITS HOST AND ITS WWW TWIN, both ways (OSDev1, 2026-10-02): ownbox.io answers with a 308 to
+    www.ownbox.io, so every pageview there carries $host = www.ownbox.io, and an exact match on the "ownbox.io" a
+    person typed found nothing. Stored under the name as typed."""
+    return f"{col} in ({_lit(host)}, {_lit(twin(host))})"
+
+
 def day_filter(d: date, tz: str) -> str:
     return f"toDate(toTimeZone(timestamp, {_lit(tz)})) = toDate('{d.isoformat()}')"
 
 
-def traffic(conn: Conn, host: str, d: date, tz: str) -> tuple[int, int, int]:
-    """(page views, visitors, sessions) for the site's day."""
+MAX_VISITS = 10000         # a site-day's visits read for the rule; HogQL answers 100 rows unless asked for more
+
+
+def visits(conn: Conn, host: str, d: date, tz: str) -> list[dict]:
+    """Every visit of the site's day, for visitors.sort: {sid, ip, pageviews, clicks, seconds, internal,
+    test_account}. Two queries, all visits then the ones the project's test-account filters keep, so a visit the
+    filters leave out is counted as the owner's rather than vanishing. The address is read into memory, never kept."""
+    f = day_filter(d, tz)
+    rows = q(conn, f"select $session_id, any(properties.$ip), countIf(event = '$pageview') pages, "
+                   f"countIf(event = '$autocapture' and properties.$event_type = 'click'), "
+                   f"dateDiff('second', min(timestamp), max(timestamp)), "
+                   f"max(toString(properties.internal_user) = 'true') from events "
+                   f"where {host_is(host)} and {f} group by $session_id having pages > 0 "
+                   f"limit {MAX_VISITS}")
+    kept = {str(r[0]) for r in q(conn, f"select distinct $session_id from events where event = '$pageview' "
+                                       f"and {host_is(host)} and {f} and {{filters}} "
+                                       f"limit {MAX_VISITS}", test_accounts_out=True)}
+    return [{"sid": str(sid or ""), "ip": ip, "pageviews": int(pages or 0), "clicks": int(clicks or 0),
+             "seconds": int(seconds or 0), "internal": bool(internal), "test_account": str(sid) not in kept}
+            for sid, ip, pages, clicks, seconds, internal in rows]
+
+
+def traffic(conn: Conn, host: str, d: date, tz: str, keep: str = "1 = 1") -> tuple[int, int, int]:
+    """(page views, visitors, visits) for the site's day: visitors are distinct people, visits are sessions, both over
+    the visits `keep` keeps (visitors.keep)."""
     r = q(conn, f"select count(), count(distinct person_id), count(distinct $session_id) from events "
-                f"where event = '$pageview' and properties.$host = {_lit(host)} and {day_filter(d, tz)}")
+                f"where event = '$pageview' and {host_is(host)} and {day_filter(d, tz)} and {keep}")
     return tuple(int(x or 0) for x in r[0]) if r else (0, 0, 0)
 
 
-def conversions(conn: Conn, host: str, d: date, tz: str, defs: list[tuple[str, str]]) -> list[tuple[str, int, int]]:
+def conversions(conn: Conn, host: str, d: date, tz: str, defs: list[tuple[str, str]],
+                keep: str = "1 = 1") -> list[tuple[str, int, int]]:
     """[(name, events, sessions)] for each conversion definition (name, HogQL condition)."""
     out = []
     for name, cond in defs:
         r = q(conn, f"select count(), count(distinct $session_id) from events "
-                    f"where properties.$host = {_lit(host)} and ({cond}) and {day_filter(d, tz)}")
+                    f"where {host_is(host)} and ({cond}) and {day_filter(d, tz)} and {keep}")
         out.append((name, int(r[0][0] or 0) if r else 0, int(r[0][1] or 0) if r else 0))
     return out
 
 
-def top(conn: Conn, host: str, d: date, tz: str, prop: str, n: int = 10) -> list[tuple[str, int]]:
+def top(conn: Conn, host: str, d: date, tz: str, prop: str, n: int = 10, keep: str = "1 = 1") -> list[tuple[str, int]]:
     """The top values of an event property by sessions: landing pages (properties.$pathname) or UTM sources."""
     rows = q(conn, f"select {prop} p, count(distinct $session_id) s from events where event = '$pageview' "
-                   f"and properties.$host = {_lit(host)} and {day_filter(d, tz)} group by p order by s desc limit {int(n)}")
+                   f"and {host_is(host)} and {day_filter(d, tz)} and {keep} "
+                   f"group by p order by s desc limit {int(n)}")
     return [(str(p), int(s or 0)) for p, s in rows if p not in (None, "")]
 
 
-def referrers(conn: Conn, host: str, d: date, tz: str, n: int = 25) -> list[tuple[str, int, list[tuple[str, int]]]]:
+def referrers(conn: Conn, host: str, d: date, tz: str, n: int = 25,
+              keep: str = "1 = 1") -> list[tuple[str, int, list[tuple[str, int]]]]:
     """Each referring site, its visits, and the pages those visits viewed. A visit is attributed to the site that
-    referred its first page view, so later clicks inside the visit count under it too (the CRO report's rule)."""
+    referred its first page view, so later clicks inside the visit count under it too (the CRO report's rule). The
+    visits are chosen once, inside, so the kept ones are the only ones joined."""
     f = day_filter(d, tz)
     rows = q(conn, f"""
         select ref, count(distinct sid) visits, groupArray((path, views)) pages from (
           select s.ref ref, e.$session_id sid, e.properties.$pathname path, count() views
           from events e
           join (select $session_id sid, argMin(properties.$referring_domain, timestamp) ref
-                from events where event = '$pageview' and properties.$host = {_lit(host)} and {f}
+                from events where event = '$pageview' and {host_is(host)} and {f} and {keep}
                 group by sid) s on e.$session_id = s.sid
-          where e.event = '$pageview' and e.properties.$host = {_lit(host)} and {f.replace('timestamp', 'e.timestamp')}
+          where e.event = '$pageview' and {host_is(host, 'e.properties.$host')} and {f.replace('timestamp', 'e.timestamp')}
           group by ref, sid, path)
         group by ref order by visits desc limit {int(n)}""")
     out = []
@@ -119,13 +165,31 @@ def referrers(conn: Conn, host: str, d: date, tz: str, n: int = 25) -> list[tupl
 def check(conn: Conn, host: str, tz: str) -> int:
     """One real query, the one the sync runs: page views in the last 30 days. Raises Refused; 0 means the key
     works but the PostHog snippet is not on the site yet, which no key can fix."""
-    r = q(conn, f"select count() from events where event = '$pageview' and properties.$host = {_lit(host)} "
+    r = q(conn, f"select count() from events where event = '$pageview' and {host_is(host)} "
                 f"and timestamp >= now() - INTERVAL 30 DAY")
     return int(r[0][0] or 0) if r else 0
 
 
 def hosts(conn: Conn, *, days: int = 30, min_views: int = 50, n: int = 25) -> list[tuple[str, int]]:
-    """The hosts this project recorded page views on, busiest first, with at least `min_views` in `days`."""
-    rows = q(conn, f"select properties.$host h, count() c from events where event = '$pageview' "
-                   f"and timestamp >= now() - INTERVAL {int(days)} DAY group by h order by c desc limit {int(n)}")
-    return [(str(h).strip().lower(), int(c or 0)) for h, c in rows if h and int(c or 0) >= int(min_views)]
+    """The hosts this project recorded page views on, busiest first, with at least `min_views` in `days` FROM PEOPLE
+    (OSDev1's ruling): views from a data-center address don't count, nor the owner's, so a site only mail scanners
+    open is never "found". An address that can't be read counts as a person, as everywhere (visitors.py)."""
+    rows = q(conn, f"select properties.$host h, properties.$ip ip, count() c from events where event = '$pageview' "
+                   f"and timestamp >= now() - INTERVAL {int(days)} DAY and {{filters}} "
+                   f"and not (toString(properties.internal_user) = 'true') "
+                   f"group by h, ip order by c desc limit {MAX_VISITS}", test_accounts_out=True)
+    views: dict[str, int] = {}
+    for h, ip, c in rows:
+        if h and not visitors.network(ip):
+            key = str(h).strip().lower()
+            views[key] = views.get(key, 0) + int(c or 0)
+    # ONE SITE, NOT TWO (OSDev1): a host and its www twin are found once, by the spelling people land on, with the
+    # views of both, the same match every day query makes (host_is).
+    sites: dict[str, int] = {}
+    for h, c in sorted(views.items(), key=lambda kv: -kv[1]):
+        if twin(h) in sites:
+            sites[twin(h)] += c
+        else:
+            sites[h] = c
+    ranked = sorted(sites.items(), key=lambda kv: -kv[1])
+    return [(h, c) for h, c in ranked if c >= int(min_views)][:int(n)]

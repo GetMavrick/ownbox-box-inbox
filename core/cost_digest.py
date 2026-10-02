@@ -73,7 +73,8 @@ def meters(now: datetime | None = None) -> list[dict]:
         days_to_cap = ((cap - used) / burn) if (burn > 0 and used < cap) else None
         out.append({"vendor": v, "used": used, "cap": cap, "pct": pct, "burn": burn,
                     "days_to_cap": days_to_cap, "days_left": left_in_cycle,
-                    "hits_cap_this_cycle": bool(days_to_cap is not None and days_to_cap < left_in_cycle) or used >= cap})
+                    "goal": cost_guard.vendor_soft_goal(v),
+                    "hits_cap_this_cycle": bool(cap) and (bool(days_to_cap is not None and days_to_cap < left_in_cycle) or used >= cap)})
     return out
 
 
@@ -83,6 +84,10 @@ def render(now: datetime | None = None) -> str:
     rows = meters(now)
     lines = [f"Meters, {now:%a %d %b} — cycle {start:%d %b} to {nxt:%d %b}"]
     for r in rows:
+        if not r["cap"]:   # uncapped by choice (`metered: true`): usage, pace, and any soft goal
+            goal = f" — soft goal {r['goal']:.0f}" if r.get("goal") is not None else ""
+            lines.append(f"   {r['vendor']:<14} {r['used']:>7.0f} used, no cap (~{r['burn']:.0f}/day){goal}")
+            continue
         if r["used"] >= r["cap"] and r["cap"]:
             tail = "AT CAP — calls are refused until the cycle resets"
         elif r["days_to_cap"] is not None:
@@ -90,6 +95,8 @@ def render(now: datetime | None = None) -> str:
         else:
             tail = "no use yet"
         flag = "!! " if r["pct"] >= WARN_PCT else "   "
+        if r.get("goal") is not None:
+            tail += f" — soft goal {r['goal']:.0f}" + (" (PAST IT: worth it?)" if r["used"] > r["goal"] else "")
         lines.append(f"{flag}{r['vendor']:<14} {r['used']:>7.0f} / {r['cap']:<6.0f} ({r['pct']:>3.0f}%)  {tail}")
     try:
         lines.append(f"USD this cycle: ${cost_guard.month_to_date_spend(now):.2f} of ${cost_guard.ceiling():.2f} ceiling")

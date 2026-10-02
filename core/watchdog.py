@@ -1910,7 +1910,10 @@ def run_once() -> None:
     for vendor in cost_guard.metered_vendors():
         used, vcap = cost_guard.vendor_usage(vendor), cost_guard.vendor_cap(vendor)
         total_est += used * cost_guard.vendor_usd_rate(vendor)
-        parts.append(f"{vendor} {used:g}/{vcap:g}u")
+        parts.append(f"{vendor} {used:g}u/{cost_guard.vendor_limit_label(vendor)}")
+        if vcap is None:   # uncapped by choice (`metered: true`): reported, never paged about
+            state.clear_alert(f"meter:{vendor}")
+            continue
         # The usage above is ALWAYS reported in the spend line. Only the page is optional:
         # a vendor the operator has silenced (`vendors.<v>.alerts: false`) still meters and
         # still refuses at its cap — it just stops asking him about a decision he's made.

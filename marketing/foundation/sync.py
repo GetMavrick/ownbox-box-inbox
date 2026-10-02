@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from core.logging import get_logger
 
-from . import posthog, settings, store
+from . import posthog, settings, store, visitors
 
 log = get_logger(__name__)
 
@@ -27,14 +27,18 @@ def _local_today(tz: str) -> date:
 
 
 def sync_site_day(conn: posthog.Conn, site: str, d: date, tz: str) -> None:
-    """One site's day, from PostHog into the store. Raises posthog.Refused."""
+    """One site's day, from PostHog into the store, counting people only (visitors.py): the day's visits are sorted
+    first, and every number after that reads the ones kept. Raises posthog.Refused."""
+    out, why, unchecked = visitors.sort(posthog.visits(conn, site, d, tz))
+    keep = visitors.keep(out)
     store.write_day(
         site, d,
-        traffic=posthog.traffic(conn, site, d, tz),
-        conversions=posthog.conversions(conn, site, d, tz, settings.conversions(site)),
-        pages=posthog.top(conn, site, d, tz, "properties.$pathname"),
-        utms=posthog.top(conn, site, d, tz, "properties.utm_source"),
-        referrers=posthog.referrers(conn, site, d, tz))
+        traffic=posthog.traffic(conn, site, d, tz, keep),
+        conversions=posthog.conversions(conn, site, d, tz, settings.conversions(site), keep),
+        pages=posthog.top(conn, site, d, tz, "properties.$pathname", keep=keep),
+        utms=posthog.top(conn, site, d, tz, "properties.utm_source", keep=keep),
+        referrers=posthog.referrers(conn, site, d, tz, keep=keep),
+        left_out=why, unchecked=unchecked)
 
 
 def _search_day(site: str, d: date) -> None:
@@ -110,11 +114,12 @@ def yesterday() -> date:
     return _local_today(settings.tz()) - timedelta(days=1)
 
 
-def sync_one(conn: posthog.Conn, site: str, upto: date, *, force: bool = False) -> int:
-    """One site up to `upto`: just that day when forced (Sync now), else the days it is missing. Returns how many
-    days were synced. Raises posthog.Refused. Idempotent per (site, day): a re-sync replaces the day."""
+def sync_one(conn: posthog.Conn, site: str, upto: date, *, force: bool = False, days: int = 1) -> int:
+    """One site up to `upto`: the `days` ending there when forced (Sync now: 1; a new counting rule: 28), else the days
+    it is missing. Returns how many days were synced. Raises posthog.Refused. Idempotent per (site, day): a re-sync
+    replaces the day."""
     tz = settings.tz()
-    days = [upto] if force else _wanted(site, upto)
+    days = [upto - timedelta(days=i) for i in range(max(int(days), 1) - 1, -1, -1)] if force else _wanted(site, upto)
     for d in days:
         sync_site_day(conn, site, d, tz)
         _search_day(site, d)
@@ -154,9 +159,30 @@ def _now_iso() -> str:
     return datetime.now(ZoneInfo("UTC")).isoformat(timespec="seconds")
 
 
+def recount() -> bool:
+    """THE NUMBERS ARE RE-COUNTED ONCE WHEN THE RULE CHANGES (OSDev1's ruling, after #1822): the last 28 days of every
+    site, through the worker one site at a time (jobs.start_sync), so this week and last both count people and the
+    change between them means something. True while it is due or running, so the daily sync waits for it.
+
+    A box with nothing stored, or no PostHog, has nothing counted the old way, so the rule is simply taken up."""
+    if settings.sync_state().get("rule") == visitors.RULE:
+        return False
+    if settings.posthog() is None or not store.stored_sites():
+        settings.set_sync_state(rule=visitors.RULE)
+        return False
+    from . import jobs
+    if not jobs.running(jobs.SYNC):
+        jobs.start_sync(days=BACKFILL_DAYS, rule=visitors.RULE)
+        log.info("website.recount_started", rule=visitors.RULE)
+    return True
+
+
 def tick() -> None:
-    """The worker's hourly pass: sync once the local day has turned and the hour has come. Never raises."""
+    """The worker's hourly pass: re-count once if the rule changed, else sync once the local day has turned and the
+    hour has come. Never raises."""
     try:
+        if recount():
+            return
         tz = settings.tz()
         now = datetime.now(ZoneInfo(tz))
         if now.hour < HOUR_LOCAL:
