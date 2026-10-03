@@ -34,6 +34,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _T = tempfile.mkdtemp()
 os.environ["AIOS_HERMETIC_TEST"] = "1"
 os.environ["AIOS_DB_PATH"] = os.path.join(_T, "managed.db")
+# THE PROVISIONER'S FILE, IN THE TEST'S OWN FOLDER (plan #1857 H10): never the real /opt/aios, which a laptop can't
+# write and a box must not have a test write.
+os.environ["AIOS_PROVISION_JSON"] = os.path.join(_T, "provision.json")
 os.environ["DISPATCH_BEARER_TOKEN"] = "bearer"
 os.environ["DASH_TOKEN"] = "pw"
 

@@ -1,9 +1,11 @@
-# Ten minutes after boot (the web process is up by then), then every hour, spread across the fleet.
+# Four minutes after boot, so a fresh box (a release's rehearsal, a buyer's new box) reports within minutes of its
+# first check-in and the release tool can wait for it (#1857 H1); the run waits for the web process itself
+# (key_features._wait_for_web). Then every hour, spread across the fleet.
 [Unit]
 Description=AIOS key features check, every hour
 
 [Timer]
-OnBootSec=10min
+OnBootSec=4min
 OnUnitActiveSec=1h
 RandomizedDelaySec=10min
 

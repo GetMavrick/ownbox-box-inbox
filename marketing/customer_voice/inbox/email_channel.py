@@ -95,28 +95,29 @@ def _header(msg, name: str) -> str:
 # enquiries arrive from `alerts@` or `info@`, and never answering a customer is the more expensive
 # mistake of the two.
 #
-# WHAT IS DELIBERATELY NOT HERE: `Precedence: bulk`. It is not a standard, plenty of ordinary
-# mailers set it on perfectly personal mail, and it would cost real conversations.
+# THE RULES LIVE IN drafter/who_wrote.py (plan #1857 H7). Until 2026-10-03 this file kept its own list, which left
+# out `Precedence: bulk` and `alert@` to spare real customers; who_wrote, measured on the owner's mailbox (OSDev5),
+# counts both, and it already decided what is drafted, so one set of rules now decides both drafted and waiting.
+# THE HEADERS THE CLASSIFIER READS, and only these: drafter/who_wrote.py decides from them and the sender.
+_JUDGED_HEADERS = ("List-Unsubscribe", "List-Id", "Auto-Submitted", "X-Auto-Response-Suppress", "X-Ownbox",
+                   "X-Autoreply", "X-Autorespond", "Precedence", "Content-Type")
 
-_AUTO_SUBMITTED_OK = "no"          # RFC 3834: the ONLY value meaning a person sent it
 
-# THE LINE IS "HAS THIS NAME ANY PLAUSIBLE CUSTOMER-FACING USE", and it is drawn on purpose.
-# Every local part below is a machine function word no business puts on mail it wants answered.
-#
-# DELIBERATELY ABSENT, and each one would cost a real customer: `info`, `sales`, `hello`,
-# `contact`, `support`, `admin`, `billing`, `accounts` — and `alert` / `alerts`, which reads like
-# a robot and is a perfectly ordinary address for a security or monitoring firm. OSDev1's
-# `alert@spaceship.com` is caught anyway, by its `Auto-Submitted` header, which is the whole
-# reason the headers are asked first: they catch the senders an address list would have to guess
-# at, and guessing wrong here means a customer is never answered and nobody finds out.
-_ROBOT_LOCALS = (
-    "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "do_not_reply",
-    "mailer-daemon", "postmaster", "bounce", "bounces", "notification", "notifications",
-    "invitations", "invitation", "automated", "auto-confirm", "mailer",
-    "system", "daemon", "root", "cron", "bot", "robot", "automailer",
-)
-_ROBOT_PREFIXES = ("noreply", "no-reply", "donotreply", "do-not-reply", "mailer-daemon",
-                   "bounce", "notification", "invitations")
+def automated_level(msg, sender: str = "") -> int:
+    """0 a person, 1 automated, 2 only a list header (the shape of a cold pitch). Never raises.
+
+    ONE CLASSIFIER (plan #1857 H7): this asks drafter/who_wrote.py, which the drafter asks too, so the thread the
+    inbox marks and the message the drafter skips are judged by the same rules. It kept its own word list until
+    2026-10-03; the words it had and who_wrote lacked are merged there. who_wrote imports only core and re, so the
+    inbox (which sends) taking it gives the drafter (which thinks) nothing new."""
+    from marketing.customer_voice.drafter import who_wrote
+    try:
+        headers = {h.lower(): _header(msg, h) for h in _JUDGED_HEADERS} if msg is not None else {}
+        # strict=False: "waiting" never hides a maybe-customer (an `alerts@` business, a Precedence: bulk mailer)
+        return who_wrote.level(sender, {k: v for k, v in headers.items() if v}, ours=who_wrote.our_addresses(),
+                               strict=False)
+    except Exception:                                    # noqa: BLE001 — a bad header is not fatal
+        return 0
 
 
 def is_automated(msg, sender: str = "") -> bool:
@@ -126,27 +127,7 @@ def is_automated(msg, sender: str = "") -> bool:
     the other end to read a reply. This decides only whether the box drafts an answer and offers
     it for sending — the message is still ingested, still shown, still searchable.
     """
-    try:
-        auto = _header(msg, "Auto-Submitted").strip().lower() if msg is not None else ""
-        if auto and not auto.startswith(_AUTO_SUBMITTED_OK):
-            return True                                  # RFC 3834: auto-generated, auto-replied…
-        if msg is not None and (_header(msg, "List-Id") or _header(msg, "List-Unsubscribe")):
-            return True                                  # bulk, RFC 2919 / RFC 2369
-        if msg is not None and _header(msg, "X-Auto-Response-Suppress"):
-            return True                                  # Microsoft's, widely set by ticketing
-    except Exception:                                    # noqa: BLE001 — a bad header is not fatal
-        pass
-    addr = str(sender or "").strip().lower()
-    if "@" not in addr:
-        return False
-    local = addr.split("@", 1)[0]
-    if local in _ROBOT_LOCALS or any(local.startswith(p) for p in _ROBOT_PREFIXES):
-        return True
-    # `jobs-listings@linkedin.com`, `jobalerts-noreply@…` — the marker is a WORD in the local
-    # part, not the whole of it. Split on the separators a local part may legally contain so
-    # "noreplyable@" (a real word containing one) cannot match.
-    return any(part in _ROBOT_LOCALS
-               for part in re.split(r"[.\-_+]", local) if part)
+    return automated_level(msg, sender) != 0
 
 
 def thread_key(msg) -> str:
@@ -638,7 +619,7 @@ def sweep(space: str) -> tuple[int, int]:
             # is writing to this business is a fact about the other end, and the box's own
             # outbound tells us nothing about them.
             if inbound:
-                store.mark_automated(space, zcid, is_automated(msg, addr))
+                store.mark_automated(space, zcid, automated_level(msg, addr))
             stored += 1
 
         # AND THE ROWS THAT WERE ALREADY THERE. The 35 robot drafts on the owner's box all predate
@@ -846,7 +827,7 @@ def _judge_the_backlog(space: str) -> int:
     marked = 0
     for r in rows:
         try:
-            store.mark_automated(space, r["zcid"], is_automated(None, r["sender"]))
+            store.mark_automated(space, r["zcid"], automated_level(None, r["sender"]))
             marked += 1
         except Exception:                                # noqa: BLE001 — one row never stops the rest
             continue

@@ -21,6 +21,7 @@ subscription). Spend rows are written either way — with cost 0 on claude_code 
 so per-job attribution and the watchdog's task counts keep working.
 """
 from core.config import ROOT
+import base64
 import contextvars
 import json
 import os
@@ -1026,10 +1027,14 @@ def _run_agent_now(prompt: str, *, run_id: str, coworker: str, workspace, system
     if not ready:
         raise RuntimeError(f"a coworker cannot run: {why}")
     be = _backend()
+    if be == "codex":
+        return _run_agent_codex(prompt, run_id=run_id, coworker=coworker, workspace=str(ws), system=system,
+                                mcp=mcp, web=web, max_turns=max_turns, max_minutes=max_minutes, task=task,
+                                sandboxed=sandboxed)
     if be not in ("claude_code", "api"):
         # A plain refusal, not a quiet fallback onto somebody else's account.
-        raise RuntimeError("coworkers run on a Claude account today, and this box thinks on "
-                           "ChatGPT. Connect a Claude sign-in or an Anthropic key in Set up")
+        raise RuntimeError("coworkers run on a Claude account or ChatGPT, and this box thinks on neither. "
+                           "Connect one in Set up")
     if sandboxed:
         from core.coworkers import sandbox as _sandbox
         bin_ = _sandbox.cli_path()                 # refuses a CLI under /root, by name
@@ -1116,6 +1121,221 @@ def _run_agent_now(prompt: str, *, run_id: str, coworker: str, workspace, system
 
     return _agent_verdict(rc, out, err, run_id=run_id, be=be, model=model, task=task,
                           minutes=minutes, max_turns=max_turns, max_usd=max_usd)
+
+
+# ── the same run on ChatGPT (codex exec) ─────────────────────────────────────────────────────────────────────
+# MEASURED ON codex-cli 0.155.1 (2026-10-03, a stand-in model and a stand-in MCP server, both on loopback):
+#   * `-c mcp_servers.aios.url=...` with `bearer_token_env_var` reaches a streamable-HTTP MCP server, sends the
+#     bearer on every request, lists its tools and calls them. No bridge is needed.
+#   * the tools arrive as one namespace, `mcp__aios`, each name with its dots made underscores.
+#   * with the features below off, the model is offered NOTHING else that acts: no shell, no web, no sub-agents,
+#     no images, no plugins. What is left is the box's own tools and the CLI's MCP resource readers.
+#   * `--json` prints one event per line: `mcp_tool_call` items (a turn each), `agent_message` (the answer),
+#     `turn.completed` with token usage, `turn.failed` with the error. An `error` ITEM is a warning (an unknown
+#     model's metadata), never the run's verdict.
+#   * `approval: never` in exec: a box tool call runs without anyone to ask, as `--permission-mode dontAsk` does.
+_CODEX_AGENT_OFF = ("features.shell_tool=false", "features.unified_exec=false", "features.multi_agent=false",
+                    "features.goals=false", "features.view_image=false", "features.apps=false",
+                    "features.plugins=false", "features.computer_use=false", "features.browser_use=false",
+                    "features.in_app_browser=false", "features.image_generation=false",
+                    "features.sleep_tool=false", "features.tool_suggest=false", "features.skill_search=false",
+                    "features.hooks=false")
+CODEX_LINK = "/usr/local/bin/codex"          # where scripts/install_codex.sh puts the pinned binary
+# THE SIGN-IN GOES IN BY ENVIRONMENT FILE AND COMES BACK BY STDERR. The CLI's credential is its auth.json, and
+# it sits in CODEX_HOME under /var/lib/aios, which the sandbox hides. So the runner hands its bytes to the unit
+# the way the Claude path hands its token (systemd reads the file as root; never a property, never argv), this
+# script writes them into the unit's private /tmp and unsets the variable before the CLI starts.
+# A REFRESHED SIGN-IN MUST NOT DIE WITH THE UNIT. ChatGPT refresh tokens rotate: if the CLI refreshes mid-run and
+# the new file is thrown away with the unit's /tmp, the box's own copy holds a used token and the box is signed out.
+# So the file comes back on stderr after a marker, is cut out before stderr is read for anything else, and is
+# written back only when it changed and the box's copy has not changed meanwhile (`_codex_keep_refreshed`).
+_CODEX_AUTH_MARK = "@@aios-codex-auth@@"
+_CODEX_SH = (
+    'umask 077; d="${AIOS_CODEX_DIR:-/tmp/codex}"; mkdir -p "$d" || exit 70\n'
+    'printf %s "$AIOS_CODEX_AUTH" | base64 -d > "$d/auth.json" || exit 70\n'
+    'unset AIOS_CODEX_AUTH AIOS_CODEX_DIR; CODEX_HOME="$d"; export CODEX_HOME\n'
+    '"$@"; rc=$?\n'
+    f'printf "\\n{_CODEX_AUTH_MARK}%s\\n" "$(base64 -w0 "$d/auth.json" 2>/dev/null)" >&2\n'
+    'exit $rc\n')
+
+
+def _codex_split_auth(err: str) -> tuple[str, str]:
+    """(stderr without the sign-in, the sign-in's base64 or ""). Called before stderr is read for anything."""
+    i = err.rfind(_CODEX_AUTH_MARK)
+    if i < 0:
+        return err, ""
+    tail = err[i + len(_CODEX_AUTH_MARK):]
+    return err[:i].rstrip("\n"), tail.split("\n", 1)[0].strip()
+
+
+def _codex_keep_refreshed(home: pathlib.Path, before: bytes, after_b64: str) -> None:
+    """Write a sign-in the CLI refreshed during the run back to the box. Never raises; loud when it cannot."""
+    if not after_b64:
+        return
+    try:
+        after = base64.b64decode(after_b64, validate=True)
+        if after == before or not isinstance(json.loads(after), dict):
+            return
+        path = home / "auth.json"
+        if path.read_bytes() != before:
+            # Something else refreshed it meanwhile (a think() call as root): that copy is the newer one.
+            log.warning("brain.codex_refresh_superseded")
+            return
+        tmp = home / ".auth.json.aios"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(after)
+        os.replace(tmp, path)
+        log.info("brain.codex_refresh_kept")
+    except Exception as e:                           # noqa: BLE001 — the run's answer is not lost over this
+        log.error("brain.codex_refresh_LOST", error=f"{type(e).__name__}: {str(e)[:120]}")
+
+
+def _run_agent_codex(prompt: str, *, run_id: str, coworker: str, workspace: str, system: str,
+                     mcp: dict | None, web, max_turns: int, max_minutes: int, task: str,
+                     sandboxed: bool) -> dict:
+    """`_run_agent_now` on a box that thinks on ChatGPT: `codex exec` with the box's tools and nothing else.
+
+    THE SAME LIMITS AS THE CLAUDE PATH: the same sandbox unit, user and hidden paths; the seat only in the
+    environment, never on the command line; the minutes as the unit's time limit; the answer from stdout. What
+    differs is said here:
+      * NO FILES. The model has no shell, so it reads and writes nothing in the workspace; a coworker's notes
+        folder is unused on ChatGPT. Everything it does goes through the box's tools, under its seat.
+      * THE TURN LIMIT IS COUNTED, NOT ENFORCED. The CLI has no turn cap; the minutes stop a run. A run over its
+        turns is still answered, and logged with the count.
+      * NO DOLLARS. A subscription has no per-run price, so `max_usd` does not apply and the spend row is 0.0
+        with the tokens, as `_think_codex` records it.
+      * web: "search" or "read" turns on the CLI's own web search; without either it is off.
+    """
+    from core import box_secrets
+    if not box_secrets.codex_connected():
+        raise RuntimeError(CODEX_SIGNED_OUT)
+    home = pathlib.Path(box_secrets.codex_home())
+    try:
+        before = (home / "auth.json").read_bytes()
+    except OSError as e:
+        raise RuntimeError(CODEX_SIGNED_OUT) from e
+    if sandboxed:
+        from core.coworkers import sandbox as _sandbox
+        bin_ = _sandbox.cli_path(CODEX_LINK)          # refuses a CLI under /root, by name
+        unit = _sandbox.unit_name(coworker, run_id)
+        cwd_in = _sandbox.MOUNT
+    else:
+        bin_ = shutil.which("codex")
+        if not bin_:
+            raise RuntimeError("this box thinks on ChatGPT but the `codex` CLI is not installed — "
+                               "run scripts/install_codex.sh")
+        cwd_in = workspace
+    chosen = str((get_config().get("brain") or {}).get("codex_model") or "").strip()
+    args = [bin_, "exec", "--json", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config",
+            "--ignore-rules", "-s", "read-only", "--color", "never", "-C", cwd_in]
+    for flag in _CODEX_AGENT_OFF:
+        args += ["-c", flag]
+    args += ["-c", f'web_search="{"live" if set(web) & set(AGENT_WEB) else "disabled"}"']
+    if mcp:
+        args += ["-c", f"mcp_servers.aios.url={json.dumps(str(mcp['url']))}",
+                 "-c", 'mcp_servers.aios.bearer_token_env_var="AIOS_SEAT"']
+    else:
+        args += ["-c", "mcp_servers={}"]
+    if chosen:
+        args += ["-m", chosen]
+    args.append("-")
+    cli = ["/bin/sh", "-c", _CODEX_SH, "aios-codex", *args]
+    # NO SYSTEM FLAG on this CLI (see _think_codex): the standing instructions go first on stdin.
+    stdin = (system.strip() + "\n\n" if system and system.strip() else "") + prompt
+    secrets_ = {"AIOS_CODEX_AUTH": base64.b64encode(before).decode(), "NO_COLOR": "1"}
+    if mcp:
+        secrets_["AIOS_SEAT"] = mcp["credential"]
+
+    private = None
+    try:
+        if sandboxed:
+            private = _sandbox.run_dir(run_id)
+            env_file = _sandbox.write_env(private, secrets_)
+            cmd = _sandbox.argv(unit=unit, command=cli, workspace_dir=workspace, minutes=int(max_minutes),
+                                env_file=env_file, ro_dir=private)
+            env, cwd = None, None
+        else:
+            private = tempfile.mkdtemp(prefix="aios-run-")
+            os.chmod(private, 0o700)
+            passthrough = {k: os.environ[k] for k in _AGENT_ENV_KEEP if k in os.environ}
+            cmd = cli
+            env = {**passthrough, "HOME": private, "AIOS_CODEX_DIR": os.path.join(private, "codex"), **secrets_}
+            cwd = workspace
+        started = time.monotonic()
+        log.info("brain.agent_start", run_id=run_id, coworker=coworker, backend="codex",
+                 model=chosen or "default", tools=[], mcp=bool(mcp), max_turns=max_turns,
+                 max_minutes=max_minutes, sandboxed=sandboxed)
+        try:
+            rc, out, err = _run_agent_cli(cmd, stdin=stdin, env=env, cwd=cwd, timeout=max_minutes * 60 + 30)
+        except subprocess.TimeoutExpired as e:
+            if sandboxed:
+                _stop_agent_unit(_sandbox.stop_argv(unit))
+            raise AgentLimit(f"stopped: it ran past its {max_minutes:g}-minute limit") from e
+        minutes = (time.monotonic() - started) / 60
+    finally:
+        if private:
+            shutil.rmtree(private, ignore_errors=True)
+    err, after = _codex_split_auth(err)
+    _codex_keep_refreshed(home, before, after)
+    return _codex_verdict(rc, out, err, run_id=run_id, model=chosen, task=task, minutes=minutes,
+                          max_turns=max_turns)
+
+
+def _codex_verdict(rc: int, out: str, err: str, *, run_id, model, task, minutes, max_turns) -> dict:
+    """What `codex exec --json` printed, as a result or a named exception."""
+    text, turns, failed, said = "", 0, "", ""
+    usage = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
+    for line in out.splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        kind, item = ev.get("type"), ev.get("item") or {}
+        if kind == "item.completed" and item.get("type") == "mcp_tool_call":
+            turns += 1
+        elif kind == "item.completed" and item.get("type") == "agent_message":
+            text = str(item.get("text") or "")
+        elif kind == "turn.completed":
+            for k in usage:
+                usage[k] += int((ev.get("usage") or {}).get(k) or 0)
+        elif kind == "turn.failed":
+            failed = str((ev.get("error") or {}).get("message") or kind)
+        elif kind == "error":
+            # A STREAM NOTICE, possibly one the CLI retried past: it explains a failure, never makes one.
+            said = said or str(ev.get("message") or "")
+    label = f"codex:{model or 'default'}"
+    if usage["input_tokens"] or usage["output_tokens"]:
+        try:
+            state.record_spend(job_id=run_id, task=task, model=label, cost_usd=0.0,
+                               input_tokens=usage["input_tokens"], output_tokens=usage["output_tokens"],
+                               cache_write_tokens=0, cache_read_tokens=usage["cached_input_tokens"])
+        except Exception as e:                       # noqa: BLE001 — the run happened
+            log.error("brain.agent_SPEND_UNRECORDED", run_id=run_id, cost_usd=0.0, error=str(e)[:200])
+    if rc != 0 or failed or not text.strip():
+        from core.logging import scrub_secrets
+        blob = scrub_secrets(" ".join((failed or said or err[-400:] or f"rc={rc}").split()))
+        if _CLI_AUTH_RE.search(blob):
+            try:
+                from core import box_secrets
+                box_secrets.note_codex_status("needs_reauth", blob[:200])
+            except Exception as e:                   # noqa: BLE001
+                log.warning("brain.codex_status_unwritable", error=type(e).__name__)
+            log.warning("brain.codex_signed_out", rc=rc, said=blob[-300:])
+            raise RuntimeError(CODEX_SIGNED_OUT)
+        if _AGENT_WINDOW_RE.search(blob) or _CLI_LIMIT_RE.search(blob):
+            raise BudgetExceeded(f"chatgpt subscription limit: {blob[:200]}")
+        if _CLI_TRANSIENT_RE.search(blob):
+            raise RetryableError(f"agent run: the AI was busy or unreachable: {blob[:200]}")
+        raise RuntimeError(f"agent run failed (rc={rc}): {blob[:300]}")
+    if turns > max_turns:
+        log.warning("brain.agent_over_turns", run_id=run_id, turns=turns, max_turns=max_turns)
+    log.info("brain.agent_done", run_id=run_id, turns=turns, minutes=round(minutes, 2), cost_usd=0.0,
+             api_usd=0.0, denied=0)
+    return {"text": text, "turns": turns, "minutes": round(minutes, 3), "cost_usd": 0.0, "api_usd": 0.0,
+            "backend": "codex", "model": label, "denied": []}
 
 
 _AGENT_SPENT_AFTER_MIN = 1.0

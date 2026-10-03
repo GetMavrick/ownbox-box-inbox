@@ -27,16 +27,22 @@ truncating, which is right for a guessed web page and wrong for a video: a trunc
 uploads to the CDN looking finished. Those two refuse instead, and they refuse by SIZE as well
 as by address, because an unbounded read is how one response fills a 1-vCPU box's disk.
 
-Not covered, deliberately and stated rather than implied: DNS rebinding. We check the name, then
-urllib resolves it again to connect, and a hostile resolver can answer differently the second
-time. Closing that means pinning the resolved IP into the connection, which is a different piece
-of machinery; this closes the redirect door, which is the one a guessed domain walks through.
+DNS REBINDING, for the one caller that needs it closed. `url_is_public` checks the name, then urllib
+resolves it again to connect, and a hostile resolver can answer a public address the first time and
+a private one the second. `get_public(..., pin=True)` closes that: it resolves once, checks every
+address, and CONNECTS TO THE ADDRESS IT CHECKED (`PinnedHTTPSConnection`: the name still goes in SNI
+and Host, so TLS verifies the certificate against the name). Every redirect hop is re-resolved,
+re-checked and re-pinned. The OAuth sign-in uses it (core/connector/oauth.py `_fetch_document`):
+a client's document is fetched on an UNAUTHENTICATED request to an address a stranger chose
+(#1857 H4). The guessed-domain readers keep the unpinned door, which closes the redirect trick.
 """
 import contextlib
+import http.client
 import ipaddress
 import json as _json
 import os
 import socket
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -72,6 +78,83 @@ def is_public_host(host: str, resolve=None) -> bool:
         return False
     return all(not (a.is_private or a.is_loopback or a.is_link_local or a.is_reserved
                     or a.is_multicast or a.is_unspecified) for a in addrs)
+
+
+def public_addresses(host: str, resolve=None) -> list:
+    """The addresses `host` resolves to, when EVERY one is public; [] otherwise. What a pinned connection dials."""
+    host = (host or "").strip().strip("[]")
+    addrs = _addresses(host, resolve) if host else []
+    if not addrs or not all(not (a.is_private or a.is_loopback or a.is_link_local or a.is_reserved
+                                 or a.is_multicast or a.is_unspecified) for a in addrs):
+        return []
+    return addrs
+
+
+class PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """TLS to `host`, dialled at `address`. The name goes in SNI and Host and the certificate is checked against it,
+    so pinning the address changes WHERE the socket goes, never WHO it trusts. Used for a checked public address
+    (`get_public(pin=True)`) and for the box's own loopback (core/key_features.py)."""
+
+    def __init__(self, host: str, address: str, port: int = 443, **kw):
+        super().__init__(host, port, **kw)
+        self._address = str(address)
+
+    def connect(self):
+        sock = socket.create_connection((self._address, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+class PinnedHTTPConnection(http.client.HTTPConnection):
+    """Plain HTTP to `host`, dialled at `address`."""
+
+    def __init__(self, host: str, address: str, port: int = 80, **kw):
+        super().__init__(host, port, **kw)
+        self._address = str(address)
+
+    def connect(self):
+        self.sock = socket.create_connection((self._address, self.port), self.timeout)
+
+
+_PIN_MAX_HOPS = 5
+_REDIRECTS = (301, 302, 303, 307, 308)
+
+
+def _get_pinned(url: str, *, headers: dict | None, timeout: int, max_bytes: int, resolve,
+                connect=None) -> tuple[int, str]:
+    """`get_public` with every hop resolved ONCE, checked, and dialled at the address checked. -> (status, body)."""
+    for _ in range(_PIN_MAX_HOPS + 1):
+        u = urllib.parse.urlsplit(url or "")
+        if u.scheme not in _ALLOWED_SCHEMES or not u.hostname:
+            log.warning("net.fetch_refused", url=str(url)[:120])
+            return 0, ""
+        addrs = public_addresses(u.hostname, resolve)
+        if not addrs:
+            log.warning("net.fetch_refused", url=str(url)[:120])
+            return 0, ""
+        if connect is not None:
+            conn = connect(u, str(addrs[0]), timeout)
+        elif u.scheme == "https":
+            conn = PinnedHTTPSConnection(u.hostname, str(addrs[0]), u.port or 443, timeout=timeout,
+                                         context=ssl.create_default_context())
+        else:
+            conn = PinnedHTTPConnection(u.hostname, str(addrs[0]), u.port or 80, timeout=timeout)
+        try:
+            path = (u.path or "/") + (f"?{u.query}" if u.query else "")
+            conn.request("GET", path, headers=headers or {})
+            r = conn.getresponse()
+            location = r.getheader("Location")
+            if r.status in _REDIRECTS and location:
+                r.read(0)
+                url = urllib.parse.urljoin(url, location)
+                continue
+            return int(r.status), r.read(max_bytes).decode("utf-8", "replace")
+        except Exception as e:                   # noqa: BLE001 — nothing usable reached us
+            log.info("net.get_failed", url=str(url)[:80], error=type(e).__name__)
+            return 0, ""
+        finally:
+            conn.close()
+    log.warning("net.redirects_exhausted", url=str(url)[:120])
+    return 0, ""
 
 
 def url_is_public(url: str, resolve=None) -> bool:
@@ -146,7 +229,7 @@ class _NoRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def get_public(url: str, *, headers: dict | None = None, timeout: int = DEFAULT_TIMEOUT,
-               max_bytes: int = DEFAULT_MAX_BYTES, resolve=None) -> tuple[int, str]:
+               max_bytes: int = DEFAULT_MAX_BYTES, resolve=None, pin: bool = False) -> tuple[int, str]:
     """GET a public URL and RETURN THE STATUS with the body. -> (status, body).
 
     WHY THIS EXISTS BESIDE `fetch_public`, WHICH LOOKS THE SAME. `fetch_public` answers "" for a
@@ -163,7 +246,11 @@ def get_public(url: str, *, headers: dict | None = None, timeout: int = DEFAULT_
     The public-host check, the redirect policy and the byte cap are identical; only the return
     differs. A transport failure that never reached the far end is status 0, because there is no
     status to report and inventing one would be the same collapse in the other direction.
+
+    pin=True: DNS rebinding closed too (the module doc). The same answers, the same caps.
     """
+    if pin:
+        return _get_pinned(url, headers=headers, timeout=timeout, max_bytes=max_bytes, resolve=resolve)
     if not url_is_public(url, resolve):
         log.warning("net.fetch_refused", url=str(url)[:120])
         return 0, ""

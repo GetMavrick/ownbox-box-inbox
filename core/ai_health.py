@@ -88,10 +88,24 @@ def test(*, fresh: bool = False) -> dict:
     try:
         if not fresh and time.time() - datetime.fromisoformat(str(prev.get("at"))).timestamp() < TEST_GAP_S:
             return {"ok": bool(prev.get("ok")), "answer": prev.get("answer", ""), "seconds": prev.get("seconds", 0),
-                    "why": prev.get("why", ""), "repeat": True}
+                    "why": prev.get("why", ""), "kind": prev.get("kind", ""), "repeat": True}
     except (TypeError, ValueError):
         pass
     return _keep_test(_ask())
+
+
+def kind(e: Exception) -> str:
+    """Whose problem a failed answer is, for the key features gate (core/key_features.py, #1857 H1). `vendor`: the AI
+    app was down, busy or slow, or the plan's window is spent (it clears on its own). `unset`: the buyer's own sign-in
+    needs them (signed out, refused, unpaid). `ours`: anything else, which is the box's own break. Told apart by the
+    exception and brain's own account verdict, the rules every draft already uses, never by new words."""
+    from core import brain
+    from core.exceptions import BudgetExceeded, RetryableError
+    if isinstance(e, (RetryableError, BudgetExceeded)) or brain._is_transient(e):
+        return "vendor"
+    if brain._own_account_verdict(e) in ("needs_reauth", "payment_required"):
+        return "unset"
+    return "ours"
 
 
 def _ask() -> dict:
@@ -103,7 +117,7 @@ def _ask() -> dict:
     except Exception as e:                              # noqa: BLE001 — the owner reads exactly what went wrong
         why = scrub_secrets(" ".join(f"{type(e).__name__}: {e}".split()))[:300]
         note(False, "test", why, force=True)
-        return {"ok": False, "answer": "", "seconds": round(time.monotonic() - t0, 1), "why": why}
+        return {"ok": False, "answer": "", "seconds": round(time.monotonic() - t0, 1), "why": why, "kind": kind(e)}
     answer = " ".join(str(text or "").split())[:60]
     if answer:
         note(True, "test", force=True)

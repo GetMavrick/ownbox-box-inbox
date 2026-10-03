@@ -109,10 +109,10 @@ def _norm(s: dict) -> dict:
         # so there is no per-row narrowing to fall back on.
         "carousel_platforms": s.get("carousel_platforms"),
         # THE SPACE'S PUBLIC LABEL (owner 2026-09-05: one droplet, many subdomains — a demo app
-        # answers at <industry>.nlvl.co). `label: online-coaches` makes this Space the one that
+        # answers at <industry>.<demo zone>). `label: online-coaches` makes this Space the one that
         # `online-coaches.<demo zone>` shows on /dash, and the one the box's /tls/ask will hold a
         # certificate for. OPT-IN: a Space with no label is reachable only on the bare host — a
-        # Space NAME is a stamp on rows, never an address, so `default.nlvl.co` stays a 403.
+        # Space NAME is a stamp on rows, never an address, so `acme.example.com` stays a 403.
         # core/dash reads the same key straight from config (core imports no machine); the test
         # in tests/test_dash_demo_tabs.py holds the two readers to one answer.
         "label": (str(s.get("label") or "").strip().lower() or None),

@@ -412,8 +412,13 @@ def _meters(r: dict | None) -> str:
             if str(x.get("text") or "").strip() and has_value(x.get("value"))]
     warn = [w for w in (r.get("watch") or []) if w.get("state") != "ok" and str(w.get("text") or "").strip()]
     spent = has_value(h.get("value"))
-    if not (spent or used or warn):
+    # YOUR AI TODAY (plan #1857 H7): what the box's AI did, by task, today and this cycle. Counts, never cost.
+    ai = [f for k, f in (r.get("figures") or {}).items()
+          if str(k).startswith("ai:") and (f.get("value") or f.get("cycle"))]
+    if not (spent or used or warn or ai):
         return ""
+    ai_rows = "".join(f'<li><b>{_esc(f.get("label"))}</b> {int(f.get("value") or 0)} today'
+                      f'<span class="quiet">, {int(f.get("cycle") or 0)} this cycle</span></li>' for f in ai)
     items = "".join(f'<li><b>{_esc(x.get("text"))}</b> {_esc(x.get("value", ""))}</li>' for x in used)
     warns = "".join(f'<li><span class="dot {_esc(w.get("state") or "warn")}" role="img" '
                     f'aria-label="{_esc(_STATE_WORD.get(w.get("state"), "Worth a look"))}"></span>'
@@ -421,6 +426,7 @@ def _meters(r: dict | None) -> str:
     return (f'<section class="seg"><div class="hd"><h2>Spend</h2></div>'
             + (f'<div class="big">{_esc(h.get("value", ""))}<small>{_esc(h.get("label", ""))}</small></div>'
                if spent else "")
+            + (f'<div class="rv-rail"><span class="k">Your AI today</span><ul>{ai_rows}</ul></div>' if ai_rows else "")
             + (f'<div class="rv-rail"><span class="k">This cycle</span><ul>{items}</ul></div>' if items else "")
             + (f'<div class="rv-rail"><span class="k">Worth watching</span><ul class="col">{warns}</ul></div>'
                if warns else "")
@@ -435,13 +441,13 @@ def _admit(*, owner_only: bool = True):
     a label named in `dash.public_labels` — correctly, because the app is a SALES surface whose
     rows are scoped to that one label. This page is neither: it is cross-machine and it carries
     money. MEASURED ON THE LIVE BOX 2026-09-09, no session and no token, by OSDev5 and confirmed
-    by me: `health-and-wellness.nlvl.co/app/review` and `funded-companies.nlvl.co/app/review` both
+    by me: `health-and-wellness.example.com/app/review` and `funded-companies.example.com/app/review` both
     returned 200 with the meters, the monthly ceiling, the AT-CAP line and every machine's totals.
     Five labels are public on that box. Mirroring a gate is not the same as inheriting its
     reasoning, and the reasoning is what did not transfer.
 
     IT ALSO MUST NOT LOCK HIM OUT — his own box IS the public label, and the session cookie is
-    host-only, so a session from `aios.nlvl.co` does not travel to a demo subdomain. Hence a
+    host-only, so a session from `aios.example.com` does not travel to a demo subdomain. Hence a
     REDIRECT to that host's own `/dash/login` (mounted on every host by the kernel), never a 404:
     one sign-in on that address and he is in for thirty days. `dash.app_token` opens it too.
 

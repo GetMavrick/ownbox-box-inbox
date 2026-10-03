@@ -40,11 +40,11 @@ if [ ! -f "$AIOS/.env" ]; then
 # OBJECT_STORE_ENDPOINT=        # e.g. https://<account>.r2.cloudflarestorage.com
 # OBJECT_STORE_KEY=
 # OBJECT_STORE_SECRET=
-# OBJECT_STORE_PUBLIC_URL=      # CDN base for <video> tags, e.g. https://media.nlvl.co
+# OBJECT_STORE_PUBLIC_URL=      # CDN base for <video> tags, e.g. https://media.example.com
 # INSTANTLY_API_KEY=
 # INSTANTLY_CAMPAIGN_ID=   # destination campaign for approved gtm sends
 # RESEND_API_KEY=          # gtm send backend (gtm.send_backend: resend)
-# GTM_FROM_EMAIL=          # from-address on a Resend-VERIFIED domain, e.g. brian@nlvl.co
+# GTM_FROM_EMAIL=          # from-address on a Resend-VERIFIED domain, e.g. hello@example.com
 # APOLLO_API_KEY=   # bulk lead discovery (people search)
 # HUNTER_API_KEY=   # email finder/verification for discovered leads
 # Airtable two-way script sync — set ALL THREE to mirror scripts ↔ VIDEOS table:

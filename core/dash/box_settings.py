@@ -2035,8 +2035,13 @@ def deploy_updates_plan():
     updates is the box's key removed on Ownbox's side, so a forged "on" here buys nothing."""
     from core import box_updates
     body = request.get_json(silent=True) or {}
+    if "updates" not in body and "ends" not in body:
+        return jsonify({"error": "bad_plan", "message": "nothing to store"}), 400
     try:
-        box_updates.set_plan(str(body.get("updates") or ""), str(body.get("until") or ""))
+        if "updates" in body:
+            box_updates.set_plan(str(body.get("updates") or ""), str(body.get("until") or ""))
+        if "ends" in body:                       # #1857 D9c: when a cancelled Managed ends, "" when it is not
+            box_updates.set_managed_ends(str(body.get("ends") or ""))
     except ValueError as e:
         return jsonify({"error": "bad_plan", "message": str(e)}), 400
     return jsonify({"ok": True}), 200

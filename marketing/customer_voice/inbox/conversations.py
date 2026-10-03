@@ -75,11 +75,16 @@ def _outcome(fn) -> dict:
     try:
         r = fn()
     except reply.ReplyIndeterminate as e:
-        return {"status": "unknown", "message_id": None, "reason": f"it may have been sent: {e}"}
+        return {"status": "unknown", "message_id": None, "reason": f"it may have been sent: {e}", "code": "unknown"}
     except (reply.ReplyRefused, ValueError) as e:
-        return {"status": "refused", "message_id": None, "reason": str(e)}
+        return _refused(str(e), getattr(e, "code", "refused"))
     return {"status": "duplicate" if r.get("duplicate") else "sent", "message_id": r.get("message_id"),
-            "reason": ""}
+            "reason": "", "code": ""}
+
+
+def _refused(reason: str, code: str = "refused") -> dict:
+    """Nothing went. `code` says why for a program (reply.ReplyRefused lists them); `reason` says it for a person."""
+    return {"status": "refused", "message_id": None, "reason": reason, "code": code}
 
 
 def send(*, machine: str, conversation: str, text: str, key: str, buttons=None, quick_replies=None) -> dict:
@@ -376,27 +381,25 @@ def reply_to_comment(*, machine: str, comment: dict, text: str, key: str, quick_
     the platform's own list, and its opt-out is read from the inbox. If the box can't look, nothing is sent."""
     from core import spaces
     if not isinstance(comment, dict):
-        return {"status": "refused", "message_id": None,
-                "reason": "pass the comment exactly as m.comments() returned it (the whole dict, not its id)"}
+        return _refused("pass the comment exactly as m.comments() returned it (the whole dict, not its id)")
     space = str(comment.get("space") or spaces.DEFAULT)
     author = comment.get("author") if isinstance(comment.get("author"), dict) else {}
     ids = (author.get("id"), author.get("username"))
     if store.opted_out_by_ident(space, ids):
         # FROM THE BOX'S OWN RECORD of who is on each conversation, every page it has ever read (OSDev1's review).
-        return {"status": "refused", "message_id": None, "reason": "this person has opted out — nothing is sent to them"}
+        return _refused("this person has opted out — nothing is sent to them", "opted_out")
     if not filled(space) and not store.known_ident(space, ids):
         # THE BOX HASN'T READ EVERY CONVERSATION YET (the one-time fill above), so it can't be sure this person
         # never said STOP on an archived one. It waits rather than guesses.
-        return {"status": "refused", "message_id": None,
-                "reason": "the box is still reading its past conversations to check who said STOP; try again soon"}
+        return _refused("the box is still reading its past conversations to check who said STOP; try again soon",
+                        "not_ready")
     try:
         theirs = _conversation_strict(comment)
         stopped = bool(theirs) and opted_out(conversation=theirs)
     except Exception as e:                               # noqa: BLE001 — can't tell whether they said STOP: don't
         log.warning("inbox.private_reply_stop_unchecked", error=f"{type(e).__name__}: {e}"[:160])
-        return {"status": "refused", "message_id": None,
-                "reason": "the box couldn't check whether this person said STOP, so nothing is sent"}
+        return _refused("the box couldn't check whether this person said STOP, so nothing is sent", "unchecked")
     if stopped:
-        return {"status": "refused", "message_id": None, "reason": "this person has opted out — nothing is sent to them"}
+        return _refused("this person has opted out — nothing is sent to them", "opted_out")
     return _outcome(lambda: reply.reply_to_comment(space=space, machine=machine, comment=comment, text=text,
                                                    key=key, quick_replies=quick_replies))

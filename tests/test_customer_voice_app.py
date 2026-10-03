@@ -623,7 +623,9 @@ def test_an_inbox_nothing_can_reach_says_so_instead_of_promising():
         # AND as its button — three words, twice, inside one small box. Nothing in the code said
         # so; it took looking at the page. Asserted generically so the next edit cannot re-do it.
         import re as _re2
-        card = _re2.search(r'<div class="card">.*?</div></div></div>', body)
+        # THE EMPTY STATE'S OWN CARD, by its own markup: a machine's card in the Inbox's slot (core/panels.py) may
+        # follow it now, so the page's closing tags are no longer right after it.
+        card = _re2.search(r'<div class="card"><div class="setrow">.*?</div></div>', body)
         ok("...in a card that does not say the same thing twice", bool(card), "no card rendered")
         if card:
             words = _re2.findall(r"[A-Za-z']+", _re2.sub(r"<[^>]+>", " ", card.group(0)))

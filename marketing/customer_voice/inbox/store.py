@@ -158,7 +158,9 @@ def get_conversation(space: str, zcid: str) -> dict | None:
 # AND NOBODY ELSE IS HANDLING IT. A conversation an automation has claimed (customer_voice/claims.py) is the
 # automation's until it hands it back or the claim expires, so it is not waiting on a person: the
 # header, the filter, the morning count and the notice all leave it out, through this one string.
-_WAITING = f"k.opted_out = 0 AND {_NEWEST_IS_INBOUND} AND {_UNCLAIMED}"
+# A MACHINE IS NOT WAITING ON THE OWNER (plan #1857 H7): "waiting on you" read 120, the oldest 317 days, counting
+# newsletters, bounces and his own mail. `automated` 1 or 2 leaves waiting; NULL (never judged) still counts.
+_WAITING = f"k.opted_out = 0 AND COALESCE(k.automated, 0) = 0 AND {_NEWEST_IS_INBOUND} AND {_UNCLAIMED}"
 
 # CAME FROM AN AD HE PAID FOR. `ad_meta_id` and `ad_title` are written by the poller at INSERT for
 # a click-to-message conversation and by nothing else; the row already wears a "From <ad_title>"
@@ -969,7 +971,7 @@ def unread_conversations(space: str) -> int:
     return int(row["n"]) if row else 0
 
 
-def mark_automated(space: str, zcid: str, automated: bool) -> None:
+def mark_automated(space: str, zcid: str, automated: int) -> None:
     """Record whether a machine is writing this thread. Written at INGEST, where the headers are.
 
     NOT `INSERT OR IGNORE` AND NOT CONDITIONAL. A thread's answer can legitimately change — a
@@ -979,7 +981,8 @@ def mark_automated(space: str, zcid: str, automated: bool) -> None:
     with state.connect() as c:
         c.execute("UPDATE inbox_conversations SET automated = ?, updated_at = ? "
                   " WHERE space = ? AND zernio_conversation_id = ?",
-                  (1 if automated else 0, state._now(), space, str(zcid)))
+                  # 0 a person, 1 automated, 2 only a list header (a cold pitch's shape, email_channel.automated_level)
+                  (max(0, min(2, int(automated))), state._now(), space, str(zcid)))
 
 
 def unjudged_email_senders(space: str, *, limit: int = 500) -> list[dict]:

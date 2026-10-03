@@ -23,6 +23,12 @@ FOUR CHECKS, each the buyer's own path, never a shortcut around it:
 WHAT LEAVES THE BOX: counts and the names of what failed ("mcp:aeo.status", "ai"), never an error's text, an
 answer, a credential or anything about a person. The detail stays in this box's own log.
 
+EACH FAILURE SAYS WHOSE IT IS (#1857 H1, from OSDev4's review): `why` maps each failed name to `ours` (the box's own
+break, which blocks a release and pages OSDev1), `vendor` (the AI app was down or busy: reported, never blocking) or
+`unset` (no AI signed in yet, or the buyer's sign-in needs them: a fresh box is like this by design). Without it an
+Anthropic outage would stop every release and every new box would page on its first hour. Only the AI check can be
+anything but `ours`: the connector, the review and the approval are the box's own code.
+
 Run: python -m core.key_features   (aios-keyfeatures.timer, hourly; it nudges a check-in after each run)
 """
 from __future__ import annotations
@@ -31,6 +37,7 @@ import http.client
 import json
 import os
 import socket
+import subprocess
 import ssl
 import time
 import urllib.parse
@@ -53,6 +60,10 @@ SEAT_LABEL = "Key features check"
 ERROR_META = "io.ownbox/error"           # core/connector/mcp.py puts an error's code here
 _SAMPLE = {"integer": 1, "number": 1, "string": "ownbox", "boolean": False}
 _RAN: list = []                          # the approval kind's runs, counted by the round trip
+OURS, VENDOR, UNSET = "ours", "vendor", "unset"
+REASONS = (OURS, VENDOR, UNSET)
+_AI_LAST: dict = {}                      # the last AI test this run asked, so its failure can say whose it is
+WEB_WAIT_S = 120                         # at boot the timer can fire before gunicorn listens (OnBootSec=4min)
 
 
 def _now() -> datetime:
@@ -69,14 +80,12 @@ def base_url() -> str:
     return (getattr(settings, "dashboard_base_url", "") or LOCAL).rstrip("/")
 
 
-class _Loopback(http.client.HTTPSConnection):
+def _Loopback(host: str, port: int, **kw):
     """TLS to the box's public name, dialled on its own loopback. Caddy picks the site by SNI and Host and checks
     the certificate as a client does, but the socket never leaves the box, so the seat's credential cannot reach
-    another host whatever DNS says."""
-
-    def connect(self):
-        sock = socket.create_connection(("127.0.0.1", self.port), self.timeout)
-        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+    another host whatever DNS says. The same pinned connection the sign-in's fetch uses (core/net.py)."""
+    from core import net
+    return net.PinnedHTTPSConnection(host, "127.0.0.1", port, **kw)
 
 
 def _http(url: str, body: dict, headers: dict) -> tuple[int, dict | None]:
@@ -220,10 +229,94 @@ def check_ai() -> bool:
         fresh = False
     if fresh:
         return True                                      # a real answer in 6 hours: no question needed
-    return bool(ai_health.test().get("ok"))
+    got = ai_health.test()
+    _AI_LAST.clear()
+    _AI_LAST.update(got if isinstance(got, dict) else {})
+    return bool(_AI_LAST.get("ok"))
+
+
+def _ai_signed_in() -> bool:
+    """Is an AI signed in at all, on the backend this box thinks with? The same credentials brain.can_think reads,
+    asked directly so a missing CLI (our break) is never mistaken for a missing sign-in (the buyer's step)."""
+    from core import box_secrets, brain
+    held = {"codex": box_secrets.codex_connected, "claude_code": box_secrets.claude_oauth_token,
+            "api": box_secrets.anthropic_key}.get(brain._backend())
+    return held is None or bool(held())
+
+
+def ai_why() -> str:
+    """Whose failure the AI check's is: `unset` with no sign-in, else what the test's exception said (ai_health.kind),
+    else `ours`. Never raises: a question it can't answer is ours."""
+    try:
+        if not _ai_signed_in():
+            return UNSET
+    except Exception:                                    # noqa: BLE001
+        return OURS
+    k = _AI_LAST.get("kind")
+    return k if k in (VENDOR, UNSET) else OURS
 
 
 # ── 3. the Morning Review builds ────────────────────────────────────────────────────────────────────────────
+# ── 5. upkeep, checked rather than assumed (plan #1857 H14) ─────────────────────────────────────────────────────
+UPGRADES_TIMER = "apt-daily-upgrade.timer"             # Ubuntu's own: it runs unattended-upgrades every day
+UPGRADES_MAX_AGE_S = 48 * 3600
+CERT_MIN_DAYS = 14
+
+
+def _systemctl_show(unit: str) -> dict:
+    """`systemctl show` for one unit, as {property: value}; {} where there is no systemctl."""
+    try:
+        r = subprocess.run(["systemctl", "show", unit, "-p", "ActiveState", "-p", "LastTriggerUSecRealtime"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    return dict(ln.split("=", 1) for ln in r.stdout.splitlines() if "=" in ln)
+
+
+def _box_age_s() -> float | None:
+    """Seconds since this box was provisioned (the provisioner's file, core/claim.py), or None on a box without it."""
+    from core import claim
+    try:
+        return _now().timestamp() - os.path.getmtime(claim.PROVISION_JSON)
+    except OSError:
+        return None
+
+
+def check_upgrades(show=None, age=None) -> bool:
+    """The box's security updates still run: Ubuntu's upgrade timer is active and fired in the last 48 hours.
+
+    A BOX YOUNGER THAN 48 HOURS PASSES WHILE THE TIMER IS ACTIVE (OSDev1's review of #1867): the timer fires once a
+    day around 06:00, so the rehearsal box a release waits on, minutes old, has never fired it, and calling that a
+    break of ours would stop every release. Past 48 hours, it must have run."""
+    got = (show or _systemctl_show)(UPGRADES_TIMER)
+    try:
+        last_us = int(got.get("LastTriggerUSecRealtime") or 0)
+    except ValueError:
+        last_us = 0
+    fresh = last_us > 0 and (_now().timestamp() - last_us / 1e6) < UPGRADES_MAX_AGE_S
+    born = (age or _box_age_s)()
+    young = born is not None and born < UPGRADES_MAX_AGE_S
+    return got.get("ActiveState") == "active" and (fresh or young)
+
+
+def _cert_days_left(url: str | None = None) -> float | None:
+    """Days until the box's own certificate expires, read over the same loopback TLS the MCP check uses, or None
+    when the box has no https address to read."""
+    u = urllib.parse.urlsplit(url or base_url())
+    if u.scheme != "https" or not u.hostname:
+        return None
+    sock = socket.create_connection(("127.0.0.1", u.port or 443), 10)
+    with ssl.create_default_context().wrap_socket(sock, server_hostname=u.hostname) as tls:
+        not_after = ssl.cert_time_to_seconds(tls.getpeercert()["notAfter"])
+    return (not_after - _now().timestamp()) / 86400
+
+
+def check_certificate(days_left=None) -> bool:
+    """The box's certificate has more than 14 days left (Caddy renews at 30, so less is a renewal that stopped)."""
+    left = (days_left or _cert_days_left)()
+    return left is None or left > CERT_MIN_DAYS
+
+
 def check_review() -> bool:
     from core import report, review_brief
     yesterday = report.today() - timedelta(days=1)
@@ -259,6 +352,7 @@ def check_approval() -> bool:
 def run(*, post=None, url: str | None = None) -> dict:
     """Every check. -> {"at", "ok", "passed", "total", "failed": [names]}. Never raises."""
     passed, failed = 0, []
+    _AI_LAST.clear()
     try:
         clean_up()
     except Exception as e:                               # noqa: BLE001 — a leftover never stops the checks
@@ -269,7 +363,8 @@ def run(*, post=None, url: str | None = None) -> dict:
     except Exception as e:                               # noqa: BLE001
         failed.append("mcp")
         log.warning("key_features.mcp_crashed", error=f"{type(e).__name__}: {e}"[:200])
-    for name, fn in (("ai", check_ai), ("review", check_review), ("approval", check_approval)):
+    for name, fn in (("ai", check_ai), ("review", check_review), ("approval", check_approval),
+                     ("upgrades", check_upgrades), ("certificate", check_certificate)):
         try:
             good = bool(fn())
         except Exception as e:                           # noqa: BLE001 — a check that crashed failed
@@ -281,7 +376,9 @@ def run(*, post=None, url: str | None = None) -> dict:
             failed.append(name)
     out = {"at": _iso(_now()), "ok": not failed, "passed": passed, "total": passed + len(failed),
            "failed": failed[:FAILED_MAX]}
-    log.info("key_features.ran", ok=out["ok"], passed=passed, failed=failed[:FAILED_MAX])
+    if out["failed"]:
+        out["why"] = {n: (ai_why() if n == "ai" else OURS) for n in out["failed"]}
+    log.info("key_features.ran", ok=out["ok"], passed=passed, failed=failed[:FAILED_MAX], why=out.get("why"))
     return out
 
 
@@ -301,13 +398,42 @@ def last() -> dict | None:
         return None
     if not isinstance(got, dict):
         return None
-    return {"at": str(got.get("at") or "")[:32], "ok": got.get("ok") is True,
-            "passed": int(got.get("passed") or 0), "total": int(got.get("total") or 0),
-            "failed": [str(x)[:80] for x in (got.get("failed") or [])][:FAILED_MAX]}
+    out = {"at": str(got.get("at") or "")[:32], "ok": got.get("ok") is True,
+           "passed": int(got.get("passed") or 0), "total": int(got.get("total") or 0),
+           "failed": [str(x)[:80] for x in (got.get("failed") or [])][:FAILED_MAX]}
+    why = got.get("why") if isinstance(got.get("why"), dict) else {}
+    reasons = {n: why[n] for n in out["failed"] if why.get(n) in REASONS}
+    if reasons:
+        out["why"] = reasons
+    return out
+
+
+def _wait_for_web(limit_s: float = WEB_WAIT_S, sleep=time.sleep) -> bool:
+    """Wait for gunicorn's own bind to answer /health, at most `limit_s`. The timer fires 4 minutes after boot so a
+    fresh box reports within minutes (#1857 H1), and on a box from the image the web process can still be starting.
+    -> whether it answered. A box whose web never comes up runs the checks anyway and fails `mcp:connect`, ours."""
+    u = urllib.parse.urlsplit(LOCAL)
+    deadline = time.monotonic() + limit_s
+    while True:
+        try:
+            conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=5)
+            try:
+                conn.request("GET", "/health")
+                if conn.getresponse().status == 200:
+                    return True
+            finally:
+                conn.close()
+        except OSError:
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        sleep(5)
 
 
 def main() -> int:
     import core.dispatch  # noqa: F401 — loads every machine, so the tools and grants are the box's real ones
+    if not _wait_for_web():
+        log.warning("key_features.web_not_up", waited_s=WEB_WAIT_S)
     result = run()
     save(result)
     from core import checkin

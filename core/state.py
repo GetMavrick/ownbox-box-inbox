@@ -406,6 +406,27 @@ CREATE TABLE IF NOT EXISTS oauth_codes (
   used_at         TEXT              -- set on redemption; a second attempt is refused
 );
 
+-- THE SIGN-IN'S OWN BOOKKEEPING (#1857 H4). SCHEMA, not MIGRATIONS: brand-new tables.
+-- A client's last approval and the seats it was given, so `oauth.sweep` can drop a client nobody has used in 30
+-- days and that holds no live seat. A seat outlives its client row: the token is the seat, and it keeps working.
+CREATE TABLE IF NOT EXISTS oauth_client_use (
+  client_id     TEXT PRIMARY KEY,
+  last_code_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_client_seats (
+  client_id  TEXT NOT NULL,
+  seat_id    TEXT NOT NULL,
+  PRIMARY KEY (client_id, seat_id)
+);
+-- FAILED CLIENT-DOCUMENT FETCHES, PER URL, NEVER PER HOST. Five failures of one URL in ten minutes refuse that URL for
+-- an hour. Per host would let five bad ids under chatgpt.com lock every buyer out of ChatGPT.
+CREATE TABLE IF NOT EXISTS oauth_cimd_misses (
+  url            TEXT PRIMARY KEY,
+  misses         INTEGER NOT NULL,
+  first_at       TEXT NOT NULL,
+  refused_until  TEXT
+);
+
 CREATE TABLE IF NOT EXISTS seats (
   id           TEXT PRIMARY KEY,   -- 'seat_<random>'; the PUBLIC handle, safe to log and to audit
   label        TEXT NOT NULL,      -- 'Mavrick (prod)', 'Dana - ops'; what a human recognises
@@ -933,13 +954,13 @@ def _migration_13(c) -> None:
 
 
 def _migration_14(c) -> None:
-    # One-off data rename: the owner renamed the @BuildwithBMAC account to @default,
+    # One-off data rename: the first owner renamed an account and its Space slug,
     # so its Space slug follows. reel_scripts.space is the immutable per-reel binding key
     # (set at creation), so existing rows are renamed in lockstep with the config block
-    # that now reads `name: default` — config and data can never disagree because both
+    # that now reads the new name — config and data can never disagree because both
     # land in the SAME deploy. Idempotent and a no-op on any box that never held the old
     # slug (e.g. a fresh clone): the WHERE simply matches nothing.
-    c.execute("UPDATE reel_scripts SET space='default' WHERE space='build-with-bmac'")
+    c.execute("UPDATE reel_scripts SET space='default' WHERE space='build-with-bmac'")  # frozen migration
 
 
 def _migration_15(c) -> None:
@@ -1689,7 +1710,7 @@ def _migration_50(c) -> None:
     """THE FIX FOR THE BROKEN CLASSIFIER CANNOT REACH THE THREADS THE BROKEN CLASSIFIER TOUCHED.
 
     Measured by OSDev1 on the live box, 2026-09-17: #1287 is deployed and surfaces NOTHING. All 91
-    `inbox_state` watermarks (default 52, default 39) carry `last_seen_msg_id` NULL and a
+    `inbox_state` watermarks (two Spaces, at 52 and 39) carry `last_seen_msg_id` NULL and a
     `last_activity` equal to the thread's CURRENT activity. Both were written by the poller before
     the classifier was fixed — every message read as outbound, so `_newest_inbound` returned None
     and the id stored NULL, while the activity stamp stored fine.

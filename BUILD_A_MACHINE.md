@@ -70,7 +70,7 @@ blueprint = m.blueprint               # the box mounts this when it starts
 | add a screen | `@m.screen(m.home)` (or a path under it, like `m.home + "/settings"`) on a function that returns `sdk.page(path, title=, lede=, body=)`. Screens are behind the box's sign-in; `owner_only=True` limits one to the owner. |
 | style a screen | the classes in `sdk.STYLE_CLASSES`: `card`, `quiet`, `addr`, `consent`. |
 | put a line on the Morning Review | `m.reporter(title, fn)`. `fn(day)` returns `{}` on a quiet day, or a `title`, a `headline` and what `happened`. |
-| answer your AI's questions | `m.tool(name, fn=, title=, description=, capability="read:<noun>")`. The `title` is what you read when your AI asks permission, in plain words: "Read my job list". |
+| answer your AI's questions | `m.tool(name, fn=, title=, description=, capability="read:<noun>", render=)`. The `title` is what you read when your AI asks permission, in plain words: "Read my job list". `render(result)` returns the answer in words, which your AI shows as it is; put `m.link(m.home)` in it so the answer ends with a link you can tap. `check` warns on a tool without `render=` now, and will refuse one in the next release. |
 | keep a small value | `m.setting(key, default)` and `m.save_setting(key, value)` |
 | keep more than that | your own SQLite file in `m.data_dir()`, inside your machine's folder |
 | run work on a schedule | `m.every(seconds, fn)`: every 15 seconds or more, in the box's worker. Each run has its own thread and a time budget; a run that fails is shown on the Add a Machine page, and the next one goes ahead. Keep progress in `m.data_dir()`. For work an AI does on a shift (Pro), ship a **coworker** instead: `coworkers/<name>/coworker.yaml`, hired on the Coworkers page. |

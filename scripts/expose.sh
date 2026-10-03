@@ -9,7 +9,7 @@
 set -euo pipefail
 
 DOMAIN="${1:?usage: expose.sh <domain> [demo-zone]}"
-ZONE="${2:-}"   # e.g. nlvl.co on the demo box: *.nlvl.co answers, certificates on demand, gated by /tls/ask
+ZONE="${2:-}"   # e.g. example.com on a demo box: *.example.com answers, certificates on demand, gated by /tls/ask
 AIOS=/opt/aios
 
 echo "== caddy =="

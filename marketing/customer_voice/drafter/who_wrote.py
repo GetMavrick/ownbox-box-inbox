@@ -61,7 +61,7 @@ import re
 # touch. Measured on the owner's mailbox: his own Morning Review was the last thing leaking
 # through, and this is the line that stops it.
 BULK_HEADERS = ("list-unsubscribe", "list-id", "auto-submitted", "x-auto-response-suppress",
-                "x-ownbox")
+                "x-ownbox", "x-autoreply", "x-autorespond")
 _BULK_PRECEDENCE = {"bulk", "list", "junk", "auto_reply"}
 
 # Anchored to a word boundary inside the LOCAL PART so `notify@` matches and `denotify@example`
@@ -74,7 +74,13 @@ _NEVER_WRITES_BACK = re.compile(
     r"|jobalerts?|invitations?|digest|newsletter|unsubscribe"
     r"|verify|verification|confirm|confirmation|otp"
     r"|automated|auto-?confirm|system|daemon"
-    r")(?:$|[.\-_+])", re.I)
+    # THE INBOX'S OWN WORDS, MERGED (plan #1857 H7: one classifier, not two). email_channel.is_automated kept its own
+    # list beside this one; it now asks this file, so the words it had and this lacked come here.
+    r"|mailer|root|cron|bot|robot|automailer"
+    r")(?=$|[.\-_+])", re.I)                             # a lookahead, so `alerts-noreply` yields both words
+# A BUSINESS CAN WRITE FROM THESE (the inbox's rule since 2026-09-22): a security or monitoring firm's `alerts@`.
+# The drafter still won't pay to answer one on its address alone; "waiting" won't hide one (strict=False).
+_MAYBE_A_BUSINESS = {"alert", "alerts"}
 
 
 def _local(addr: str) -> str:
@@ -82,7 +88,7 @@ def _local(addr: str) -> str:
     return a.split("@", 1)[0] if "@" in a else a
 
 
-def why(sender: str, headers: dict | None = None, *, ours: set[str] | None = None) -> str:
+def why(sender: str, headers: dict | None = None, *, ours: set[str] | None = None, strict: bool = True) -> str:
     """The reason this message must not be answered, or "" when a person wrote it.
 
     `headers` is a plain mapping of the inbound's headers, lower-cased keys. `ours` is every
@@ -94,14 +100,36 @@ def why(sender: str, headers: dict | None = None, *, ours: set[str] | None = Non
     if ours and addr in {str(o).strip().lower() for o in ours if o}:
         return "this box sent it"
     h = {str(k).lower(): str(v or "") for k, v in (headers or {}).items()}
+    if h.get("content-type", "").strip().lower().startswith("multipart/report"):
+        return "a delivery report"                      # RFC 6522: a bounce or a read receipt, never a person
     for name in BULK_HEADERS:
-        if h.get(name):
+        # `Auto-Submitted: no` is the one value that means a person sent it (RFC 3834).
+        if h.get(name) and not (name == "auto-submitted" and h[name].strip().lower() == "no"):
             return f"an automated sender ({name})"
-    if h.get("precedence", "").strip().lower() in _BULK_PRECEDENCE:
+    if h.get("precedence", "").strip().lower() in (_BULK_PRECEDENCE if strict else {"auto_reply"}):
         return f"an automated sender (precedence: {h['precedence'].strip().lower()})"
-    if _NEVER_WRITES_BACK.search(_local(addr)):
+    words = {w.lower() for w in _NEVER_WRITES_BACK.findall(_local(addr))}
+    if words if strict else (words - _MAYBE_A_BUSINESS):
         return "an address that does not accept replies"
     return ""
+
+
+PERSON, AUTOMATED, LIST_ONLY = 0, 1, 2
+
+
+def level(sender: str, headers: dict | None = None, *, ours: set[str] | None = None, strict: bool = True) -> int:
+    """PERSON (0), AUTOMATED (1), or LIST_ONLY (2): the only sign of a machine is a `List-Unsubscribe` header.
+
+    LIST_ONLY IS THE SHAPE OF A COLD PITCH (plan #1857 H7, OSDev4's F4 #1852): most cold-email tools add
+    List-Unsubscribe to every send, so a rule that skipped it would silence the pitch-back before it could answer.
+    It is not waiting on the owner and it is not drafted, unless pitch-back is on (drafter/store.needs_a_draft)."""
+    if not why(sender, headers, ours=ours, strict=strict):
+        return PERSON
+    h = {str(k).lower(): v for k, v in (headers or {}).items()}
+    if h.get("list-unsubscribe") and not why(sender, {k: v for k, v in h.items() if k != "list-unsubscribe"},
+                                             ours=ours, strict=strict):
+        return LIST_ONLY
+    return AUTOMATED
 
 
 def is_a_person(sender: str, headers: dict | None = None, *, ours: set[str] | None = None) -> bool:

@@ -145,6 +145,19 @@ def clock(iso) -> str:
     return f"{day}{hm}{_utc_label(tz)}"
 
 
+def unavailable(vendor: str, when=None, *, own: bool = True) -> dict:
+    """ONE RULE FOR EVERY TOOL THAT READS A VENDOR (#1857 H5): a vendor that does not answer never fails the answer.
+    The result carries this under `unavailable`, and its render says the sentence, so every machine says it the same
+    way. `own=False` when the box has nothing of its own to show instead.
+
+    `vendor` is the name the buyer connected (PostHog, Google Search Console). The box's own AI is "The box's own AI":
+    pages name no AI vendor (owner, 2026-10-03)."""
+    t = when if isinstance(when, datetime) else (_parse(when) if when else datetime.now(timezone.utc))
+    at = t.isoformat(timespec="seconds")
+    tail = "; these are the box's own numbers." if own else ". It is asked again next time."
+    return {"vendor": vendor, "at": at, "words": f"{vendor} didn't answer at {clock(at)}{tail}"}
+
+
 def as_of(iso, stale: bool = False) -> str:
     """Freshness in words. `stale`: said, never hidden (core/report_tools.py: stale-and-labelled is survivable)."""
     when = clock(iso)
@@ -222,7 +235,7 @@ def quoted(text, most: int = 140) -> str:
 
 def plain(text) -> str:
     """A sentence from somewhere else in the box, made safe to put in a line: no braces, one line, a capital.
-    A line that opens with an address keeps it as written ("brian-macdonald.com: 179 visits", not "Brian-...")."""
+    A line that opens with an address keeps it as written ("glowmedspa.com: 179 visits", not "Glowmedspa...")."""
     t = " ".join(str(text or "").replace("{", "(").replace("}", ")").split())
     if not t or "." in t.split(" ", 1)[0].rstrip(":,"):
         return t

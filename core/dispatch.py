@@ -250,7 +250,9 @@ def _deploy_authorized(req) -> bool:
 
     AND ONCE MORE, 2026-09-23 (#1472 R9): `/deploy/updates-plan`, where the provisioner tells the box
     whether updates come with its plan. It stores "on" or "off" and a date, nothing else, and it only
-    explains the Updates screen — the box's key, removed on our side, is what stops updates.
+    explains the Updates screen — the box's key, removed on our side, is what stops updates. Since
+    2026-10-03 (#1857 D9c) it may also carry `ends`, the date a cancelled Managed ends, which only changes
+    what the Managed screens say. Leaked, the worst it does is show a wrong date.
 
     AND 2026-09-26 (docs/SCOPE_TIERS.md): `/deploy/plan`, where the provisioner tells the box its plan.
     It stores a tier and add-ons from a fixed list, with a seq that only goes up, and answers with the
@@ -441,14 +443,17 @@ def dispatch():
     if not idem:
         return jsonify({"error": "idempotency_key is required"}), 400
 
-    job, created = queue.enqueue(
-        idempotency_key=idem,
-        agent_name=body.get("agent_name"),
-        intent=body.get("intent"),
-        raw_text=raw_text,
-        slack_channel_id=body.get("slack_channel_id"),
-        slack_thread_ts=body.get("slack_thread_ts"),
-    )
+    try:
+        job, created = queue.enqueue(
+            idempotency_key=idem,
+            agent_name=body.get("agent_name"),
+            intent=body.get("intent"),
+            raw_text=raw_text,
+            slack_channel_id=body.get("slack_channel_id"),
+            slack_thread_ts=body.get("slack_thread_ts"),
+        )
+    except ValueError as e:                              # a machine this box doesn't have (plan #1857 H6)
+        return jsonify({"error": str(e)}), 400
     log.info("dispatch.received", job_id=job["id"], created=created,
              agent=body.get("agent_name"), intent=job.get("intent"))
     return jsonify({"job_id": job["id"], "status": job["status"],

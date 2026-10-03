@@ -356,6 +356,87 @@ def set_plan(updates: str, until: str = "") -> None:
     box_settings.put(_PLAN_MACHINE, _PLAN_KEY, {"updates": updates, "until": until}, set_by="provisioner")
 
 
+_ENDS_KEY = "managed_ends"
+
+
+def managed_ends() -> str:
+    """When this box's cancelled Managed ends, as the provisioner last said (#1857 D9c), or "". Never raises."""
+    try:
+        from core import box_settings
+        got = box_settings.get(_PLAN_MACHINE, _ENDS_KEY, default="")
+        return got if isinstance(got, str) else ""
+    except Exception:                                    # noqa: BLE001 — unknown reads as not ending
+        return ""
+
+
+def set_managed_ends(ends: str) -> None:
+    """Store when a cancelled Managed ends: a date, or "" for not ending (the buyer resumed it). Refuses anything
+    else. It only changes what the Managed screens say; it never touches updates."""
+    ends = str(ends or "")[:40]
+    if ends:
+        datetime.fromisoformat(ends.replace("Z", "+00:00"))   # a date or nothing — raises otherwise
+    from core import box_settings
+    box_settings.put(_PLAN_MACHINE, _ENDS_KEY, ends, set_by="provisioner")
+
+
+# THE WAY BACK (#1857 D9d, owner 2026-10-03 "D9 as recommended"). LIVE since 2026-10-03: one "rejoin" payment link
+# per plan, at the same monthly Managed price the plan was sold with and no trial (plink_1UMZcf9zPuayPezN5r8YghDW
+# for Base, plink_1UMZcf9zPuayPezNj2xH4DSo for Pro), which the provisioner reads as STRIPE_REJOIN_LINKS
+# (provisioner/rejoin.py). OSDev1's alone to change: all Stripe work is theirs (owner 2026-09-26).
+REJOIN_LINKS = {"ownbox": "https://buy.stripe.com/28E5kx6RUaqW15r1RA2Ry0v",
+                "pro": "https://buy.stripe.com/28E14h6RUgPk3dz0Nw2Ry0w"}
+
+
+def rejoin_url() -> str:
+    """The link that resumes Managed for THIS box: its plan's rejoin link, carrying the box's own order id (how the
+    provisioner knows which box paid, as the Pro upgrade does) and the owner's email. "" when no link fits."""
+    from urllib.parse import urlencode
+    try:
+        from core import claim, state, tiers
+        order = claim.provisioned_order() or ""
+        link = REJOIN_LINKS.get(str(tiers.current().get("tier") or ""), "")
+        email = str(state.owner_user().get("email") or "")
+    except Exception:                                    # noqa: BLE001 — no button beats a wrong one
+        return ""
+    if not order or not link:
+        return ""
+    q = {"client_reference_id": order, **({"prefilled_email": email} if email else {})}
+    return link + ("&" if "?" in link else "?") + urlencode(q)
+
+
+def managed_words(until_day: str) -> tuple[str, str]:
+    """What the Managed screens say, from what the provisioner last told this box. -> (title, sentence).
+
+    ONE PLACE FOR THE WORDS, used by the Managed page and the home card, so they never disagree. Before
+    #1857 D9c both said "Unless you cancel, it renews after that" to a buyer who had cancelled, and "Managed is
+    on" after it had ended."""
+    told = plan()
+    if told.get("updates") == "off":
+        when = _day(told.get("until"))
+        return ("Managed has ended",
+                (f"Managed ended on {when}. " if when else "Managed has ended. ")
+                + "Your box keeps running and stays yours; it no longer receives updates.")
+    ends_iso = managed_ends()
+    ends = _day(ends_iso)
+    if ends and _past(ends_iso):
+        # Over, but nobody has said updates stopped (R9 report-only): never claim they did.
+        return ("Managed has ended", f"Managed ended on {ends}. Your box keeps running and stays yours.")
+    if ends:
+        return ("Managed is ending",
+                f"You cancelled Managed. It ends on {ends}. Your box keeps running; updates stop then.")
+    return ("Managed is on",
+            f"You bought Managed with this box, with three months free to {until_day}. "
+            "Unless you cancel, it renews after that.")
+
+
+def _past(iso) -> bool:
+    try:
+        t = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)) <= datetime.now(timezone.utc)
+
+
 def _day(iso) -> str:
     try:
         return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).strftime("%-d %B %Y")

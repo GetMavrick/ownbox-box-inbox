@@ -19,8 +19,9 @@ WHAT IS PROMISED (§9.2), AND WHAT IS NOT:
   * reasoning        m.think(task, prompt): the only way to use AI, on this box's account and under
                      its monthly spend ceiling (core.brain.think)
   * the morning page m.reporter(title, fn)
-  * tools            m.tool(name, fn=, description=, capability=, args=): a question this box can
-                     answer for the owner's AI (core.connector.tools). Coworkers need no code: a
+  * tools            m.tool(name, fn=, description=, capability=, args=, render=): a question this box can
+                     answer for the owner's AI (core.connector.tools); `render(result)` is the answer in
+                     words, and m.link(path) a full address to put in it. Coworkers need no code: a
                      machine ships them as files, `coworkers/<name>/coworker.yaml` (coworker: 1).
   * the menu         m.menu(key, title=, href=): only those three; the menu's look is ours
   * screens          m.screen(path): a signed-in page on the box's own chrome, and STYLE_CLASSES.
@@ -142,14 +143,25 @@ class Machine:
 
     # ── tools for the owner's AI ──────────────────────────────────────────────────────────────
     def tool(self, name: str, *, fn, description: str, capability: str,
-             args: dict | None = None, title: str | None = None) -> None:
+             args: dict | None = None, title: str | None = None, render=None) -> None:
         """One question the owner's AI may ask this box. `capability` is `read:<noun>` for a
         question that changes nothing; the box decides who may ask it. `title` is what the owner
         reads when their AI asks permission ("Read your latest notes"); without one, the box makes
-        one from the name. Added in SDK 1 without breaking anything built on it: it is optional."""
+        one from the name. Added in SDK 1 without breaking anything built on it: it is optional.
+
+        `render(result)` returns THE ANSWER IN WORDS: what the owner's AI shows as it is, before the
+        data (#1857 F3). Every tool of the box's own has one; a tool without one hands the AI raw
+        fields to explain, and it explains them worse. `python scripts/ownbox.py check` warns on a
+        tool without one now, and will refuse it in the next release. Optional in SDK 1."""
         from core.connector import tools
         tools.register(name, fn=fn, description=description, machine=self.key,
-                       capability=capability, args=args, title=title)
+                       capability=capability, args=args, title=title, render=render)
+
+    def link(self, path: str) -> str:
+        """A FULL address on this box for one of this machine's pages (`https://<box>/my/...`), for an
+        answer in words: a bare path is a dead end in a chat."""
+        from core.connector import words
+        return words.link(self._own(path, "link"))
 
     # ── the menu ──────────────────────────────────────────────────────────────────────────────
     def menu(self, key: str, *, title: str, href: str) -> None:
@@ -281,8 +293,10 @@ class Machine:
         inbox refuses when a person has replied since you claimed it (the claim ends and the conversation is
         theirs: don't claim it again), the person opted out, the box is stopped, the channel's window is closed (on
         Instagram, 24 hours after their own message) or the hourly cap is reached. -> {"status": "sent" |
-        "duplicate" | "refused" | "unknown", "message_id", "reason"}. "unknown" means it may have gone: don't
-        send it again.
+        "duplicate" | "refused" | "unknown", "message_id", "reason", "code"}. "unknown" means it may have gone:
+        don't send it again. `reason` is a sentence for a person; decide in code on `code`, which a rewording
+        never changes: "taken_over", "opted_out", "box_stopped", "window_closed", "hourly_cap", "not_claimed",
+        "too_old", "not_ready" (try again soon), "unchecked", or "refused" for anything else.
 
         `buttons`: up to 3 links, each {"title": "Get the guide", "url": "https://…"} (titles cut at 20 characters).
         `quick_replies`: up to 13 titles ("I just followed you!"). A tap SENDS the title back as their message,

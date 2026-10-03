@@ -83,6 +83,7 @@ if _inbox.is_file():
     # app live once, in System Settings, so "AI and Drafts" and "Home Screen" left this menu and
     # their addresses send people to those one homes.
     rows = {"/inbox/settings": "Overview", "/inbox/mailbox": "Mailbox", "/inbox/signature": "Email Signature",
+            "/inbox/pitch-back": "Cold Pitches",
             "/inbox/snippets": "Saved Replies",
             "/inbox/connect": "Social Accounts"}
     for _old, _home in (("/inbox/drafts", "/inbox/settings"), ("/inbox/install", "/settings/mobile")):

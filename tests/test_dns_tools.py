@@ -26,13 +26,13 @@ dns_check = load("dns_check")
 
 # ── the checker reports what is there, and never invents ──────────────────────────────
 answers = {
-    ("acme.nlvl.co", "A"): ["203.0.113.7"],
+    ("acme.ownbox.app", "A"): ["203.0.113.7"],
     ("acme-roofing.com", "TXT"): ["v=spf1 include:amazonses.com ~all"],
     ("_dmarc.acme-roofing.com", "TXT"): [],
     ("resend._domainkey.acme-roofing.com", "TXT"): ["p=MIGfMA0G"],
 }
 fake = lambda n, t: answers.get((n, t), [])
-ok("finds a record that exists", dns_check.lookup("acme.nlvl.co", "A", fetch=fake) == ["203.0.113.7"])
+ok("finds a record that exists", dns_check.lookup("acme.ownbox.app", "A", fetch=fake) == ["203.0.113.7"])
 ok("reports nothing for a record that does not", dns_check.lookup("_dmarc.acme-roofing.com", "TXT", fetch=fake) == [])
 ok("a missing record is MISSING, not an error", dns_check.check("x", [], "v=spf1", "fix") is False)
 ok("a present record must still MATCH what we need",

@@ -228,6 +228,7 @@ def fixtures() -> dict:
         "inbox.saved_replies": {"saved_replies": [{"id": 1, "name": "Pricing", "words": "Hi Dana, here is our pricing.",
                                                    "times_used": 3}], "where": "/inbox/snippets", "note": None},
         "inbox.propose_signature": asked,
+        "inbox.propose_pitch_back": asked,
         "inbox.propose_drafts": {**asked, "skipped": ["fb_9"]},
         "inbox.propose_drafting": asked,
         "inbox.propose_discard_draft": {"asked": False, "note": "no written reply is waiting for that conversation"},

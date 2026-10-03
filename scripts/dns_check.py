@@ -10,7 +10,7 @@ TWO DIFFERENT DOMAINS, AND ONLY ONE OF THEM COSTS ANYTHING:
            carries an unsubscribe link built from it, and the login rides the same host.
            This does NOT have to be the client's domain and does NOT have to be bought: one
            A record on ownbox.app — the owner's rule (2026-09-21, superseding the 2026-09-05
-           nlvl.co ruling): <industry>.ownbox.app for one of our demo apps,
+           old-zone ruling): <industry>.ownbox.app for one of our demo apps,
            <client>.ownbox.app for a sold box — points at this droplet and Caddy
            issues the certificate by itself. Thirty seconds, no client involvement, no purchase,
            ten times over. scripts/dns_add.py makes the record from the owner's machine.

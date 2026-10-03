@@ -13,7 +13,6 @@ operator, and nothing twice: one digest per local day, one crossing alert per ve
 import json
 import pathlib
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 from core import cost_guard
 from core.config import get_config, settings
@@ -30,7 +29,8 @@ def _cfg() -> dict:
 
 
 def _tz():
-    return ZoneInfo((get_config().get("cost") or {}).get("timezone", "UTC"))
+    from core import report                              # the box's one time zone (report.tz_name, plan #1857 H9)
+    return report.tz()
 
 
 def _state_path() -> pathlib.Path:

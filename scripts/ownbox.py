@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT))
 
 _SLUG = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 
-from core.sdk_check import check  # noqa: E402  (one list of rules, shared with the break notice)
+from core.sdk_check import check, warnings  # noqa: E402  (one list of rules, shared with the break notice)
 
 
 def machines_dir() -> pathlib.Path:
@@ -61,6 +61,10 @@ def cmd_check(targets: list[str]) -> int:
         for r in rows:
             where = f"{r['path']}:{r['line']}" if r["line"] else r["path"]
             print(f"✗ {where}: {r['problem']}. Fix: {r['fix']}")
+        # WARNINGS DO NOT FAIL THE CHECK, this release. The next one turns them into findings (#1857 F3).
+        for r in warnings(folder):
+            where = f"{r['path']}:{r['line']}" if r["line"] else r["path"]
+            print(f"! {where}: {r['problem']}. Fix: {r['fix']}")
     return 1 if found else 0
 
 
@@ -139,8 +143,15 @@ def latest(limit: int = 5) -> dict:
     return {{"notes": [n["text"] for n in notes()[-max(1, min(int(limit), 20)):]]}}
 
 
+def latest_words(r: dict) -> str:
+    """The answer in words, which the owner's AI shows as it is."""
+    got = r.get("notes") or []
+    lines = "\\n".join(f"- {{n}}" for n in got) or "No notes saved yet."
+    return f"{{lines}}\\n\\n{title}: {{m.link(m.home)}}"
+
+
 m.tool("latest_notes", fn=latest, title="Read the newest notes in {title}",
-       description="The newest notes saved in {title}.",
+       description="The newest notes saved in {title}.", render=latest_words,
        capability="read:{key}_notes", args={{"limit": {{"type": "integer", "description": "how many, 1 to 20"}}}})
 '''
 

@@ -135,7 +135,7 @@ _srows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _sn, r
 # people on it: "AI is settled and server is settled, but the other three need to be in another category"), Server.
 ok("the rows, in their groups' order",
    _srows == ["Overview", "AI Account", "MCP Server", "Data Sources", "Coworkers", "Mobile App", "Sending Email",
-              "People", "Updates", "Server Access"], str(_srows))
+              "People", "Time Zone", "Updates", "Server Access"], str(_srows))
 _sgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _sn, re.S)
 ok("...each group opening with a gap", _sgrp == ["AI Account", "Mobile App", "Updates"], str(_sgrp))
 ok("...and its name above its first row", re.findall(r'<span class="glabel">([^<]*)</span>', _sn)

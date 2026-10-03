@@ -4,7 +4,7 @@ The owner asked his AI for the Morning Review over the connector and said: "This
 is a dumb box." What it had been handed:
   · Meters, eleven lines from every vendor in the shipped config: "Instantly 0 of 0", "MyEmailVerifier (lead checks)
     0 of 0", "Tomba 0 of 1000", ... and the one real line, "Resend 9 of 3000", valued "0%";
-  · a Website headline of label "" and value 0, above "brian-macdonald.com: 179 visits from people this week".
+  · a Website headline of label "" and value 0, above "glowmedspa.com: 179 visits from people this week".
 
 Held here:
   1. a meter is a line only when it was used this cycle (owner, 2026-09-29: "If a line doesn't have data, it should
@@ -106,7 +106,7 @@ report.REPORTERS.update({m: {"title": m, "fn": (lambda d, m=m: SAY[(m, d)]() if 
                          for m in ("website", "aeo_machine", "lead_machine", "said_none")})
 # YESTERDAY, AS STORED BEFORE THIS FIX: the website said its lines with no headline; the AEO Machine had a quiet day;
 # the Lead Machine could not report.
-SAY.update({("website", Y): {"title": "Website", "happened": [{"text": "brian-macdonald.com: 179 visits from people"}]},
+SAY.update({("website", Y): {"title": "Website", "happened": [{"text": "glowmedspa.com: 179 visits from people"}]},
             ("aeo_machine", Y): {}, ("lead_machine", Y): boom,
             ("said_none", Y): {"headline": {"value": 179, "label": "visits from people this week"}}})
 report.snapshot(Y)

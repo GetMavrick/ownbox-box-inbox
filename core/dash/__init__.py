@@ -295,9 +295,9 @@ def scope() -> list[str] | None:
     """Which recipes this request is looking at, read from the host — lane E of
     docs/MACHINE_AUTOPILOT_PLAN.md (owner, 2026-09-05: one demo box, many subdomains).
 
-    `dentists.nlvl.co` → the packs whose manifest `industry` is "dentists" → their slugs, and every
+    `dentists.example.com` → the packs whose manifest `industry` is "dentists" → their slugs, and every
     read on the page is filtered to rows those recipes found. A bare host, an IP, localhost, or a
-    first label no pack claims is the WHOLE box, exactly as today — so a sold box at acme.nlvl.co
+    first label no pack claims is the WHOLE box, exactly as today — so a sold box at acme.example.com
     (a client's name, never an industry) is unchanged, and nothing here can hide a row from the
     person who owns the box; it only chooses which rows a demo address shows. Read-only, no SQL:
     the stores take the result as `campaign=`.
@@ -345,7 +345,7 @@ def label_sources() -> dict[str, list[str]]:
 
 
 def host_label() -> str | None:
-    """The first label of the request host — `dentists` from `dentists.nlvl.co` — or None for a
+    """The first label of the request host — `dentists` from `dentists.example.com` — or None for a
     bare host, an IP, localhost, or a reserved first label. This is the one host read every scope
     shares: `scope()` maps it through the packs (lead rows), the reel board maps it through the
     Spaces (content rows). One reader, so the two scopes can never disagree about the host."""
@@ -1455,9 +1455,15 @@ def _managed_body() -> str:
            'They will email you a link to sign in. If you have already cancelled, Stripe will say so.</p>'
            if portal.startswith("https://") else
            '<p>To cancel, reply to your welcome email and we will stop it the same day.</p>')
-    return ('<div class="card"><h2>Managed is on</h2>'
-            f'<p>You bought Managed with this box, with three months free to '
-            f'<strong>{html.escape(day)}</strong>. Unless you cancel, it renews after that.</p>'
+    from core import box_updates
+    title, said = box_updates.managed_words(day)
+    back = box_updates.rejoin_url() if title == "Managed has ended" else ""
+    if back:                                     # #1857 D9d: the way back is a button that takes the payment
+        how = (f'<p><a class="btn" href="{html.escape(back)}" target="_blank" rel="noopener">Resume Managed</a></p>'
+               '<p class="quiet">That is Stripe. It shows the monthly price before you pay, and your box hears '
+               'within a few hours. Updates come back on its next check.</p>')
+    return (f'<div class="card"><h2>{html.escape(title)}</h2>'
+            f'<p>{html.escape(said)}</p>'
             f'{how}</div>'
             '<div class="card"><p>Cancelling Managed does not touch the box. It keeps running, it keeps your data, '
             'and it stays yours — you would simply be running it yourself.</p></div>')
@@ -1729,6 +1735,7 @@ from core.dash import home as _home  # noqa: E402,F401
 # is registered on an app.
 from core.dash import box_settings as _box_settings  # noqa: E402,F401
 from core.dash import box_email as _box_email  # noqa: E402,F401 — its own file, same drawer
+from core.dash import box_timezone as _box_timezone  # noqa: E402,F401 — Settings, General, Time Zone
 from core.dash import google_search as _google_search  # noqa: E402,F401 — the Search Console button
 from core.dash import sources as _sources  # noqa: E402,F401 — Data Sources, apps connected by MCP
 from core.dash import approvals as _approvals  # noqa: E402,F401 — Waiting for you

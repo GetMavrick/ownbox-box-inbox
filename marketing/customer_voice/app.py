@@ -1208,6 +1208,7 @@ shell.register_section(
         {"key": "overview", "label": "Overview", "href": "/inbox/settings"},
         {"key": "mailbox", "label": "Mailbox", "href": "/inbox/mailbox"},
         {"key": "signature", "label": "Email Signature", "href": "/inbox/signature"},
+        {"key": "pitch_back", "label": "Cold Pitches", "href": "/inbox/pitch-back"},
         {"key": "snippets", "label": "Saved Replies", "href": "/inbox/snippets"},
         {"key": "channels", "label": "Social Accounts", "href": "/inbox/connect"},
     ])
@@ -4897,17 +4898,21 @@ def _ai_home() -> str:
 # THE ROUTE IS `/inbox/waiting` WHILE THE TAB SAYS DRAFTS. `/inbox/drafts` is already taken by
 # the AI-account form (§2.6) — a misnamed route from before this screen existed. Renaming it
 # today would break a link somebody may already have; it should move, in its own change.
-def _draft_card(d: dict, n: int) -> str:
+def _draft_card(d: dict, n: int, pitched: bool = False) -> str:
     asked = str(d.get("asked") or "").strip()
     return (
         f'<div class="card dcard" style="margin-top:12px">'
         f'<label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">'
-        f'<input type="checkbox" name="pick" value="{_esc(str(d["zcid"]))}" '
+        f'<input type="checkbox" name="pick" value="{_esc(str(d["zcid"]))}"'
+        f'{" data-pitch=1" if pitched else ""} '
         f'style="margin-top:4px;width:18px;height:18px;flex:0 0 auto">'
         f'<span style="flex:1 1 auto">'
         f'<b>{_esc(str(d.get("participant") or "Someone"))}</b>'
         f'<span class="quiet dm"> · {_esc(_channel(str(d.get("platform") or "")))}'
         f' · asked {_esc(_when(d.get("asked_at") or d.get("created_at")))}</span>'
+        # A COLD PITCH, TURNED AROUND (drafter PITCH_BACK): said on the card, so he knows this reply sells back.
+        + ('<span class="quiet" style="display:block;margin:4px 0 0;color:var(--accent)">'
+           'A cold pitch, turned around: this reply points them to your link.</span>' if pitched else "")
         # WHAT THEY ASKED, ABOVE WHAT WE WOULD SAY. A reply read without the question is a reply
         # nobody can judge, and judging it is the whole point of this screen.
         + (f'<span class="quiet" style="display:block;margin:6px 0 0;padding-left:10px;'
@@ -4918,6 +4923,16 @@ def _draft_card(d: dict, n: int) -> str:
         f'<a href="/inbox/inbox/{_esc(str(d["zcid"]))}" style="color:var(--href)">'
         f'Open the conversation to edit it</a></span>'
         f'</span></label></div>')
+
+
+def _pitch_tick(rows: list, pitched: set) -> str:
+    """'Tick every cold pitch': the owner's 'all at once' (2026-10-02), one tap that only ticks; Send still sends."""
+    k = sum(1 for d in rows if str(d.get("in_reply_to")) in pitched)
+    if not k:
+        return ""
+    return ('<p style="margin:12px 0 0"><button type="button" class="btn" style="min-height:48px" '
+            'onclick="document.querySelectorAll(\'input[data-pitch]\').forEach(function(c){c.checked=true})">'
+            f'Tick all {k} cold {"pitch" if k == 1 else "pitches"}</button></p>')
 
 
 @blueprint.route("/inbox/waiting", methods=["GET", "POST"])
@@ -5004,6 +5019,7 @@ def r_waiting():
                 '<div class="foot"><a href="/inbox/inbox">← All conversations</a></div>')
         return _shell(note + body, here="/inbox/waiting"), 200
 
+    pitched = drafts.pitch_backs(space)
     n = len(rows)
     body = (f'<h1>{n} {"reply" if n == 1 else "replies"} to send.</h1>'
             '<p class="quiet">Your box wrote these. Read them, tick the ones you are happy with, '
@@ -5011,7 +5027,8 @@ def r_waiting():
             'change, open the conversation and edit it there.</p>'
             + note
             + '<form method="post">'
-            + "".join(_draft_card(d, i) for i, d in enumerate(rows, 1))
+            + _pitch_tick(rows, pitched)
+            + "".join(_draft_card(d, i, str(d.get("in_reply_to")) in pitched) for i, d in enumerate(rows, 1))
             + '<p style="margin:18px 0 0"><button class="btn" type="submit">'
               'Send the ones I ticked</button></p></form>'
             + '<div class="foot"><a href="/inbox/inbox">← All conversations</a></div>')
@@ -5068,6 +5085,59 @@ def r_signature():
             '<p class="quiet" style="margin:0">Leave it empty to stop adding one.</p>'
             '<button class="btn" type="submit" style="min-height:48px">Save signature</button></form>')
     return _shell(head + form + _back_link(), here="/inbox/signature"), 200
+
+
+# ── cold pitches, turned around (inbox/pitch_back.py, drafter PITCH_BACK) ───────────────────────────────────────────
+# Owner, 2026-10-02: "I get tons of cold email and I want to advertise right back to them and turn it right around on
+# them." The box drafts; he reads and sends (or ticks them all on Replies to send). Owner-only, like the mailbox.
+@blueprint.route("/inbox/pitch-back", methods=["GET", "POST"])
+def r_pitch_back():
+    from marketing.customer_voice.inbox import pitch_back as _pb
+    gate = _gate()
+    if gate is not None:
+        return gate
+    owner = _is_owner()
+    if request.method == "POST" and not owner:
+        return _owner_refusal()
+    note, typed = "", None
+    if request.method == "POST":
+        typed = str(request.form.get("link") or "")
+        try:
+            u = dash.session_user(request) or {}
+        except Exception:                        # noqa: BLE001 — only whose name the audit line carries
+            u = {}
+        try:
+            _pb.put(bool(request.form.get("on")), typed, by=u.get("id"))
+            return redirect("/inbox/pitch-back?saved=1", code=303)
+        except ValueError as e:
+            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
+    cur = _pb.get()
+    saved = request.args.get("saved") and not note
+    head = ('<h1>Cold pitches</h1>'
+            '<p class="quiet">When someone emails you a sales pitch, your box can draft a friendly reply that turns it '
+            'around: it thanks them, says what you offer and points them to your website. Each one waits on '
+            '<a href="/inbox/waiting" style="color:var(--href)">Replies to send</a>, marked as a cold pitch, and in your '
+            'Gmail Drafts. Nothing goes out until you send it.</p>'
+            + (('<p class="quiet">Saved. ' + ("New cold pitches get a reply drafted." if cur["on"] else
+                                               "Cold pitches are left alone.") + '</p>') if saved else "") + note)
+    if not owner:
+        state_line = (f'On, pointing to {_esc(cur["link"])}.' if cur["on"] else "Off.")
+        return _shell(head + f'<p>{state_line}</p>' + _back_link(), here="/inbox/pitch-back"), 200
+    field = ('font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;width:100%;'
+             'border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)')
+    link = cur["link"] if typed is None else typed
+    form = ('<form class="compose" method="post" action="/inbox/pitch-back" '
+            'style="display:flex;flex-direction:column;gap:10px;align-items:stretch">'
+            '<label style="display:flex;gap:10px;align-items:center;min-height:48px">'
+            f'<input type="checkbox" name="on" value="1"{" checked" if cur["on"] else ""} '
+            'style="width:22px;height:22px;flex:0 0 auto">'
+            '<span>Turn cold pitches around</span></label>'
+            '<label style="display:block"><span class="t" style="display:block;'
+            'font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px">Your website</span>'
+            f'<input name="link" value="{_esc(link)}" inputmode="url" autocomplete="url" spellcheck="false" '
+            f'aria-label="Your website" placeholder="www.yourwebsite.com" style="{field}"></label>'
+            '<button class="btn" type="submit" style="min-height:48px">Save</button></form>')
+    return _shell(head + form + _back_link(), here="/inbox/pitch-back"), 200
 
 
 # ── saved replies (inbox/snippets.py, #1821) ─────────────────────────────────────────────────────────────────────

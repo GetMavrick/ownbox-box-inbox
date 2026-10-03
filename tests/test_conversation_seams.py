@@ -226,19 +226,21 @@ with state.connect() as c:
 r = m.reply_to_comment({**c1, "id": "c-15", "author": {"id": "u7", "username": "harborlight", "name": "Harbor Light Studio"}},
                        "Hi", key="dm1")
 ok("...or on their display name, the shape a live box's inbox actually stores",
-   r["status"] == "refused" and "opted out" in r["reason"], r)
+   r["status"] == "refused" and "opted out" in r["reason"] and r.get("code") == "opted_out", r)
 
 _paused = pause.is_paused
 pause.is_paused = lambda: True
 r = m.reply_to_comment({**c1, "id": "c-12"}, "Hi", key="dm1")
 pause.is_paused = _paused
-ok("nothing is sent while the box is stopped", r["status"] == "refused" and "stopped" in r["reason"], r)
+ok("nothing is sent while the box is stopped", r["status"] == "refused" and "stopped" in r["reason"]
+   and r.get("code") == "box_stopped", r)
 
 _cfg = dict(get_config().get("inbox") or {})
 get_config().setdefault("inbox", {})["hourly_send_cap"] = store.sends_last_hour(SPACE)
 r = m.reply_to_comment({**c1, "id": "c-13"}, "Hi", key="dm1")
 get_config()["inbox"] = _cfg
-ok("the hourly cap every send shares is respected", r["status"] == "refused" and "this hour" in r["reason"], r)
+ok("the hourly cap every send shares is respected, with a code a machine can wait on (not the wording)",
+   r["status"] == "refused" and "this hour" in r["reason"] and r.get("code") == "hourly_cap", r)
 
 COMMENTS.fail = zernio.ZernioError("gateway timeout after send", indeterminate=True)
 r = m.reply_to_comment({**c1, "id": "c-14"}, "Hi", key="dm1")

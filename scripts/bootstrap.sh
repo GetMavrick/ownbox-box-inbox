@@ -17,7 +17,7 @@
 #   the image's first-boot apt itself.
 #
 #   --host IS A SUBDOMAIN OF ownbox.app (owner, 2026-09-21: "do the cutover to ownbox.app permanently").
-#   <client>.ownbox.app for a sold box. This line used to say nlvl.co, from the 2026-09-05 arrangement, and
+#   <client>.ownbox.app for a sold box. This line used to name our old company zone, from the 2026-09-05 arrangement, and
 #   it was the last thing pointing an operator at the old domain: the automated path has built on ownbox.app
 #   since `provisioner/userdata.py` set BOXES_DOMAIN, so a hand-built box was landing somewhere the
 #   provisioner, the reserved-name list and the certificate story all disagreed with.

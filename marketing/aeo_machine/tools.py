@@ -157,15 +157,69 @@ def article(id=None):
     return _article(row)
 
 
+def _store_week() -> dict | None:
+    """The AEO site's last full week from the box's own store (marketing/foundation/seam.py), or None. Never raises."""
+    try:
+        from marketing.foundation import seam
+        from marketing.foundation import sync as fsync
+
+        from . import posthog
+        own = posthog._site_host().removeprefix("www.")
+        site = next((x for x in seam.sites() if x.removeprefix("www.") == own), None) if own else None
+        return seam.week(site, fsync.yesterday()) if site else None
+    except Exception as e:                                # noqa: BLE001 — no store is no store, never an error
+        log.warning("aeo.store_unreadable", error=f"{type(e).__name__}: {str(e)[:120]}")
+        return None
+
+
+def _pct(now: int, before: int):
+    return None if not before else round((now - before) * 100.0 / before, 1)
+
+
+def _from_store(wk: dict) -> dict:
+    """aeo.performance's answer from the store: people only, the 7 days to yesterday against the 7 before."""
+    this, before = wk.get("totals") or {}, (wk.get("before") or {}).get("totals") or {}
+    src, src_b = wk.get("by_source") or {}, (wk.get("before") or {}).get("by_source") or {}
+    own = str(wk.get("site") or "").removeprefix("www.")
+    refs = [(d, v) for d, v in wk.get("referrers") or []
+            if d and str(d).removeprefix("www.").split("/")[0] != own][:5]
+    return {
+        "available": True, "from": "store", "site": wk.get("site"), "through": wk.get("end"),
+        "visits_recorded": bool(this.get("pageviews") or before.get("pageviews")),
+        "visitors": int(this.get("visitors") or 0),
+        "visitors_change": _pct(int(this.get("visitors") or 0), int(before.get("visitors") or 0)),
+        "views": int(this.get("pageviews") or 0),
+        "views_change": _pct(int(this.get("pageviews") or 0), int(before.get("pageviews") or 0)),
+        "ai_visits": int(src.get("ai") or 0), "ai_visits_change": _pct(int(src.get("ai") or 0), int(src_b.get("ai") or 0)),
+        "assistants": dict(src.get("assistants") or {}),
+        "top_articles": [{"path": p, "views": n} for p, n in wk.get("pages") or [] if str(p).startswith("/articles/")][:5],
+        "top_sources": [{"site": d, "views": v} for d, v in refs],
+        "conversions": [{"name": n, "count": c} for n, c, *_ in (wk.get("conversions") or [])][:5],
+        "note": ("The box's own numbers: people only, the 7 days to yesterday against the 7 before. Changes are "
+                 "percentages; null means nothing the week before to compare with."),
+    }
+
+
 def performance():
-    """How the website did over the last 7 days, against the 7 before, from the owner's PostHog."""
+    """How the website did over the last 7 days, against the 7 before.
+
+    THE BOX'S OWN STORE FIRST (#1857 H5): the foundation keeps each site's days (people only), so a PostHog that is
+    down never costs the answer. PostHog live is asked only when the store has no week for this site, and when it
+    then fails the answer says so in words (`unavailable`) instead of failing."""
+    wk = _store_week()
+    if wk:
+        return _from_store(wk)
     from . import posthog
-    p = posthog.performance()
+    try:
+        p = posthog.performance()
+    except Exception as e:                                # noqa: BLE001 — a vendor never fails the answer
+        log.warning("aeo.performance_raised", error=type(e).__name__)
+        p = {"ok": False, "why": ""}
     if not p.get("ok"):
         if p.get("why") == "not_connected":
             return tools.NotConfigured("PostHog is not connected. The owner connects it on AEO → "
                                        "Data sources → PostHog.")
-        return {"available": False, "why": p.get("why")}
+        return {"available": False, "why": p.get("why"), "unavailable": say.unavailable("PostHog", own=False)}
     if p.get("empty"):
         return {"available": True, "site": p.get("site"), "visits_recorded": False,
                 "note": "PostHog is connected and has no page views from this website in the last "
@@ -184,7 +238,11 @@ def performance():
 def searches():
     """What people search for when the site shows up, and the searches one article could win."""
     from . import searches as sc
-    s = sc.searches()
+    try:
+        s = sc.searches()
+    except Exception as e:                                # noqa: BLE001 — a vendor never fails the answer
+        log.warning("aeo.searches_raised", error=type(e).__name__)
+        s = {"ok": False, "why": sc.UNREACHABLE}
     if not s.get("ok"):
         if s.get("why") == "not_connected":
             return tools.NotConfigured("Google Search Console is not connected. The owner "
@@ -192,9 +250,11 @@ def searches():
         if s.get("why") == "no_property":
             return tools.NotConfigured("Google Search Console is connected but no site is chosen. "
                                        "The owner chooses it on Settings → Google Search Console.")
-        return {"available": False, "why": s.get("why")}
+        return {"available": False, "why": s.get("why"),
+                "unavailable": say.unavailable("Google Search Console", own=False)}
     lo, hi = sc.OPPORTUNITY
-    return {"available": True, "from": s["start"], "to": s["end"],
+    stale = {"as_of": s["as_of"], "unavailable": say.unavailable("Google Search Console")} if s.get("stale") else {}
+    return {"available": True, "from": s["start"], "to": s["end"], **stale,
             "top_searches": s["top"], "opportunities": s["opportunities"],
             "note": (f"Opportunities are searches where the site shows up at average position "
                      f"{lo:.0f} to {hi:.0f}, most seen first. Google reports about "
@@ -350,7 +410,8 @@ def _render_article(r: dict) -> str:
 def _render_performance(r: dict) -> str:
     site = str(r.get("site") or "your website")
     if not r.get("available"):
-        body = f"Your website numbers could not be read just now. {say.plain(r.get('why') or '').rstrip('.')}".strip()
+        body = say.answer((r.get("unavailable") or {}).get("words") or "Your website numbers could not be read just now.",
+                          say.plain(r.get("why") or ""))
     elif not r.get("visits_recorded"):
         body = (f"PostHog is connected and has no page views from {site} in the last 14 days. The PostHog snippet is "
                 f"probably missing from the site: {_page('SOURCES')}")
@@ -364,12 +425,20 @@ def _render_performance(r: dict) -> str:
         if r.get("ai_visits"):
             lines.append(line(r.get("ai_visits"), "visits came from AI answers such as ChatGPT",
                               r.get("ai_visits_change")))
+        if r.get("assistants"):
+            lines.append("From AI answers: " + ", ".join(f"{name} {say.n(v)}" for name, v in
+                                                          sorted(r["assistants"].items(), key=lambda kv: -kv[1])))
+        lines += [f"{say.plural(c.get('count') or 0, 'conversion')}: {c.get('name')}"
+                  for c in r.get("conversions") or [] if isinstance(c, dict) and c.get("name")]
         host = site.removeprefix("https://").removeprefix("http://").rstrip("/")
         top = [f"{host}{a.get('path')}: {say.plural(a.get('views') or 0, 'view')}"
                for a in r.get("top_articles") or [] if isinstance(a, dict) and a.get("path")]
         sources = [f"{s.get('site')}: {say.plural(s.get('views') or 0, 'view')}"
                    for s in r.get("top_sources") or [] if isinstance(s, dict) and s.get("site")]
-        body = say.answer(f"{host}, the last 7 days against the 7 before:", say.bullets(lines),
+        span = (f"the 7 days to {say.day_words(r['through'])} against the 7 before, the box's own numbers (people only):"
+                if r.get("from") == "store" and r.get("through") else "the last 7 days against the 7 before:")
+        lines = [x for x in lines if x and not x.startswith("0 article views")]
+        body = say.answer(f"{host}, {span}", say.bullets(lines),
                           say.section("Most read articles:", top), say.section("Sites that sent visitors:", sources),
                           f"The Performance screen: {_page('PERFORMANCE')}")
     return say.answer(
@@ -382,7 +451,8 @@ def _render_performance(r: dict) -> str:
 
 def _render_searches(r: dict) -> str:
     if not r.get("available"):
-        body = f"Your searches could not be read just now. {say.plain(r.get('why') or '').rstrip('.')}".strip()
+        body = say.answer((r.get("unavailable") or {}).get("words") or "Your searches could not be read just now.",
+                          say.plain(r.get("why") or ""))
         return say.answer(body, say.ask_next((f"{MACHINE}.sources", "Which data sources are connected?")))
 
     def line(q: dict, clicks: bool) -> str:
@@ -398,7 +468,11 @@ def _render_searches(r: dict) -> str:
     opps = [line(q, False) for q in r.get("opportunities") or [] if isinstance(q, dict)]
     span = f"{say.day_words(r.get('from'))} to {say.day_words(r.get('to'))}" if r.get("from") else "the last 28 days"
     best = next((q.get("query") for q in r.get("opportunities") or [] if isinstance(q, dict) and q.get("query")), "")
+    kept = ""
+    if r.get("as_of"):
+        kept = (f"Google Search Console didn't answer just now, so this is its last answer, from {say.clock(r['as_of'])}.")
     return say.answer(
+        kept,
         f"From Google Search Console, {span} (Google reports a few days late).",
         say.section("Searches that brought clicks:", top) or "No search brought a click in that time.",
         say.section("Searches one article could win, where the site already shows up on page one or two:", opps),

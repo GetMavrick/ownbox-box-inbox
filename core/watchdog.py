@@ -1992,6 +1992,12 @@ def run_once() -> None:
     if requeued:
         log.warning("watchdog.reaped_orphans", count=len(requeued))
     _retire_old_raws()
+    # THE SIGN-IN'S HOUSEKEEPING (#1857 H4): spent codes, idle clients, stale miss counts. It had no caller before.
+    try:
+        from core.connector import oauth as _oauth
+        _oauth.sweep()
+    except Exception as e:                               # noqa: BLE001 — housekeeping never blocks the probes
+        log.warning("watchdog.oauth_sweep_failed", error=f"{type(e).__name__}: {str(e)[:120]}")
 
     notifier_ok = True
     # A PROBE THAT CHANGES STATE IS TOLD TO OWNBOX NOW, not at the next six-hourly check-in

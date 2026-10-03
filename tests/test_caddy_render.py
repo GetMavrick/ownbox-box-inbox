@@ -10,10 +10,10 @@ def ok(label, cond, detail=""):
 R = ROOT / "scripts/render_caddyfile.sh"
 one = subprocess.run(["bash", str(R), "aios.example.com"], capture_output=True, text=True)
 ok("one argument renders today's file: the box's address, proxy to loopback, no placeholders", one.returncode == 0 and "aios.example.com {" in one.stdout and "reverse_proxy 127.0.0.1:8000" in one.stdout and "{$" not in one.stdout and "on_demand" not in one.stdout, one.stdout[:200] + one.stderr[:200])
-two = subprocess.run(["bash", str(R), "aios.example.com", "nlvl.co"], capture_output=True, text=True)
+two = subprocess.run(["bash", str(R), "aios.example.com", "example.net"], capture_output=True, text=True)
 t = two.stdout
 ok("with the zone: the global on_demand_tls block comes FIRST and asks this box", two.returncode == 0 and t.lstrip().startswith("#") and t.index("on_demand_tls") < t.index("aios.example.com {") and "ask http://127.0.0.1:8000/tls/ask" in t, t[:300])
-ok("with the zone: *.nlvl.co block with tls on_demand and the same loopback proxy", "*.nlvl.co {" in t and re.search(r"\*\.nlvl\.co \{[^}]*tls \{\s*on_demand\s*\}", t, re.S) and t.count("reverse_proxy 127.0.0.1:8000") == 2, t[-300:])
+ok("with the zone: *.example.net block with tls on_demand and the same loopback proxy", "*.example.net {" in t and re.search(r"\*\.example\.net \{[^}]*tls \{\s*on_demand\s*\}", t, re.S) and t.count("reverse_proxy 127.0.0.1:8000") == 2, t[-300:])
 ok("with the zone: the box's own block is unchanged", "aios.example.com {" in t and "{$" not in t)
 ok("no zone argument → no wildcard block, no global block (a sold box)", "*." not in one.stdout and "on_demand_tls" not in one.stdout)
 ok("expose.sh renders through the renderer and validates before moving the live file", all(x in (ROOT / "scripts/expose.sh").read_text() for x in ("render_caddyfile.sh", "caddy validate", "Caddyfile.candidate", "untouched")))

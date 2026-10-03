@@ -135,6 +135,30 @@ def _code_findings(folder: pathlib.Path, py: pathlib.Path) -> list[dict]:
     return out
 
 
+FIX_RENDER = ("Give it render=: a function that takes the tool's result and returns the answer in words, which the "
+              "owner's AI shows as it is (m.link(path) gives a full address to put in it)")
+
+
+def warnings(folder: pathlib.Path) -> list[dict]:
+    """What does not fail the check THIS release and will in the next (#1857 F3): an `m.tool(...)` with no `render=`.
+    Read from the code without running it, like `check`."""
+    folder = pathlib.Path(folder)
+    out = []
+    for py in sorted(folder.rglob("*.py")):
+        if "__pycache__" in py.parts or (folder / "data") in py.parents:
+            continue
+        try:
+            tree = ast.parse(py.read_text(), filename=str(py))
+        except (SyntaxError, OSError, UnicodeDecodeError):
+            continue                                     # `check` already says it does not parse
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "tool" \
+                    and any(k.arg == "fn" for k in node.keywords) and not any(k.arg == "render" for k in node.keywords):
+                first = node.args[0].value if node.args and isinstance(node.args[0], ast.Constant) else "a tool"
+                out.append(_finding(py, node.lineno, f"{first} has no answer in words", FIX_RENDER))
+    return out
+
+
 def check(folder: pathlib.Path) -> list[dict]:
     """Every finding for one machine folder, in file order. Never runs the machine's code."""
     folder = pathlib.Path(folder)

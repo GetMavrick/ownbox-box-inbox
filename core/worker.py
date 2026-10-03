@@ -320,14 +320,33 @@ def _never_silent(job: dict) -> None:
 
 
 def route(raw_text: str) -> str:
-    """Classify raw text to an intent. Used only when no intent hint was given."""
+    """Classify raw text to an intent. Used only when no intent hint was given.
+
+    ONLY WHAT THIS BOX ANSWERS (plan #1857 H6). It offered every intent the product has ever had, so on a box without
+    the content machine the AI picked "reel", and the job failed every day with "no module registered for intent
+    'reel'": a wasted think and a red line, daily. Now the choices are the known intents this worker has a handler
+    for, and with none, the job fails at once without asking the AI."""
+    choices = tuple(i for i in KNOWN_INTENTS if i in HANDLERS)
+    if not choices:
+        raise RuntimeError("no machine on this box answers a request in words")
     prompt = ("Classify the request into exactly one label from "
-              f"{KNOWN_INTENTS}. Reply with only the label, lowercase.\n\n"
+              f"{choices}. Reply with only the label, lowercase.\n\n"
               f"Request:\n{raw_text}")
     label = think("router", prompt, max_tokens=8, timeout=20).strip().lower()
-    if label not in KNOWN_INTENTS:
+    if label not in choices:
         log.warning("worker.route_unknown", label=label)
     return label
+
+
+def publish_intents() -> None:
+    """Tell the processes that enqueue which intents this box answers (core/queue.py refused_intent)."""
+    from core import box_settings
+    from core import queue as _q
+    try:
+        box_settings.put(_q.INTENTS_NS, _q.INTENTS_KEY, {"intents": sorted(HANDLERS), "modules": _q.modules_now()},
+                         set_by="worker")
+    except Exception as e:                               # noqa: BLE001 — refusing nothing is the safe failure
+        log.warning("worker.intents_unpublished", error=type(e).__name__)
 
 
 def process_one():
@@ -604,6 +623,7 @@ def run_forever(poll_interval: float = 2.0, pause_interval: float = 300.0,
     #                  pull+restart with no separate migration step to forget (a
     #                  worker-only restart used to run against a stale schema).
     load_modules()  # register department handlers before claiming any job
+    publish_intents()  # so a job for a machine this box doesn't have is refused where it is made (plan #1857 H6)
     # Daemon thread → dies with the process, so stopped beats == dead worker (correct).
     # Start the heartbeat BEFORE the backend probe: the probe runs a real `claude -p`
     # (up to ~60s if the CLI is slow), and we must not delay the worker's first beat, or a

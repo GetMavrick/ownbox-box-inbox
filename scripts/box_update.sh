@@ -195,6 +195,12 @@ fi
 if [ -f scripts/coworker_setup.sh ]; then
   bash scripts/coworker_setup.sh || echo "   coworker setup failed; box unaffected"
 fi
+# CHATGPT'S CLI AND ITS CODE-MODE HOST reach every box already sold the same way (#1857 H3). Without the
+# host, the CLI's default model is offered no tools, so Ask your box on ChatGPT could reach none of the box's.
+# Idempotent and pinned by sha256: a box that has both downloads nothing. A failure never fails the update.
+if [ -f scripts/install_codex.sh ]; then
+  bash scripts/install_codex.sh || echo "   codex install failed; box unaffected"
+fi
 # THE CHECK-IN REACHES every box already sold the same way (docs/PLAN_NO_GHOST_BOXES.md P1).
 if [ -f scripts/checkin_setup.sh ]; then
   bash scripts/checkin_setup.sh || echo "   check-in setup failed; box unaffected"

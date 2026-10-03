@@ -35,34 +35,34 @@ try:
     os.environ["DASHBOARD_BASE_URL"] = "https://aios.example.com"
     dsec["demo_zone"] = ""
     ok("zone unset: the box's own address is admitted", dash.ask_tls("aios.example.com"))
-    ok("zone unset: an industry label under any zone is refused", not dash.ask_tls(f"{label}.nlvl.co"))
-    dsec["demo_zone"] = "nlvl.co"
-    ok(f"zone set: {label}.nlvl.co (a label this box admits) is admitted", dash.ask_tls(f"{label}.nlvl.co"))
-    ok("upper case and a port are normalised", dash.ask_tls(f"{label.upper()}.NLVL.CO:443"))
-    for bad, why in [("acme.nlvl.co", "a client name, not an industry"), ("nlvl.co", "the bare zone"), (f"{label}.example.com", "another zone"),
-                     (f"deep.{label}.nlvl.co", "a deeper subdomain"), ("probe-no-such-industry.nlvl.co", "an unclaimed label"), ("203.0.113.7", "an IP"),
-                     ("", "empty"), (f"{label}.nlvl.co/../x", "junk"), (f"{label}.nlvl.co evil", "whitespace"), ("*.nlvl.co", "the wildcard itself")]:
+    ok("zone unset: an industry label under any zone is refused", not dash.ask_tls(f"{label}.example.net"))
+    dsec["demo_zone"] = "example.net"
+    ok(f"zone set: {label}.example.net (a label this box admits) is admitted", dash.ask_tls(f"{label}.example.net"))
+    ok("upper case and a port are normalised", dash.ask_tls(f"{label.upper()}.EXAMPLE.NET:443"))
+    for bad, why in [("acme.example.net", "a client name, not an industry"), ("example.net", "the bare zone"), (f"{label}.example.com", "another zone"),
+                     (f"deep.{label}.example.net", "a deeper subdomain"), ("probe-no-such-industry.example.net", "an unclaimed label"), ("203.0.113.7", "an IP"),
+                     ("", "empty"), (f"{label}.example.net/../x", "junk"), (f"{label}.example.net evil", "whitespace"), ("*.example.net", "the wildcard itself")]:
         ok(f"refused: {why}", not dash.ask_tls(bad), bad)
     ok("the box's own address is still admitted with the zone set", dash.ask_tls("aios.example.com"))
     # a machine that is code, not a pack, is named in dash.labels (owner 2026-09-05: an app for every machine)
     old_labels = dsec.get("labels"); dsec["labels"] = {"health-and-wellness": ["job:"], "Bad Label": ["job:"]}
     try:
-        ok("a dash.labels label is admitted", dash.ask_tls("health-and-wellness.nlvl.co"))
-        ok("a malformed dash.labels entry admits nothing", not dash.ask_tls("bad label.nlvl.co") and not dash.ask_tls("bad-label.nlvl.co"))
-        ok("an unclaimed label is still refused with the map set", not dash.ask_tls("probe-no-such-industry.nlvl.co"))
+        ok("a dash.labels label is admitted", dash.ask_tls("health-and-wellness.example.net"))
+        ok("a malformed dash.labels entry admits nothing", not dash.ask_tls("bad label.example.net") and not dash.ask_tls("bad-label.example.net"))
+        ok("an unclaimed label is still refused with the map set", not dash.ask_tls("probe-no-such-industry.example.net"))
     finally:
         if old_labels is None: dsec.pop("labels", None)
         else: dsec["labels"] = old_labels
     # the HTTP surface Caddy actually calls
     from core.dispatch import app
     c = app.test_client()
-    r1 = c.get(f"/tls/ask?domain={label}.nlvl.co"); r2 = c.get("/tls/ask?domain=evil.nlvl.co"); r3 = c.get("/tls/ask")
+    r1 = c.get(f"/tls/ask?domain={label}.example.net"); r2 = c.get("/tls/ask?domain=evil.example.net"); r3 = c.get("/tls/ask")
     ok("GET /tls/ask → 200 for a claimed industry", r1.status_code == 200, r1.status_code)
     ok("GET /tls/ask → 403 for an unknown label, body reveals nothing", r2.status_code == 403 and r2.get_data(as_text=True).strip() == "no", (r2.status_code, r2.get_data(as_text=True)[:40]))
     ok("GET /tls/ask without a domain → 403", r3.status_code == 403, r3.status_code)
-    r4 = c.get(f"/tls/ask?domain={label}.nlvl.co", headers={"X-Forwarded-For": "203.0.113.9"})
+    r4 = c.get(f"/tls/ask?domain={label}.example.net", headers={"X-Forwarded-For": "203.0.113.9"})
     ok("a request that came through the proxy (X-Forwarded-For) is refused even for a claimed label — only Caddy's own call is answered", r4.status_code == 403, r4.status_code)
-    r5 = c.get(f"/tls/ask?domain={label}.nlvl.co", headers={"X-Forwarded-Host": "evil.example"})
+    r5 = c.get(f"/tls/ask?domain={label}.example.net", headers={"X-Forwarded-Host": "evil.example"})
     ok("…and one carrying X-Forwarded-Host", r5.status_code == 403, r5.status_code)
 finally:
     dsec["demo_zone"] = old_zone

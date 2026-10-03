@@ -947,6 +947,25 @@ def propose_signature(text=None, seat=None):
                         "Set your email signature" if t else "Stop adding an email signature", seat)
 
 
+def propose_pitch_back(on=None, link=None, seat=None):
+    """Ask the owner to turn cold pitches around (or stop), with the website each reply points to."""
+    from marketing.customer_voice.inbox import pitch_back
+    if not isinstance(on, bool):
+        return {"error": "give on: true to turn cold pitches around, false to stop"}
+    try:
+        t = pitch_back.clean_link(link if link is not None else pitch_back.get()["link"])
+    except ValueError as e:
+        return {"asked": False, "error": str(e)}
+    if on and not t:
+        return {"asked": False, "error": "give the website each turned-around reply points to (link)"}
+    cur = pitch_back.get()
+    if cur["on"] == on and (not on or cur["link"] == t):
+        return {"asked": False, "note": f"cold pitches are already {'turned around, pointing to ' + t if on else 'left alone'}"}
+    words = ({"Change": "Turn cold pitches around", "Points them to": t} if on else
+             {"Change": "Stop turning cold pitches around"})
+    return _ask_control("pitch_back", {"on": on, "link": t}, words, words["Change"], seat)
+
+
 def propose_saved_reply(name=None, words=None, seat=None):
     """Ask the owner to add one saved reply to the dropdown above every reply box."""
     from marketing.customer_voice.inbox import snippets
@@ -1005,6 +1024,14 @@ def _run_control(detail: dict) -> dict:
             return {"ok": False, "text": f"Not changed: {e}"}
         return {"ok": True, "text": "Signature saved. Every email reply ends with it." if t
                 else "No signature is added any more."}
+    if action == "pitch_back":
+        from marketing.customer_voice.inbox import pitch_back
+        try:
+            cur = pitch_back.put(bool(detail.get("on")), detail.get("link"), by=_who_approved())
+        except ValueError as e:
+            return {"ok": False, "text": f"Not changed: {e}"}
+        return {"ok": True, "text": (f"On. New cold pitches get a reply drafted that points to {cur['link']}."
+                                     if cur["on"] else "Off. Cold pitches are left alone.")}
     if action == "snippet":
         from marketing.customer_voice.inbox import snippets
         try:
@@ -1045,6 +1072,18 @@ tools.register(
                 "(name, title, website). An empty text stops adding one. Nothing changes until the owner approves.",
     args={"text": {"type": "string", "required": True,
                    "description": "The whole signature, rows separated by new rows; empty to stop adding one."}},
+)
+
+tools.register(
+    "propose_pitch_back",
+    title="Ask before turning cold pitches around",
+    fn=propose_pitch_back, machine=MACHINE, min_role="act", render=_render_proposal,
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to have the box draft a reply to every cold sales pitch that turns it around, pointing "
+                "them to the owner's website (or to stop). Drafts still wait to be sent. Nothing changes until the "
+                "owner approves.",
+    args={"on": {"type": "boolean", "required": True, "description": "true to turn them around, false to stop."},
+          "link": {"type": "string", "required": False, "description": "The website each reply points to."}},
 )
 
 tools.register(

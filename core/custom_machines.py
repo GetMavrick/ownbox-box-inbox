@@ -30,6 +30,7 @@ import os
 import pathlib
 import re
 import sys
+import types
 
 from core.logging import get_logger
 
@@ -149,6 +150,13 @@ def load(process: str) -> list[dict]:
                 importlib.import_module(fmod)
             mod = sys.modules.get(name)
             if mod is None:
+                # A MACHINE MAY BE MORE THAN ONE FILE. Its package is `my_machines.<slug>`, and a relative import
+                # inside it (`from . import store`) needs the parent package to exist; without this, only a
+                # one-file machine could load. The parent is an empty namespace: it holds nothing of its own.
+                if "my_machines" not in sys.modules:
+                    parent = types.ModuleType("my_machines")
+                    parent.__path__ = []
+                    sys.modules["my_machines"] = parent
                 folder = pathlib.Path(d["path"])
                 spec = importlib.util.spec_from_file_location(
                     name, folder / "__init__.py", submodule_search_locations=[str(folder)])

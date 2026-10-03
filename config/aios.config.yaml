@@ -95,10 +95,8 @@ notify:
   # rather than here because they are his ruling, not a per-box setting; a settings area for
   # frequency is scoped separately and will put them back under config when he rules on it.
   #
-  # WHERE THE BUYER IS. Empty means: use what his browser told us when he claimed the box, and
-  # failing that `cost.timezone` below. This is the override — the only one a person can correct
-  # after the fact. cost.timezone is the BOX's, and on a sold box it is UTC, which would have put
-  # the 8 AM email at one in the morning for a Pacific buyer.
+  # WHERE THE BUYER IS: no longer read here. The slots follow the box's one time zone (core/report.py
+  # tz_name: Settings, General, Time Zone, then the zone given at claim, then cost.timezone), plan #1857 H9.
   timezone: ""
 
 review:
@@ -323,11 +321,11 @@ dash:
   # 2026-09-06: "seven pages listed in the navigation plus the call to action which goes directly
   # into our funnel." Empty = no chip rendered at all, which is the right default for a clone: a
   # button that goes nowhere is worse than no button.
-  cta_url: "https://brian-macdonald.com/build"
+  cta_url: ""
   # DEMO ZONE — one box, many subdomains (docs/MACHINE_AUTOPILOT_PLAN.md, lane E; owner 2026-09-05:
   # "use the existing droplet as the demo box"). Empty = off (every sold box). The demo box's
-  # overlay (my/settings.yaml) sets `demo_zone: nlvl.co`; then Caddy issues a certificate for
-  # <industry>.nlvl.co ON DEMAND, and only after this box's /tls/ask says that label is an
+  # overlay (my/settings.yaml) sets `demo_zone: example.com`; then Caddy issues a certificate for
+  # <industry>.example.com ON DEMAND, and only after this box's /tls/ask says that label is an
   # industry a pack claims. No DNS token lives on any box; one wildcard record does the rest.
   demo_zone: ""
   # LABELS FOR MACHINES THAT ARE CODE, NOT PACKS (owner 2026-09-05: "mini apps built for every

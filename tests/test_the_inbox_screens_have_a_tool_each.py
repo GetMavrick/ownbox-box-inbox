@@ -39,6 +39,7 @@ TOOLS = {
     "/inbox/waiting": ("inbox.propose_drafts", "inbox.propose_discard_draft"),
     "/inbox/drafts": ("inbox.propose_drafting",),
     "/inbox/signature": ("inbox.propose_signature",),
+    "/inbox/pitch-back": ("inbox.propose_pitch_back",),
     "/inbox/snippets": ("inbox.saved_replies", "inbox.propose_saved_reply"),
 }
 

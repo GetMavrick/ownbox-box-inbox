@@ -75,10 +75,42 @@ def _cfg() -> dict:
     return dict(get_config().get("review") or {})
 
 
+def tz_name() -> str:
+    """THE BOX'S ONE TIME ZONE, by name (plan #1857 H9). Every sold box shipped `cost.timezone: UTC`, so the owner's
+    review read "As of 1:57 AM" while the claim form had caught his browser's zone and kept it unused. In order:
+      1. the owner's choice in Settings (box setting `core.timezone`);
+      2. the zone the buyer's browser gave when they claimed the box (`box_claim.timezone`);
+      3. config `cost.timezone`, a deliberate value on a hand-built box;
+      4. UTC.
+    One resolver for the whole box (§1.8): the review, "As of", the brief, the cost ledger and the digest all ask it.
+    A second key is how a Tuesday report gets labelled Wednesday."""
+    def _ok(name) -> str:
+        name = str(name or "").strip()
+        try:
+            return name if name and ZoneInfo(name) else ""
+        except Exception:                                # noqa: BLE001 — an unknown zone is no zone
+            return ""
+    try:
+        from core import box_settings
+        chosen = _ok(box_settings.get(TZ_NS, TZ_KEY))
+    except Exception:                                    # noqa: BLE001 — a database too old for settings
+        chosen = ""
+    if chosen:
+        return chosen
+    try:
+        from core import claim
+        claimed = _ok((claim.claimed() or {}).get("timezone"))
+    except Exception:                                    # noqa: BLE001
+        claimed = ""
+    return claimed or _ok((get_config().get("cost") or {}).get("timezone")) or "UTC"
+
+
+TZ_NS, TZ_KEY = "core", "timezone"
+
+
 def tz():
-    """ONE timezone key for the whole box (§1.8): `cost.timezone`, the one the cost ledger and
-    the digest already read. A second key is how a Tuesday report gets labelled Wednesday."""
-    return ZoneInfo((get_config().get("cost") or {}).get("timezone", "UTC"))
+    """The box's one time zone (tz_name), as a ZoneInfo."""
+    return ZoneInfo(tz_name())
 
 
 def now_local() -> datetime:
@@ -243,7 +275,38 @@ def _meters_report(day: date) -> dict:
             "happened": happened, "watch": watch,
             # THE TWO NUMBERS THE MORNING BRIEF WEIGHS (core/review_brief.py: spend over half the ceiling).
             "figures": ({"spend": {"value": round(usd["spend"], 2), "label": "Spent this cycle"},
-                         "ceiling": {"value": round(usd["ceiling"], 2), "label": "Monthly ceiling"}} if usd else {})}
+                         "ceiling": {"value": round(usd["ceiling"], 2), "label": "Monthly ceiling"}} if usd else {})
+            | ai_figures(day, at)}
+
+
+# WHAT THE BOX'S AI DID, BY TASK (plan #1857 H7): Meters showed vendors and dollars, and a box thinking on the
+# buyer's own subscription spends no dollars, so it showed nothing of where the AI went. Counts, never cost.
+_AI_TASKS = {"inbox_draft": "Replies drafted", "brief": "Today's brief", "ask": "Questions answered",
+             "review": "Morning Review", "router": "AI checks", "written_seed": "Articles planned"}
+
+
+def ai_figures(day: date, at: datetime) -> dict:
+    """{"ai:<task>": {"value": calls that day, "label", "cycle": calls this cycle}}, from the spend ledger."""
+    from zoneinfo import ZoneInfo
+    try:
+        from core import cost_guard
+        lo = datetime.combine(day, datetime.min.time(), tzinfo=tz())
+        utc = ZoneInfo("UTC")
+        lo_u, hi_u = lo.astimezone(utc).isoformat(), (lo + timedelta(days=1)).astimezone(utc).isoformat()
+        cyc_u = min(cost_guard._cycle_start(at), lo).astimezone(utc).isoformat()
+        with state.connect() as c:
+            rows = c.execute("SELECT task, SUM(CASE WHEN ts >= ? THEN 1 ELSE 0 END) AS today, COUNT(*) AS cycle "
+                             "FROM spend_ledger WHERE ts >= ? AND ts < ? AND task IS NOT NULL GROUP BY task",
+                             (lo_u, cyc_u, hi_u)).fetchall()
+    except Exception as e:                               # noqa: BLE001 — the meters still land without it
+        log.warning("report.ai_uses_unreadable", error=type(e).__name__)
+        return {}
+    out = {}
+    for r in sorted(rows, key=lambda r: (-int(r["today"] or 0), str(r["task"]))):
+        task = str(r["task"])
+        out[f"ai:{task}"] = {"value": int(r["today"] or 0), "cycle": int(r["cycle"] or 0),
+                             "label": _AI_TASKS.get(task) or task.replace("_", " ").capitalize()}
+    return out
 
 
 REPORTERS[METERS] = {"title": "Meters", "fn": _meters_report}

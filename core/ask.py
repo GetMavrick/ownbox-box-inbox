@@ -22,8 +22,9 @@ with an ask id the buyer's AI collects with `core.ask_result`. Today's brief (co
 never waits at all.
 
 THREE WAYS IT ANSWERS, by what the box thinks on:
-  * a Claude sign-in or an Anthropic key: the agent above (the only backend the sandboxed CLI runs);
-  * ChatGPT: one think() call over today's stored numbers (core/brief.facts), no tools;
+  * a Claude sign-in, an Anthropic key or ChatGPT: the agent above, the box's tools on the run's own seat
+    (ChatGPT through `codex exec`, core/brain.py `_run_agent_codex`, #1857 H3);
+  * any other thinking backend: one think() call over today's stored numbers (core/brief.facts), no tools;
   * no AI signed in (D5, ruled 2026-10-02): today's brief in plain words, and "sign in your AI on Settings for
     insights".
 
@@ -221,7 +222,8 @@ def _text(row: dict) -> str:
         return (f"I'm still working on that. Ask me for the answer in a minute: it's ask {row['ask_id']} "
                 f"(core.ask_result).")
     if st == "failed":
-        return f"I couldn't answer that this time: {row.get('why') or 'the box AI did not finish'}."
+        said = f"I couldn't answer that this time: {row.get('why') or 'the box AI did not finish'}."
+        return "\n\n".join(x for x in (said, row.get("fallback") or "") if x)
     out = [row.get("answer") or ""]
     if row.get("means"):
         out.append(f"What it means: {row['means']}")
@@ -241,7 +243,7 @@ def _text(row: dict) -> str:
 
 def _public(row: dict) -> dict:
     keep = ("ask_id", "status", "question", "answer", "means", "ask_next", "can_start", "proposed", "answered_by",
-            "took_s", "insights", "why")
+            "took_s", "insights", "why", "unavailable")
     out = {k: row[k] for k in keep if k in row}
     out["text"] = _text(row)
     return out
@@ -282,13 +284,13 @@ def _agent(ask_id: str, question: str, caps: list, *, run_agent=None) -> dict:
                "the AI was busy or could not be reached" if type(e).__name__ == "RetryableError" else
                f"the box AI stopped ({type(e).__name__})")
         return {"status": "failed", "why": why, "proposed": _proposed((label, seat_id), since),
-                "took_s": round(time.monotonic() - t0, 1)}
+                "took_s": round(time.monotonic() - t0, 1), **_fallback()}
     finally:
         seats.revoke(seat_id)
 
 
 def _think(question: str, caps: set, *, think=None) -> dict:
-    """ChatGPT boxes: one answer over today's stored numbers, no tools."""
+    """A backend the agent cannot run on: one answer over today's stored numbers, no tools."""
     from core import brain, brief
     f = brief.facts()
     ask = {"question": question, "facts": {"today": {"needs_you": f["needs_you"], "machines": f["machines"]},
@@ -299,6 +301,21 @@ def _think(question: str, caps: set, *, think=None) -> dict:
     got = _parse(raw)
     return {"status": "answered", "answered_by": "box_ai_facts", **got,
             "can_start": _starts(got["can_start"], caps), "proposed": []}
+
+
+def _fallback() -> dict:
+    """THE BOX'S OWN AI IS A VENDOR TOO (#1857 H5). When it does not answer (a timeout, a busy service, a lapsed
+    sign-in, its own limit), the question is still answered with today's brief, which is written ahead and needs no
+    AI, under one sentence that says so. Never an empty answer. No app is named: pages name no AI vendor."""
+    try:
+        from core import brief
+        from core.connector import words
+        u = words.unavailable("The box's own AI")
+        today = brief.get()["text"].split("\n\n" + brief.NO_AI)[0]
+        return {"unavailable": u, "fallback": f"{u['words']}\n\n{today}"}
+    except Exception as e:                                # noqa: BLE001 — the fallback never adds a failure
+        log.warning("ask.fallback_failed", error=f"{type(e).__name__}: {str(e)[:120]}")
+        return {}
 
 
 def _no_ai(why: str) -> dict:
@@ -338,12 +355,13 @@ def ask(question: str | None = None, seat=None, *, run_agent=None, think=None, w
         if not ready or os.environ.get("AIOS_HERMETIC_TEST"):
             return _public({"question": q, **_no_ai(why or "a test never spends")})
     caps = sorted(c for c in tools.held(seat) if tools.ai_may_hold(c))
-    if think is not None or (run_agent is None and brain._backend() not in ("claude_code", "api")):
+    if think is not None or (run_agent is None and brain._backend() not in ("claude_code", "api", "codex")):
         try:
             return _public({"question": q, **_think(q, set(caps), think=think)})
         except Exception as e:                            # noqa: BLE001
             log.warning("ask.think_failed", error=f"{type(e).__name__}: {str(e)[:160]}")
-            return _public({"question": q, "status": "failed", "why": f"the box AI stopped ({type(e).__name__})"})
+            return _public({"question": q, "status": "failed", "why": f"the box AI stopped ({type(e).__name__})",
+                            **_fallback()})
 
     _prune()
     if _busy():

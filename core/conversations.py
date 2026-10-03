@@ -20,7 +20,8 @@ WHAT A PROVIDER ANSWERS (all keyword arguments; `machine` is the caller's key, `
   messages(conversation=, since=, limit=)         -> list[{"id", "direction", "sent_by", "body", "at"}]
   send(machine=, conversation=, text=, key=, buttons=, quick_replies=)
                                                   -> {"status": "sent" | "duplicate" | "refused" | "unknown",
-                                                      "message_id", "reason"}
+                                                      "message_id", "reason", "code"}: `code` is why, for a
+                                                      program (see sdk.Machine.send_dm)
   comments(post=, since=, posts=, per_post=)      -> list[{"id", "post", "account", "space", "text",
                                                            "author": {"id", "username", "name"}, "at"}]
   reply_to_comment(machine=, comment=, text=, key=, quick_replies=)

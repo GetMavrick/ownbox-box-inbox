@@ -247,7 +247,12 @@ push.subscriptions_for = lambda uid: devices.get(str(uid), [])
 _mailed = []
 _real_mail_send = box_mail.send
 box_mail.send = lambda *a, **k: _mailed.append(a) or "id"
-notify._cfg = lambda: {"enabled": True, "timezone": "America/Los_Angeles"}
+notify._cfg = lambda: {"enabled": True}
+# THE OWNER'S ZONE, WHERE THE BOX KEEPS IT (plan #1857 H9): the box setting Settings, General, Time Zone writes, the one
+# resolver notify and the review both read. Not config: an exported box's config says UTC, ours says Pacific.
+from core import box_settings as _bs  # noqa: E402
+
+_bs.put(report.TZ_NS, report.TZ_KEY, "America/Los_Angeles")
 morning = datetime(2026, 9, 24, 16, 30, tzinfo=timezone.utc)          # 09:30 Pacific
 res = notify.send_notice("inbox_waiting", "subject", "body", now=morning)
 ok("WITH NO EMAIL SET UP, THE APP NOTIFICATION STILL GOES", res.get("notified") == 1 and pushed, str(res))

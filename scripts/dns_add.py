@@ -3,10 +3,10 @@
 
   export CLOUDFLARE_API_TOKEN=...            # a token scoped to Zone:DNS:Edit on ownbox.app
   python scripts/dns_add.py acme 203.0.113.7                 # a sold box: <client>.ownbox.app
-  python scripts/dns_add.py health-wellness 203.0.113.7 --zone nlvl.co   # a DEMO app keeps its own zone
-  python scripts/dns_add.py acme 203.0.113.7 --zone nlvl.co --dry-run
+  python scripts/dns_add.py health-wellness 203.0.113.7 --zone example.com   # a DEMO app keeps its own zone
+  python scripts/dns_add.py acme 203.0.113.7 --zone example.com --dry-run
 
-Creates (or updates) an A record  acme.nlvl.co → 203.0.113.7. THE NAME IS THE RULE (owner, 2026-09-05):
+Creates (or updates) an A record  acme.ownbox.app → 203.0.113.7. THE NAME IS THE RULE (owner, 2026-09-05):
 a sold box is named for the client, one of our own demo apps for its industry, so two roofers never
 collide and a demo reads as what it is. Run this from YOUR machine, before bootstrap; the token never
 sits on a client's VPS. Caddy on that droplet then
@@ -62,12 +62,12 @@ def fail(msg: str) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("name", nargs="?", default=None, help="the label — a client ('acme' → acme.nlvl.co) for a sold box, an industry ('health-wellness') for a demo app")
+    ap.add_argument("name", nargs="?", default=None, help="the label — a client ('acme' → acme.ownbox.app) for a sold box, an industry ('health-wellness') for a demo app")
     ap.add_argument("ip", help="the droplet's public IPv4")
     ap.add_argument("--wildcard", action="store_true",
                     help="the demo box's ONE record: *.<zone> → ip (owner, once; every <industry>.<zone> then resolves)")
     # ownbox.app IS THE BOXES DOMAIN (owner, 2026-09-21: "make the permanent cutover to
-    # ownbox.app for all machines"). This defaulted to nlvl.co, so the one script an operator
+    # ownbox.app for all machines"). This defaulted to our old company zone, so the one script an operator
     # runs to create a hand-built box's DNS record put it on the OLD zone — while the
     # provisioner, which builds every automated box, has used provisioner.userdata.BOXES_DOMAIN
     # ("ownbox.app") throughout. Two paths, two domains, and only one of them matched the

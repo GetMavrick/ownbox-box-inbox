@@ -50,6 +50,46 @@ SYSTEM = (
     "not a mistake is the worst of both."
 )
 
+# COLD PITCHES, TURNED AROUND (owner, 2026-10-02: "I get tons of cold email and I want to advertise right back to them
+# and turn it right around on them"; the link he gave: www.ownbox.io). OFF until the owner turns it on with a link on
+# Inbox Settings, Cold Pitches (box_settings inbox / pitch_back.*), and then it is a FOURTH case in the same one call:
+# no second model call, no new cost. The draft waits like every draft; nothing sends until a person presses Send.
+PITCH_BACK = "PITCH_BACK:"
+PITCH_CASE = (
+    "\n4. SOMEONE IS SELLING TO THE BUSINESS: unsolicited sales outreach, a vendor or agency offering their "
+    "services, a cold pitch. Start your reply with exactly PITCH_BACK: and then write a short, friendly reply that "
+    "thanks them and turns it around: say in one sentence what this business offers, using only what you were told "
+    "about it, and invite them to take a look at {link}. Never invent a price, a discount or a promise.")
+
+
+def pitch_back() -> dict:
+    """{"on": bool, "link": str}: the owner's Cold Pitches setting. Off when unreadable."""
+    try:
+        from core import box_settings
+        on = bool(box_settings.get("inbox", "pitch_back.enabled", default=False))
+        link = str(box_settings.get("inbox", "pitch_back.link", default="") or "").strip()
+    except Exception:                                    # noqa: BLE001 — a setting never costs a draft
+        return {"on": False, "link": ""}
+    return {"on": on and bool(link), "link": link}
+
+
+def _system() -> str:
+    pb = pitch_back()
+    return SYSTEM + (PITCH_CASE.format(link=pb["link"]) if pb["on"] else "")
+
+
+def _bare(link: str) -> str:
+    return link.lower().split("://", 1)[-1].removeprefix("www.").rstrip("/")
+
+
+def _turned_around(text: str, link: str) -> str:
+    """The reply without its marker, and with the owner's link in it whatever the model did."""
+    body = text.strip()[len(PITCH_BACK):].strip()
+    if link and _bare(link) not in body.lower():
+        body = f"{body}\n\nTake a look: {link}" if body else f"Take a look: {link}"
+    return body
+
+
 # The model's way of saying a message needs no answer. Matched on its own, so a reply that merely
 # discusses the idea is still a reply.
 NO_REPLY = "NO_REPLY_NEEDED"
@@ -94,6 +134,15 @@ def per_sweep() -> int:
         return max(0, int(_cfg().get("per_sweep", 3) or 0))
     except Exception:                            # noqa: BLE001 — junk must not uncap spending
         return 0
+
+
+def _pitch_back_on() -> bool:
+    """Inbox Settings, Cold Pitches (OSDev4's F4 #1852 writes it). Off until a person turns it on."""
+    try:
+        from core import box_settings
+        return bool(box_settings.get("inbox", "pitch_back.enabled", default=False))
+    except Exception:                            # noqa: BLE001 — a box without settings yet: off
+        return False
 
 
 def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
@@ -156,7 +205,7 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
         # business — which is why every draft it wrote asked "could you tell me what service
         # you're interested in?" instead of answering. Passed as cached_context, it is the facts
         # without the setting sources.
-        text = brain.think(task="inbox_draft", prompt=prompt, system=SYSTEM,
+        text = brain.think(task="inbox_draft", prompt=prompt, system=_system(),
                            cached_context=brain.knowledge_context() or None,
                            max_tokens=300, isolated=True,
                            job_id=f"draft:{space}:{in_reply_to}")
@@ -196,8 +245,21 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
         return None
 
 
+    pitched = text.upper().startswith(PITCH_BACK)
+    if pitched:
+        pb = pitch_back()
+        if not pb["on"]:
+            # Only asked for when it is on; a model that says it anyway gets a normal draft, marker gone.
+            text, pitched = text[len(PITCH_BACK):].strip(), False
+        else:
+            text = _turned_around(text, pb["link"])
+        if not text:
+            return None
     if not store.put(space=space, zcid=zcid, in_reply_to=in_reply_to, body=text):
         return None
+    if pitched:
+        store.mark_pitch_back(space, in_reply_to)
+        log.info("drafter.pitch_back", extra={"space": space, "conversation": zcid})
     log.info("drafter.drafted", extra={"space": space, "conversation": zcid,
                                        "in_reply_to": in_reply_to, "chars": len(text)})
     return text
@@ -297,7 +359,7 @@ def sweep(space: str) -> dict:
         # ones would leave the same undraftable rows at the head of a newest-first queue forever —
         # which is precisely the seven-hour head-block of 2026-09-22, arriving by a new road.
         # Bounded, because this is still a queue and not a mailbox scan.
-        waiting = store.needs_a_draft(space, limit=cap * _SCAN_MULTIPLE)
+        waiting = store.needs_a_draft(space, limit=cap * _SCAN_MULTIPLE, pitch_back=_pitch_back_on())
     except Exception as e:                       # noqa: BLE001 — a box without the table yet
         log.warning("drafter.unreadable", extra={"error": f"{type(e).__name__}: {e}"[:120]})
         return {"status": "unreadable", "drafted": 0}
@@ -308,9 +370,15 @@ def sweep(space: str) -> dict:
     # A model call is only ever spent on a message a person wrote and might read an answer to.
     from . import who_wrote
     ours = who_wrote.our_addresses()
+    pitch_back = _pitch_back_on()
     people, refused = [], {}
     for row in waiting:
         reason = who_wrote.why(row.get("sender") or "", row.get("headers"), ours=ours)
+        # A COLD PITCH STILL REACHES THE PITCH-BACK (plan #1857 H7, OSDev4's F4 #1852): most cold-email tools add
+        # List-Unsubscribe, so while pitch-back is on, a message whose only machine sign is that header is drafted.
+        if reason and pitch_back and who_wrote.level(row.get("sender") or "", row.get("headers"),
+                                                     ours=ours) == who_wrote.LIST_ONLY:
+            reason = ""
         if reason:
             refused[reason] = refused.get(reason, 0) + 1
         else:

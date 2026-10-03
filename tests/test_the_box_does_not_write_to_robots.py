@@ -142,7 +142,8 @@ ok(f"all {len(ROBOTS) + len(HUMANS)} messages are ingested — nothing is hidden
 
 for _k, (mid, frm, _x) in ROBOTS.items():
     row = store.get_conversation(SPACE, mid) or {}
-    ok(f"{frm} is marked automated", row.get("automated") == 1, str(row.get("automated")))
+    # 1 automated, or 2: only a list header, a cold pitch's shape (plan #1857 H7); both leave waiting and the drafter
+    ok(f"{frm} is marked automated", row.get("automated") in (1, 2), str(row.get("automated")))
 for _k, (mid, frm, _x) in HUMANS.items():
     row = store.get_conversation(SPACE, mid) or {}
     ok(f"{frm} is NOT — a real business writes from there", row.get("automated") == 0,

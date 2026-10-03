@@ -300,6 +300,16 @@ CREATE TABLE IF NOT EXISTS inbox_echoes (
   UNIQUE (space, echo_id)
 );
 
+-- A DRAFT THAT TURNS A COLD PITCH AROUND (drafter/draft.py, owner 2026-10-02: "I get tons of cold email and I want to
+-- advertise right back to them and turn it right around on them"). Marks the draft so the Drafts tab can say so. A NEW
+-- table, so no migration number.
+CREATE TABLE IF NOT EXISTS inbox_pitch_backs (
+  space       TEXT NOT NULL,
+  in_reply_to TEXT NOT NULL,          -- the cold pitch it answers (inbox_drafts is unique on it)
+  created_at  TEXT NOT NULL,
+  PRIMARY KEY (space, in_reply_to)
+);
+
 -- SAVED REPLIES (inbox/snippets.py, docs/SCOPE_INBOX_SNIPPETS.md, owner 2026-10-02): one list per Space, picked from a
 -- dropdown above the reply box. Archived, never deleted, so a snippet once sent can still be named. A NEW table.
 CREATE TABLE IF NOT EXISTS inbox_snippets (

@@ -83,7 +83,7 @@ class Settings:
     # Shared with Litestream (#42); the same bucket can hold the DB replica and
     # the reel videos. Set all five to serve finished videos from a CDN instead
     # of the box (fixes choppy remote playback). PUBLIC_URL is the CDN base the
-    # <video> tags use (e.g. https://media.nlvl.co or https://pub-xxx.r2.dev).
+    # <video> tags use (e.g. https://media.example.com or https://pub-xxx.r2.dev).
     object_store_bucket    = os.environ.get("OBJECT_STORE_BUCKET", "")
     object_store_endpoint  = os.environ.get("OBJECT_STORE_ENDPOINT", "")
     object_store_key       = os.environ.get("OBJECT_STORE_KEY", "")
@@ -211,7 +211,7 @@ class Settings:
     # single control surface. An armed row with Keyword + Lead Magnet Content filled is auto-
     # published + activated by the keyword-intake sweep (leadmagnet.airtable_intake). Off by default
     # in code (the sweep is gated); the field just has to exist on the VIDEOS table for the filter
-    # to resolve. (@default: single-select "Publish Lead Magnet" with option "Publish now".)
+    # to resolve. (e.g. a single-select "Publish Lead Magnet" with option "Publish now".)
     # `Publish Lead Magnet` -> `Publish to Website` -> `Post to Website` -> `Arm DM Keyword`
     # (owner, 2026-08-05 — three times in one afternoon, which is exactly why this is config and
     # not a literal). The final name is the honest one: this trigger does NOT put a page up, gate
@@ -275,7 +275,7 @@ class Settings:
     gtm_sender_title       = os.environ.get("GTM_SENDER_TITLE", "")      # signature line 1 suffix
     gtm_company_name       = os.environ.get("GTM_COMPANY_NAME", "")     # signature line 2
     gtm_cta_url            = os.environ.get("GTM_CTA_URL", "")          # the pitch's link target
-    # Reply-To: cold sends go out from the verified subdomain (mail.nlvl.co) but replies
+    # Reply-To: cold sends go out from the verified subdomain (mail.example.com) but replies
     # route to a MONITORED inbox (the root-domain Workspace box). Set once here, applied to
     # every send. Empty → no Reply-To header (falls back to the From address). No effect on
     # SPF/DKIM/DMARC (those key off From + return-path, never Reply-To).

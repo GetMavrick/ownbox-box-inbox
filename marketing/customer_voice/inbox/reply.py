@@ -29,7 +29,15 @@ log = get_logger(__name__)
 
 
 class ReplyRefused(Exception):
-    """The reply was not attempted, and nothing was spent. The caller shows the reason."""
+    """The reply was not attempted, and nothing was spent. The caller shows the reason.
+
+    `code` is the same fact for a program (a machine deciding to wait or to stop), so it never has to match
+    the sentence, which may be reworded: taken_over, opted_out, box_stopped, window_closed, hourly_cap,
+    not_claimed, too_old, or "refused" for anything else (a bad call, a vendor refusal)."""
+
+    def __init__(self, message: str = "", *, code: str = "refused"):
+        super().__init__(message)
+        self.code = code
 
 
 class ReplyIndeterminate(Exception):
@@ -219,7 +227,7 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
         # FORBIDDEN: a boundary that announces what exists on the other side is not a boundary.
         raise ReplyRefused("no such conversation on this box")
     if conv.get("opted_out"):
-        raise ReplyRefused("this person has opted out — nothing is sent to them")
+        raise ReplyRefused("this person has opted out — nothing is sent to them", code="opted_out")
 
     # A CHANNEL THE BOX CANNOT SEND ON AT ALL, REFUSED IN WORDS — and refused HERE, in the send
     # path, not only on the screen.
@@ -439,30 +447,30 @@ def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str
     from marketing.customer_voice import claims
     held = claims.holder(space, zcid)
     if not held or held.get("machine") != machine:
-        raise ReplyRefused("this machine hasn't claimed this conversation")
+        raise ReplyRefused("this machine hasn't claimed this conversation", code="not_claimed")
     # A PERSON WROTE SINCE THE CLAIM BEGAN, from the box or from the platform's own app: the conversation is
     # theirs now. The claim ends with a note, and nothing more is sent (OSDev1's review of #1753).
     if claims.person_wrote_since(space, zcid, held.get("claimed_at") or ""):
         claims.take_over(space, zcid)
-        raise ReplyRefused("a person has replied on this conversation, so the machine stopped")
+        raise ReplyRefused("a person has replied on this conversation, so the machine stopped", code="taken_over")
     if conv.get("opted_out"):
-        raise ReplyRefused("this person has opted out — nothing is sent to them")
+        raise ReplyRefused("this person has opted out — nothing is sent to them", code="opted_out")
     try:
         from core import pause
         stopped = pause.is_paused()
     except Exception:                    # noqa: BLE001 — an unreadable switch fails toward silence
         stopped = True
     if stopped:
-        raise ReplyRefused("the box is stopped, so no automation sends")
+        raise ReplyRefused("the box is stopped, so no automation sends", code="box_stopped")
     platform = str(conv.get("platform") or "").strip().lower()
     if platform == "email":
         raise ReplyRefused("machines don't send email from this inbox")
     if window.allowed_send(conv.get("last_inbound_at"), platform=platform) != "freeform":
-        raise ReplyRefused("this channel's window to reply is closed")
+        raise ReplyRefused("this channel's window to reply is closed", code="window_closed")
     from core.config import get_config
     cap = int(((get_config().get("inbox") or {}).get("hourly_send_cap")) or 40)
     if store.sends_last_hour(space) >= cap:
-        raise ReplyRefused(f"the box has sent its {cap} messages for this hour; try again later")
+        raise ReplyRefused(f"the box has sent its {cap} messages for this hour; try again later", code="hourly_cap")
     account_id = conv.get("account_id") or ""
     if not account_id:
         raise ReplyRefused("this conversation has no account to send from")
@@ -485,7 +493,7 @@ def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str
         claims.take_over(space, zcid)
         store.resolve_send(space=space, idem_key=idem, status="failed",
                            error="a person replied first, so the machine stopped")
-        raise ReplyRefused("a person has replied on this conversation, so the machine stopped")
+        raise ReplyRefused("a person has replied on this conversation, so the machine stopped", code="taken_over")
     mid = _deliver(space=space, zcid=zcid, conv=conv, account_id=account_id, text=text, idem=idem,
                    buttons=wire_buttons, quick_replies=wire_quick)
     store.record_message(space=space, zcid=zcid, zmid=mid, direction="out", sent_by="ai", body=text)
@@ -557,19 +565,20 @@ def reply_to_comment(*, space: str, machine: str, comment: dict, text: str, key:
     except Exception:                    # noqa: BLE001 — an unreadable switch fails toward silence
         stopped = True
     if stopped:
-        raise ReplyRefused("the box is stopped, so no automation sends")
+        raise ReplyRefused("the box is stopped, so no automation sends", code="box_stopped")
     author = comment.get("author") if isinstance(comment.get("author"), dict) else {}
     if _commenter_opted_out(space, author):
-        raise ReplyRefused("this person has opted out — nothing is sent to them")
+        raise ReplyRefused("this person has opted out — nothing is sent to them", code="opted_out")
     age = _age_days(comment.get("at"))
     if age is None:
         raise ReplyRefused("this comment has no time on it, so its reply window can't be checked")
     if age > PRIVATE_REPLY_DAYS:
-        raise ReplyRefused(f"Instagram only allows a private reply within {PRIVATE_REPLY_DAYS} days of a comment")
+        raise ReplyRefused(f"Instagram only allows a private reply within {PRIVATE_REPLY_DAYS} days of a comment",
+                           code="too_old")
     from core.config import get_config
     cap = int(((get_config().get("inbox") or {}).get("hourly_send_cap")) or 40)
     if store.sends_last_hour(space) >= cap:
-        raise ReplyRefused(f"the box has sent its {cap} messages for this hour; try again later")
+        raise ReplyRefused(f"the box has sent its {cap} messages for this hour; try again later", code="hourly_cap")
 
     idem = f"private_reply:{space}:{cid}"
     zcid = f"comment:{cid}"

@@ -38,6 +38,10 @@ ROWS = 250                      # enough rows that the opportunities are not onl
 CACHE_S = 600
 FAIL_CACHE_S = 60
 _cache: dict = {}
+# THE LAST GOOD ANSWER PER SITE, kept while this process lives (#1857 H5): a Google that fails a refresh gets the
+# last answer back with its time (`stale`, `as_of`), never "could not be read". A restart forgets it, and the next
+# good answer keeps it again.
+_last_good: dict = {}
 _lock = threading.Lock()
 
 # What each refusal means to the person reading the page. `not_connected` and `no_property` are not
@@ -78,12 +82,24 @@ def searches(*, fresh: bool = False, today: _dt.date | None = None) -> dict:
     ck = (st["property"], start, end)
     with _lock:
         hit = _cache.get(ck)
-        if hit and not fresh and time.time() - hit[0] < (CACHE_S if hit[1].get("ok")
-                                                         else FAIL_CACHE_S):
-            return hit[1]
-    out = _fetch(start, end)
+        cached = hit and not fresh and time.time() - hit[0] < (CACHE_S if hit[1].get("ok") else FAIL_CACHE_S)
+    if cached:
+        out = hit[1]
+    else:
+        try:
+            out = _fetch(start, end)
+        except Exception as e:                   # noqa: BLE001 — never raises (the docstring)
+            log.warning("aeo.searches_raised", error=type(e).__name__)
+            out = {"ok": False, "why": UNREACHABLE}
     with _lock:
-        _cache[ck] = (time.time(), out)
+        if not cached:
+            _cache[ck] = (time.time(), out)
+        if out.get("ok"):
+            if not cached:
+                _last_good[st["property"]] = (_dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"), out)
+        elif out.get("why") not in ("not_connected", "no_property", SIGNED_OUT) and st["property"] in _last_good:
+            at, good = _last_good[st["property"]]
+            return {**good, "stale": True, "as_of": at, "why": out.get("why")}
     return out
 
 
@@ -106,3 +122,4 @@ def _fetch(start: str, end: str) -> dict:
 def forget() -> None:
     with _lock:
         _cache.clear()
+        _last_good.clear()

@@ -85,7 +85,7 @@ def dismiss(space: str, draft_id: str) -> None:
                   (state._now(), space, str(draft_id)))
 
 
-def needs_a_draft(space: str, *, limit: int = 5) -> list[dict]:
+def needs_a_draft(space: str, *, limit: int = 5, pitch_back: bool = False) -> list[dict]:
     """Conversations whose newest inbound has no draft yet, newest first.
 
     THE `limit` IS A SPEND BOUND, not a page size. Each row this returns becomes one model call,
@@ -121,6 +121,9 @@ def needs_a_draft(space: str, *, limit: int = 5) -> list[dict]:
             # `IS NOT 1` RATHER THAN `= 0`, because NULL means nobody has looked yet and an
             # unjudged thread must still get its draft. Only a thread PROVEN automated is skipped.
             " WHERE k.space = ? AND k.opted_out = 0 AND k.automated IS NOT 1 "
+            # ONLY A LIST HEADER (2) IS A COLD PITCH'S SHAPE: drafted only while pitch-back is on (OSDev4's F4 #1852,
+            # plan #1857 H7), and kept out of the capped query otherwise, so pitches can't starve a real customer.
+            "   AND (k.automated IS NOT 2 OR ?) "
             # A CONVERSATION AN AUTOMATION IS RUNNING IS NOT DRAFTED (customer_voice/claims.py, owner
             # 2026-10-01, decision 2): it would be a model call for a reply nobody should send.
             f"   AND {_UNCLAIMED} "
@@ -142,7 +145,7 @@ def needs_a_draft(space: str, *, limit: int = 5) -> list[dict]:
             # jam comes straight back through a channel that sends a bare newline. The second
             # argument is the set of characters to strip, so this is tab, newline and return too.
             "   AND TRIM(COALESCE(m.body, ''), ' ' || char(9) || char(10) || char(13)) <> '' "
-            " ORDER BY m.created_at DESC LIMIT ?", (space, int(limit))).fetchall()
+            " ORDER BY m.created_at DESC LIMIT ?", (space, 1 if pitch_back else 0, int(limit))).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -274,3 +277,24 @@ def lessons(space: str, *, limit: int = 4) -> list[dict]:
             " WHERE space = ? ORDER BY edited DESC, created_at DESC LIMIT ?",
             (space, int(limit))).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── cold pitches turned around (draft.py `PITCH_BACK`) ─────────────────────────────────────────────────────────────
+def mark_pitch_back(space: str, in_reply_to: str) -> None:
+    """Note that the draft answering `in_reply_to` turns a cold pitch around. Never raises."""
+    try:
+        with state.connect() as c:
+            c.execute("INSERT OR IGNORE INTO inbox_pitch_backs (space, in_reply_to, created_at) VALUES (?,?,?)",
+                      (space, str(in_reply_to), state._now()))
+    except Exception as e:                               # noqa: BLE001 — a label never costs a draft
+        log.warning("drafter.pitch_back_unmarked", extra={"error": type(e).__name__})
+
+
+def pitch_backs(space: str) -> set:
+    """The inbound ids whose draft turns a cold pitch around."""
+    try:
+        with state.connect() as c:
+            return {r[0] for r in c.execute("SELECT in_reply_to FROM inbox_pitch_backs WHERE space = ?",
+                                            (space,)).fetchall()}
+    except Exception:                                    # noqa: BLE001
+        return set()

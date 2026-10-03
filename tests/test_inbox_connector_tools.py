@@ -81,6 +81,8 @@ PROPOSE_TOOLS = ("inbox.propose_reply", "inbox.propose_drafts",
                  "inbox.propose_drafting", "inbox.propose_discard_draft", "inbox.propose_opt_out",
                  # the email signature (owner, 2026-10-02): set from a chat, on one tap
                  "inbox.propose_signature",
+                 # cold pitches turned around (owner, 2026-10-02): switched on from a chat, on one tap
+                 "inbox.propose_pitch_back",
                  # saved replies (#1821): one added from a chat, on one tap
                  "inbox.propose_saved_reply")
 

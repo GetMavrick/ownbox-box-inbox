@@ -52,6 +52,25 @@ def post(url, body, headers):
 
 
 ai_health.test = lambda **kw: {"ok": True, "answer": "ready"}     # the AI's answer is the one thing stood in for
+# ...and the two upkeep readings (plan #1857 H14), which only a box has: systemd's upgrade timer, the box's certificate.
+import time as _time  # noqa: E402
+
+UPKEEP = {"state": "active", "ago_s": 3600, "days": 60.0}
+key_features._systemctl_show = lambda unit: {"ActiveState": UPKEEP["state"], "LastTriggerUSecRealtime":
+                                             "0" if UPKEEP["ago_s"] is None else
+                                             str(int((_time.time() - UPKEEP["ago_s"]) * 1e6))}
+import tempfile as _tmp  # noqa: E402
+
+from core import claim as _claim  # noqa: E402
+
+_claim.PROVISION_JSON = os.path.join(_tmp.mkdtemp(), "provision.json")   # a box provisioned 10 days ago, by default
+open(_claim.PROVISION_JSON, "w").write("{}")
+os.utime(_claim.PROVISION_JSON, (_time.time() - 10 * 86400, _time.time() - 10 * 86400))
+
+
+def _born(seconds_ago: float) -> None:
+    os.utime(_claim.PROVISION_JSON, (_time.time() - seconds_ago, _time.time() - seconds_ago))
+key_features._cert_days_left = lambda url=None: UPKEEP["days"]
 asked = []
 _real_test = ai_health.test
 
@@ -299,10 +318,109 @@ from core import checkin  # noqa: E402
 ready = checkin._ready() or {}
 ok("the check-in's ready section carries the last result", ready.get("key_features", {}).get("failed")
    == ["mcp:ping"] and ready["key_features"]["passed"] == 30, ready)
-ok("...and only its counts, names and time, never anything else the file holds",
-   set(ready["key_features"]) == {"at", "ok", "passed", "total", "failed"}, ready.get("key_features"))
+ok("...and only its counts, names, reasons and time, never anything else the file holds",
+   set(ready["key_features"]) <= {"at", "ok", "passed", "total", "failed", "why"}, ready.get("key_features"))
 ok("it fits the check-in's size limit with every name full", len(json.dumps(
     {"failed": ["mcp:" + "x" * 76] * key_features.FAILED_MAX})) < checkin.MAX_BYTES // 2)
+
+print("\nEach failure says whose it is, so only our own break blocks a release (#1857 H1)\n")
+from core.exceptions import BudgetExceeded, RetryableError  # noqa: E402
+
+ok("ai_health.kind: an outage or a busy AI app is the vendor's", ai_health.kind(RetryableError("overloaded")) == "vendor"
+   and ai_health.kind(BudgetExceeded("claude subscription limit")) == "vendor")
+ok("...a refused or signed-out account is the buyer's step (unset)",
+   ai_health.kind(RuntimeError("the AI account refused the request (401: unauthorized)")) == "unset")
+ok("...anything else is ours", ai_health.kind(RuntimeError("boom")) == "ours")
+
+res = key_features.run(post=post, url="https://box.example")
+ok("a green run carries no reasons", res["ok"] is True and "why" not in res, res)
+ai_health.note(False, "test", "x", force=True)               # no fresh real answer, so the gate asks
+_signed = key_features._ai_signed_in
+key_features._ai_signed_in = lambda: False
+ai_health.test = lambda **kw: {"ok": False, "why": "not signed in"}
+res = key_features.run(post=post, url="https://box.example")
+ok("no AI signed in yet: 'ai' fails as unset, a fresh box by design", res.get("why") == {"ai": "unset"}, res)
+key_features._ai_signed_in = lambda: True
+ai_health.test = lambda **kw: {"ok": False, "why": "overloaded", "kind": "vendor"}
+res = key_features.run(post=post, url="https://box.example")
+ok("signed in and the AI app down: 'ai' fails as vendor", res.get("why") == {"ai": "vendor"}, res)
+ai_health.test = lambda **kw: {"ok": False, "why": "it answered with nothing"}
+res = key_features.run(post=post, url="https://box.example")
+ok("signed in and no reason from the test: 'ai' is ours", res.get("why") == {"ai": "ours"}, res)
+key_features._ai_signed_in = lambda: (_ for _ in ()).throw(RuntimeError("no backend"))
+res = key_features.run(post=post, url="https://box.example")
+ok("...and a sign-in question that crashes is ours, never quieter", res.get("why") == {"ai": "ours"}, res)
+key_features._ai_signed_in = _signed
+ai_health.test = lambda **kw: {"ok": True, "answer": "ready"}
+review_brief.build = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("no rows"))
+res = key_features.run(post=post, url="https://box.example")
+ok("the review, the approval and the connector are the box's own code: always ours",
+   res.get("why") == {"review": "ours"}, res)
+review_brief.build = _build
+key_features.save({**res, "why": {"review": "ours", "ghost": "ours", "ai": "maybe"}, "failed": ["review", "ai"]})
+got = key_features.last()
+ok("the saved result carries reasons for failed names only, known reasons only", got.get("why") == {"review": "ours"},
+   got)
+ready = checkin._ready() or {}
+ok("...and the check-in carries them", ready.get("key_features", {}).get("why") == {"review": "ours"}, ready)
+
+print("\nA fresh box reports within minutes of boot\n")
+import http.server  # noqa: E402
+import threading  # noqa: E402
+
+timer = (ROOT / "deploy" / "aios-keyfeatures.timer").read_text()
+unit = (ROOT / "deploy" / "aios-keyfeatures.service").read_text()
+ok("the timer runs 4 minutes after boot, not 10", "OnBootSec=4min" in timer, timer)
+limit = int(unit.split("TimeoutStartSec=")[1].split()[0])
+ok("the unit's time limit covers the web wait plus a full run", limit >= key_features.WEB_WAIT_S + 300, limit)
+_local = key_features.LOCAL
+key_features.LOCAL = "http://127.0.0.1:9"                    # nothing listens there
+ok("no web process: the wait gives up at its limit and says so",
+   key_features._wait_for_web(limit_s=0, sleep=lambda s: None) is False)
+
+
+class _Health(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200 if self.path == "/health" else 404)
+        self.end_headers()
+
+    def log_message(self, *a):
+        pass
+
+
+srv = http.server.HTTPServer(("127.0.0.1", 0), _Health)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+key_features.LOCAL = f"http://127.0.0.1:{srv.server_port}"
+ok("the web process answering /health ends the wait", key_features._wait_for_web(limit_s=5, sleep=lambda s: None) is True)
+srv.shutdown()
+key_features.LOCAL = _local
+
+print("\nUpkeep is checked, not assumed (#1857 H14)\n")
+ok("security updates ran an hour ago and the certificate has 60 days: both pass",
+   key_features.check_upgrades() and key_features.check_certificate())
+UPKEEP["ago_s"] = 50 * 3600
+ok("UPDATES LAST RAN 50 HOURS AGO: red", key_features.check_upgrades() is False)
+UPKEEP["ago_s"], UPKEEP["state"] = 3600, "inactive"
+ok("THE UPGRADE TIMER IS OFF: red", key_features.check_upgrades() is False)
+ok("...and so is a box with no reading at all", key_features.check_upgrades(show=lambda u: {}) is False)
+UPKEEP["state"], UPKEEP["ago_s"] = "active", None
+_born(3600)
+ok("A BOX PROVISIONED AN HOUR AGO, its timer never fired yet: passes (the release's rehearsal box)",
+   key_features.check_upgrades() is True)
+_born(3 * 86400)
+ok("...provisioned 3 days ago and never fired: red", key_features.check_upgrades() is False)
+_born(3600)
+UPKEEP["state"] = "inactive"
+ok("...provisioned an hour ago with the timer off: red", key_features.check_upgrades() is False)
+_born(10 * 86400)
+UPKEEP["ago_s"] = 3600
+UPKEEP["state"], UPKEEP["days"] = "active", 9.5
+ok("THE CERTIFICATE HAS 9.5 DAYS LEFT: red (Caddy renews at 30, so renewal has stopped)",
+   key_features.check_certificate() is False)
+res = key_features.run(post=post, url="https://box.example")
+ok("...and in the gate both are named, as ours, so they block a release",
+   res["failed"] == ["certificate"] and res["why"] == {"certificate": "ours"}, res)
+UPKEEP["days"] = 60.0
 
 print("\nALL KEY FEATURES GATE CHECKS PASS" if not _failed else f"\n{_failed} KEY FEATURES GATE CHECK(S) FAILED")
 sys.exit(1 if _failed else 0)

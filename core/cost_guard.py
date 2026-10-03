@@ -20,7 +20,8 @@ def _cost_cfg() -> dict:
 def _cycle_start(now: datetime | None = None) -> datetime:
     """Start of the current billing cycle, in the configured timezone."""
     cfg = _cost_cfg()
-    tz = ZoneInfo(cfg.get("timezone", "UTC"))
+    from core import report                              # the box's one time zone (report.tz_name, plan #1857 H9)
+    tz = report.tz()
     now = (now or datetime.now(tz)).astimezone(tz)
     day = int(cfg.get("billing_cycle_day", 1))
     # Clamp to a safe day-of-month (handles 29/30/31 on short months).

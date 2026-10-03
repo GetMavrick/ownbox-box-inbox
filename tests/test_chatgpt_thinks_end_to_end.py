@@ -17,7 +17,8 @@ Held here, through the box's own code:
      signed in and where to sign in again, never "add an Anthropic key". So does a box whose CLI file is gone.
 
 AIOS_REAL_CODEX names the binary. CI installs it with the box's own installer and names it, so a broken install is
-a failure there. Unset (a developer's machine, a box), this prints SKIP: never a `codex` that happens to be on PATH.
+a failure there. Unset (a developer's machine, a box), this prints a SKIP line naming it: never a `codex` that happens to
+be on PATH.
 Run: python tests/test_chatgpt_thinks_end_to_end.py
 """
 from __future__ import annotations
@@ -41,7 +42,7 @@ sys.path.insert(0, str(ROOT))
 
 REAL = os.environ.get("AIOS_REAL_CODEX", "")
 if not REAL:
-    print("SKIP no real codex CLI named (set AIOS_REAL_CODEX to a codex 0.155.1 binary to run this end to end)")
+    print("SKIP: needs AIOS_REAL_CODEX, a codex 0.155.1 binary (CI installs one; a skip there is a failure)")
     sys.exit(0)
 if not (os.path.isfile(REAL) and os.access(REAL, os.X_OK)):
     print(f"FAIL AIOS_REAL_CODEX names {REAL}, and no CLI is there (CI puts it on with scripts/install_codex.sh)")
@@ -73,7 +74,7 @@ FAKE_JWT = ".".join([_b64({"alg": "none"}), _b64({
     "email": "owner@example.com", "exp": int(time.time()) + 86400,
     "https://api.openai.com/auth": {"chatgpt_plan_type": "plus", "chatgpt_account_id": "acct_test",
                                     "chatgpt_user_id": "user_test"}}), "not-a-signature"])
-SAID = {"reply": "OK", "refuse": False, "polls": 0, "asked": 0}
+SAID = {"reply": "OK", "refuse": False, "polls": 0, "asked": 0, "tool": "", "offered": [], "tool_said": ""}
 
 
 class StandIn(BaseHTTPRequestHandler):
@@ -92,7 +93,7 @@ class StandIn(BaseHTTPRequestHandler):
         self._json(404, {})
 
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
         p = self.path.split("?")[0]
         if p.endswith("/deviceauth/usercode"):
             return self._json(200, {"device_auth_id": "dev_test", "user_code": "WXYZ-1234", "interval": "1"})
@@ -110,8 +111,39 @@ class StandIn(BaseHTTPRequestHandler):
             if SAID["refuse"]:
                 return self._json(401, {"error": {"message": "Your authentication token has been invalidated.",
                                                   "code": "token_invalidated"}})
-            item = {"type": "message", "role": "assistant", "id": "msg_1",
-                    "content": [{"type": "output_text", "text": SAID["reply"]}]}
+            try:
+                req = json.loads(raw or b"{}")
+            except ValueError:
+                req = {}
+            # THE BOX'S TOOLS, AS THE REAL CLI OFFERS THEM (measured on 0.155.1): one namespace, mcp__aios. With
+            # SAID["tool"] set, the stand-in model calls that tool first, then answers once its output comes back.
+            SAID["all_tools"] = [(t.get("type"), t.get("name")) for t in req.get("tools") or []]
+            box = [t for t in req.get("tools") or [] if t.get("type") == "namespace" and t.get("name") == "mcp__aios"]
+            if box:
+                SAID["offered"] = ["mcp__aios__" + str(x.get("name")) for x in box[0].get("tools") or []]
+                SAID["others"] = sorted({t.get("name") or t.get("type") for t in req.get("tools") or []} - {"mcp__aios"})
+            done = [x for x in req.get("input") or [] if x.get("type") in ("function_call_output",
+                                                                        "custom_tool_call_output")]
+            if done:
+                SAID["tool_said"] = json.dumps(done[-1].get("output"))
+                for part in done[-1].get("output") if isinstance(done[-1].get("output"), list) else []:
+                    t = str(part.get("text") or "")
+                    if t.startswith("[") and "mcp__aios__" in t:
+                        SAID["offered"] = json.loads(t)
+            # CODE MODE (measured on 0.155.1: the CLI's default model when the account names none). The tools are not
+            # offered as functions: the model writes JavaScript for one `exec` tool, and the box's tools are methods on
+            # `tools` (tools.mcp__aios__core_health). The script reports ALL_TOOLS too, so the test sees what it had.
+            code = any(x.get("type") == "additional_tools" for x in req.get("input") or [])
+            if code and SAID["tool"] and not done:
+                js = (f"text(JSON.stringify(ALL_TOOLS.map(t => t.name))); "
+                      f"text(JSON.stringify(await tools.mcp__aios__{SAID['tool']}({{}})));")
+                item = {"type": "custom_tool_call", "id": "ctc_1", "call_id": "call_1", "name": "exec", "input": js}
+            elif box and SAID["tool"] and not done:
+                item = {"type": "function_call", "id": "fc_1", "call_id": "call_1", "namespace": "mcp__aios",
+                        "name": SAID["tool"], "arguments": "{}"}
+            else:
+                item = {"type": "message", "role": "assistant", "id": "msg_1",
+                        "content": [{"type": "output_text", "text": SAID["reply"]}]}
             usage = {"input_tokens": 5, "input_tokens_details": None, "output_tokens": 4,
                      "output_tokens_details": None, "total_tokens": 9}
             ev = [("response.created", {"type": "response.created", "response": {"id": "resp_1"}}),
@@ -250,10 +282,44 @@ ok("TODAY'S BRIEF is written by ChatGPT", r.get("status") == "ai" and b.get("fro
 SAID["reply"] = json.dumps({"answer": "Three people are waiting on your reply.",
                             "means": "Answer them first.", "ask_next": [], "can_start": []})
 n = SAID["asked"]
+# THE BOX'S OWN MCP, SERVED ON LOOPBACK AS ON A BOX (127.0.0.1:8000 there), so the real CLI reaches it over HTTP
+# with the ask's own seat. Unsandboxed: CI has no systemd to start a unit; the sandbox's argv is held by
+# tests/test_chatgpt_asks_with_tools.py.
+from werkzeug.serving import make_server  # noqa: E402
+
+box_srv = make_server("127.0.0.1", 0, app, threaded=True)
+threading.Thread(target=box_srv.serve_forever, daemon=True).start()
+ask.MCP_URL = f"http://127.0.0.1:{box_srv.server_port}/mcp"
+SAID["tool"] = "core_health"
+_cli, CLI = brain._run_agent_cli, {}
+
+
+def _heard(cmd, **kw):
+    rc, out, err = _cli(cmd, **kw)
+    CLI.update(rc=rc, out=out[-1500:])
+    return rc, out, err
+
+
+brain._run_agent_cli = _heard
 with spends():
-    a = ask.ask("What needs me today?")
-ok("ASK YOUR BOX is answered by ChatGPT", a.get("answered_by") == "box_ai_facts"
-   and a.get("answer") == "Three people are waiting on your reply." and SAID["asked"] == n + 1, a)
+    from core.connector import seats as _seats  # noqa: E402
+    _, _cred = _seats.mint("ChatGPT", "act")         # the buyer's own AI, asking through its connection
+    a = ask.ask("What needs me today?", _seats.verify(_cred),
+                run_agent=lambda *a_, **k: brain.run_agent(*a_, **{**k, "sandboxed": False}))
+ok("ASK YOUR BOX is answered by ChatGPT, as the agent with the box's tools", a.get("answered_by") == "box_ai"
+   and a.get("answer") == "Three people are waiting on your reply." and SAID["asked"] == n + 2, (a, SAID))
+ok("...the real CLI offered the model the box's own tools, by name", "mcp__aios__core_health" in SAID["offered"]
+   and "mcp__aios__core_ask" in SAID["offered"], (SAID["offered"], SAID.get("all_tools"), CLI))
+ok("...and NOTHING ELSE THAT ACTS: no shell, no web, no images", not ({"exec_command", "shell", "web_search",
+   "view_image", "image_generation"} & (set(SAID.get("others") or []) | set(SAID["offered"]))),
+   (SAID.get("others"), SAID["offered"]))
+ok("...the tool ran on the box, through its MCP, and its answer went back to the model",
+   "box" in SAID["tool_said"].lower() and 'isError\\":true' not in SAID["tool_said"].replace(" ", ""), SAID["tool_said"][:300])
+_asks = [s_ for s_ in _seats.all_seats(include_runs=True) if str(s_.get("label") or "").startswith("Ask ask_")]
+ok("...on the ask's own seat, revoked when it finished", _asks and all(s_.get("revoked_at") for s_ in _asks), _asks)
+SAID["tool"] = ""
+brain._run_agent_cli = _cli
+box_srv.shutdown()
 
 from marketing.customer_voice.drafter import draft as D  # noqa: E402
 

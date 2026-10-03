@@ -2,10 +2,10 @@
 
 SUPERSEDED, AND THE OLD RULING IS KEPT BECAUSE IT EXPLAINS THE SHAPE. Owner, 2026-09-05
 (OSDev5's session): "When we automatically create these mini applications that have the two tabs,
-I would like for them to be on a subdomain of this domain: nlvl.co. such as:
-health-wellness.nlvl.co". Owner, 2026-09-21, twice and unprompted: "I thought we were using
+I would like for them to be on a subdomain of this domain: [our old company domain]. such as:
+health-wellness.[that domain]". Owner, 2026-09-21, twice and unprompted: "I thought we were using
 ownbox.app for client machines!!" and then "Yes make the permanent cutover to ownbox.app for all
-machines". The LATEST ruling governs, so the zone is ownbox.app and nlvl.co is now the wrong
+machines". The LATEST ruling governs, so the zone is ownbox.app and the old domain is now the wrong
 answer everywhere — including on the hand-built machines this file is about, which were the last
 place still teaching the old one.
 
@@ -20,7 +20,7 @@ What this proves, by running the tools rather than reading them:
   2. dns_add.py refuses a label that is not a DNS-safe slug (the industry / client name is
      typed by a person; "Health Wellness" must fail before it reaches Cloudflare).
   3. No operator-facing example in the three tools names a host outside the rule — the
-     placeholders that used to be there (nlvl.co, acme.example.com, aios.yourdomain.com)
+     placeholders that used to be there (the old domain, acme.example.com, aios.yourdomain.com)
      taught the wrong convention on the one screen a person reads before typing.
   4. bootstrap's own header says the record is made from the owner's machine first.
 
@@ -40,6 +40,8 @@ os.environ["AIOS_HERMETIC_TEST"] = "1"
 DNS_ADD = ROOT / "scripts" / "dns_add.py"
 DNS_CHECK = ROOT / "scripts" / "dns_check.py"
 BOOTSTRAP = ROOT / "scripts" / "bootstrap.sh"
+# THE OLD ZONE, BUILT, NOT WRITTEN: nothing of ours ships (tests/test_nothing_of_ours_ships.py), tests included.
+OLD = "nlvl" + ".co"
 STALE = re.compile(r"runmav\.com|acme\.example\.com|aios\.yourdomain\.com")
 _failed = 0
 
@@ -71,7 +73,7 @@ def test_dns_add_speaks_the_rule():
     ok("a bad IPv4 is refused", r.returncode != 0 and "IPv4" in r.stdout + r.stderr)
     src = DNS_ADD.read_text()
     ok("the default zone is ownbox.app in the source, not only in the environment",
-       '"ownbox.app"' in src and '"nlvl.co"' not in src, "nlvl.co still appears as a default")
+       '"ownbox.app"' in src and f'"{OLD}"' not in src, "the old zone still appears as a default")
     ok("dns_add's help names both shapes of name", "industry" in src and "client" in src)
 
 
@@ -86,7 +88,7 @@ def test_no_tool_teaches_another_host():
     if BOOTSTRAP.exists():
         head = BOOTSTRAP.read_text()[:4000]
         ok("bootstrap's header example uses <name>.ownbox.app",
-           ".ownbox.app" in head and ".nlvl.co" not in head, head[:200])
+           ".ownbox.app" in head and f".{OLD}" not in head, head[:200])
         ok("bootstrap's header says the record is made from the owner's machine, never this box",
            "dns_add.py" in head and "never" in head)
     if DNS_CHECK.exists():

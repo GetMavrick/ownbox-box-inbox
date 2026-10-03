@@ -217,9 +217,15 @@ print("\ntest_the_schedule_runs_on_the_buyers_clock_not_the_boxs")
 # the buyer's, so "8 AM" reaches a Pacific buyer at one in the morning. The resolver is what fixes
 # it, and the order it looks in is the whole of the fix.
 _real_cfg = notify._cfg
-notify._cfg = lambda: {"enabled": True, "timezone": "Australia/Sydney"}
-ok("an explicit notify.timezone wins, because it is the only one a person can correct",
+# ONE RESOLVER SINCE PLAN #1857 H9 (core/report.py tz_name): the owner's choice on Settings, General, Time Zone wins,
+# because it is the only one a person can correct. The old `notify.timezone` override nothing wrote is not read.
+from core import box_settings as _bs, report as _report  # noqa: E402
+
+notify._cfg = lambda: {"enabled": True, "timezone": "Europe/Paris"}
+_bs.put(_report.TZ_NS, _report.TZ_KEY, "Australia/Sydney")
+ok("the owner's choice on the Time Zone page wins, because it is the only one a person can correct",
    notify.buyer_timezone() == "Australia/Sydney")
+_bs.put(_report.TZ_NS, _report.TZ_KEY, "")
 
 notify._cfg = lambda: {"enabled": True}
 from core import claim as _claim  # noqa: E402

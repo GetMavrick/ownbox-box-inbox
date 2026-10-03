@@ -1174,9 +1174,13 @@ def _managed_card() -> str:
         day = _dt.fromisoformat(until).strftime("%-d %B %Y")
     except ValueError:
         day = until                          # an unparseable date is still better shown than hidden
+    from core import box_updates
+    title, said = box_updates.managed_words(day)
+    if title == "Managed is on":                  # the short form the card always had, while nothing changed
+        said = (f"Free until {day}. Unless you cancel, it renews after that. "
+                "Cancelling does not touch the box — it keeps running and it stays yours.")
     return ('<div class="card"><h2>Managed</h2>'
-            f'<p class="sub">Free until {_esc(day)}. Unless you cancel, it renews after that. '
-            'Cancelling does not touch the box — it keeps running and it stays yours.</p>'
+            f'<p class="sub">{_esc(said)}</p>'
             '<p><a href="/dash/managed">Manage or cancel &rarr;</a></p></div>')
 
 
@@ -1716,6 +1720,9 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                            # PEOPLE HAD NO DOOR once: the page existed and nothing on a box linked to it, so
                            # inviting a colleague meant knowing the address.
                            {"key": "people", "label": "People", "href": "/settings/people",
+                            "owner_only": True, "group": "general"},
+                           # THE BOX'S ONE TIME ZONE (plan #1857 H9): the review's 8 AM and every "As of" follow it.
+                           {"key": "timezone", "label": "Time Zone", "href": "/settings/timezone",
                             "owner_only": True, "group": "general"},
                            # SERVER: what it runs, and who can sign in to it. MOVE YOUR BOX IS NOT A ROW (owner,
                            # 2026-09-30): it is in the danger zone at the foot of Server Access.

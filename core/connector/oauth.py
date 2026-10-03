@@ -127,6 +127,10 @@ def register(payload: dict) -> dict:
 
 CIMD_TIMEOUT_S = 5
 CIMD_MAX_BYTES = 64 * 1024
+CIMD_MISSES = 5                    # failed fetches of one client-document URL ...
+CIMD_MISS_WINDOW_S = 600           # ... inside ten minutes ...
+CIMD_REFUSE_S = 3600               # ... refuse that URL for an hour (never a trusted host: `_cimd_refused`)
+CLIENT_IDLE_DAYS = 30              # `sweep` drops a client with no approval in this long and no live seat
 
 
 def _public_https(url: str) -> bool:
@@ -154,8 +158,10 @@ def _fetch_document(url: str) -> dict | None:
     if not _public_https(url):
         return None
     from core import net
+    # PINNED (#1857 H4): resolved once, checked, and dialled at the address checked, so a name that answers public
+    # for the check and private for the connect (DNS rebinding) cannot point this unauthenticated fetch inward.
     status, body = net.get_public(url, headers={"Accept": "application/json", "User-Agent": "Ownbox-Box/1"},
-                                  timeout=CIMD_TIMEOUT_S, max_bytes=CIMD_MAX_BYTES + 1)
+                                  timeout=CIMD_TIMEOUT_S, max_bytes=CIMD_MAX_BYTES + 1, pin=True)
     if status != 200 or not body or len(body.encode("utf-8")) > CIMD_MAX_BYTES:
         if status != 200:
             log.warning("oauth.cimd_unreachable", host=urllib.parse.urlsplit(url).hostname, status=status)
@@ -181,9 +187,57 @@ def _offers_none(doc: dict) -> bool:
     return str(doc.get("token_endpoint_auth_method") or "none") == "none"
 
 
+def _trusted_host(url: str) -> bool:
+    from core.connector import cors
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    return any(host == d or host.endswith("." + d) for d in cors.TRUSTED_DOMAINS)
+
+
+def _cimd_refused(url: str) -> bool:
+    """Is this client-document URL inside its hour of refusal? A trusted vendor's host never is."""
+    if _trusted_host(url):
+        return False
+    with state.connect() as c:
+        row = c.execute("SELECT refused_until FROM oauth_cimd_misses WHERE url = ?", (url,)).fetchone()
+    return bool(row and row["refused_until"] and datetime.fromisoformat(row["refused_until"]) > _now())
+
+
+def _cimd_missed(url: str, ok: bool) -> None:
+    """Count one failed fetch of `url` (a success clears it). The fifth inside the window starts the refusal, logged
+    once. A trusted vendor's host is never counted: five bad ids under chatgpt.com must not lock every buyer out."""
+    now = _now()
+    with state.connect() as c:
+        if ok:
+            c.execute("DELETE FROM oauth_cimd_misses WHERE url = ?", (url,))
+            return
+        if _trusted_host(url):
+            return
+        row = c.execute("SELECT misses, first_at FROM oauth_cimd_misses WHERE url = ?", (url,)).fetchone()
+        if row is None or datetime.fromisoformat(row["first_at"]) < now - timedelta(seconds=CIMD_MISS_WINDOW_S):
+            misses, first = 1, now
+        else:
+            misses, first = int(row["misses"]) + 1, datetime.fromisoformat(row["first_at"])
+        until = (now + timedelta(seconds=CIMD_REFUSE_S)).isoformat() if misses >= CIMD_MISSES else None
+        c.execute("INSERT OR REPLACE INTO oauth_cimd_misses (url, misses, first_at, refused_until) VALUES (?,?,?,?)",
+                  (url, misses, first.isoformat(), until))
+    if misses == CIMD_MISSES:
+        log.warning("oauth.cimd_refused_for_an_hour", host=urllib.parse.urlsplit(url).hostname, misses=misses)
+
+
 def _from_document(client_id: str) -> dict | None:
     """A CIMD client: its document must name itself by exactly this URL and list https redirects. Kept in
-    oauth_clients like a registered client, so the code and token checks are the same rows."""
+    oauth_clients like a registered client, so the code and token checks are the same rows.
+
+    FIVE FAILURES OF ONE URL IN TEN MINUTES REFUSE IT FOR AN HOUR, without a fetch (#1857 H4): the box fetches on an
+    unauthenticated request, and a stranger repeating one bad id should cost one row, not a fetch each time."""
+    if _cimd_refused(client_id):
+        return None
+    got = _read_document(client_id)
+    _cimd_missed(client_id, got is not None)
+    return got
+
+
+def _read_document(client_id: str) -> dict | None:
     doc = _fetch_document(client_id)
     if not doc or doc.get("client_id") != client_id:
         return None
@@ -248,6 +302,8 @@ def issue_code(*, client_id: str, redirect_uri: str, code_challenge: str, role: 
                   " label, user_id, expires_at) VALUES (?,?,?,?,?,?,?,?)",
                   (code, client_id, redirect_uri, code_challenge, role, label[:60], user_id,
                    (_now() + timedelta(seconds=CODE_TTL_S)).isoformat()))
+        c.execute("INSERT OR REPLACE INTO oauth_client_use (client_id, last_code_at) VALUES (?,?)",
+                  (client_id, _now().isoformat()))
     log.info("oauth.code_issued", client_id=client_id, role=role)
     return code
 
@@ -277,6 +333,8 @@ def exchange(*, code: str, client_id: str, redirect_uri: str, verifier: str) -> 
         c.execute("UPDATE oauth_codes SET used_at = ? WHERE code = ? AND used_at IS NULL",
                   (_now().isoformat(), code))
     seat_id, credential = seats.mint(row["label"], row["role"])
+    with state.connect() as c:
+        c.execute("INSERT OR IGNORE INTO oauth_client_seats (client_id, seat_id) VALUES (?,?)", (client_id, seat_id))
     log.info("oauth.token_issued", client_id=client_id, seat_id=seat_id, role=row["role"])
     # No refresh token: the credential does not expire, and the owner revokes it on the same
     # screen they revoke a hand-minted one. A rotating refresh token would add a second lifetime
@@ -285,9 +343,31 @@ def exchange(*, code: str, client_id: str, redirect_uri: str, verifier: str) -> 
 
 
 def sweep(*, older_than_s: int = 3600) -> int:
-    """Drop spent and expired codes. They are worthless, but they are also a list of grants."""
-    cutoff = (_now() - timedelta(seconds=older_than_s)).isoformat()
+    """Drop spent and expired codes, idle clients, and stale miss counts. -> rows dropped. Run by the watchdog.
+
+    CODES are worthless once spent or expired, but they are also a list of grants.
+    A CLIENT is dropped when nobody has approved it in CLIENT_IDLE_DAYS and it holds no live seat (#1857 H4): a
+    registration endpoint anyone can call must not grow a table forever. Its seats are untouched (a seat is the token
+    and keeps working); an app that signs in again registers again, and a CIMD client is read from its URL again.
+    A MISS COUNT whose window and refusal are both over is history, not state."""
+    now = _now()
+    cutoff = (now - timedelta(seconds=older_than_s)).isoformat()
+    idle = (now - timedelta(days=CLIENT_IDLE_DAYS)).isoformat()
     with state.connect() as c:
-        cur = c.execute("DELETE FROM oauth_codes WHERE expires_at < ? OR "
-                        "(used_at IS NOT NULL AND used_at < ?)", (cutoff, cutoff))
-        return cur.rowcount or 0
+        n = c.execute("DELETE FROM oauth_codes WHERE expires_at < ? OR "
+                      "(used_at IS NOT NULL AND used_at < ?)", (cutoff, cutoff)).rowcount or 0
+        gone = [r["client_id"] for r in c.execute(
+            "SELECT k.client_id FROM oauth_clients k LEFT JOIN oauth_client_use u ON u.client_id = k.client_id "
+            "WHERE COALESCE(u.last_code_at, k.created_at) < ? AND NOT EXISTS ("
+            "  SELECT 1 FROM oauth_client_seats s JOIN seats ON seats.id = s.seat_id "
+            "  WHERE s.client_id = k.client_id AND seats.revoked_at IS NULL)", (idle,)).fetchall()]
+        for cid in gone:
+            c.execute("DELETE FROM oauth_clients WHERE client_id = ?", (cid,))
+            c.execute("DELETE FROM oauth_client_use WHERE client_id = ?", (cid,))
+            c.execute("DELETE FROM oauth_client_seats WHERE client_id = ?", (cid,))
+        stale = (now - timedelta(seconds=CIMD_MISS_WINDOW_S)).isoformat()
+        n += c.execute("DELETE FROM oauth_cimd_misses WHERE first_at < ? AND "
+                       "(refused_until IS NULL OR refused_until < ?)", (stale, now.isoformat())).rowcount or 0
+    if gone:
+        log.info("oauth.clients_swept", count=len(gone))
+    return n + len(gone)

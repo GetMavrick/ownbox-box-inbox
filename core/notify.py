@@ -101,34 +101,18 @@ def _has_device(person_id: str) -> bool:
 
 
 def buyer_timezone() -> str:
-    """WHERE THE PERSON READING THIS ACTUALLY IS, in priority order.
+    """WHERE THE PERSON READING THIS ACTUALLY IS: the box's one time zone (core/report.py `tz_name`).
 
-    NOT `cost.timezone`, WHICH IS THE BOX'S. OSDev1 measured it on 2026-09-17: a sold box ships
-    that as UTC and nothing in the provisioner ever sets it to the buyer's, so a schedule built on
-    it mails a Pacific buyer at one in the morning. The owner's own box has it right, which is
-    exactly why the bug survives every test run on ours.
-
-      1. `notify.timezone` in config — the override a settings screen will write, and the only
-         one a person can correct after the fact.
-      2. What the browser told us when he claimed the box. Asked of the browser, never of him.
-      3. The box's `cost.timezone`, which is at least a deliberate value on an operator box.
-      4. UTC, which is the honest answer when nothing else is known.
-    """
-    cfg = str(_cfg().get("timezone") or "").strip()
-    if cfg:
-        return cfg
+    NOT `cost.timezone` ALONE, WHICH IS THE BOX'S. OSDev1 measured it on 2026-09-17: a sold box ships that as UTC, so
+    a schedule built on it mailed a Pacific buyer at one in the morning. This used to be a second resolver (a
+    `notify.timezone` override, then the claim's zone, then cost.timezone). Since plan #1857 H9 there is one, and it
+    reads the owner's choice on Settings, General, Time Zone first, so the 8 AM and 5 PM slots follow what that page
+    says (OSDev1's review of #1863: the page promised 8 AM in a zone this file never read)."""
     try:
-        from core import claim
-        row = claim.claimed() or {}
-        claimed_tz = str(row.get("timezone") or "").strip()
-        if claimed_tz:
-            return claimed_tz
-    except Exception as e:                     # noqa: BLE001 — a box too old for the column
-        log.warning("notify.claim_tz_unreadable", error=str(e)[:120])
-    try:
-        from core.config import get_config
-        return str((get_config().get("cost") or {}).get("timezone") or "UTC")
-    except Exception:                          # noqa: BLE001
+        from core import report
+        return report.tz_name()
+    except Exception as e:                     # noqa: BLE001 — a bad zone must not silence a box
+        log.warning("notify.tz_unreadable", error=str(e)[:120])
         return "UTC"
 
 

@@ -3,7 +3,7 @@
 # Two = also the demo zone: Caddy answers *.<zone> and issues each certificate ON DEMAND, only
 # after this box's /tls/ask says yes (an industry a pack claims). No DNS token on the box.
 #   bash scripts/render_caddyfile.sh aios.example.com              > /etc/caddy/Caddyfile
-#   bash scripts/render_caddyfile.sh aios.example.com nlvl.co      > /etc/caddy/Caddyfile
+#   bash scripts/render_caddyfile.sh aios.example.com example.net     > /etc/caddy/Caddyfile
 set -euo pipefail
 DOMAIN="${1:?usage: render_caddyfile.sh <domain> [demo-zone]}"; ZONE="${2:-}"
 AIOS="$(cd "$(dirname "$0")/.." && pwd)"
