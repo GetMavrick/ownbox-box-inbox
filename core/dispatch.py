@@ -373,6 +373,28 @@ def _cross_site(req) -> str | None:
 
 
 @app.before_request
+def _ai_app_preflight():
+    """A CORS preflight from an AI app's own page (core/connector/cors.py) is answered here, ahead of every gate: a
+    preflight carries no credential by design, so the seat gate would 401 it and the browser would never ask."""
+    from core.connector import cors
+    if request.method == "OPTIONS" and cors.applies(request.path, request.headers.get("Origin")):
+        return "", 204, cors.headers(request.headers["Origin"])
+    return None
+
+
+@app.after_request
+def _ai_app_cors(resp):
+    """Every connector and sign-in answer to a trusted AI app's page carries the CORS headers, the 401 included:
+    its WWW-Authenticate is how that page finds the sign-in."""
+    from core.connector import cors
+    origin = request.headers.get("Origin")
+    if cors.applies(request.path, origin):
+        for k, v in cors.headers(origin).items():
+            resp.headers[k] = v
+    return resp
+
+
+@app.before_request
 def _same_origin_gate():
     why = _cross_site(request)
     if why:

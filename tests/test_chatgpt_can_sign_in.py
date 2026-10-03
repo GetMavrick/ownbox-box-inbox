@@ -170,6 +170,48 @@ for u in ("http://chatgpt.com/x.json", "https://127.0.0.1/x.json", "https://loca
           "https://10.0.0.5/x.json", "https://chatgpt.com:8443/x.json", "https://u:p@chatgpt.com/x.json"):
     ok(f"never fetched (SSRF): {u}", oauth._fetch_document(u) is None)
 
+print("\n— ChatGPT's own page asks from chatgpt.com (CORS), as its plugin screen does —")
+O = "https://chatgpt.com"
+pre = anon.open("/mcp", method="OPTIONS", headers={"Origin": O, "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization,content-type,mcp-protocol-version"})
+ok("the preflight on /mcp is answered, not 401", pre.status_code == 204, pre.status_code)
+ok("...allowing chatgpt.com, POST and the Authorization header",
+   pre.headers.get("Access-Control-Allow-Origin") == O and "POST" in pre.headers.get("Access-Control-Allow-Methods", "")
+   and "Authorization" in pre.headers.get("Access-Control-Allow-Headers", ""), dict(pre.headers))
+r = anon.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}, headers={"Origin": O})
+ok("the 401 is readable by the page: CORS on it, WWW-Authenticate exposed", r.status_code == 401
+   and r.headers.get("Access-Control-Allow-Origin") == O
+   and "WWW-Authenticate" in r.headers.get("Access-Control-Expose-Headers", ""), dict(r.headers))
+for p in ("/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server"):
+    g2 = anon.get(p, headers={"Origin": O})
+    ok(f"{p} is readable from chatgpt.com", g2.status_code == 200 and g2.headers.get("Access-Control-Allow-Origin") == O)
+pre = anon.open("/oauth/register", method="OPTIONS", headers={"Origin": O, "Access-Control-Request-Method": "POST"})
+ok("registration's preflight is answered", pre.status_code == 204 and pre.headers.get("Access-Control-Allow-Origin") == O)
+r = rpc(anon, "tools/list", token=at, rid=9)
+r2 = anon.post("/mcp", json={"jsonrpc": "2.0", "id": 9, "method": "tools/list", "params": {}},
+               headers={"Origin": O, "Authorization": f"Bearer {at}", "Content-Type": "application/json"})
+ok("signed in, a request from chatgpt.com is served, not refused as cross-origin", r2.status_code == 200, r2.status_code)
+E = "https://evil.example"
+pre = anon.open("/mcp", method="OPTIONS", headers={"Origin": E, "Access-Control-Request-Method": "POST"})
+ok("any other site gets no CORS permission", "Access-Control-Allow-Origin" not in pre.headers, dict(pre.headers))
+r3 = anon.post("/mcp", json={"jsonrpc": "2.0", "id": 9, "method": "tools/list", "params": {}},
+               headers={"Origin": E, "Authorization": f"Bearer {at}", "Content-Type": "application/json"})
+ok("...and is still refused even with a valid token (the DNS-rebinding rule)", r3.status_code == 403, r3.status_code)
+from core.connector import cors  # noqa: E402
+for o in ("https://chatgpt.com", "https://chat.openai.com", "https://platform.openai.com", "https://openai.com",
+          "https://admin.openai.com", "https://www.chatgpt.com",
+          "https://claude.ai"):
+    ok(f"trusted: {o}", cors.trusted(o))
+for o in ("http://chatgpt.com", "https://chatgpt.com.evil.example", "https://evilchatgpt.com", "https://openai.com:8443",
+          "https://notopenai.com", "https://u@chatgpt.com", "null", "", None):
+    ok(f"not trusted: {o!r}", not cors.trusted(o))
+pre = anon.open("/mcp", method="OPTIONS", headers={"Origin": "https://platform.openai.com",
+                                                    "Access-Control-Request-Method": "POST"})
+ok("an openai.com page's preflight is answered too", pre.status_code == 204
+   and pre.headers.get("Access-Control-Allow-Origin") == "https://platform.openai.com", dict(pre.headers))
+g3 = anon.get("/settings/agent", headers={"Origin": O})
+ok("the box's own pages get no CORS, even for chatgpt.com", "Access-Control-Allow-Origin" not in g3.headers)
+
 print()
 if _failed:
     print(f"{_failed} FAILED")

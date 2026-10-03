@@ -127,7 +127,10 @@ def _origin_ok(req) -> bool:
     origin = req.headers.get("Origin")
     if not origin:
         return True
-    return origin.rstrip("/") == req.host_url.rstrip("/")
+    # THE AI APPS' OWN PAGES, BY NAME (core/connector/cors.py): ChatGPT asks from chatgpt.com. Every other origin is
+    # still refused, which is what the spec's DNS-rebinding rule protects.
+    from core.connector import cors
+    return origin.rstrip("/") == req.host_url.rstrip("/") or cors.trusted(origin)
 
 
 def _version_ok(req) -> tuple[bool, str]:
