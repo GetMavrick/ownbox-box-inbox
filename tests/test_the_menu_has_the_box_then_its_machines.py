@@ -131,15 +131,17 @@ _srows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _sn, r
 # server your own AI connects to, the coworkers on the box), Connections (what it reads from, the mobile app, the
 # address it sends from), Team, Server.
 # HIS ORDER (owner, 2026-10-02, approved from a preview): "The order of the menu should go AI account, MCP server, data
-# sources, and then coworkers"; then Reaching you (the mobile app, the address the box sends from), Team, Server.
+# sources, and then coworkers"; then General (owner, 2026-10-03: the mobile app, the address the box sends from, the
+# people on it: "AI is settled and server is settled, but the other three need to be in another category"), Server.
 ok("the rows, in their groups' order",
    _srows == ["Overview", "AI Account", "MCP Server", "Data Sources", "Coworkers", "Mobile App", "Sending Email",
               "People", "Updates", "Server Access"], str(_srows))
 _sgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _sn, re.S)
-ok("...each group opening with a gap", _sgrp == ["AI Account", "Mobile App", "People", "Updates"], str(_sgrp))
+ok("...each group opening with a gap", _sgrp == ["AI Account", "Mobile App", "Updates"], str(_sgrp))
 ok("...and its name above its first row", re.findall(r'<span class="glabel">([^<]*)</span>', _sn)
-   == ["AI", "Reaching you", "Team", "Server"], re.findall(r'<span class="glabel">([^<]*)</span>', _sn))
+   == ["AI", "General", "Server"], re.findall(r'<span class="glabel">([^<]*)</span>', _sn))
 ok("...and no old name is left", all(x not in _sn for x in ("AI Coworkers", "Outbound Email", "Coworkers (Agents)",
+                                                           "Reaching you", '"glabel">Team<',
                                                            '"lbl">Shifts', '"lbl">Email<')))
 _mc = app.test_client()
 _mc.set_cookie(dash.COOKIE, dash.new_session(state.add_user("tomas.reyes@acme.co", name="Tomas",
@@ -151,7 +153,7 @@ ok("a member's shorter menu keeps its gaps on the rows they are shown",
    _mgrp == ["Coworkers", "Mobile App", "Updates"], str(_mgrp))
 # A GROUP'S NAME TRAVELS WITH ITS GAP, and a group a member sees nothing of has no name over another group's rows.
 ok("...and its group names over them, never a name for a group they are shown nothing of",
-   re.findall(r'<span class="glabel">([^<]*)</span>', _mn) == ["AI", "Reaching you", "Server"],
+   re.findall(r'<span class="glabel">([^<]*)</span>', _mn) == ["AI", "General", "Server"],
    re.findall(r'<span class="glabel">([^<]*)</span>', _mn))
 
 

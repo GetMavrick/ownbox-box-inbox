@@ -38,6 +38,7 @@ asking waits for a root-scoped worker, which is a separate change with its own b
 import html as _html
 import json
 import os
+import re
 import subprocess
 
 from flask import jsonify, redirect, request
@@ -204,9 +205,10 @@ def box_ai():
 
     def page(parts: list, lede: str):
         if settled:
-            kind = ("ChatGPT subscription" if ai.get("provider") == "chatgpt" else
-                    "Claude subscription" if box_secrets.claude_oauth_token() else
-                    "Anthropic API key")
+            # NO AI IS NAMED (owner, 2026-10-03: "Please adjust to not mention which LLM. We're also going to add
+            # Gemini and Grok very soon."): a subscription or a key, on the buyer's own account.
+            kind = ("AI subscription" if ai.get("provider") == "chatgpt" or box_secrets.claude_oauth_token()
+                    else "AI key")
             parts = (['<div class="card"><h2>Connected</h2>'
                       f'<p>Your drafts are written with your {_esc(kind)}, on your own account '
                       'and your own bill.</p>' + _ai_health_lines() + '</div>',
@@ -430,7 +432,9 @@ def _ai_health_lines() -> str:
     # WHICH TOKEN IS IN USE (owner, 2026-10-01): a newer sign-in always wins; a token only in the box's settings file
     # is named, so a stale one there can never hide behind "Connected" again.
     try:
-        source = box_secrets.claude_oauth_source()
+        from core import brain
+        # The Claude token's source, said only while the box thinks on Claude: on ChatGPT it isn't the one in use.
+        source = box_secrets.claude_oauth_source() if brain._backend() == "claude_code" else ""
     except Exception:                                # noqa: BLE001
         source = ""
     if source == "sign-in":
@@ -1145,19 +1149,35 @@ def _seat_rows(seats_list: list) -> str:
     return "".join(out)
 
 
-def _seat_form(note: str = "") -> str:
+def _seat_form(note: str = "", *, name: str = "", quiet: bool = False) -> str:
     # ONE PERMISSION, SAID, NOT CHOSEN (owner, 2026-10-02: Read only removed). It names everything the key can do.
+    fid = "seat-label-" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") if name else "seat-label"   # ids unique
     opts = "".join(f'<input type="hidden" name="role" value="{r}"><p><b>{t}.</b> {w}</p>'
                    for r, t, w in _ROLE_CHOICES)
     return (note +
             '<form method="post" action="/settings/agent" class="card">'
             '<input type="hidden" name="do" value="mint">'
-            '<label for="seat-label">What should it be called?</label>'
+            f'<label for="{fid}">What should it be called?</label>'
             '<p class="quiet">A name you will recognise later, so you know what you are '
             'revoking.</p>'
-            '<input id="seat-label" name="label" maxlength="60" placeholder="Grok on X" required>'
+            f'<input id="{fid}" name="label" maxlength="60" placeholder="My AI app" value="{_esc(name)}" '
+            'required>'
             '<p><b>What it can do</b></p>' + opts +
-            '<button type="submit">Create the connection</button></form>')
+            # ONE PRIMARY PER SCREEN (tests/test_every_settings_screen_has_one_primary.py): the second key form is quiet.
+            f'<button type="submit"{' class="ghost"' if quiet else ""}>Make the connection key</button></form>')
+
+
+def _copy(value: str, label: str) -> str:
+    """One press to copy. Where the browser can't, the value beside it is plain text to select."""
+    return (f'<button type="button" class="ghost" data-copy="{_esc(value)}" onclick="var b=this;'
+            'navigator.clipboard&amp;&amp;navigator.clipboard.writeText(b.dataset.copy).then(function()'
+            "{b.textContent='Copied'})\">" + _esc(label) + '</button>')
+
+
+# A CONNECTION KEY, NEVER AN "API KEY" IN OUR OWN WORDS (owner, 2026-10-02: "nobody wants to enter an API key because
+# that's really scary because it could get really expensive"; OSDev1's copy). Said wherever a key is made or shown.
+KEY_WORDS = ("This connection key is made by your box. It costs nothing. It isn't a key to any AI account: it only "
+             "lets your AI reach this box, and you can delete it here any time.")
 
 
 def _seat_credential(label: str, credential: str, url: str) -> str:
@@ -1167,15 +1187,17 @@ def _seat_credential(label: str, credential: str, url: str) -> str:
     the tab has lost it, and the only repair is revoking a seat they never used and making another.
     """
     return ('<div class="card"><h2>Copy this now.</h2>'
-            f'<p class="quiet">This is the only time <b>{_esc(label)}</b>\'s key will ever be '
+            f'<p class="quiet">This is the only time <b>{_esc(label)}</b>\'s connection key will ever be '
             'shown. The box keeps a one-way hash of it and nothing else, so if you lose it, revoke '
             'this connection and make another — there is no way to look it up.</p>'
-            f'<p class="addr">{_esc(credential)}'
-            '</p></div>'
-            '<div class="card"><p><b>Address</b> — give your AI agent this and that key. It '
-            'speaks MCP.</p>'
-            f'<p class="addr">{_esc(url)}</p>'
-            '</div>')
+            f'<p class="addr">{_esc(credential)}</p>' + _copy(credential, "Copy key") +
+            f'<p>{_esc(KEY_WORDS)}</p></div>'
+            '<div class="card"><h2>Where it goes</h2>'
+            '<p><b>Address:</b></p>'
+            f'<p class="addr">{_esc(url)}</p>' + _copy(url, "Copy address") +
+            '<p><b>In ChatGPT</b>, in the same New custom plugin form: set <b>Authentication</b> to '
+            '<b>Access token / API key</b> (ChatGPT\'s words) and paste the key there.</p>'
+            '<p class="quiet">Any other AI app or agent: give it the address and the key.</p></div>')
 
 
 @blueprint.route("/settings/agent", methods=["GET", "POST"])
@@ -1240,14 +1262,17 @@ def box_agent():
                                  '&larr; MCP Server</a></div>'), 200
 
     root = str(request.host_url or "").rstrip("/")
-    clients = "".join(f'<div class="row"><b style="flex:1;min-width:0">{_esc(c["name"])}</b>'
-                      f'<span class="quiet">{_esc(c["how"])}</span></div>'
-                      for c in getattr(box_secrets, "AGENT_CLIENTS", ()))
+    addr = f"{root}/mcp"
     # THE ADDRESS FIRST, THEN HOW TO ADD IT TO EACH AI (owner, 2026-10-02: "standard base machines should be able to
     # have a menu choice called MCP server and they should be able to clearly see the address of the MCP server on
     # how to add it to their favorite chat bo[t]", approved from a preview). The two kinds of coworker are said on
     # Coworkers, the Pro page; this page is the box's own door for the AI a person already uses, on every box.
-    addr = f"{root}/mcp"
+    #
+    # THEN A GUIDE NOBODY HAS TO ASK ABOUT (owner, 2026-10-03: "our customers don't have the ability to ask you
+    # questions. So if they can't figure that shit out they're gonna fucking be pissed"; OSDev1's assignment): ChatGPT
+    # and Claude step by step with the exact field values, signing in first and the connection key as the labelled
+    # fallback, and every error a buyer meets with its fix. An AI is named only where the buyer is in that app.
+    copy_addr = _copy(addr, "Copy address")
     body = ('<div class="card"><h2>Your box\'s MCP address</h2>'
             # THERE IS NO KEY TO COPY (owner, 2026-09-22: "we just enter the MCP server and it authorizes"): the
             # assistant is sent here to sign in, since the OAuth front door (#1419).
@@ -1255,30 +1280,60 @@ def box_agent():
             'no key to copy.</p>'
             # A PLACE TO BREAK AT EACH SLASH, so a long address wraps between its parts on a mobile screen rather
             # than mid-word ("…/mc" then "p"). <wbr> copies as nothing.
-            f'<p class="addr">{_esc(root).replace("/", "/<wbr>")}/<wbr>mcp</p>'
-            # ONE PRESS TO COPY IT. Where the browser can't, the address above is plain text to select.
-            f'<button type="button" class="ghost" data-copy="{_esc(addr)}" onclick="var b=this;'
-            'navigator.clipboard&amp;&amp;navigator.clipboard.writeText(b.dataset.copy).then(function()'
-            '{b.textContent=\'Copied\'})">Copy address</button></div>'
-            # EVERY ONE OF THESE IS LIVE. They connect TO the box over MCP; the box never calls them and holds
-            # nothing of theirs, which is why this list needs nothing greyed out.
-            + (f'<div class="card"><h2>Add it to your AI</h2>{clients}</div>' if clients else "")
-            + '<div class="card"><ol style="padding-left:20px;margin:0">'
-            + "".join(f'<li style="margin:6px 0">{_esc(t)}</li>'
-                      for t in getattr(box_secrets, "AGENT_STEPS", ()))
-            + '</ol></div>'
-            + '<div class="card"><p>You choose what each AI may do, and you can take it back at any moment.</p>'
-              '<p class="quiet">Nothing that connects here can send a message as your business. The most it can do '
-              'is leave a reply waiting on the screen for you.</p></div>'
-            + '<details style="margin-top:18px"><summary style="cursor:pointer">'
-              'Or make a key by hand</summary>'
-              '<p class="quiet" style="margin:10px 0">For a script, or an AI agent that cannot '
-              'sign in. The key is shown once and you keep it safe yourself — signing in '
-              'above is easier and revoking it is the same button.</p>'
-            + _seat_form(note)
-            + '</details>'
-            + _seat_rows((seats.promote_all(), seats.all_seats())[1])
-            + _back())
+            f'<p class="addr">{_esc(root).replace("/", "/<wbr>")}/<wbr>mcp</p>' + copy_addr + '</div>'
+            + '<div class="card guide" id="chatgpt"><h2>Connect ChatGPT</h2><ol style="padding-left:20px;margin:0">'
+              '<li>On <b>chatgpt.com</b>, in a web browser, open <b>Settings</b>, then <b>Plugins</b>, and choose '
+              '<b>New custom plugin</b>.</li>'
+              '<li><b>Name:</b> Ownbox</li>'
+              f'<li><b>Server URL:</b> <div class="addr">{_esc(addr)}</div>{copy_addr}</li>'
+              '<li><b>Authentication:</b> OAuth</li>'
+              '<li>Tick the box that says you understand the risk, then press <b>Create</b>.</li>'
+              '<li>ChatGPT sends you to this box to sign in. Press <b>Allow</b>, and you are back in ChatGPT, '
+              'connected.</li></ol>'
+              '<h3>If it doesn\'t work</h3><ul style="padding-left:20px;margin:0">'
+              '<li><b>\u201cOAuth setup is unavailable in this environment\u201d</b>: you are in the ChatGPT desktop '
+              'or mobile app. Add it on chatgpt.com in a web browser; the apps use it once it is added.</li>'
+              '<li><b>No Plugins, or no New custom plugin</b>: on a ChatGPT Business or Enterprise workspace, custom '
+              'plugins can be switched off. Ask your workspace admin to allow them.</li>'
+              '<li><b>It won\'t sign in</b>: use a connection key instead, just below. It works on every plan.</li>'
+              '</ul>'
+              f'<details id="key"{" open" if note else ""}><summary>Use a connection key instead</summary>'
+              '<p>In the same form, set <b>Authentication</b> to <b>Access token / API key</b> (ChatGPT\'s words), '
+              'and paste a connection key from your box there. Make it here; it is shown once.</p>'
+              f'<p class="quiet">{_esc(KEY_WORDS)}</p>'
+            + _seat_form(note, name="ChatGPT")
+            + '</details></div>'
+            + '<div class="card guide" id="claude"><h2>Connect Claude</h2><ol style="padding-left:20px;margin:0">'
+              '<li>In Claude, open <b>Settings</b>, then <b>Connectors</b>, and choose '
+              '<b>Add custom connector</b>.</li>'
+              '<li><b>Name:</b> Ownbox</li>'
+              f'<li><b>Remote MCP server URL:</b> <div class="addr">{_esc(addr)}</div>{copy_addr}</li>'
+              '<li>Press <b>Add</b>, then <b>Connect</b>. Claude sends you to this box to sign in. Press '
+              '<b>Allow</b>.</li></ol>'
+              '<h3>If it doesn\'t work</h3><ul style="padding-left:20px;margin:0">'
+              '<li><b>No Add custom connector</b>: on a Claude Team or Enterprise plan, an owner of the '
+              'organization adds it first, in the organization\'s settings under Connectors.</li>'
+              '<li><b>It couldn\'t connect</b>: check the whole address was pasted, ending in /mcp, then press '
+              'Connect again.</li>'
+              '</ul></div>')
+    others = [c for c in getattr(box_secrets, "AGENT_CLIENTS", ()) if c.get("id") not in ("chatgpt", "claude")]
+    body += ('<div class="card"><h2>Another AI app</h2>'
+             + "".join(f'<div class="row"><b style="flex:1;min-width:0">{_esc(c["name"])}</b>'
+                       f'<span class="quiet">{_esc(c["how"])}</span></div>' for c in others)
+             + '<ol style="padding-left:20px;margin:12px 0 0">'
+             + "".join(f'<li style="margin:6px 0">{_esc(t)}</li>' for t in getattr(box_secrets, "AGENT_STEPS", ()))
+             + '</ol></div>'
+             + '<div class="card"><p>You choose what each AI may do, and you can take it back at any moment.</p>'
+               '<p class="quiet">Nothing that connects here can send a message as your business. The most it can do '
+               'is leave a reply waiting on the screen for you.</p></div>'
+             + f'<details style="margin-top:18px"{" open" if note else ""}><summary style="cursor:pointer">'
+               'Make a connection key for a script or another agent</summary>'
+               f'<p class="quiet" style="margin:10px 0">For anything that can\'t sign in. {_esc(KEY_WORDS)} It is '
+               'shown once, so keep it somewhere safe.</p>'
+             + _seat_form(note, quiet=True)
+             + '</details>'
+             + _seat_rows((seats.promote_all(), seats.all_seats())[1])
+             + _back())
     return chrome("/settings/agent", title="MCP Server",
                   lede="Use your box from the AI you already use: Claude, ChatGPT, Gemini or Grok.",
                   body=body), 200

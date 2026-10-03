@@ -148,7 +148,7 @@ ok("Coworkers explains both kinds and points at the MCP Server",
 # THE MCP SERVER PAGE LEADS WITH THE ADDRESS (owner, 2026-10-02: "they should be able to clearly see the address of
 # the MCP server on how to add it to their favorite chat bo[t]"); the two kinds are said on Coworkers, the Pro page.
 ok("MCP Server leads with its address and how to add it to each AI, not the two kinds",
-   "Two kinds of coworker" not in _ag and _ag.index("Your box's MCP address") < _ag.index("Add it to your AI")
+   "Two kinds of coworker" not in _ag and _ag.index("Your box's MCP address") < _ag.index("Connect ChatGPT") < _ag.index("Connect Claude")
    and "Copy address" in _ag, _ag[_ag.find("<h1>"):][:400])
 ok("...and neither page says its old name", "Coworkers (Agents)" not in _sh + _ag
    and not re.search(r"<h1>Shifts</h1>|&larr; Shifts<", _sh + _ag))

@@ -224,6 +224,7 @@ def fixtures() -> dict:
         "inbox.connect": inbox_tools.connect(),
         "inbox.draft_reply": {"id": "ig_123", "written": True, "replying_to": "m_1", "note": "waiting on the screen"},
         "inbox.propose_reply": asked,
+        "inbox.propose_signature": asked,
         "inbox.propose_drafts": {**asked, "skipped": ["fb_9"]},
         "inbox.propose_drafting": asked,
         "inbox.propose_discard_draft": {"asked": False, "note": "no written reply is waiting for that conversation"},
@@ -282,8 +283,13 @@ for name in sorted(FIX):
        text.strip() and not bad and not keys and not re.search(r"\b(None|True|False)\b", text),
        f"braces/fields={bad[:3]} keys={keys[:4]} text={text[:240]!r}")
     ok(f"{name}: ends by offering what to ask next", "\nAsk next:\n- " in text, text[-200:])
-    ok(f"{name}: the data travels whole beside the words", out["structuredContent"] == result
+    sc = out["structuredContent"]
+    ok(f"{name}: the data travels whole beside the words", {k: v for k, v in sc.items() if k != mcp.IN_WORDS} == result
        and out["isError"] is False)
+    # THE WORDS RIDE IN THE DATA, FIRST: Claude's apps hand the model structuredContent and drop the text (measured
+    # on the owner's box, 2026-10-02, release .12), so words only in `content` never reach the AI.
+    ok(f"{name}: the words are the first thing in the data a Claude app hands its model",
+       list(sc)[0] == mcp.IN_WORDS and sc[mcp.IN_WORDS] == text, list(sc)[:3])
 
 # NOT VACUOUS: the same check reads the old transport's text as raw, so it can fail.
 _old = json.dumps(FIX["morning_review.report_day"])
@@ -343,7 +349,9 @@ ok("what happened reads number first, in the review's own words", "- 43 messages
    and "- 38 people wrote for the first time" in text and "Published “AI Business Machine”" in text
    and "brian-macdonald.com: 179 visits from people this week (+231%)" in text, text)
 ok("a number already said is not said twice (120 and 43 live in the lines, not again as figures)",
-   text.count("120") == 1 and text.count("43") == 1 and "Oldest waiting: 317 days" in text, text)
+   # COUNTED BELOW THE "As of" LINE: at 4:43 PM the clock itself said 43 (OSDev1, 2026-10-02 23:43 UTC).
+   (_body := text.split("\n", 1)[-1]).count("120") == 1 and _body.count("43") == 1
+   and "Oldest waiting: 317 days" in text, text)
 ok("the act connection is offered the 22 written replies, through Approvals",
    "I can start:\n- Send the 22 written replies. You approve it on Approvals: " + BASE + "/approvals" in text, text)
 ok("...and asked next about who is waiting and the website (the machines' own follow-ons lead)",

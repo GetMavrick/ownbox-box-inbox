@@ -36,6 +36,11 @@ from core import state  # noqa: E402
 state.init_db()
 from core import approvals, brain, dispatch, report  # noqa: E402
 from core import brief  # noqa: E402
+
+# THE CLOCK IS NOON ON THE BOX, so "hours ago" never crosses the box's midnight. Unpinned, a box whose day had just
+# begun (an exported Lead box in UTC, CI at 00:15 UTC, 2026-10-03) moved "6 hours ago" into yesterday, and main went red.
+_NOON = datetime.now(report.tz()).replace(hour=12, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+brief._now = lambda: _NOON
 from core.config import settings  # noqa: E402
 from core.connector import seats, tools  # noqa: E402
 
@@ -152,12 +157,12 @@ r = brief.refresh(think=good_ai)
 ok("new numbers within 6 hours: the AI's brief stays, no question", r["status"] == "same" and len(asked) == n,
    (r, len(asked)))
 stored = brief._stored()
-stored["built_at"] = (datetime.now(timezone.utc) - timedelta(seconds=brief.BRIEF_EVERY_S + 5)).isoformat()
+stored["built_at"] = (brief._now() - timedelta(seconds=brief.BRIEF_EVERY_S + 5)).isoformat()
 brief._store(stored)
 r = brief.refresh(think=good_ai)
 ok("new numbers after 6 hours: the AI rewrites it", r["status"] == "ai" and len(asked) == n + 1, (r, len(asked)))
 stored = brief._stored()
-stored["built_at"] = (datetime.now(timezone.utc) - timedelta(seconds=brief.BRIEF_EVERY_S + 5)).isoformat()
+stored["built_at"] = (brief._now() - timedelta(seconds=brief.BRIEF_EVERY_S + 5)).isoformat()
 brief._store(stored)
 inbox["happened"][0]["value"] = 45
 report.snapshot()
@@ -171,11 +176,11 @@ r = brief.refresh(think=lambda *a, **k: asked.append(1) or "{}")
 ok("a failed ask is not retried on the next snapshot: the 6-hour clock runs from the last ask, not the last AI brief",
    not asked, (r, len(asked)))
 stored = brief._stored()
-stored["ai_tried_at"] = (datetime.now(timezone.utc) - timedelta(seconds=brief.BRIEF_EVERY_S + 5)).isoformat()
+stored["ai_tried_at"] = (brief._now() - timedelta(seconds=brief.BRIEF_EVERY_S + 5)).isoformat()
 brief._store(stored)
 r = brief.refresh(think=good_ai)
 stored = brief._stored()
-stored["built_at"] = (datetime.now(timezone.utc) - timedelta(seconds=brief.BRIEF_EVERY_S + 5)).isoformat()
+stored["built_at"] = (brief._now() - timedelta(seconds=brief.BRIEF_EVERY_S + 5)).isoformat()
 brief._store(stored)
 ok("a quiet afternoon: an AI brief hours old whose numbers still hold is still the one served",
    r["status"] == "ai" and brief.get()["built_at"] == stored["built_at"] and brief.get()["from"] == "ai", r)
@@ -185,7 +190,7 @@ g = brief.get()
 ok("...and once the numbers move, today's ranking stays, said to be from earlier, with the numbers as they are now",
    g["from"] == "ai" and "What your box's AI ranked at" in g["text"] and "Needs you now:" in g["text"]
    and "39 people" in g["text"], g["text"])
-stored["built_at"] = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+stored["built_at"] = (brief._now() - timedelta(days=1)).isoformat()
 brief._store(stored)
 ok("...but a ranking from another day is never shown as today's: it is read plain",
    brief.get()["from"] == "plain" and "39 people" in brief.get()["text"], brief.get()["text"])
@@ -218,7 +223,7 @@ ok("a day of 96 snapshots, every one with new numbers, asks the box's AI at most
 print("\ncore.brief over the connector\n")
 inbox["happened"][1]["value"] = 38           # back to the numbers good_ai writes about
 report.snapshot()
-brief._store({**brief._stored(), "built_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()})
+brief._store({**brief._stored(), "built_at": (brief._now() - timedelta(days=1)).isoformat()})
 r = brief.refresh(think=good_ai)
 status, body = mcp(owner_cred, "tools/list", {})
 names = {t["name"] for t in body["result"]["tools"]}

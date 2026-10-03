@@ -1,0 +1,18 @@
+# THE KEY FEATURES GATE (core/key_features.py): the box uses its MCP connector, its AI, its Morning Review and an
+# approval round trip the way a buyer does, and nudges a check-in that carries the counts (never data, never a
+# secret). Owner, 2026-10-02: "This is a key feature that can never break again." Never fails the unit.
+[Unit]
+Description=AIOS key features check: the box tests its own connector, AI, review and approvals
+ConditionPathExists=/opt/aios/provision.json
+Wants=network-online.target
+After=network-online.target aios-dispatch.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aios
+EnvironmentFile=/opt/aios/.env
+ExecStart=/opt/aios/.venv/bin/python -m core.key_features
+TimeoutStartSec=300
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true

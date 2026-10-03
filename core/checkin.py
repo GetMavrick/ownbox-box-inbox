@@ -262,6 +262,13 @@ def _ready() -> dict | None:
             out["ai_fail"] = {"at": str(fail.get("at"))[:32], "why": str(fail.get("why") or "")[:160]}
     except Exception:                                    # noqa: BLE001
         pass
+    try:                                                 # the box's own hourly self-test (core/key_features.py)
+        from core import key_features
+        kf = key_features.last()
+        if kf:
+            out["key_features"] = kf
+    except Exception:                                    # noqa: BLE001
+        pass
     try:
         from core.connections import store
         out["apps"] = min(len(store.load()["items"]), 100)

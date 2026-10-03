@@ -788,11 +788,18 @@ def anthropic_state() -> dict:
     # it does not. He pastes the token he was asked for, nothing on screen changes, and the only
     # sane conclusion is that it failed. He would have filmed exactly that.
     # A CHATGPT SIGN-IN IS AN AI ACCOUNT TOO, and this is the one reader every screen asks, so it
-    # answers for all of them. The Claude token still wins in `brain._backend()` when both exist;
-    # here the question is only "can this box draft", and the answer is the same.
+    # answers for all of them. WHEN THE BOX THINKS ON CHATGPT, THIS ANSWERS FOR CHATGPT, even with a
+    # Claude token beside it (the newest sign-in wins in `brain._backend()`, 2026-10-03): a lapsed
+    # ChatGPT sign-in must never read "Connected" off the Claude token the box isn't using. A
+    # ChatGPT box whose CLI file is gone needs signing in again.
     cst = codex_status()
-    if cst and not claude_oauth_token() and not anthropic_key():
-        return {"status": "connected" if cst == "saved" else cst, "user": None,
+    try:
+        from core import brain
+        on_chatgpt = brain._backend() == "codex"
+    except Exception:                                    # noqa: BLE001 — the reader never raises
+        on_chatgpt = False
+    if on_chatgpt or (cst and not claude_oauth_token() and not anthropic_key()):
+        return {"status": ("connected" if cst == "saved" else cst) or "needs_reauth", "user": None,
                 "detail": get(CODEX_DETAIL), "provider": "chatgpt"}
     if claude_oauth_token():
         st = get(CLAUDE_OAUTH_STATUS)
@@ -1080,7 +1087,8 @@ AGENT_CLIENTS = (
      "how": "Settings \u2192 Connectors \u2192 Add custom connector. Paste the address, choose "
             "\u201cSign in now\u201d, then Connect."},
     {"id": "chatgpt", "name": "ChatGPT",
-     "how": "Settings \u2192 Connectors \u2192 Add. Paste the address and let it sign in."},
+     "how": "chatgpt.com \u2192 Settings \u2192 Plugins \u2192 New custom plugin. Paste the address, choose "
+            "OAuth, then Create."},
     {"id": "gemini", "name": "Gemini",
      "how": "Add the address as an MCP server and let it sign in."},
     {"id": "grok", "name": "Grok",
@@ -1094,7 +1102,7 @@ AGENT_CLIENTS = (
 AGENT_STEPS = (
     "Copy the address of this box.",
     "In your AI agent, add a connector or MCP server and paste it. Pick the option that says "
-    "it will SIGN IN \u2014 not \u201cno sign-in\u201d, and not an API key.",
+    "it will SIGN IN \u2014 not \u201cno sign-in\u201d.",
     "It sends you here to approve. Press Allow, then allow the tools your AI agent asks about.",
 )
 

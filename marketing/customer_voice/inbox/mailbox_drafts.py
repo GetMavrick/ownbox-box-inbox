@@ -18,6 +18,7 @@ from core import state
 from core.logging import get_logger
 
 from . import email_channel, store  # noqa: F401 — store re-exported for the suite's fakes
+from . import signature
 
 log = get_logger(__name__)
 
@@ -134,7 +135,9 @@ def sweep(space: str) -> dict:
                 continue
             landed = email_channel.append_draft(space=space, zcid=row["zcid"],
                                                 in_reply_to=row["in_reply_to"],
-                                                body=row["body"], conn=conn)
+                                                # THE BUYER'S SIGNATURE, which Gmail never adds to a
+                                                # draft placed over IMAP (signature.py).
+                                                body=signature.apply(space, row["body"]), conn=conn)
             if landed:
                 appended += 1
             elif landed is False:

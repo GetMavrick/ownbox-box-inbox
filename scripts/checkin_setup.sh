@@ -10,7 +10,7 @@
 set -uo pipefail
 AIOS="${AIOS_DIR:-/opt/aios}"
 changed=0
-for n in aios-checkin.service aios-checkin.timer; do
+for n in aios-checkin.service aios-checkin.timer aios-keyfeatures.service aios-keyfeatures.timer; do
   f="$AIOS/deploy/$n"; t="/etc/systemd/system/$n"
   [ -f "$f" ] || { echo "check-in: $n missing from this release; skipped"; exit 0; }
   cmp -s "$f" "$t" 2>/dev/null && continue
@@ -22,4 +22,8 @@ done
 [ "$changed" -gt 0 ] && systemctl daemon-reload
 systemctl enable --now aios-checkin.timer >/dev/null 2>&1 && echo "check-in: enabled" \
   || echo "check-in: could not be enabled"
+# THE KEY FEATURES GATE (core/key_features.py): the box uses its MCP connector, its AI, its Morning Review and an
+# approval the way a buyer does, every hour, and the check-in it nudges carries the counts.
+systemctl enable --now aios-keyfeatures.timer >/dev/null 2>&1 && echo "key features check: enabled" \
+  || echo "key features check: could not be enabled"
 exit 0

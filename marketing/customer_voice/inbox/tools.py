@@ -898,6 +898,20 @@ def propose_opt_out(id=None, seat=None):
                         f"Opt out {who}", seat)
 
 
+def propose_signature(text=None, seat=None):
+    """Ask the owner to set the email signature every reply ends with ("" to stop adding one)."""
+    from marketing.customer_voice.inbox import signature
+    try:
+        t = signature.clean(text if isinstance(text, str) else "")
+    except ValueError as e:
+        return {"asked": False, "error": str(e)}
+    if t == signature.get(_space()):
+        return {"asked": False, "note": "that is already the signature"}
+    words = {"Signature": t} if t else {"Change": "Stop adding a signature"}
+    return _ask_control("signature", {"text": t}, words,
+                        "Set your email signature" if t else "Stop adding an email signature", seat)
+
+
 def connect():
     """How each channel is connected, and the page a person signs in on. A sign-in happens in a browser."""
     return {
@@ -937,6 +951,14 @@ def _run_control(detail: dict) -> dict:
         log.info("inbox.draft_discarded_on_approval", conversation=detail.get("conversation"),
                  by=_who_approved())
         return {"ok": True, "text": "Thrown away. Nothing was sent."}
+    if action == "signature":
+        from marketing.customer_voice.inbox import signature
+        try:
+            t = signature.put(space, str(detail.get("text") or ""), by=_who_approved())
+        except ValueError as e:
+            return {"ok": False, "text": f"Not changed: {e}"}
+        return {"ok": True, "text": "Signature saved. Every email reply ends with it." if t
+                else "No signature is added any more."}
     if action == "opt_out":
         store.set_opted_out(space, str(detail.get("conversation") or ""))
         log.info("inbox.opted_out_on_approval", conversation=detail.get("conversation"), by=_who_approved())
@@ -959,6 +981,17 @@ tools.register(
     description="Ask the owner to turn the box's reply writing on or off. Nothing changes until the owner approves.",
     args={"on": {"type": "boolean", "required": True,
                  "description": "true to turn writing replies on, false to turn it off."}},
+)
+
+tools.register(
+    "propose_signature",
+    title="Ask before changing your email signature",
+    fn=propose_signature, machine=MACHINE, min_role="act", render=_render_proposal,
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to set the signature at the end of every email reply the box drafts or sends "
+                "(name, title, website). An empty text stops adding one. Nothing changes until the owner approves.",
+    args={"text": {"type": "string", "required": True,
+                   "description": "The whole signature, rows separated by new rows; empty to stop adding one."}},
 )
 
 tools.register(

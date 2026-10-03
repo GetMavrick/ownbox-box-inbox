@@ -40,16 +40,17 @@ def ok(what: str, cond, got: str = "") -> None:
 BOX = (ROOT / "core/dash/static/box.css").read_text()
 
 print("test_the_unit_is_declared_capped_and_ios_only")
-# A TOUCH SMALLER since 2026-10-02 (owner, about 6%, from a before and after): over 17, not 16. The ceiling stays.
-ok("--px is the browser's base size over 17, under the same 1.5px ceiling",
-   "--px: min(calc(1rem / 17), 1.5px);" in BOX)
+# A TOUCH SMALLER since 2026-10-02 (owner, about 6%, from a before and after): over 17, not 16; and one more step on
+# 2026-10-03 (owner chose about 6% again): over 18. The ceiling stays.
+ok("--px is the browser's base size over 18, under the same 1.5px ceiling",
+   "--px: min(calc(1rem / 18), 1.5px);" in BOX)
 _ios = re.search(r"@supports \(font: -apple-system-body\) and \(-webkit-touch-callout: none\) \{(.*?)\n\}",
                  BOX, re.S)
 ok("iPhone and iPad opt in, and only they (the touch-callout test keeps a Mac out)", _ios is not None)
 ok("...handing the root the device's own text size",
    _ios is not None and ":where(html) { font: -apple-system-body; }" in _ios.group(1))
-ok("...measured from its default of 17px, the same touch smaller, under the same ceiling",
-   _ios is not None and "--px: min(calc(1rem / 18), 1.5px);" in _ios.group(1))
+ok("...measured from its default of 17px, the same two steps smaller, under the same ceiling",
+   _ios is not None and "--px: min(calc(1rem / 19), 1.5px);" in _ios.group(1))
 ok("...and the body takes the box's own face back", re.search(r":where\(body\) \{[^}]*font-family: var\(--sans\)", BOX) is not None)
 
 # ── 2 & 3: every stylesheet a client's screens draw ─────────────────────────────────────────────

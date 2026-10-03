@@ -1,0 +1,11 @@
+# Ten minutes after boot (the web process is up by then), then every hour, spread across the fleet.
+[Unit]
+Description=AIOS key features check, every hour
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

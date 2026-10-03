@@ -79,9 +79,10 @@ def _row(r) -> dict:
     return d
 
 
-def propose(kind: str, *, machine: str, title: str, detail: dict, seat_id: str = "") -> dict:
+def propose(kind: str, *, machine: str, title: str, detail: dict, seat_id: str = "", quiet: bool = False) -> dict:
     """Hold this until a person decides. -> the approval row. The same kind and detail while one is waiting
-    returns that one (a model retries), and the owner's phone is told once."""
+    returns that one (a model retries), and the owner's phone is told once. `quiet` tells nobody: only the box's
+    own hourly self-test uses it (core/key_features.py), which decides its proposal in the same breath."""
     if kind not in _KINDS:
         raise ValueError(f"no approval kind {kind!r} is registered")
     body = json.dumps(detail, sort_keys=True, default=str)
@@ -102,7 +103,8 @@ def propose(kind: str, *, machine: str, title: str, detail: dict, seat_id: str =
                    _iso(now + timedelta(days=DAYS))))
         row = c.execute("SELECT * FROM approvals WHERE id=?", (aid,)).fetchone()
     log.info("approvals.proposed", id=aid, kind=kind, machine=machine, seat=seat_id)
-    _tell_phone()
+    if not quiet:
+        _tell_phone()
     return _row(row)
 
 

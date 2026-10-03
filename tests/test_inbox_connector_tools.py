@@ -76,7 +76,9 @@ WRITE_TOOL = "inbox.draft_reply"
 # STEP 3 (owner, 2026-10-02: "One-tap approve"): proposals, which send nothing until a person approves.
 PROPOSE_TOOLS = ("inbox.propose_reply", "inbox.propose_drafts",
                  # step 4: the rest of the screen's controls, each a one-tap approval too
-                 "inbox.propose_drafting", "inbox.propose_discard_draft", "inbox.propose_opt_out")
+                 "inbox.propose_drafting", "inbox.propose_discard_draft", "inbox.propose_opt_out",
+                 # the email signature (owner, 2026-10-02): set from a chat, on one tap
+                 "inbox.propose_signature")
 
 
 def test_the_inbox_is_actually_offered():

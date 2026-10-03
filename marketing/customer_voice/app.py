@@ -1207,6 +1207,7 @@ shell.register_section(
     items=[
         {"key": "overview", "label": "Overview", "href": "/inbox/settings"},
         {"key": "mailbox", "label": "Mailbox", "href": "/inbox/mailbox"},
+        {"key": "signature", "label": "Email Signature", "href": "/inbox/signature"},
         {"key": "channels", "label": "Social Accounts", "href": "/inbox/connect"},
     ])
 
@@ -3005,8 +3006,23 @@ def _compose(zcid: str, conv: dict, msgs: list[dict]) -> str:
             + note +
             f'<textarea name="text" rows="{_tall}" maxlength="1800" required '
             f'placeholder="Write a reply…">{_esc(drafted)}</textarea>'
+            + _signed_note(conv) +
             '<button class="btn" type="submit">Send</button>'
             '</form>' + off_note)
+
+
+def _signed_note(conv: dict) -> str:
+    """Under an email reply box: what the signature will add, said before Send, or where to write one.
+    The signature itself is added in the send path (inbox/signature.py), never typed into this box."""
+    if str((conv or {}).get("platform") or "").strip().lower() != "email":
+        return ""
+    from marketing.customer_voice.inbox import signature as _sig
+    sig = _sig.get(_space())
+    if sig:
+        return ('<div class="quiet" style="margin:6px 0 8px;white-space:pre-line">Your signature goes at the end:'
+                f'\n{_esc(sig)}</div>')
+    return ('<div class="quiet" style="margin:6px 0 8px"><a href="/inbox/signature" style="color:var(--href)">'
+            'Add an email signature</a> to end every reply with your name and link.</div>')
 
 
 # NOT `@blueprint.post`. `tests/test_customer_voice.py:498-500` scans this department for a CALL
@@ -4941,3 +4957,55 @@ def r_waiting():
               'Send the ones I ticked</button></p></form>'
             + '<div class="foot"><a href="/inbox/inbox">← All conversations</a></div>')
     return _shell(body, here="/inbox/waiting"), 200
+
+
+# ── the email signature (inbox/signature.py) ───────────────────────────────────────────────────────────────────
+# Owner, 2026-10-02: "I always want to finish with a signature that includes a link to my website", then "Yes, perfect
+# add that open field please." One open field, owner-only like the mailbox it signs for; a member reads it.
+@blueprint.route("/inbox/signature", methods=["GET", "POST"])
+def r_signature():
+    from marketing.customer_voice.inbox import signature as _sig
+    gate = _gate()
+    if gate is not None:
+        return gate
+    owner = _is_owner()
+    if request.method == "POST" and not owner:
+        return _owner_refusal()
+    space = _space()
+    note, typed = "", None
+    if request.method == "POST":
+        typed = str(request.form.get("signature") or "")
+        try:
+            u = dash.session_user(request) or {}
+        except Exception:                        # noqa: BLE001 — only whose name the audit line carries
+            u = {}
+        try:
+            _sig.put(space, typed, by=u.get("id"))
+            return redirect("/inbox/signature?saved=1", code=303)
+        except ValueError as e:
+            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
+    current = _sig.get(space)
+    saved = request.args.get("saved") and not note
+    head = ('<h1>Email signature</h1>'
+            '<p class="quiet">It goes at the end of every email reply your box drafts or sends, including the '
+            'drafts it puts in your Gmail Drafts. Gmail doesn\'t add its own there.</p>'
+            + ('<p class="quiet">Saved. Your next reply ends with it.</p>' if saved else ""))
+    if not owner:
+        shown = (f'<pre style="white-space:pre-wrap;font:inherit">{_esc(current)}</pre>' if current
+                 else '<p class="quiet">No signature yet. The owner of this box can add one here.</p>')
+        return _shell(head + shown + _back_link(), here="/inbox/signature"), 200
+    field = ('font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;width:100%;'
+             'border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)')
+    form = (note +
+            '<form class="compose" method="post" action="/inbox/signature" '
+            'style="display:flex;flex-direction:column;gap:10px;align-items:stretch">'
+            '<label style="display:block">'
+            '<span class="t" style="display:block;font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px">'
+            'Your signature</span>'
+            f'<textarea name="signature" rows="5" maxlength="{_sig.MAX_CHARS}" '
+            'aria-label="Your email signature" '
+            'placeholder="Your name&#10;Your title&#10;www.yourwebsite.com" '
+            f'style="{field}">{_esc(current if typed is None else typed)}</textarea></label>'
+            '<p class="quiet" style="margin:0">Leave it empty to stop adding one.</p>'
+            '<button class="btn" type="submit" style="min-height:48px">Save signature</button></form>')
+    return _shell(head + form + _back_link(), here="/inbox/signature"), 200

@@ -95,8 +95,8 @@ INSTRUCTIONS = ("This is one business's own Ownbox. tools/list says what it can 
                 "reads return the box's state, and actions are proposals a person on the box approves; no tool "
                 "sends, publishes or spends on its own. Answer the person in plain words: lead with what matters "
                 "most and why, with the box's real numbers and the full link to the page each comes from. Never "
-                "show raw fields, ids or JSON: each tool's text is already written to be read, and its structured "
-                "data is there for your own work. Always end by offering what to ask next (questions this box can "
+                "show raw fields, ids or JSON: every answer carries `in_words`, already written for the person, so show "
+                "that as it is, and use the rest of the data for your own work. Always end by offering what to ask next (questions this box can "
                 "answer) and what the box can start for them to approve on Approvals. Ready-made asks are in "
                 "prompts/list: a morning brief, what needs them today, who to follow up with, how their websites "
                 "are doing and what to write next.")
@@ -212,6 +212,9 @@ def _tool_entry(spec: dict) -> dict:
     return entry
 
 
+ERROR_META = "io.ownbox/error"
+
+
 def _words(spec: dict | None, result, seat: dict | None) -> str | None:
     """The tool's answer in words (its `render`), or None to send the result as JSON, as before.
 
@@ -231,6 +234,9 @@ def _words(spec: dict | None, result, seat: dict | None) -> str | None:
         log.warning("connector.render_empty", tool=(spec or {}).get("name"))
         return None
     return text
+
+
+IN_WORDS = "in_words"                                   # the answer in words, first in structuredContent
 
 
 def _tool_result(payload: dict, status: int, spec: dict | None = None, seat: dict | None = None) -> dict:
@@ -256,20 +262,30 @@ def _tool_result(payload: dict, status: int, spec: dict | None = None, seat: dic
     if status == 200 and "result" in payload:
         result = payload["result"]
         text = _words(spec, result, seat)
+        data = result
         if text is None:
             text = json.dumps(result, default=str)
+        elif isinstance(result, dict):
+            # THE WORDS RIDE IN THE DATA TOO, FIRST. Measured on the owner's box on 2026-10-02 (release .12): Claude's
+            # apps hand the model `structuredContent` and drop the text beside it, so the words never reached the AI
+            # and the daily check graded every answer "raw JSON". No tool declares an outputSchema, so the extra key
+            # breaks no contract; `in_words` is a name no result uses (core.ask already has an `answer`).
+            data = {IN_WORDS: text, **{k: v for k, v in result.items() if k != IN_WORDS}}
         return {"content": [{"type": "text", "text": text}],
-                "structuredContent": result,
+                "structuredContent": data,
                 # A CONNECTED APP'S OWN "that failed" (core/connections/gateway.py) stays a tool error, so the
                 # coworker reads the app's words and can correct itself. Opt-in by a key no shipped tool uses.
                 "isError": isinstance(result, dict) and result.get("app_error") is True}
     if status == 200 and payload.get("not_configured"):
         # A shipped box's most common state: the machine is here, the credential is not.
         return {"content": [{"type": "text", "text": payload.get("message", "not connected yet")}],
-                "isError": True}
+                "isError": True, "_meta": {ERROR_META: "not_configured"}}
+    # THE ERROR'S CODE TRAVELS WITH ITS WORDS, in `_meta` (which the spec keeps for exactly this), so a program can
+    # tell a tool that answered "no such id" from one that crashed ("tool_failed") without reading the sentence.
+    # The box's own self-test (core/key_features.py) is the first reader; a model reads the text as before.
     return {"content": [{"type": "text",
                          "text": payload.get("message") or payload.get("error") or "failed"}],
-            "isError": True}
+            "isError": True, "_meta": {ERROR_META: str(payload.get("error") or "failed")[:60]}}
 
 
 def _handle(method: str, params: dict, rpc_id, seat: dict) -> dict | None:

@@ -86,7 +86,9 @@ try:
     code, html = page()
     ok("it opens on Connected, first", "<h2>Connected</h2>" in html
        and html.find("<h2>Connected</h2>") < html.find('value="start"'), html[:200])
-    ok("...naming the account the drafts are written with", "Anthropic API key" in text(html))
+    ok("...saying what the drafts are written with, naming no AI (owner 2026-10-03: Gemini and Grok are coming)",
+       "your AI key" in text(html).split("Use a different account")[0]
+       and "Anthropic" not in text(html).split("Use a different account")[0])
     fold = html[html.find('<details class="fold ai-other">'):]
     ok("the ways to connect sit inside 'Use a different account'",
        "Use a different account" in fold and 'value="start"' in fold and 'name="key"' in fold)
@@ -96,8 +98,9 @@ try:
     clear()
     box_secrets.put(box_secrets.CLAUDE_OAUTH, "sk-ant-oat01-" + "b" * 95)
     code, html = page()
-    ok("it says Claude subscription", "<h2>Connected</h2>" in html
-       and "Claude subscription" in text(html).split("Use a different account")[0])
+    ok("it says your AI subscription, naming no AI", "<h2>Connected</h2>" in html
+       and "your AI subscription" in text(html).split("Use a different account")[0]
+       and "Claude" not in text(html).split("Use a different account")[0])
 
     print("\ntest_a_buyer_mid_change_sees_the_cards")
     ok("a model picked from the list unfolds the page",

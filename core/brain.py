@@ -215,13 +215,44 @@ def _backend() -> str:
     if configured in ("claude_code", "codex"):
         return configured
     from core import box_secrets
-    if box_secrets.claude_oauth_token():
+    claude, chatgpt = bool(box_secrets.claude_oauth_token()), _codex_chosen()
+    # SIGN IN WITH CHATGPT: connecting one IS choosing it, exactly as with Claude, so WHEN A BOX HAS BOTH, THE NEWEST
+    # SIGN-IN WINS (OSDev1's review of #1848, 2026-10-03: the owner signed in to Claude on 10-02 and to ChatGPT for
+    # his demo that night, and the box kept thinking on Claude). A tie, or a Claude token only in the box's .env
+    # (no sign-in time), goes to Claude, the owner's default (2026-09-22). Disconnecting the newer falls back to the
+    # other. A sign-in that has lapsed keeps the box on ChatGPT, so it says "sign in to ChatGPT again", never "add an
+    # Anthropic key" (_codex_chosen).
+    if claude and chatgpt:
+        newer = _signed_in_at(box_secrets.CODEX_STATUS) > _signed_in_at(box_secrets.CLAUDE_OAUTH)
+        return "codex" if newer else "claude_code"
+    if claude:
         return "claude_code"
-    # SIGN IN WITH CHATGPT: connecting one IS choosing it, exactly as with Claude. A Claude token
-    # still wins when both exist, because the owner ruled Claude the default (2026-09-22).
-    if box_secrets.codex_connected():
+    if chatgpt:
         return "codex"
     return "api"
+
+
+def _signed_in_at(name: str) -> str:
+    """When the box stored this sign-in (box_secrets.set_at, ISO), or "" when it never did (a token in .env)."""
+    from core import state
+    try:
+        with state.connect() as c:
+            row = c.execute("SELECT set_at FROM box_secrets WHERE name = ?", (name,)).fetchone()
+        return str(row["set_at"] or "") if row else ""
+    except Exception:                                    # noqa: BLE001 — no time read is no time: Claude, the default
+        return ""
+
+
+def _codex_chosen() -> bool:
+    """True when somebody signed this box in to ChatGPT and nobody has disconnected it, even if the sign-in has
+    since lapsed (ChatGPT refused it, or the CLI's file is gone).
+
+    A LAPSED SIGN-IN IS STILL A CHATGPT BOX (OSDev1's assignment, 2026-10-02: the owner's box thinks on ChatGPT for
+    his demo). `codex_connected()` turns False the moment ChatGPT refuses, and the brain used to fall back to the
+    Anthropic key it never had: every screen then said "needs an Anthropic key", and the watchdog had "no AI key
+    yet" and never paged. Only Disconnect (`box_secrets.clear_codex`) makes it stop being a ChatGPT box."""
+    from core import box_secrets
+    return bool(box_secrets.get(box_secrets.CODEX_STATUS))
 
 
 def _cli_model(model_id: str) -> str:
@@ -268,6 +299,8 @@ _CLI_TRANSIENT_RE = re.compile(r"connection|network|timed?.?out|overloaded"
 #
 # The wait is logged when it is real, because contention that nobody can see is exactly how
 # this went unexplained for a night.
+# WHAT EVERY SCREEN SAYS WHEN A CHATGPT BOX ISN'T SIGNED IN: can_think, the call itself, the watchdog, the gate.
+CODEX_SIGNED_OUT = "ChatGPT isn't signed in on this box. Sign in to ChatGPT again in Settings, AI Account."
 _CLI_AUTH_RE = re.compile(r"\b401\b|unauthori[sz]ed|not logged in|missing bearer", re.I)
 _CLI_LOCK = threading.Lock()
 _CLI_WAIT_LOG_S = 5.0
@@ -379,6 +412,9 @@ def _think_codex(task: str, prompt: str, *, system, cached_context, job_id,
                            "run scripts/install_codex.sh")
     from core import box_secrets
     own = _CALL.get()
+    if not (own and own.get("kind") == "codex") and not box_secrets.codex_connected():
+        # SIGNED OUT IS SAID, NOT TRIED: a CLI call that can only fail would say it in its own words.
+        raise RuntimeError(CODEX_SIGNED_OUT)
     home = pathlib.Path(own["home"] if own and own.get("kind") == "codex"
                         else box_secrets.codex_home())
     workdir = home / "empty"
@@ -425,6 +461,11 @@ def _think_codex(task: str, prompt: str, *, system, cached_context, job_id,
                     box_secrets.note_codex_status("needs_reauth", blob[:200])
                 except Exception as e:                   # noqa: BLE001
                     log.warning("brain.codex_status_unwritable", error=type(e).__name__)
+                # THE OWNER READS THIS ONE (Settings, the AI test): the sentence, not the CLI's log. Its words are
+                # kept with the status above and in the log here.
+                from core.logging import scrub_secrets
+                log.warning("brain.codex_signed_out", rc=proc.returncode, said=scrub_secrets(blob[-300:]))
+                raise RuntimeError(CODEX_SIGNED_OUT)
             raise RuntimeError(f"codex not signed in (rc={proc.returncode}): {blob[:200]}")
         if _CLI_LIMIT_RE.search(blob):
             raise BudgetExceeded(f"chatgpt subscription limit: {blob[:200]}")
@@ -615,8 +656,7 @@ def can_think() -> tuple[bool, str]:
             return False, "this box drafts on ChatGPT but the `codex` CLI is not on PATH"
         from core import box_secrets
         if not box_secrets.codex_connected():
-            return False, ("this box thinks on a ChatGPT subscription but nobody is signed in — "
-                           "use Sign in to ChatGPT in Set up")
+            return False, CODEX_SIGNED_OUT
         return True, "codex"
     if be == "claude_code":
         if not shutil.which("claude"):

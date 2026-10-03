@@ -507,8 +507,11 @@ def probe_backend() -> tuple[str, bool, str]:
         # NO SPEND: `codex login status` answers from the CLI's own file. A box signed in to
         # ChatGPT that is probed for an Anthropic key would page a permanent false FAIL.
         from core import codex_login
+        ready, why = _brain.can_think()
+        if not ready:
+            return ("codex", False, why)
         ok = codex_login.logged_in()
-        return ("codex", ok, "signed in to ChatGPT" if ok else "not signed in to ChatGPT")
+        return ("codex", ok, "signed in to ChatGPT" if ok else _brain.CODEX_SIGNED_OUT)
     # THE KEY THE BRAIN ACTUALLY USES, NOT THE ONE IN SETTINGS. `core.brain` drafts with
     # `box_secrets.anthropic_key()` — the environment first, then the key a buyer pastes on the
     # set-up screen. This probe used to read `settings.anthropic_api_key` alone, so on every
@@ -596,7 +599,7 @@ def _retire_old_raws() -> None:
             log.warning("watchdog.raw_retire_error", file=f.name, error=str(e)[:120])
 
 
-_BACKEND_ALERT_KEYS = {"claude_code", "anthropic_api"}
+_BACKEND_ALERT_KEYS = {"claude_code", "anthropic_api", "codex"}   # codex: a box that left ChatGPT clears its alert
 
 
 def resolve_deconfigured_backend_alerts(configured_key: str) -> None:

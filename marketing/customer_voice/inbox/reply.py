@@ -261,6 +261,12 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
     if why:
         raise ReplyRefused(why)
 
+    # THE BUYER'S SIGNATURE ENDS EVERY EMAIL REPLY (signature.py; owner, 2026-10-02). Added HERE, the one door every
+    # send comes through, so the mail that leaves and the thread's own copy of it say the same thing. Never twice.
+    if str(conv.get("platform") or "").strip().lower() == "email":
+        from . import signature
+        text = signature.apply(space, text)
+
     account_id = account_id or (conv.get("account_id") or "")
     if not account_id:
         raise ReplyRefused("this conversation has no account to send from")

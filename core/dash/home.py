@@ -1685,7 +1685,7 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                        # coworkers that work on the box. It is the order a box is set up in: "connect to their AI
                        # account, figure out how to do the inbound MCP server set up and then add outbound MCP data
                        # connections. And then set up the mobile app."
-                       group_labels={"ai": "AI", "reach": "Reaching you", "team": "Team", "server": "Server"},
+                       group_labels={"ai": "AI", "general": "General", "server": "Server"},
                        items=[
                            {"key": "overview", "label": "Overview", "href": "/settings"},
                            {"key": "ai", "label": "AI Account", "href": "/settings/ai",
@@ -1704,16 +1704,19 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                            # (core/dash/shifts.py).
                            {"key": "shifts", "label": "Coworkers", "href": "/settings/shifts",
                             "group": "ai", "feature": "coworkers"},
-                           # REACHING YOU: the app on your mobile, and the address the box sends from (Morning Review,
-                           # alerts): "Sending Email", so it is not taken for an inbox.
+                           # GENERAL (owner, 2026-10-03: "what is reaching you in the left side bar? That doesn't mean
+                           # anything relevant ... Too many categories. AI is settled and server is settled, but the
+                           # other three need to be in another category"; he chose General from options). The app on
+                           # your mobile; the address the box sends from (Morning Review, alerts), "Sending Email" so
+                           # it is not taken for an inbox; and the people on the box.
                            {"key": "mobile", "label": "Mobile App", "href": "/settings/mobile",
-                            "group": "reach"},
+                            "group": "general"},
                            {"key": "email", "label": "Sending Email", "href": "/settings/email",
-                            "owner_only": True, "group": "reach"},
-                           # TEAM. PEOPLE HAD NO DOOR once: the page existed and nothing on a box linked to it, so
+                            "owner_only": True, "group": "general"},
+                           # PEOPLE HAD NO DOOR once: the page existed and nothing on a box linked to it, so
                            # inviting a colleague meant knowing the address.
                            {"key": "people", "label": "People", "href": "/settings/people",
-                            "owner_only": True, "group": "team"},
+                            "owner_only": True, "group": "general"},
                            # SERVER: what it runs, and who can sign in to it. MOVE YOUR BOX IS NOT A ROW (owner,
                            # 2026-09-30): it is in the danger zone at the foot of Server Access.
                            {"key": "updates", "label": "Updates", "href": "/settings/updates",

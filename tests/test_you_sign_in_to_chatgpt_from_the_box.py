@@ -183,7 +183,7 @@ try:
 except brain.RetryableError as e:
     ok("a 401 raises", False, f"retryable, would loop: {e}")
 except Exception as e:                                          # noqa: BLE001
-    ok("a 401 raises a terminal error, not a retry", "not signed in" in str(e), str(e)[:120])
+    ok("a 401 raises a terminal error, not a retry, in plain words", str(e) == brain.CODEX_SIGNED_OUT, str(e)[:120])
 ok("...and the status row says needs_reauth", bs.codex_status() == "needs_reauth", bs.codex_status())
 ok("...so the AI-account reader tells the owner", bs.anthropic_state()["status"] == "needs_reauth", str(bs.anthropic_state()))
 
