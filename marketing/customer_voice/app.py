@@ -1208,6 +1208,7 @@ shell.register_section(
         {"key": "overview", "label": "Overview", "href": "/inbox/settings"},
         {"key": "mailbox", "label": "Mailbox", "href": "/inbox/mailbox"},
         {"key": "signature", "label": "Email Signature", "href": "/inbox/signature"},
+        {"key": "snippets", "label": "Saved Replies", "href": "/inbox/snippets"},
         {"key": "channels", "label": "Social Accounts", "href": "/inbox/connect"},
     ])
 
@@ -2998,11 +2999,16 @@ def _compose(zcid: str, conv: dict, msgs: list[dict]) -> str:
     # mobile, so the owner read half a reply above a Send button. Rows are counted at about 34
     # characters a line (390px, 16px type), capped at ten; `field-sizing` grows it as he edits
     # where the browser supports it.
+    picker, picked, picked_id = _snippet_picker(zcid, conv)
+    if picked is not None:
+        drafted = picked
+        note = '<div class="drafted">From a saved reply. Change anything before you send.</div>'
     _tall = min(10, max(3, sum(-(-len(ln) // 34) or 1 for ln in (drafted or "").split("\n"))))
-    return (win
+    return (win + picker
             + '<form class="compose" id="reply" method="post" '
             'action="' + _esc(f"/inbox/inbox/{zcid}/reply") + '">'
             f'<input type="hidden" name="n" value="{_esc(_reply.new_nonce())}">'
+            f'<input type="hidden" name="snippet" id="snip-used" value="{_esc(picked_id)}">'
             + note +
             f'<textarea name="text" rows="{_tall}" maxlength="1800" required '
             f'placeholder="Write a reply…">{_esc(drafted)}</textarea>'
@@ -3023,6 +3029,56 @@ def _signed_note(conv: dict) -> str:
                 f'\n{_esc(sig)}</div>')
     return ('<div class="quiet" style="margin:6px 0 8px"><a href="/inbox/signature" style="color:var(--href)">'
             'Add an email signature</a> to end every reply with your name and link.</div>')
+def _snippet_picker(zcid: str, conv: dict) -> tuple[str, str | None, str]:
+    """The saved-replies dropdown above the reply box (inbox/snippets.py). -> (html, picked words or None, its id).
+
+    ITS OWN FORM, ABOVE THE REPLY FORM, and a GET: picking can never send. With scripts on, choosing one fills the
+    reply box at once and offers Undo; without them, Use reloads the thread with the words in the box. Either way
+    the person reads the words and presses Send, the owner's pick (decision 3). Fill-ins are filled here, so the box
+    shows exactly what goes."""
+    from marketing.customer_voice.inbox import snippets as _snips
+    try:
+        rows = _snips.all_for(_space())
+    except Exception as e:                       # noqa: BLE001 — a list that can't be read costs the list only
+        log.info("voice.snippets_unreadable", extra={"error": type(e).__name__})
+        return "", None, ""
+    if not rows:
+        return ('<div class="quiet" style="margin:0 0 8px"><a href="/inbox/snippets" style="color:var(--href)">'
+                'Save replies you send often</a> and pick them here.</div>' if _is_owner() else ""), None, ""
+    try:
+        me = (dash.session_user(request) or {}).get("name") or ""
+    except Exception:                            # noqa: BLE001
+        me = ""
+    who = conv.get("participant")
+    filled = {r["id"]: _snips.fill(r["body"], participant=who, my_name=me) for r in rows}
+    want = str(request.args.get("snippet") or "")
+    picked = filled.get(want)
+    sel = ('font:inherit;font-size:max(16px, calc(16 * var(--px, 1px)));min-height:48px;width:100%;'
+           'padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)')
+    opts = '<option value="">Saved replies…</option>' + "".join(
+        f'<option value="{_esc(r["id"])}" data-body="{_esc(filled[r["id"]])}"'
+        f'{" selected" if r["id"] == want else ""}>{_esc(r["title"])}</option>' for r in rows)
+    html_ = ('<form class="snip" method="get" action="' + _esc(f"/inbox/inbox/{zcid}") + '#reply" '
+             'style="display:flex;gap:8px;align-items:stretch;margin:0 0 8px">'
+             f'<select name="snippet" id="snip-pick" aria-label="Saved replies" style="{sel}">{opts}</select>'
+             '<button class="btn" type="submit" id="snip-use" style="min-height:48px">Use</button></form>'
+             '<div style="margin:-4px 0 8px"><a href="#reply" id="snip-undo" style="display:none;color:var(--href)">'
+             'Undo: put back what was in the box</a></div>'
+             f'<script>{_SNIP_JS}</script>')
+    return html_, picked, (want if picked is not None else "")
+
+
+# RUN ONCE THE PAGE IS READ: this sits above the reply box, which does not exist yet when it is first seen.
+_SNIP_JS = ("document.addEventListener('DOMContentLoaded',function(){var s=document.getElementById('snip-pick');if(!s)return;"
+            "var b=document.getElementById('snip-use');if(b)b.style.display='none';"
+            "var ta=document.querySelector('#reply textarea[name=text]'),h=document.getElementById('snip-used'),"
+            "u=document.getElementById('snip-undo'),prev=null,prevId='';"
+            "s.addEventListener('change',function(){var o=s.options[s.selectedIndex];if(!o||!o.value||!ta)return;"
+            "if(prev===null){prev=ta.value;prevId=h?h.value:'';}"
+            "ta.value=o.getAttribute('data-body');if(h)h.value=o.value;ta.focus();"
+            "if(u&&prev.trim())u.style.display='inline';});"
+            "if(u)u.addEventListener('click',function(e){e.preventDefault();if(prev===null||!ta)return;"
+            "ta.value=prev;if(h)h.value=prevId;s.selectedIndex=0;prev=null;u.style.display='none';});});")
 
 
 # NOT `@blueprint.post`. `tests/test_customer_voice.py:498-500` scans this department for a CALL
@@ -3089,6 +3145,9 @@ def r_reply(zcid):
 
     if out.get("duplicate"):
         log.info("voice.reply_duplicate_absorbed", extra={"conversation": zcid})
+    elif request.form.get("snippet"):
+        from marketing.customer_voice.inbox import snippets as _snips
+        _snips.used(space, str(request.form.get("snippet")))
     # PRG: redirect after post, so a refresh cannot re-submit the form at all.
     return redirect(here, code=303)
 
@@ -5009,3 +5068,81 @@ def r_signature():
             '<p class="quiet" style="margin:0">Leave it empty to stop adding one.</p>'
             '<button class="btn" type="submit" style="min-height:48px">Save signature</button></form>')
     return _shell(head + form + _back_link(), here="/inbox/signature"), 200
+
+
+# ── saved replies (inbox/snippets.py, #1821) ─────────────────────────────────────────────────────────────────────
+# Owner, 2026-10-02: "a list of snippets where on each message you could pull a drop-down and see all of them and
+# select them". He edits the list; every member uses it (his pick 2). Archive, never delete.
+@blueprint.route("/inbox/snippets", methods=["GET", "POST"])
+def r_snippets():
+    from marketing.customer_voice.inbox import snippets as _snips
+    gate = _gate()
+    if gate is not None:
+        return gate
+    owner = _is_owner()
+    if request.method == "POST" and not owner:
+        return _owner_refusal()
+    space, note = _space(), ""
+    if request.method == "POST":
+        act, sid = str(request.form.get("act") or ""), str(request.form.get("id") or "")
+        try:
+            u = dash.session_user(request) or {}
+        except Exception:                        # noqa: BLE001 — only whose name the row carries
+            u = {}
+        try:
+            if act == "archive":
+                _snips.archive(space, sid)
+                return redirect("/inbox/snippets?done=archived", code=303)
+            if act == "save" and sid:
+                _snips.edit(space, sid, request.form.get("title"), request.form.get("body"))
+            else:
+                _snips.add(space, request.form.get("title"), request.form.get("body"), by=u.get("id"))
+            return redirect("/inbox/snippets?done=saved", code=303)
+        except _snips.SnippetRefused as e:
+            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
+    rows = _snips.all_for(space)
+    done = {"saved": "Saved. It is in the dropdown above every reply.",
+            "archived": "Archived. It is gone from the dropdown."}.get(str(request.args.get("done") or ""), "")
+    head = ('<h1>Saved replies</h1>'
+            '<p class="quiet">Words you send often, one tap away above every reply box. Pick one and it fills the '
+            'reply; you read it and press Send. Write {first_name} for the person\'s first name and {my_name} for '
+            'yours.</p>' + (f'<p class="quiet">{done}</p>' if done and not note else "") + note)
+    if not owner:
+        listed = "".join(f'<div class="card"><div class="t"><b>{_esc(r["title"])}</b></div>'
+                         f'<pre style="white-space:pre-wrap;font:inherit;margin:6px 0 0">{_esc(r["body"])}</pre></div>'
+                         for r in rows) or '<p class="quiet">No saved replies yet. The owner of this box adds them here.</p>'
+        return _shell(head + listed + _back_link(), here="/inbox/snippets"), 200
+    field = ('font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;width:100%;'
+             'border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)')
+
+    def form(r=None, typed=None):
+        r = r or {}
+        t = (typed or {}).get("title", r.get("title", ""))
+        b = (typed or {}).get("body", r.get("body", ""))
+        sid = r.get("id", "")
+        out = ('<form class="compose" method="post" action="/inbox/snippets" '
+               'style="display:flex;flex-direction:column;gap:8px;align-items:stretch">'
+               f'<input type="hidden" name="id" value="{_esc(sid)}">'
+               f'<input type="hidden" name="act" value="{"save" if sid else "add"}">'
+               f'<input name="title" value="{_esc(t)}" maxlength="{_snips.TITLE_MAX}" required '
+               f'aria-label="Name in the dropdown" placeholder="Name in the dropdown, e.g. Pricing" style="{field}">'
+               f'<textarea name="body" rows="5" maxlength="{_snips.BODY_MAX}" required aria-label="The words" '
+               f'placeholder="Hi {{first_name}}, here is our pricing: https://…" style="{field}">{_esc(b)}</textarea>'
+               f'<button class="btn" type="submit" style="min-height:48px">{"Save changes" if sid else "Add saved reply"}'
+               '</button></form>')
+        if sid:
+            # QUIET AND APART: archiving is never the easiest thing on the screen to hit by accident.
+            out += ('<form method="post" action="/inbox/snippets" style="margin:6px 0 0;text-align:right">'
+                    f'<input type="hidden" name="act" value="archive"><input type="hidden" name="id" value="{_esc(sid)}">'
+                    '<button type="submit" class="quiet" style="background:none;border:0;color:var(--href);'
+                    'font:inherit;padding:12px 0;min-height:48px">Archive this one</button></form>')
+        return out
+
+    typed = None
+    if note and request.method == "POST" and request.form.get("act") != "save":
+        typed = {"title": str(request.form.get("title") or ""), "body": str(request.form.get("body") or "")}
+    add = '<h2 style="margin-top:18px">Add one</h2>' + form(typed=typed)
+    listed = "".join(f'<div class="card" style="margin-top:12px"><div class="quiet">Used {int(r["uses"])} '
+                     f'time{"" if int(r["uses"]) == 1 else "s"}</div>{form(r)}</div>' for r in rows)
+    mine = ('<h2 style="margin-top:22px">Your saved replies</h2>' + listed) if rows else ""
+    return _shell(head + add + mine + _back_link(), here="/inbox/snippets"), 200

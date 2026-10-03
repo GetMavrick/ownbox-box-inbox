@@ -299,4 +299,20 @@ CREATE TABLE IF NOT EXISTS inbox_echoes (
   PRIMARY KEY (space, box_message_id),
   UNIQUE (space, echo_id)
 );
+
+-- SAVED REPLIES (inbox/snippets.py, docs/SCOPE_INBOX_SNIPPETS.md, owner 2026-10-02): one list per Space, picked from a
+-- dropdown above the reply box. Archived, never deleted, so a snippet once sent can still be named. A NEW table.
+CREATE TABLE IF NOT EXISTS inbox_snippets (
+  space        TEXT NOT NULL,
+  id           TEXT NOT NULL,
+  title        TEXT NOT NULL,          -- what the dropdown shows, 60 characters
+  body         TEXT NOT NULL,          -- the words, up to the reply box's own 1,800
+  uses         INTEGER NOT NULL DEFAULT 0,
+  last_used_at TEXT,
+  created_by   TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  archived_at  TEXT,
+  PRIMARY KEY (space, id)
+);
 """

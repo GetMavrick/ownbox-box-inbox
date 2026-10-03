@@ -1291,10 +1291,13 @@ def box_agent():
               '<li>ChatGPT sends you to this box to sign in. Press <b>Allow</b>, and you are back in ChatGPT, '
               'connected.</li></ol>'
               '<h3>If it doesn\'t work</h3><ul style="padding-left:20px;margin:0">'
-              '<li><b>\u201cOAuth setup is unavailable in this environment\u201d</b>: you are in the ChatGPT desktop '
-              'or mobile app. Add it on chatgpt.com in a web browser; the apps use it once it is added.</li>'
-              '<li><b>No Plugins, or no New custom plugin</b>: on a ChatGPT Business or Enterprise workspace, custom '
-              'plugins can be switched off. Ask your workspace admin to allow them.</li>'
+              # MEASURED BY THE OWNER, 2026-10-03 (OSDev1): on some ChatGPT screens, choosing OAuth shows this message
+              # with Create greyed out, and an underlined "Continue in ChatGPT" link beneath it.
+              '<li><b>\u201cOAuth setup is unavailable in this environment\u201d</b>: if Create is greyed out under '
+              'that message, click the underlined <b>Continue in ChatGPT</b> link. It opens ChatGPT, where you finish '
+              'the same steps and Create works. Or add it on chatgpt.com in a web browser.</li>'
+              '<li><b>No Plugins, or no New custom plugin</b>: ChatGPT isn\'t offering custom plugins yet. Your '
+              'workspace admin turns on <b>Developer mode</b>, in Settings, Apps, Advanced.</li>'
               '<li><b>It won\'t sign in</b>: use a connection key instead, just below. It works on every plan.</li>'
               '</ul>'
               f'<details id="key"{" open" if note else ""}><summary>Use a connection key instead</summary>'

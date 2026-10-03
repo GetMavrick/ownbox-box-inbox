@@ -209,6 +209,10 @@ def _tool_entry(spec: dict) -> dict:
              "annotations": {"title": spec["title"], **tools.annotations_for(spec["capability"])}}
     if spec.get("output"):
         entry["outputSchema"] = spec["output"]
+    # EVERY TOOL SAYS IT NEEDS THE OWNER'S SIGN-IN. ChatGPT reads `securitySchemes` per tool to decide that a tool
+    # wants OAuth and to offer its sign-in (developers.openai.com/apps-sdk/build/auth, 2026-10-03). Every tool here
+    # does: there is no anonymous tool on a box. Other clients ignore a field they don't know.
+    entry["securitySchemes"] = [{"type": "oauth2", "scopes": []}]
     return entry
 
 

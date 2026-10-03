@@ -589,6 +589,41 @@ tools.register(
 )
 
 
+def saved_replies():
+    """The saved replies (snippets) above every reply box, most used first."""
+    from marketing.customer_voice.inbox import snippets
+    rows = snippets.all_for(_space())
+    return {"saved_replies": [{"id": r["id"], "name": r["title"], "words": r["body"], "times_used": r["uses"]}
+                              for r in rows],
+            "where": "/inbox/snippets",
+            "note": None if rows else "no saved replies yet; the owner adds them on /inbox/snippets"}
+
+
+def _render_saved(r: dict) -> str:
+    rows = r.get("saved_replies") or []
+    if not rows:
+        return f"There are no saved replies yet. Add them on {say.link('/inbox/snippets')}."
+    lines = [f"{len(rows)} saved {'reply' if len(rows) == 1 else 'replies'}, most used first:"]
+    lines += [f"- {x['name']} (used {x['times_used']} {'time' if x['times_used'] == 1 else 'times'}): "
+              f"{' '.join(str(x['words']).split())[:160]}" for x in rows[:20]]
+    lines.append(f"Each one is picked from the dropdown above a reply box. Change them on {say.link('/inbox/snippets')}.")
+    return say.answer("\n".join(lines),
+                      say.ask_next((f"{MACHINE}.waiting", "Who is waiting on a reply?"),
+                                   (f"{MACHINE}.search", "Find who asked about prices")),
+                      say.can_start((f"{MACHINE}.propose_saved_reply",
+                                     say.approve_line("Send a saved reply to a conversation"))))
+
+
+tools.register(
+    "saved_replies",
+    title="See your saved replies",
+    fn=saved_replies, machine=MACHINE, min_role="read", render=_render_saved,
+    capability="read:inbox",
+    description="The saved replies (snippets) a person picks from the dropdown above every reply box, with how "
+                "often each is used. Changes nothing.",
+)
+
+
 def draft_reply(id=None, body=None):
     """Leave a reply WAITING ON THE SCREEN for one conversation. Nothing here sends it.
 
@@ -912,6 +947,17 @@ def propose_signature(text=None, seat=None):
                         "Set your email signature" if t else "Stop adding an email signature", seat)
 
 
+def propose_saved_reply(name=None, words=None, seat=None):
+    """Ask the owner to add one saved reply to the dropdown above every reply box."""
+    from marketing.customer_voice.inbox import snippets
+    try:
+        t, b = snippets._clean(name, words)
+    except snippets.SnippetRefused as e:
+        return {"asked": False, "error": str(e)}
+    return _ask_control("snippet", {"title": t, "body": b}, {"Add saved reply": t, "Words": b},
+                        f"Add the saved reply {t}", seat)
+
+
 def connect():
     """How each channel is connected, and the page a person signs in on. A sign-in happens in a browser."""
     return {
@@ -959,6 +1005,13 @@ def _run_control(detail: dict) -> dict:
             return {"ok": False, "text": f"Not changed: {e}"}
         return {"ok": True, "text": "Signature saved. Every email reply ends with it." if t
                 else "No signature is added any more."}
+    if action == "snippet":
+        from marketing.customer_voice.inbox import snippets
+        try:
+            snippets.add(space, detail.get("title"), detail.get("body"), by=_who_approved())
+        except snippets.SnippetRefused as e:
+            return {"ok": False, "text": f"Not added: {e}"}
+        return {"ok": True, "text": "Added. It is in the dropdown above every reply."}
     if action == "opt_out":
         store.set_opted_out(space, str(detail.get("conversation") or ""))
         log.info("inbox.opted_out_on_approval", conversation=detail.get("conversation"), by=_who_approved())
@@ -992,6 +1045,17 @@ tools.register(
                 "(name, title, website). An empty text stops adding one. Nothing changes until the owner approves.",
     args={"text": {"type": "string", "required": True,
                    "description": "The whole signature, rows separated by new rows; empty to stop adding one."}},
+)
+
+tools.register(
+    "propose_saved_reply",
+    title="Ask before adding a saved reply",
+    fn=propose_saved_reply, machine=MACHINE, min_role="act", render=_render_proposal,
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to add a saved reply (a name and its words) to the dropdown above every reply box. "
+                "{first_name} and {my_name} are filled in when it is picked. Nothing changes until the owner approves.",
+    args={"name": {"type": "string", "required": True, "description": "What the dropdown shows, up to 60 characters."},
+          "words": {"type": "string", "required": True, "description": "The reply, up to 1,800 characters."}},
 )
 
 tools.register(

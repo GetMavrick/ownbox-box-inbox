@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import secrets
 import time
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 from core import state
@@ -74,6 +76,10 @@ def authorization_server_metadata(root: str) -> dict:
             "grant_types_supported": ["authorization_code"],
             "code_challenge_methods_supported": ["S256"],
             "token_endpoint_auth_methods_supported": ["none"],
+            # CLIENT ID METADATA DOCUMENTS: a client names itself by an https URL serving its own registration, so
+            # it needs no registration step. ChatGPT prefers this, and its desktop plugin screen offers OAuth only
+            # for a server that supports it (owner, 2026-10-02: Create stayed greyed out on DCR alone).
+            "client_id_metadata_document_supported": True,
             "scopes_supported": list(ROLES)}
 
 
@@ -119,14 +125,94 @@ def register(payload: dict) -> dict:
             "grant_types": ["authorization_code"], "response_types": ["code"]}
 
 
-def client(client_id: str) -> dict | None:
+CIMD_TIMEOUT_S = 5
+CIMD_MAX_BYTES = 64 * 1024
+
+
+def _public_https(url: str) -> bool:
+    """An https URL on a public host. The box fetches a CIMD URL on an UNAUTHENTICATED request, so a URL pointing at
+    the box itself or its private network is refused before any byte is sent: no IP literal, no port but 443, no
+    userinfo, and the host public by every address it resolves to (core/net.py, the one door for fetches)."""
+    from core import net
+    try:
+        u = urllib.parse.urlsplit(url)
+    except ValueError:
+        return False
+    if u.scheme != "https" or not u.hostname or u.username or u.password or (u.port not in (None, 443)):
+        return False
+    try:
+        ipaddress.ip_address(u.hostname)
+        return False                                   # a bare IP is never a client's name
+    except ValueError:
+        pass
+    return net.url_is_public(url)
+
+
+def _fetch_document(url: str) -> dict | None:
+    """The client's own metadata document, or None. Through core/net.py: public hosts only, its redirect policy, 5 s,
+    64 KB."""
+    if not _public_https(url):
+        return None
+    from core import net
+    status, body = net.get_public(url, headers={"Accept": "application/json", "User-Agent": "Ownbox-Box/1"},
+                                  timeout=CIMD_TIMEOUT_S, max_bytes=CIMD_MAX_BYTES + 1)
+    if status != 200 or not body or len(body.encode("utf-8")) > CIMD_MAX_BYTES:
+        if status != 200:
+            log.warning("oauth.cimd_unreachable", host=urllib.parse.urlsplit(url).hostname, status=status)
+        return None
+    try:
+        doc = json.loads(body)
+    except ValueError:
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _offers_none(doc: dict) -> bool:
+    """Can this client sign in as a public client (no secret, PKCE), the only way our metadata offers?
+
+    ChatGPT'S REAL DOCUMENT CARRIES BOTH FIELDS (developers.openai.com/apps-sdk/build/auth, 2026-10-03):
+    `token_endpoint_auth_methods_supported: ["none", "private_key_jwt"]` (what it CAN use) and the legacy singular
+    `token_endpoint_auth_method: "private_key_jwt"` (what it PREFERS). It picks from the methods our metadata lists,
+    which is `none` alone, so the plural list decides. Reading the singular field refused ChatGPT itself (OSDev4's
+    review of #1853). A document with neither field is a public client by RFC 7591's default."""
+    many = doc.get("token_endpoint_auth_methods_supported")
+    if isinstance(many, list):
+        return "none" in [str(m) for m in many]
+    return str(doc.get("token_endpoint_auth_method") or "none") == "none"
+
+
+def _from_document(client_id: str) -> dict | None:
+    """A CIMD client: its document must name itself by exactly this URL and list https redirects. Kept in
+    oauth_clients like a registered client, so the code and token checks are the same rows."""
+    doc = _fetch_document(client_id)
+    if not doc or doc.get("client_id") != client_id:
+        return None
+    uris = _https_only(doc.get("redirect_uris"))
+    if not uris or not _offers_none(doc):
+        return None                                    # we accept public clients with PKCE, as the metadata says
+    name = str(doc.get("client_name") or urllib.parse.urlsplit(client_id).hostname or "An AI app")[:80]
+    with state.connect() as c:
+        c.execute("INSERT OR REPLACE INTO oauth_clients (client_id, name, redirect_uris, created_at) "
+                  "VALUES (?,?,?,?)", (client_id, name, json.dumps(uris), _now().isoformat()))
+    log.info("oauth.cimd_client", host=urllib.parse.urlsplit(client_id).hostname, name=name)
+    return {"client_id": client_id, "name": name, "redirect_uris": uris}
+
+
+def client(client_id: str, *, redirect_uri: str | None = None) -> dict | None:
+    """A registered client, or a CIMD client read from its own URL. A CIMD client whose kept copy lacks the
+    redirect asked for is read again once: its document may have changed."""
+    cid = str(client_id or "")
     with state.connect() as c:
         row = c.execute("SELECT client_id, name, redirect_uris FROM oauth_clients "
-                        "WHERE client_id = ?", (str(client_id or ""),)).fetchone()
-    if not row:
-        return None
-    return {"client_id": row["client_id"], "name": row["name"],
-            "redirect_uris": json.loads(row["redirect_uris"])}
+                        "WHERE client_id = ?", (cid,)).fetchone()
+    if row:
+        got = {"client_id": row["client_id"], "name": row["name"],
+               "redirect_uris": json.loads(row["redirect_uris"])}
+        if not (cid.startswith("https://") and redirect_uri and redirect_uri not in got["redirect_uris"]):
+            return got
+    if cid.startswith("https://"):
+        return _from_document(cid)
+    return None
 
 
 def check_authorize(*, client_id: str, redirect_uri: str, code_challenge: str,
@@ -137,7 +223,7 @@ def check_authorize(*, client_id: str, redirect_uri: str, code_challenge: str,
     else's URL, so the checks come first and the screen only draws for a request that would be
     honoured.
     """
-    cl = client(client_id)
+    cl = client(client_id, redirect_uri=redirect_uri)
     if cl is None:
         raise ValueError("unknown client")
     # EXACT MATCH, never a prefix. Prefix matching on redirect URIs is the classic open-redirect

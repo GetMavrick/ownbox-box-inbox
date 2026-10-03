@@ -85,10 +85,12 @@ ok("...the risk box, Create, then Allow on this box", "<b>Create</b>" in steps[4
 
 print("\ntest_every_chatgpt_error_names_its_fix")
 fixes = {text(b): text(f) for b, f in re.findall(r"<li><b>(.*?)</b>:(.*?)</li>", gpt.split("<h3>", 1)[-1], re.S)}
-ok("THE DESKTOP OR MOBILE APP: finish it on chatgpt.com in a web browser",
-   "on chatgpt.com in a web browser" in fixes.get("“OAuth setup is unavailable in this environment”", ""), fixes)
-ok("A BUSINESS WORKSPACE: ask its admin to allow custom plugins",
-   "workspace admin to allow them" in fixes.get("No Plugins, or no New custom plugin", ""), fixes)
+_un = fixes.get("“OAuth setup is unavailable in this environment”", "")
+ok("CREATE GREYED OUT UNDER 'OAUTH SETUP IS UNAVAILABLE': click Continue in ChatGPT, where Create works (owner 10-03)",
+   "Create is greyed out" in _un and "Continue in ChatGPT" in _un and "Create works" in _un, fixes)
+ok("...or chatgpt.com in a web browser", "on chatgpt.com in a web browser" in _un, fixes)
+ok("NO CUSTOM PLUGINS: the workspace admin turns on Developer mode, in Settings, Apps, Advanced",
+   "Developer mode, in Settings, Apps, Advanced" in fixes.get("No Plugins, or no New custom plugin", ""), fixes)
 ok("IT WON'T SIGN IN: a connection key, on every plan", "connection key" in fixes.get("It won't sign in", "")
    and "every plan" in fixes.get("It won't sign in", ""), fixes)
 ok("...and every one of them says what to do", len(fixes) == 3 and all(len(f) > 30 for f in fixes.values()), fixes)

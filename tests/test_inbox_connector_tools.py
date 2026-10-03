@@ -71,14 +71,18 @@ def seed():
 
 INBOX_TOOLS = ("inbox.list_conversations", "inbox.search", "inbox.read_conversation",
                # step 1 of docs/SCOPE_INBOX_CONNECTOR.md (owner, 2026-10-02): what the screens show
-               "inbox.waiting", "inbox.status", "inbox.settings", "inbox.connect")
+               "inbox.waiting", "inbox.status", "inbox.settings", "inbox.connect",
+               # saved replies (#1821, owner 2026-10-02)
+               "inbox.saved_replies")
 WRITE_TOOL = "inbox.draft_reply"
 # STEP 3 (owner, 2026-10-02: "One-tap approve"): proposals, which send nothing until a person approves.
 PROPOSE_TOOLS = ("inbox.propose_reply", "inbox.propose_drafts",
                  # step 4: the rest of the screen's controls, each a one-tap approval too
                  "inbox.propose_drafting", "inbox.propose_discard_draft", "inbox.propose_opt_out",
                  # the email signature (owner, 2026-10-02): set from a chat, on one tap
-                 "inbox.propose_signature")
+                 "inbox.propose_signature",
+                 # saved replies (#1821): one added from a chat, on one tap
+                 "inbox.propose_saved_reply")
 
 
 def test_the_inbox_is_actually_offered():
