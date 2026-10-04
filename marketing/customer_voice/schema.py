@@ -185,6 +185,21 @@ CREATE TABLE IF NOT EXISTS inbox_draft_lessons (
 CREATE INDEX IF NOT EXISTS ix_inbox_draft_lessons_space
   ON inbox_draft_lessons (space, edited, created_at);
 
+-- ── WHICH RULES WROTE A DRAFT (OSDev4, 2026-10-04) ──────────────────────────────────────────
+-- Owner, 2026-10-04: drafts still waiting are rewritten when the drafter changes. A draft written
+-- under old instructions (or an old reply style) stayed wrong on the screen until a person sent or
+-- threw it away; one on a live box answered a recruiter from the wrong side for a day. This keeps,
+-- per draft, a fingerprint of the instructions that wrote it; the sweep rewrites the waiting ones
+-- whose fingerprint no longer matches. A row the owner's own AI wrote carries 'kept' and is never
+-- rewritten. SCHEMA, not a migration: a brand-new table needs no version number (core/state.py).
+CREATE TABLE IF NOT EXISTS inbox_draft_rules (
+  space       TEXT NOT NULL,
+  draft_id    TEXT NOT NULL,
+  rules       TEXT NOT NULL,            -- draft.rules(platform), or 'kept'
+  written_at  TEXT NOT NULL,
+  PRIMARY KEY (space, draft_id)
+);
+
 -- ── WHAT ARRIVED, BESIDE WHAT WE SHOW (OSDev5, 2026-09-23) ────────────────────────────────
 -- WHAT WAS BEING THROWN AWAY. `email_channel._body_text()` prefers `text/plain` and DISCARDS the
 -- `text/html` part, so a buyer reads the fallback nobody at the sending company ever looks at:

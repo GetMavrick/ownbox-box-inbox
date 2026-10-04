@@ -230,6 +230,8 @@ def fixtures() -> dict:
         "inbox.propose_signature": asked,
         "inbox.propose_pitch_back": asked,
         "inbox.propose_reply_style": asked,
+        "inbox.propose_first_message": asked,
+        "inbox.propose_hourly_cap": asked,
         "inbox.propose_drafts": {**asked, "skipped": ["fb_9"]},
         "inbox.propose_drafting": asked,
         "inbox.propose_discard_draft": {"asked": False, "note": "no written reply is waiting for that conversation"},
@@ -260,6 +262,13 @@ def fixtures() -> dict:
                         "last_touch_at": "2026-10-02T09:00:00+00:00",
                         "touches": [{"at": "2026-10-02T09:00:00+00:00", "machine": "lead_magnet",
                                      "kind": "guide_sent", "ref": "botox-guide"}]},
+        "aeo.questions": {"questions": [
+            {"question": "Do you take walk-ins?", "times_asked": 6, "seen_in_search": 120,
+             "sources": ["website survey", "Google search"], "status": "open", "article": None},
+            {"question": "How much does Botox cost?", "times_asked": 2, "seen_in_search": 900,
+             "sources": ["website survey", "Google search"], "status": "answered",
+             "article": {"id": 3, "title": "How much does Botox cost?", "url": "https://radiance.example/articles/botox-cost"}}],
+            "open": ["Do you take walk-ins?"], "note": "Only the question is kept, never who asked."},
         "aeo.searches": {"available": True, "from": "2026-09-02", "to": "2026-09-29",
                          "top_searches": [{"query": "ai business machine", "clicks": 40, "impressions": 900,
                                            "position": 3.2}],
@@ -278,6 +287,9 @@ def fixtures() -> dict:
         "aeo.propose_retry": {"asked": False, "error": "Only an article that was held back can be tried again."},
         "aeo.propose_setting": asked,
         "aeo.propose_unpublish": asked,
+        "aeo.propose_facts": {"asked": True, "text": "Reading https://radiance.example now. In a minute or two, the "
+                                                     "facts it found wait on Approvals for your OK, each word for word "
+                                                     "from your own pages."},
         "aeo.propose_rewrite": {"asked": False, "error": "There are no facts for the writer yet, so a rewrite "
                                                            "would say no more than the first one. Add them on AEO Settings first."},
     }

@@ -37,6 +37,8 @@ Space from the box's own configuration, exactly as the screen does, and there is
 could widen it. A connector seat that could name its own Space would be the one place an outsider
 picks which client's conversations to read.
 """
+import re
+
 from core.connector import prompts, tools
 from core.connector import words as say
 from core.logging import get_logger
@@ -129,13 +131,16 @@ def _render_read(r: dict) -> str:
             (f"{MACHINE}.search", "Find a conversation by a name or a word")))
     lines = []
     for m in msgs:
-        who = "They wrote" if m.get("direction") == "inbound" else "You replied"
+        who = ("Delivery failed, not a reply" if m.get("bounce") else
+               "They wrote" if m.get("direction") == "inbound" else "You replied")
         when = say.clock(m.get("at"))
         lines.append(f"{when + ', ' if when else ''}{who}: {say.quoted(m.get('text'), 600)}")
-    waiting = msgs[-1].get("direction") == "inbound"
+    last = msgs[-1]
+    waiting = last.get("direction") == "inbound" and not last.get("bounce")
     head = (f"The conversation, oldest first ({say.plural(len(msgs), 'message')}). "
             + ("Their message is the last one, so they are waiting on a reply." if waiting else
-               "Your reply is the last message."))
+               "The last message is a delivery failure from a mail server, not a person; nobody is waiting."
+               if last.get("bounce") else "Your reply is the last message."))
     return say.answer(
         head, say.bullets(lines), f"Open it in your inbox: {say.link(MESSAGES_PAGE)}",
         say.ask_next((f"{MACHINE}.waiting", "Who else is waiting on a reply?"),
@@ -225,9 +230,27 @@ def read_conversation(id=None, limit=None):
         # Space must not read alike to the caller; the second is a boundary, not a result.
         return {"id": zcid, "messages": [],
                 "note": "no messages on this box for that conversation id"}
+    # IN THE WORDS THE RENDERER READS. The store says 'in' and 'out'; the renderer, and every fixture written
+    # against this tool, say "inbound" and "outbound". Until 2026-10-04 the two never met, so every message a
+    # customer sent was read out as "You replied", and a bounce from a mail server read as the owner's own reply.
     return {"id": zcid, "messages": [
-        {"at": m.get("created_at"), "direction": m.get("direction"),
-         "by": m.get("sent_by"), "text": m.get("body")} for m in rows]}
+        {"at": m.get("created_at"), "direction": "inbound" if str(m.get("direction")) == "in" else "outbound",
+         "by": m.get("sent_by"), "text": m.get("body"),
+         **({"bounce": True} if str(m.get("direction")) == "in" and _is_bounce(m.get("sent_by"), m.get("body"))
+            else {})} for m in rows]}
+
+
+# A BOUNCE IS A MAIL SERVER TALKING, NOT A PERSON. Its sender is the server's own address, or its first words
+# are the notice every provider opens with. Either is enough; neither is a reply.
+_BOUNCE_FROM = re.compile(r"^(mailer-?daemon|postmaster|mail-?delivery)", re.I)
+_BOUNCE_BODY = re.compile(r"^\s*(delivery status notification|undeliver(able|ed)|mail delivery (failed|subsystem)|"
+                          r"address not found|your message (wasn't|was not|couldn't be|could not be) delivered|"
+                          r"delivery (has )?failed)", re.I)
+
+
+def _is_bounce(sent_by, body) -> bool:
+    local = str(sent_by or "").strip().lower().split("@")[0].strip("<\"' ")
+    return bool(_BOUNCE_FROM.match(local) or _BOUNCE_BODY.match(str(body or "")))
 
 
 tools.register(
@@ -370,8 +393,8 @@ def status():
     from core import pause
     from marketing.customer_voice.inbox import store
     space = _space()
-    cfg = _inbox_cfg()
-    cap = int(cfg.get("hourly_send_cap") or 40)
+    from marketing.customer_voice.inbox import sending
+    cap = sending.hourly_cap()
     stopped = pause.is_paused()
     return {
         "box": "stopped" if stopped else "running",
@@ -395,21 +418,21 @@ def _rs_get() -> dict:
 def settings():
     """Every Inbox setting, its value, and what it means — the Settings screen, in words."""
     from marketing.customer_voice.inbox import mailbox_drafts
-    cfg = _inbox_cfg()
-    autonomy = str(cfg.get("autonomy") or "off").strip().lower()
+    from marketing.customer_voice.inbox import sending
+    snd = sending.get()
     return {
         "settings": [
             {"name": "writing_replies", "value": _onoff(_drafting()),
              "means": "the box writes a reply for each new message, for a person to read and send; "
                       "a written reply never sends on its own",
              "changed_at": "/inbox/settings"},
-            {"name": "opener", "value": "on" if autonomy == "opener" else "off",
+            {"name": "opener", "value": snd["first_message"],
              "means": "when on, the box sends one fixed first message to a new conversation by "
                       "itself, within the hourly cap",
-             "changed_at": "the box's configuration (not on a screen yet)"},
-            {"name": "hourly_send_cap", "value": int(cfg.get("hourly_send_cap") or 40),
+             "changed_at": "/inbox/sending"},
+            {"name": "hourly_send_cap", "value": snd["hourly_cap"],
              "means": "the most messages the box sends in any hour, counted across every send",
-             "changed_at": "the box's configuration (not on a screen yet)"},
+             "changed_at": "/inbox/sending"},
             *[{"name": f"reply_style_{ch}", "value": _rs_get()[ch],
                "means": f"how the box writes drafted replies to {'email' if ch == 'email' else 'direct messages'}: "
                         "service sells nothing, subtle ends every reply with one light sentence about the business, "
@@ -678,7 +701,7 @@ def draft_reply(id=None, body=None):
         return {"id": zcid, "written": False,
                 "note": "nobody has written in on this conversation, so there is nothing to reply to"}
 
-    written = drafts.put(space=space, zcid=zcid, in_reply_to=inbound["id"], body=text)
+    written = drafts.put(space=space, zcid=zcid, in_reply_to=inbound["id"], body=text, rules=drafts.KEEP)
     log.info("inbox.tool_draft_reply", space=space, conversation=zcid, written=written,
              chars=len(text))
     return {"id": zcid, "written": written, "replying_to": inbound["id"],
@@ -974,6 +997,46 @@ def propose_reply_style(email=None, dms=None, seat=None):
     return _ask_control("reply_style", want, {"Change": what, **words}, what, seat)
 
 
+def propose_first_message(on=None, text=None, seat=None):
+    """Ask the owner to turn the first message on or off, or change its words (Inbox Settings, Sending)."""
+    from marketing.customer_voice.inbox import sending
+    if on is None and text is None:
+        return {"asked": False, "error": "give on (true or false), text, or both"}
+    try:
+        want = {}
+        if on is not None:
+            want["first_message"] = sending.clean_on(on)
+        if text is not None:
+            want["text"] = sending.clean_text(text)
+    except ValueError as e:
+        return {"asked": False, "error": str(e)}
+    cur = sending.get()
+    if all(cur[k] == v for k, v in want.items()):
+        return {"asked": False, "note": "the first message is already set that way"}
+    if want.get("first_message", cur["first_message"]) == "on" and not want.get("text", cur["text"]):
+        return {"asked": False, "error": "Write the first message before turning it on."}
+    words = {}
+    if "first_message" in want:
+        words["First message on its own"] = want["first_message"]
+    if "text" in want:
+        words["The first message"] = want["text"]
+    what = "First message: " + ", ".join(f"{k} {v}" for k, v in words.items())
+    return _ask_control("sending", want, {"Change": what, **words}, what[:120], seat)
+
+
+def propose_hourly_cap(cap=None, seat=None):
+    """Ask the owner to change the most messages the box sends in an hour (Inbox Settings, Sending)."""
+    from marketing.customer_voice.inbox import sending
+    try:
+        n = sending.clean_cap(cap)
+    except ValueError as e:
+        return {"asked": False, "error": str(e)}
+    if sending.get()["hourly_cap"] == n:
+        return {"asked": False, "note": f"the hourly cap is already {n}"}
+    what = f"Most messages in an hour: {n}"
+    return _ask_control("sending", {"hourly_cap": n}, {"Change": what, "Most messages in an hour": str(n)}, what, seat)
+
+
 def propose_pitch_back(on=None, link=None, seat=None):
     """Ask the owner to turn cold pitches around (or stop), with the website each reply points to."""
     from marketing.customer_voice.inbox import pitch_back
@@ -1059,6 +1122,17 @@ def _run_control(detail: dict) -> dict:
             return {"ok": False, "text": f"Not changed: {e}"}
         return {"ok": True, "text": "Saved. New drafts are written this way: " + ", ".join(
             f"{reply_style.CHANNEL_WORDS[ch]} {reply_style.STYLES[cur[ch]]}" for ch in reply_style.CHANNELS) + "."}
+    if action == "sending":
+        from marketing.customer_voice.inbox import sending
+        try:
+            cur = sending.put(first_message=detail.get("first_message"), text=detail.get("text"),
+                              hourly_cap=detail.get("hourly_cap"), by=_who_approved())
+        except ValueError as e:
+            return {"ok": False, "text": f"Not changed: {e}"}
+        return {"ok": True, "text": ("Saved. The box sends its first message to new conversations on its own, "
+                                     if cur["first_message"] == "on" else
+                                     "Saved. Nothing sends on its own, ")
+                + f"at most {cur['hourly_cap']} messages an hour."}
     if action == "pitch_back":
         from marketing.customer_voice.inbox import pitch_back
         try:
@@ -1122,6 +1196,28 @@ tools.register(
     args={"email": {"type": "string", "required": False, "description": "service, subtle or sales, for email."},
           "dms": {"type": "string", "required": False,
                   "description": "service, subtle or sales, for direct messages."}},
+)
+
+tools.register(
+    "propose_first_message",
+    title="Ask before changing the first message",
+    fn=propose_first_message, machine=MACHINE, min_role="act", render=_render_proposal,
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to turn the first message on or off, or change its words. When on, each brand-new "
+                "conversation on a social channel gets these fixed words at once, once, never by email. Written "
+                "replies still wait to be sent. Nothing changes until the owner approves.",
+    args={"on": {"type": "boolean", "required": False, "description": "true to turn it on, false to turn it off."},
+          "text": {"type": "string", "required": False, "description": "The first message, in the owner's words."}},
+)
+
+tools.register(
+    "propose_hourly_cap",
+    title="Ask before changing the hourly cap",
+    fn=propose_hourly_cap, machine=MACHINE, min_role="act", render=_render_proposal,
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to change the most messages the box sends in any hour, counted across every channel "
+                "and every send (1 to 200). Nothing changes until the owner approves.",
+    args={"cap": {"type": "integer", "required": True, "description": "Most messages in an hour, 1 to 200."}},
 )
 
 tools.register(

@@ -41,6 +41,7 @@ TOOLS = {
     "/inbox/signature": ("inbox.propose_signature",),
     "/inbox/pitch-back": ("inbox.propose_pitch_back",),
     "/inbox/reply-style": ("inbox.propose_reply_style",),
+    "/inbox/sending": ("inbox.propose_first_message", "inbox.propose_hourly_cap"),
     "/inbox/snippets": ("inbox.saved_replies", "inbox.propose_saved_reply"),
 }
 

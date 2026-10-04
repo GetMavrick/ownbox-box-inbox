@@ -22,6 +22,7 @@ HQ = "ownbox-hq"                 # set_by on a switch HQ flipped through /deploy
 KNOWN = (
     "article_results",           # #1793 Phase 2.4: what each article brought (marketing/aeo_machine/brought.py)
     "aeo_topic_sync",            # #1793 Phase 3: topics read from the buyer's Airtable (marketing/aeo_machine/topic_sync.py)
+    "aeo_questions",             # #1793 Phase 2: the common customer questions (marketing/aeo_machine/questions.py)
 )
 
 

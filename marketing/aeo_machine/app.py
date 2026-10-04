@@ -206,14 +206,23 @@ _FIELDS = (
      "the same key."),
 )
 # (key, label, help). One item per row of the text box on the screen, a list in the store.
+# IN PLAIN WORDS, WITH AN EXAMPLE A MED SPA OWNER RECOGNISES (owner, 2026-10-04: "where would a business owner put
+# these facts in? I don't know where those would go… we're not building for me"). Each says what the field is for,
+# what happens if it is empty or wrong, and shows two real-looking entries.
 _LISTS = (
     ("facts", "Facts the writer may state",
-     "Put each on its own row. The writer states nothing about your business that is not here."),
+     "Things about your business an article may say, one per row, in your own words. For a med spa: "
+     "\u201cBotox is $12 a unit.\u201d \u201cWe're open Tuesday to Saturday, 9 to 6.\u201d The writer states nothing "
+     "about your business that isn't here, so an empty list means it can't publish."),
     ("allowed_numbers", "Numbers it may use",
-     "Each on its own row, such as your prices. An article with any other number is held back."),
-    ("never_words", "Words it must never use", "Each on its own row. Whole words."),
-    ("never_phrases", "Phrases it must never use", "Each on its own row. Matched anywhere in the text."),
-    ("competitors", "Competitors it must never name", "Each on its own row."),
+     "Every number an article may print, one per row, such as your prices and hours: 12, 9, 6. An article with any "
+     "other number is held back, so a made-up price never goes live."),
+    ("never_words", "Words it must never use",
+     "One per row, whole words. For a med spa: cure, guaranteed."),
+    ("never_phrases", "Phrases it must never use",
+     "One per row, matched anywhere in the text. For a med spa: no side effects, permanent results."),
+    ("competitors", "Competitors it must never name",
+     "One per row: businesses an article must never mention, such as the spa down the street."),
 )
 _LIST_MAX, _ITEM_MAX = 200, 200
 # ARTICLES A WEEK, folded in from OSDev4's #1565 (OSDev1, 2026-09-25). The number is the owner's: the
@@ -312,6 +321,8 @@ _SAID = {
     "fields_saved": ("Saved", "The AEO Machine uses these fields from now on.", True),
     "field_added": ("Field added", "It is in your Airtable table now, and the AEO Machine uses it.", True),
     "fields_checked": ("Checked", "Your table's fields were read again from Airtable.", True),
+    "drafting": ("Reading your website", "In a minute or two, the facts it found wait on Approvals for your OK, each "
+                                         "word for word from your own pages. Nothing is saved before you approve.", True),
 }
 
 
@@ -340,9 +351,11 @@ def _setup_card() -> str:
         links.append(f'<a href="{SANITY}">Connect Sanity &rarr;</a>')
     if not settings.get().get("site_url"):
         links.append(f'<a href="{SETTINGS}">Open AEO settings &rarr;</a>')
+    elif FACTS_MISSING in need and _is_owner():
+        links.append(f'<a href="{SETTINGS}#facts">Draft the facts from your website &rarr;</a>')
     return ('<div class="card"><h2>Not set up yet</h2>'
             f'<p>Before it can publish, the AEO Machine needs {_esc(_and(need))}.</p>'
-            f'<div class="foot">{"".join(links)}</div></div>')
+            f'<div class="foot">{"<br>".join(links)}</div></div>')            # one link per row: a thumb hits one
 
 
 def _and(items: list[str]) -> str:
@@ -570,6 +583,46 @@ def _topics_page(title: str, lede: str, *, note: str = "", typed=("", "")) -> st
     return _page(TOPICS, title, lede, DENSE_CSS + body)
 
 
+SETTINGS_DRAFT = "/aeo/settings/draft"
+
+
+def _facts_card() -> str:
+    """THE WAY IN FOR SOMEONE WHO DOESN'T KNOW WHAT TO TYPE: the box drafts the facts from their own website, onto
+    Approvals. Its own form, before the settings form, so pressing it never saves half-typed settings."""
+    from . import proposals
+    last = proposals.last_draft()
+    state_line = ""
+    if proposals.drafting():
+        state_line = "<p><b>Reading your website now.</b> The facts will wait on Approvals when it's done.</p>"
+    elif last.get("status") == "waiting":
+        state_line = (f'<p><b>{int(last.get("count") or 0)} facts from your website are waiting for your OK.</b> '
+                      f'<a href="/approvals">Open Approvals &rarr;</a></p>')
+    elif last.get("status") == "nothing" and last.get("said"):
+        state_line = f'<p class="sub">{_esc(last["said"])}</p>'
+    return ('<div class="card" id="facts"><h2>Don\u2019t know what to put?</h2>'
+            '<p>The box can read your website and draft your facts and the numbers they use. Each one is a sentence '
+            'from your own pages, word for word, and nothing is saved until you approve it.</p>' + state_line
+            + _post(SETTINGS_DRAFT, "draft", "Draft these from my website", cls="ghost")
+            + '<p class="sub">Competitors and the words never to use stay yours to add below: a website doesn\u2019t '
+              'say them.</p></div>')
+
+
+@blueprint.route(SETTINGS_DRAFT, methods=["POST"])
+def aeo_settings_draft():
+    """Draft the facts from the website: queued for the worker, never run inside this request. Owner only."""
+    refuse = _admit()
+    if refuse is not None:
+        return refuse
+    title, lede = "AEO Settings", "Your website, and what the writer may and may not say."
+    if not _is_owner():
+        return _owner_refusal(SETTINGS, title)
+    from . import proposals
+    queued, said = proposals.start_draft(by=str(_who().get("id") or ""))
+    if not queued:
+        return _page(SETTINGS, title, lede, _note("", said) + _facts_card() + _settings_form()), 400
+    return redirect(f"{SETTINGS}?said=drafting", code=303)
+
+
 def _settings_form(typed=None) -> str:
     """The owner's form. `typed` is a refused POST, so a mistake does not wipe what was entered."""
     s = dict(settings.get())
@@ -643,9 +696,9 @@ def aeo_settings():
             return _page(SETTINGS, title, lede, _note("", str(e)) + _settings_form(request.form)), 400
         return redirect(f"{SETTINGS}?said=saved", code=303)
     said = request.args.get("said") or ""
-    body = _note(said) if said == "saved" else ""
+    body = _note(said) if said in ("saved", "drafting") else ""
     body += _setup_card()
-    body += _settings_form() if _is_owner() else _settings_readonly()
+    body += (_facts_card() + _settings_form()) if _is_owner() else _settings_readonly()
     return _page(SETTINGS, title, lede, body), 200
 
 

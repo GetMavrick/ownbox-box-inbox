@@ -467,8 +467,8 @@ def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str
         raise ReplyRefused("machines don't send email from this inbox")
     if window.allowed_send(conv.get("last_inbound_at"), platform=platform) != "freeform":
         raise ReplyRefused("this channel's window to reply is closed", code="window_closed")
-    from core.config import get_config
-    cap = int(((get_config().get("inbox") or {}).get("hourly_send_cap")) or 40)
+    from . import sending
+    cap = sending.hourly_cap()
     if store.sends_last_hour(space) >= cap:
         raise ReplyRefused(f"the box has sent its {cap} messages for this hour; try again later", code="hourly_cap")
     account_id = conv.get("account_id") or ""
@@ -575,8 +575,8 @@ def reply_to_comment(*, space: str, machine: str, comment: dict, text: str, key:
     if age > PRIVATE_REPLY_DAYS:
         raise ReplyRefused(f"Instagram only allows a private reply within {PRIVATE_REPLY_DAYS} days of a comment",
                            code="too_old")
-    from core.config import get_config
-    cap = int(((get_config().get("inbox") or {}).get("hourly_send_cap")) or 40)
+    from . import sending
+    cap = sending.hourly_cap()
     if store.sends_last_hour(space) >= cap:
         raise ReplyRefused(f"the box has sent its {cap} messages for this hour; try again later", code="hourly_cap")
 

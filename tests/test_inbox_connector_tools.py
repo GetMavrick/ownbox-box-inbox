@@ -85,6 +85,8 @@ PROPOSE_TOOLS = ("inbox.propose_reply", "inbox.propose_drafts",
                  "inbox.propose_pitch_back",
                  # reply style per channel (owner, 2026-10-04): changed from a chat, on one tap
                  "inbox.propose_reply_style",
+                 # sending (owner, 2026-10-04): the first message and the hourly cap, changed from a chat, on one tap
+                 "inbox.propose_first_message", "inbox.propose_hourly_cap",
                  # saved replies (#1821): one added from a chat, on one tap
                  "inbox.propose_saved_reply")
 

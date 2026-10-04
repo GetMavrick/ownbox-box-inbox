@@ -1,4 +1,4 @@
-"""The AEO machine's one table: the plan of articles this box will write, and what became of each.
+"""The AEO machine's tables: the plan of articles this box will write, and the questions its customers ask.
 
 DECLARED BY THE MACHINE, NOT BY CORE (docs/SPEC_GOLDEN_DROPLET_IMPACT.md §5). `__init__.py` calls
 `state.register_schema("aeo_machine", DDL)` at import, so a box that does not carry this machine
@@ -33,4 +33,22 @@ CREATE TABLE IF NOT EXISTS seo_plan (
   updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS seo_plan_status ON seo_plan (status, requested_at, id);
+
+-- THE COMMON QUESTIONS (owner, 2026-10-04: "keep a table of common customer questions"). One row per
+-- question, de-duplicated by `key` (lowercase words, no punctuation), rebuilt daily by questions.py from
+-- what this box can see: answers to the website's own surveys, questions people search when the site shows
+-- up, and (once the Unified Inbox provides them) questions customers wrote in. ONLY THE QUESTION IS KEPT,
+-- never who asked: no id, address or name reaches this table (the website's /privacy promise for surveys).
+-- `plan_id` is the article that answers it, when one is planned or live.
+CREATE TABLE IF NOT EXISTS aeo_questions (
+  key          TEXT PRIMARY KEY,           -- the question, normalised, so "Do you?" and "do you" are one
+  question     TEXT NOT NULL,              -- the clearest wording seen, as people wrote it
+  asked        INTEGER NOT NULL DEFAULT 0, -- times people asked it themselves (surveys, inbox)
+  survey       INTEGER NOT NULL DEFAULT 0,
+  inbox        INTEGER NOT NULL DEFAULT 0,
+  searched     INTEGER NOT NULL DEFAULT 0, -- times the site showed up for it in Google search (impressions)
+  plan_id      INTEGER,                    -- seo_plan.id of the article answering it, if any
+  first_seen   TEXT NOT NULL,
+  last_seen    TEXT NOT NULL
+);
 """

@@ -1211,6 +1211,7 @@ shell.register_section(
         {"key": "mailbox", "label": "Mailbox", "href": "/inbox/mailbox"},
         {"key": "signature", "label": "Email Signature", "href": "/inbox/signature"},
         {"key": "reply_style", "label": "Reply Style", "href": "/inbox/reply-style"},
+        {"key": "sending", "label": "Sending", "href": "/inbox/sending"},
         {"key": "pitch_back", "label": "Cold Pitches", "href": "/inbox/pitch-back"},
         {"key": "snippets", "label": "Saved Replies", "href": "/inbox/snippets"},
         {"key": "channels", "label": "Social Accounts", "href": "/inbox/connect"},
@@ -5330,6 +5331,68 @@ def r_reply_style():
             + pick("email") + pick("dms")
             + '<button class="btn" type="submit" style="min-height:48px">Save</button></form>')
     return _shell(head + form + _back_link(), here="/inbox/reply-style"), 200
+
+
+# ── sending, what the box sends on its own (inbox/sending.py) ────────────────────────────────────────────────────
+# Owner, 2026-10-04: "Seems like there's some things that are not even built out yet." The first message and the
+# hourly cap lived only in the configuration file, which a buyer cannot edit. Owner edits; members read.
+@blueprint.route("/inbox/sending", methods=["GET", "POST"])
+def r_sending():
+    from marketing.customer_voice.inbox import sending as _snd
+    gate = _gate()
+    if gate is not None:
+        return gate
+    owner = _is_owner()
+    if request.method == "POST" and not owner:
+        return _owner_refusal()
+    note = ""
+    if request.method == "POST":
+        try:
+            u = dash.session_user(request) or {}
+        except Exception:                        # noqa: BLE001 — only whose name the audit line carries
+            u = {}
+        try:
+            _snd.put(first_message=request.form.get("first_message") or "off", text=request.form.get("text"),
+                     hourly_cap=request.form.get("hourly_cap"), by=u.get("id"))
+            return redirect("/inbox/sending?saved=1", code=303)
+        except ValueError as e:
+            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
+    cur = _snd.get()
+    saved = request.args.get("saved") and not note
+    head = ('<h1>Sending</h1>'
+            '<p class="quiet">Everything your box writes waits for you to send it, except one thing you can turn on '
+            'here: a <b>first message</b>. When it is on, a brand-new conversation on Messenger, Instagram or '
+            'WhatsApp gets the fixed words below at once, so nobody waits while you are busy. It goes once per '
+            'conversation, never by email, and stops the moment the person asks it to.</p>'
+            '<p class="quiet">The <b>hourly cap</b> is the most messages your box sends in any hour, counted across '
+            'every channel and every send. The default, 40, is safe. Your mailbox provider and Meta have limits of '
+            'their own and watch for bursts: set this high and a busy hour can get your mail marked as junk or '
+            'your account held back. Raise it only if you know your provider allows it.</p>'
+            + ('<p class="quiet">Saved.</p>' if saved else "") + note)
+    on = cur["first_message"] == "on"
+    if not owner:
+        rows = (f'<p>First message on its own: {"On" if on else "Off"}</p>'
+                + (f'<p>The first message: {_esc(cur["text"])}</p>' if cur["text"] else "")
+                + f'<p>Most messages in an hour: {cur["hourly_cap"]}</p>')
+        return _shell(head + rows + _back_link(), here="/inbox/sending"), 200
+    field = ('font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;width:100%;'
+             'min-height:48px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)')
+    label = 'class="t" style="display:block;font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px"'
+    form = ('<form class="compose" method="post" action="/inbox/sending" '
+            'style="display:flex;flex-direction:column;gap:12px;align-items:stretch">'
+            f'<label style="display:block"><span {label}>First message on its own</span>'
+            f'<select name="first_message" aria-label="First message on its own" style="{field}">'
+            f'<option value="off"{"" if on else " selected"}>Off</option>'
+            f'<option value="on"{" selected" if on else ""}>On</option></select></label>'
+            f'<label style="display:block"><span {label}>The first message</span>'
+            f'<textarea name="text" aria-label="The first message" rows="3" style="{field};min-height:96px" '
+            f'placeholder="Thanks for reaching out! I got your message and I\'m on it. What can I help with?"'
+            f'>{_esc(cur["text"])}</textarea></label>'
+            f'<label style="display:block"><span {label}>Most messages in an hour</span>'
+            f'<input name="hourly_cap" type="number" inputmode="numeric" min="{_snd.MIN_CAP}" max="{_snd.MAX_CAP}" '
+            f'aria-label="Most messages in an hour" value="{cur["hourly_cap"]}" style="{field}"></label>'
+            '<button class="btn" type="submit" style="min-height:48px">Save</button></form>')
+    return _shell(head + form + _back_link(), here="/inbox/sending"), 200
 
 
 # ── cold pitches, turned around (inbox/pitch_back.py, drafter PITCH_BACK) ───────────────────────────────────────────

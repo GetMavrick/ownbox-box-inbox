@@ -49,9 +49,10 @@ def _space(name: str) -> dict | None:
 
 
 def _opener_text(sp: dict) -> str:
-    return (sp.get("opener_template")
-            or _cfg().get("opener_template")
-            or _DEFAULT_OPENER)
+    # THE SCREEN WINS (Inbox Settings, Sending): the owner's own words, else the Space's, else the
+    # configuration's, else the default below.
+    from . import sending
+    return sending.first_message_text(_cfg(), sp) or _DEFAULT_OPENER
 
 
 def _is_stop(text: str) -> bool:
@@ -109,7 +110,9 @@ def handle(job: dict) -> dict:
     # re-enable auto-DMs — the most likely config mistake must not yield the most
     # permissive behavior. Sending requires an EXPLICIT `autonomy: "opener"`.
     _ACTIVE_TIERS = {"opener"}          # Phase 1. Phase 2 (AI replies) registers its tier here.
-    autonomy = str(_cfg().get("autonomy", "unset")).strip().lower()
+    # THE SCREEN WINS (Inbox Settings, Sending): "on" there is "opener" here; unset, the configuration decides.
+    from . import sending
+    autonomy = sending.autonomy(_cfg())
     if autonomy not in _ACTIVE_TIERS:
         _notify(job, f":speech_balloon: New {chan} message{ad_bit} — autonomy is "
                      f"'{autonomy}' (not an active send tier), observed only, no auto-reply "
@@ -167,7 +170,7 @@ def handle(job: dict) -> dict:
     # counted send ages out of the rolling hour), burning neither the claim nor the
     # worker's retry budget. RetryableError here terminally failed burst leads ~15
     # minutes into a 60-minute cap window — the contract promises "sends later".
-    cap = int(_cfg().get("hourly_send_cap", 40))
+    cap = sending.hourly_cap(_cfg())
     if store.sends_last_hour(space_name) >= cap:
         oldest = store.oldest_counted_send(space_name)
         if oldest:

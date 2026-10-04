@@ -8,6 +8,8 @@ code has to out-argue: there is nothing here that could carry it out.
 """
 from __future__ import annotations
 
+import hashlib
+
 from core import brain, cost_guard
 from core.logging import get_logger
 
@@ -244,6 +246,59 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
     # job applications"). Labelling every inbound line "Customer" told the model the recruiter replying to HIS
     # application was a customer of his, and it answered as the employer. "Them" and "You" leave the roles to case 2,
     # and the first line says who started the thread, as far as this box can see.
+    prompt = _prompt(space=space, zcid=zcid, inbound=inbound, history=history)
+
+    text = _ask_model(space=space, zcid=zcid, prompt=prompt, platform=platform,
+                      job_id=f"draft:{space}:{in_reply_to}")
+    if not text:
+        return None
+    # A DECISION NOT TO ANSWER IS RECORDED, NOT DISCARDED. If this simply returned None the row
+    # would still have no draft, `needs_a_draft` would hand it back every two minutes, and the
+    # box would pay for the same refusal forever — the seven-hour head-block of this morning
+    # (#1436) wearing a third face. So it is stored and dismissed in one step: the decision is
+    # on the record, the Drafts tab never shows it, and the sweep never sees it again.
+    if text.strip().upper().startswith(NO_REPLY):
+        try:
+            if store.put(space=space, zcid=zcid, in_reply_to=in_reply_to,
+                         body="(the box judged that this message needs no reply)", rules=rules(platform)):
+                row = store.for_inbound(space, in_reply_to)
+                if row:
+                    store.dismiss(space, row["id"])
+        except Exception as e:                       # noqa: BLE001 — bookkeeping never breaks a sweep
+            log.warning("drafter.no_reply_unrecorded", extra={"space": space,
+                                                              "error": type(e).__name__})
+        log.info("drafter.no_reply_needed", extra={"space": space, "conversation": zcid})
+        return None
+
+
+    pitched = text.upper().startswith(PITCH_BACK)
+    if pitched:
+        pb = pitch_back()
+        if not pb["on"]:
+            # Only asked for when it is on; a model that says it anyway gets a normal draft, marker gone.
+            text, pitched = text[len(PITCH_BACK):].strip(), False
+        else:
+            text = _turned_around(text, pb["link"])
+        if not text:
+            return None
+    if not store.put(space=space, zcid=zcid, in_reply_to=in_reply_to, body=text, rules=rules(platform)):
+        return None
+    if pitched:
+        store.mark_pitch_back(space, in_reply_to)
+        log.info("drafter.pitch_back", extra={"space": space, "conversation": zcid})
+    log.info("drafter.drafted", extra={"space": space, "conversation": zcid,
+                                       "in_reply_to": in_reply_to, "chars": len(text)})
+    return text
+
+
+def rules(platform=None) -> str:
+    """A fingerprint of everything that shapes a draft for this channel: the instructions, the reply style, the
+    cold-pitch setting and its link. Stored with each draft; a waiting draft whose fingerprint no longer matches
+    is rewritten by the next sweep (owner, 2026-10-04)."""
+    return hashlib.sha1(_system(platform).encode("utf-8")).hexdigest()[:12]
+
+
+def _prompt(*, space: str, zcid: str, inbound: str, history: list[dict] | None) -> str:
     lines = []
     for m in (history or [])[-8:]:
         who = "Them" if str(m.get("direction")) == "in" else "You (the business)"
@@ -278,7 +333,11 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
     prompt = (voice + (started + "\n\n" if started else "") + "Here is the conversation so far.\n\n--- transcript ---\n"
               + "\n".join(lines)
               + "\n--- end of transcript ---\n\nWrite the business's next reply, as the business's owner.")
+    return prompt
 
+
+def _ask_model(*, space: str, zcid: str, prompt: str, platform, job_id: str) -> str | None:
+    """The one model call, metered and guarded. Returns the text, or None when nothing could be written."""
     try:
         cost_guard.check_vendor("anthropic_drafts", 1)
     except Exception as e:                       # noqa: BLE001 — over budget is not a crash
@@ -296,7 +355,7 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
         text = brain.think(task="inbox_draft", prompt=prompt, system=_system(platform),
                            cached_context=brain.knowledge_context() or None,
                            max_tokens=300, isolated=True,
-                           job_id=f"draft:{space}:{in_reply_to}")
+                           job_id=job_id)
     except Exception as e:                       # noqa: BLE001 — a missing key, a timeout, a cap
         # A BOX WITH NO MODEL CONFIGURED IS NOT BROKEN, it just has no drafts. Nothing here is
         # load-bearing for reading or answering the inbox by hand.
@@ -314,43 +373,45 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
     text = str(text or "").strip()
     if not text:
         return None
-    # A DECISION NOT TO ANSWER IS RECORDED, NOT DISCARDED. If this simply returned None the row
-    # would still have no draft, `needs_a_draft` would hand it back every two minutes, and the
-    # box would pay for the same refusal forever — the seven-hour head-block of this morning
-    # (#1436) wearing a third face. So it is stored and dismissed in one step: the decision is
-    # on the record, the Drafts tab never shows it, and the sweep never sees it again.
-    if text.strip().upper().startswith(NO_REPLY):
-        try:
-            if store.put(space=space, zcid=zcid, in_reply_to=in_reply_to,
-                         body="(the box judged that this message needs no reply)"):
-                row = store.for_inbound(space, in_reply_to)
-                if row:
-                    store.dismiss(space, row["id"])
-        except Exception as e:                       # noqa: BLE001 — bookkeeping never breaks a sweep
-            log.warning("drafter.no_reply_unrecorded", extra={"space": space,
-                                                              "error": type(e).__name__})
-        log.info("drafter.no_reply_needed", extra={"space": space, "conversation": zcid})
-        return None
-
-
-    pitched = text.upper().startswith(PITCH_BACK)
-    if pitched:
-        pb = pitch_back()
-        if not pb["on"]:
-            # Only asked for when it is on; a model that says it anyway gets a normal draft, marker gone.
-            text, pitched = text[len(PITCH_BACK):].strip(), False
-        else:
-            text = _turned_around(text, pb["link"])
-        if not text:
-            return None
-    if not store.put(space=space, zcid=zcid, in_reply_to=in_reply_to, body=text):
-        return None
-    if pitched:
-        store.mark_pitch_back(space, in_reply_to)
-        log.info("drafter.pitch_back", extra={"space": space, "conversation": zcid})
-    log.info("drafter.drafted", extra={"space": space, "conversation": zcid,
-                                       "in_reply_to": in_reply_to, "chars": len(text)})
     return text
+
+
+def rewrite_one(*, space: str, row: dict) -> bool:
+    """Write a waiting draft again under the rules the box runs now, in place. One model call.
+
+    Owner, 2026-10-04: drafts still waiting are rewritten when the drafter changes. The same prompt as a fresh
+    draft, the same three answers: words replace the old words on the same row; NO_REPLY_NEEDED dismisses it;
+    a turned-around pitch is turned around. Whatever it chose, the draft's rules are marked, so it is never
+    paid for twice under the same rules."""
+    platform = row.get("platform")
+    inbound = str(row.get("asked") or "").strip()[:_MAX_INBOUND]
+    did = str(row.get("id") or "")
+    if not inbound or not did:
+        return False
+    try:
+        history = store.history_for(space, row["zcid"])
+    except Exception:                            # noqa: BLE001 — rewrite on the inbound alone
+        history = []
+    text = _ask_model(space=space, zcid=row["zcid"], prompt=_prompt(space=space, zcid=row["zcid"], inbound=inbound,
+                                                                     history=history),
+                      platform=platform, job_id=f"redraft:{space}:{did}:{rules(platform)}")
+    if not text:
+        return False
+    now = rules(platform)
+    if text.strip().upper().startswith(NO_REPLY):
+        store.dismiss(space, did)
+        store.mark_rules(space, did, now)
+        log.info("drafter.rewrite_no_reply", extra={"space": space, "conversation": row["zcid"]})
+        return True
+    if text.upper().startswith(PITCH_BACK):
+        pb = pitch_back()
+        text = _turned_around(text, pb["link"]) if pb["on"] else text[len(PITCH_BACK):].strip()
+        if not text:
+            return False
+    if not store.rewrite(space=space, draft_id=did, body=text, rules=now):
+        return False
+    log.info("drafter.rewritten", extra={"space": space, "conversation": row["zcid"], "chars": len(text)})
+    return True
 
 
 def _note_recovered() -> None:
@@ -496,10 +557,24 @@ def sweep(space: str) -> dict:
     # would have caught this one and nothing else; the next silent cause — a cap, a model that
     # will not answer, a draft already present under a different key — would be invisible all over
     # again. The question worth asking every two minutes is only ever: I had work, did I do any?
+    # THEN THE STALE ONES, with whatever the spend bound has left (owner, 2026-10-04: drafts still waiting are
+    # rewritten when the drafter changes). New messages come first: a person waiting on a first draft beats a
+    # draft that only needs better words.
+    rewritten = 0
+    left = cap - len(waiting)
+    if left > 0:
+        try:
+            stale = store.stale_waiting(space, email_rules=rules("email"), dms_rules=rules("instagram"), limit=left)
+        except Exception as e:                   # noqa: BLE001 — a box without the table yet
+            log.warning("drafter.stale_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:120]})
+            stale = []
+        for row in stale:
+            if rewrite_one(space=space, row=row):
+                rewritten += 1
     if waiting and not drafted:
         log.warning("drafter.sweep_wrote_nothing",
                     extra={"space": space, "considered": len(waiting),
                            "oldest": str(waiting[-1].get("inbound_at") or "")[:19],
                            "platforms": ",".join(sorted({str(r.get("platform") or "?")
                                                          for r in waiting}))})
-    return {"status": "ok", "drafted": drafted, "considered": len(waiting)}
+    return {"status": "ok", "drafted": drafted, "considered": len(waiting), "rewritten": rewritten}

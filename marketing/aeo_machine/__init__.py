@@ -41,6 +41,23 @@ def _aeo_publish_tick():
 
 _register_periodic(_aeo_publish_tick, interval_s=60, name="aeo_publish")
 
+
+# THE COMMON QUESTIONS, rebuilt once a day (questions.py; labs `aeo_questions`, off = one settings read).
+def _aeo_questions_tick():
+    from . import questions
+    return questions.periodic()
+
+
+_register_periodic(_aeo_questions_tick, interval_s=86400, name="aeo_questions")
+
+# DRAFTING THE FACTS FROM THE BUYER'S WEBSITE runs in the worker, never in a web request: it reads a few pages and
+# makes one reasoning call, about a minute (proposals.py, facts_draft.py; owner 2026-10-04).
+from core.worker import register as _register_intent  # noqa: E402
+
+from . import proposals as _proposals  # noqa: E402
+
+_register_intent(_proposals.DRAFT_INTENT, _proposals.do_draft, on_failure=_proposals.draft_failed)
+
 # THE MORNING REVIEW SEGMENT, registered at import like every machine's: the worker imports this
 # package, and the review's snapshot runs in the worker (core/report.py says why).
 from . import report  # noqa: E402,F401

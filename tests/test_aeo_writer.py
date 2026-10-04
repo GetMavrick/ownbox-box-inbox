@@ -166,8 +166,11 @@ for path in sorted(glob.glob("marketing/aeo_machine/*.py")):
     if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
            and n.func.attr == "think" for n in ast.walk(tree)):
         callers.append(path.split("/")[-1])
-ok("only writer.py calls think() — everything else is deterministic (CLAUDE.md §3)",
-   callers == ["writer.py"], callers)
+# TWO PLACES, EACH ON PURPOSE: writer.py writes an article, and facts_draft.py picks which of the buyer's own
+# website sentences state facts (owner, 2026-10-04: "where would a business owner put these facts in?"). It answers
+# with sentence numbers only, so it can't put a word of its own in a fact. A third caller fails here.
+ok("only writer.py and facts_draft.py call think() — everything else is deterministic (CLAUDE.md §3)",
+   callers == ["facts_draft.py", "writer.py"], callers)
 
 print(f"\n{_failed} FAILED" if _failed else "\nall ok")
 sys.exit(1 if _failed else 0)

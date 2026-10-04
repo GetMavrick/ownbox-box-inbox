@@ -84,6 +84,7 @@ if _inbox.is_file():
     # their addresses send people to those one homes.
     rows = {"/inbox/settings": "Overview", "/inbox/mailbox": "Mailbox", "/inbox/signature": "Email Signature",
             "/inbox/reply-style": "Reply Style",
+            "/inbox/sending": "Sending",
             "/inbox/pitch-back": "Cold Pitches",
             "/inbox/snippets": "Saved Replies",
             "/inbox/connect": "Social Accounts"}

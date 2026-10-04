@@ -16,18 +16,22 @@ THE SAME CHECKS AS THE SCREENS, TWICE. A proposal is checked when it is made, so
 that a topic is a duplicate or a number is out of range, and again when it runs, because a week may
 have passed and the plan or the settings may have changed.
 
-FIVE ACTIONS:
+SIX ACTIONS:
   * add a topic (AEO → Articles, "Add a topic"), optionally next up ("Write and publish now");
   * try a stopped article again (AEO → Articles, "Try again now");
   * change one setting (AEO → Settings): the website, articles a week, or one entry added to or removed
     from a list. Connections and their keys are never proposable: those stay on Data sources;
   * unpublish a live article: off the website, kept as a draft in Sanity, never deleted (owner, 2026-10-04);
   * rewrite a live or unpublished article from today's facts, at its own address (owner, 2026-10-04,
-    after two articles went out with an empty fact list).
+    after two articles went out with an empty fact list);
+  * add the facts and numbers the box drafted from the buyer's own website (facts_draft.py; owner, 2026-10-04:
+    "where would a business owner put these facts in?"). Drafting runs in the worker; its result waits here.
 """
 from __future__ import annotations
 
-from core import approvals, box_settings
+import json as _json
+
+from core import approvals, box_settings, state
 from core.logging import get_logger
 
 from . import plan, settings
@@ -220,6 +224,96 @@ def propose_rewrite(id=None, seat=None):
                 {"app": APP, "do": "rewrite", "arguments": args}, seat)
 
 
+# ── facts drafted from the buyer's website ─────────────────────────────────────────────────────────
+
+DRAFT_INTENT = "aeo_facts_draft"
+DRAFT_NS, DRAFT_KEY = "aeo_machine", "facts_draft"     # the last draft's outcome, for the Settings screen
+
+
+def drafting() -> bool:
+    """Is a draft queued or running? Read from the queue itself, so a restarted worker never leaves it stuck."""
+    with state.connect() as c:
+        return c.execute("SELECT 1 FROM jobs WHERE intent = ? AND status IN ('queued', 'running') LIMIT 1",
+                         (DRAFT_INTENT,)).fetchone() is not None
+
+
+def start_draft(*, by: str = "") -> tuple[bool, str]:
+    """Queue one draft. (queued, what to tell the person). Refused while one is running or with no website."""
+    import uuid
+    site = str(settings.get().get("site_url") or "")
+    if not site:
+        return False, "Add your website's address on AEO Settings first, so the box knows which site to read."
+    if drafting():
+        return False, "The box is already reading your website. The facts will wait on Approvals when it's done."
+    from core.queue import queue
+    queue.enqueue(idempotency_key=f"{DRAFT_INTENT}:{uuid.uuid4().hex[:12]}", intent=DRAFT_INTENT,
+                  agent_name="aeo", raw_text=_json.dumps({"by": str(by or "")[:80]}))
+    box_settings.put(DRAFT_NS, DRAFT_KEY, {"status": "reading", "site": site}, set_by=by or "aeo")
+    return True, (f"Reading {site} now. In a minute or two, the facts it found wait on Approvals for your OK, "
+                  "each word for word from your own pages.")
+
+
+def last_draft() -> dict:
+    got = box_settings.get(DRAFT_NS, DRAFT_KEY, default={}) or {}
+    return got if isinstance(got, dict) else {}
+
+
+def do_draft(job: dict) -> dict:
+    """The worker's half: read the site, draft, and put what it found on Approvals as one proposal."""
+    from . import facts_draft
+    by = (_json.loads(job.get("raw_text") or "{}") or {}).get("by") or ""
+    site = str(settings.get().get("site_url") or "")
+    got = facts_draft.draft(site)
+    have = {x.lower() for x in _list_now("facts")}
+    new = [f for f in got.get("facts") or [] if f["text"].lower() not in have]
+    if not new:
+        said = got.get("why") or "Every fact the box found on your website is already on your list."
+        box_settings.put(DRAFT_NS, DRAFT_KEY, {"status": "nothing", "site": site, "said": said}, set_by="aeo")
+        return {"ok": True, "proposed": 0}
+    nums = [n for n in got.get("numbers") or [] if n not in _list_now("allowed_numbers")]
+    args = {f"fact {i}": f["text"] for i, f in enumerate(new, 1)}
+    if nums:
+        args["numbers it may use"] = ", ".join(nums)
+    args["read from"] = ", ".join(got.get("pages") or [site])
+    a = _ask(f"Add {len(new)} facts from your website for the AEO Machine",
+             {"app": APP, "do": "add_facts", "arguments": args}, {"label": by or "the box"})
+    box_settings.put(DRAFT_NS, DRAFT_KEY, {"status": "waiting", "site": site, "approval": a["approval"],
+                                           "count": len(new)}, set_by="aeo")
+    return {"ok": True, "proposed": len(new)}
+
+
+def draft_failed(job: dict, error: Exception) -> None:
+    try:
+        box_settings.put(DRAFT_NS, DRAFT_KEY, {"status": "nothing", "said": "Reading your website stopped before it "
+                                               "finished, so nothing was drafted. Try again in a minute."},
+                         set_by="aeo")
+    except Exception:                                         # noqa: BLE001
+        pass
+
+
+def propose_facts(seat=None):
+    """Ask the box to draft the facts from the buyer's own website. They wait on Approvals; nothing is saved first."""
+    queued, said = start_draft(by=_who(seat))
+    return {"asked": queued, "text": said} if queued else {"asked": False, "error": said}
+
+
+def _add_facts(args: dict) -> dict:
+    from . import app
+    facts = [str(v) for k, v in args.items() if str(k).startswith("fact ")]
+    now = _list_now("facts")
+    have = {x.lower() for x in now}
+    add = [f for f in facts if f.lower() not in have][:max(0, app._LIST_MAX - len(now))]
+    if add:
+        box_settings.put(settings.MACHINE, "facts", now + add, set_by=SET_BY)
+    nums_now = _list_now("allowed_numbers")
+    nums = [n.strip() for n in str(args.get("numbers it may use") or "").split(",") if n.strip()]
+    nums_add = [n for n in nums if n not in nums_now]
+    if nums_add:
+        box_settings.put(settings.MACHINE, "allowed_numbers", nums_now + nums_add, set_by=SET_BY)
+    return {"ok": True, "text": f"Added {len(add)} facts and {len(nums_add)} numbers from your website. Change any "
+                                "of them on AEO Settings; the AEO Machine uses them from its next article."}
+
+
 def propose_setting(name=None, value=None, change=None, seat=None):
     """Ask the owner to change one setting: set the website or articles a week, or add or remove one entry."""
     key = str(name or "").strip().lower()
@@ -255,6 +349,8 @@ def _run(detail: dict) -> dict:
             if not plan.request_now(int(row["id"])):
                 raise Refused("It is no longer stopped, so nothing was changed.")
             return {"ok": True, "text": f"\"{row.get('topic')}\" is next up again."}
+        if do == "add_facts":
+            return _add_facts(args)
         if do == "unpublish":
             from datetime import datetime, timezone
 

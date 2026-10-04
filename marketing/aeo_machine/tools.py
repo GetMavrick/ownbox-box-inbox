@@ -102,9 +102,10 @@ def status():
     failing = brain.get("state") == "fail" or brain.get("ok") is False
     ai_ready = can and not failing
     from .app import FACTS_MISSING, SETTINGS
-    if FACTS_MISSING in need:                          # with the page that fixes it, as a full address
+    if FACTS_MISSING in need:                          # with the fix: drafted from the site, or typed on the page
         from core.connector import words
-        need[need.index(FACTS_MISSING)] = f"{FACTS_MISSING}: add them on AEO Settings, {words.link(SETTINGS)}"
+        need[need.index(FACTS_MISSING)] = (f"{FACTS_MISSING}: the box can draft them from your website for your OK "
+                                           f"(aeo.propose_facts), or add them on AEO Settings, {words.link(SETTINGS)}")
     if not can:
         need.insert(0, "a signed-in AI account (System Settings → AI account)")
     elif failing:
@@ -610,6 +611,67 @@ tools.register(
     description="Whether Sanity, Airtable, PostHog and Google Search Console are connected, and "
                 "which table and site. Never a credential.")
 # THE PROPOSALS. Each asks; only a person's Approve on Approvals runs it (proposals.py).
+def common_questions(limit=None):
+    """The common customer questions (questions.py): most asked first, where each came from, and whether an
+    article answers it. Behind labs `aeo_questions`."""
+    from core import labs
+
+    from . import questions
+    if not labs.on(questions.LABS):
+        return tools.NotConfigured("The common questions aren't switched on for this box yet.")
+    rows = questions.table(_clamp(limit, 25))
+    if not rows:                                       # first ask on a box: build it now, then answer
+        questions.refresh()
+        rows = questions.table(_clamp(limit, 25))
+    # EACH SOURCE IS NAMED ONLY WHERE THIS BOX HAS IT (OSDev1's review): a box with no Unified Inbox is never
+    # told its inbox was counted. The inbox is there when it provides the box's conversations (core seam).
+    from core import conversations
+    try:
+        conversations.provider()
+        where = "in the website's surveys or the inbox"
+    except conversations.NoProvider:
+        where = "in the website's surveys"
+    return {"questions": rows, "open": [q["question"] for q in rows if q["status"] == "open"][:3],
+            "note": (f"Times asked counts people who asked it themselves, {where}. Seen in search counts how often "
+                     "the site showed up for it in Google. Only the question is kept, never who asked.")}
+
+
+def _render_questions(r: dict) -> str:
+    rows = [q for q in r.get("questions") or [] if isinstance(q, dict)]
+    if not rows:
+        return say.answer("No questions yet: none of your website's survey answers or searches were questions.",
+                          say.ask_next((f"{MACHINE}.sources", "Which data sources are connected?")))
+
+    def line(q: dict) -> str:
+        bits = [say.quoted(q.get("question"), 120)]
+        if q.get("times_asked"):
+            bits.append(f"asked {say.plural(q['times_asked'], 'time')}")
+        if q.get("seen_in_search"):
+            bits.append(f"seen {say.plural(q['seen_in_search'], 'time')} in search")
+        art = q.get("article") or {}
+        bits.append({"answered": f"answered by {say.quoted(art.get('title'), 80)}" + (f" at {art['url']}" if art.get("url") else ""),
+                     "planned": f"planned as article {art.get('id')}", "being written": "being written now"}
+                    .get(q.get("status"), "no article answers it yet"))
+        return ", ".join(bits)
+
+    best = next((q["question"] for q in rows if q.get("status") == "open"), "")
+    return say.answer(
+        say.section("Your customers' common questions, most asked first:", [line(q) for q in rows]),
+        say.plain(r.get("note") or ""),
+        say.ask_next((f"{MACHINE}.searches", "What do people search to find my website?"),
+                     (f"{MACHINE}.articles", "Which articles have we published?")),
+        say.can_start((f"{MACHINE}.propose_topic",
+                       say.approve_line(f"Write an article answering {say.quoted(best, 80)}"))) if best else "")
+
+
+tools.register(
+    "questions", title="See your customers' common questions",
+    fn=common_questions, machine=MACHINE, min_role="read", capability=CAPABILITY, render=_render_questions,
+    description="The questions this business's customers ask, most asked first: from the website's own surveys and "
+                "the searches it shows up for. How often each was asked, where, and whether an article answers it "
+                "yet. Only the question is kept, never who asked.",
+    args={"limit": {"type": "integer", "required": False, "description": "How many, 1-100. Defaults to 25."}})
+
 from . import proposals  # noqa: E402
 
 
@@ -680,6 +742,16 @@ tools.register(
     args={"id": {"type": "integer", "required": True,
                  "description": "The article's id, from aeo.articles."}})
 
+tools.register(
+    "propose_facts", title="Draft your AEO facts from your website",
+    fn=proposals.propose_facts, machine=MACHINE, min_role="act", capability="write:proposals",
+    render=_render_proposal,
+    wants_seat=True,
+    description="Ask the box to read this business's own website and draft the facts and numbers the AEO Machine "
+                "may use. Each fact is a sentence quoted word for word from a page, never invented. They wait on "
+                "Approvals for the owner's OK; nothing is saved until then. Competitors and never-use words stay "
+                "the owner's to add.")
+
 # Every role sees the reads above. Explicit, so a reviewer sees it (core/connector/tools.py grant()).
 tools.grant(CAPABILITY)
 
@@ -703,9 +775,11 @@ say.review_offers(_SEGMENT, _review_offers)
 prompts.register(
     "what_to_write_next", title="What should we write next", machine=MACHINE, prefer=("core.ask",),
     description="The next article worth writing: the searches you nearly win, what is already planned, and why.",
-    ask="What should we write next? Pick the one or two articles most worth writing, from the searches my site "
-        "nearly wins and what is already planned or published, and say why each would bring people.",
-    uses=[(f"{MACHINE}.searches", "the searches that bring clicks, and the ones one article could win"),
+    ask="What should we write next? Pick the one or two articles most worth writing, from the questions my "
+        "customers ask, the searches my site nearly wins and what is already planned or published, and say why "
+        "each would bring people.",
+    uses=[(f"{MACHINE}.questions", "the questions customers ask most, and which ones no article answers yet"),
+          (f"{MACHINE}.searches", "the searches that bring clicks, and the ones one article could win"),
           (f"{MACHINE}.articles", "what is already planned, written or live, so nothing is written twice"),
           (f"{MACHINE}.performance", "which articles people read most")])
 prompts.use("websites", f"{MACHINE}.performance", "visitors, page views, AI answer visits and the most read "

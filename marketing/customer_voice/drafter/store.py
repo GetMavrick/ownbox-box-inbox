@@ -18,7 +18,10 @@ _UNCLAIMED = ("NOT EXISTS (SELECT 1 FROM inbox_claims c WHERE c.space = k.space 
 log = get_logger(__name__)
 
 
-def put(*, space: str, zcid: str, in_reply_to: str, body: str) -> bool:
+KEEP = "kept"          # the rules mark of a draft a person's own AI wrote: never rewritten by the box
+
+
+def put(*, space: str, zcid: str, in_reply_to: str, body: str, rules: str = "") -> bool:
     """Record one draft. Returns False if this inbound already had one.
 
     EXACTLY ONE DRAFT PER INBOUND MESSAGE, enforced by `UNIQUE (space, in_reply_to)` rather
@@ -29,12 +32,68 @@ def put(*, space: str, zcid: str, in_reply_to: str, body: str) -> bool:
     body = str(body or "").strip()
     if not body:
         return False
+    did, now = str(uuid.uuid4()), state._now()
     with state.connect() as c:
         cur = c.execute(
             "INSERT OR IGNORE INTO inbox_drafts (id, space, zernio_conversation_id, "
             "in_reply_to, body, created_at) VALUES (?,?,?,?,?,?)",
-            (str(uuid.uuid4()), space, zcid, in_reply_to, body, state._now()))
+            (did, space, zcid, in_reply_to, body, now))
+        if cur.rowcount > 0 and rules:
+            c.execute("INSERT OR REPLACE INTO inbox_draft_rules (space, draft_id, rules, written_at) "
+                      "VALUES (?,?,?,?)", (space, did, str(rules), now))
         return cur.rowcount > 0
+
+
+def rewrite(*, space: str, draft_id: str, body: str, rules: str) -> bool:
+    """Replace a waiting draft's words in place (same row, same id) and record the rules that wrote them.
+    Never a new row: `UNIQUE (space, in_reply_to)` means one draft per message, and the screen, the lessons
+    and the Waiting list all hold the id. A dismissed draft is left alone."""
+    body = str(body or "").strip()
+    if not body:
+        return False
+    now = state._now()
+    with state.connect() as c:
+        cur = c.execute("UPDATE inbox_drafts SET body = ?, created_at = ? "
+                        " WHERE space = ? AND id = ? AND dismissed_at IS NULL", (body, now, space, str(draft_id)))
+        if cur.rowcount > 0:
+            c.execute("INSERT OR REPLACE INTO inbox_draft_rules (space, draft_id, rules, written_at) "
+                      "VALUES (?,?,?,?)", (space, str(draft_id), str(rules), now))
+        return cur.rowcount > 0
+
+
+def mark_rules(space: str, draft_id: str, rules: str) -> None:
+    """Record which rules a draft now answers to, without touching its words (a rewrite that chose no reply)."""
+    with state.connect() as c:
+        c.execute("INSERT OR REPLACE INTO inbox_draft_rules (space, draft_id, rules, written_at) VALUES (?,?,?,?)",
+                  (space, str(draft_id), str(rules), state._now()))
+
+
+def stale_waiting(space: str, *, email_rules: str, dms_rules: str, limit: int = 5) -> list[dict]:
+    """Drafts still waiting on a person that were written under other rules than the box runs now, oldest
+    first: no rules row (written before the box kept one), or a fingerprint that no longer matches the
+    conversation's channel. Never one marked KEEP, never one dismissed or already answered. The `limit`
+    is a spend bound: each row is one model call."""
+    with state.connect() as c:
+        rows = c.execute(
+            "SELECT d.id, d.zernio_conversation_id AS zcid, d.body, d.in_reply_to, k.participant, k.platform,"
+            "       m.body AS asked, m.created_at AS asked_at, r.rules "
+            "  FROM inbox_drafts d "
+            "  JOIN inbox_conversations k ON k.space = d.space "
+            "   AND k.zernio_conversation_id = d.zernio_conversation_id "
+            "  JOIN inbox_messages m ON m.space = d.space AND m.zernio_message_id = d.in_reply_to "
+            "  LEFT JOIN inbox_draft_rules r ON r.space = d.space AND r.draft_id = d.id "
+            " WHERE d.space = ? AND d.dismissed_at IS NULL AND k.opted_out = 0 "
+            "   AND k.automated IS NOT 1 "
+            f"   AND {_UNCLAIMED} "
+            "   AND (r.rules IS NULL OR (r.rules <> ? AND "
+            "        r.rules <> CASE WHEN k.platform = 'email' THEN ? ELSE ? END)) "
+            "   AND NOT EXISTS (SELECT 1 FROM inbox_messages o "
+            "                    WHERE o.space = d.space "
+            "                      AND o.zernio_conversation_id = d.zernio_conversation_id "
+            "                      AND o.direction = 'out' AND o.created_at > m.created_at) "
+            " ORDER BY m.created_at ASC LIMIT ?",
+            (space, KEEP, str(email_rules), str(dms_rules), int(limit))).fetchall()
+    return [dict(r) for r in rows]
 
 
 def for_inbound(space: str, in_reply_to: str) -> dict | None:
