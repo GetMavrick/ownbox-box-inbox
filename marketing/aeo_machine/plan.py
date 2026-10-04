@@ -36,14 +36,16 @@ def add(topic: str, question: str = "", *, user_id: str | None = None) -> int:
     if not topic:
         raise Rejected("Type the topic the article should be about.")
     now = state._now()
+    from . import site as _site                         # the site it is planned for (#1793 F5 1.2, migration 58)
+    host = _site.site() or None
     with state.connect() as c:
         dup = c.execute("SELECT id FROM seo_plan WHERE lower(topic) = lower(?) "
                         "AND status IN ('planned', 'writing')", (topic,)).fetchone()
         if dup:
             raise Rejected("That topic is already waiting to be written.")
         cur = c.execute("INSERT INTO seo_plan (topic, question, status, created_at, created_by, "
-                        "updated_at) VALUES (?,?,'planned',?,?,?)",
-                        (topic, question or None, now, user_id, now))
+                        "updated_at, site) VALUES (?,?,'planned',?,?,?,?)",
+                        (topic, question or None, now, user_id, now, host))
         return int(cur.lastrowid)
 
 

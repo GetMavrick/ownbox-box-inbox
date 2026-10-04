@@ -78,6 +78,12 @@ def searches(*, fresh: bool = False, today: _dt.date | None = None) -> dict:
         return {"ok": False, "why": "not_connected"}
     if not st.get("property"):
         return {"ok": False, "why": "no_property"}
+    # ANOTHER WEBSITE'S SEARCHES ARE NEVER THIS ONE'S (#1793 F5 1.2): Google is not asked, nothing is cached, and the
+    # last good answer is not shown, because it was the other site's too. The sentence names both fixes.
+    from . import site as _site
+    wrong = _site.mismatch(st["property"])
+    if wrong:
+        return {"ok": False, "why": wrong, "wrong_site": True}
     start, end = window(today)
     ck = (st["property"], start, end)
     with _lock:

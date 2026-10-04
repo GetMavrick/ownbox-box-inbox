@@ -390,6 +390,33 @@ def set_opted_out(space: str, zcid: str) -> None:
                   "WHERE space = ? AND zernio_conversation_id = ?",
                   (state._now(), space, zcid))
     log.info("inbox.opted_out", space=space, conversation=zcid)
+    _suppress_their_addresses(space, zcid)
+
+
+def _suppress_their_addresses(space: str, zcid: str) -> None:
+    """A STOP HERE IS A STOP EVERYWHERE ON THE BOX (OSDev1, 2026-10-04). The conversation's flag only ever kept this
+    inbox quiet: the box's one do-not-contact list (core/compliance.py) is what the welcome email and the Lead Magnet's
+    guide check before they send, and nothing here wrote to it, so a person who said STOP in the inbox could still be
+    mailed by the rest of the box. Every email address THEY wrote from on this conversation goes on that list:
+    the inbound messages' senders and their recorded ids. Never the business's own address, which only ever appears
+    on outbound. Never raises: the conversation is opted out either way, and a failure is logged loud."""
+    try:
+        from core import compliance
+        with state.connect() as c:
+            found = {str(r[0] or "") for r in c.execute(
+                "SELECT DISTINCT sent_by FROM inbox_messages WHERE space = ? AND zernio_conversation_id = ? "
+                "AND direction = 'in'", (space, zcid))}
+            found |= {str(r[0] or "") for r in c.execute(
+                "SELECT ident FROM inbox_participant_ids WHERE space = ? AND zernio_conversation_id = ?",
+                (space, zcid))}
+        for addr in sorted(found):
+            try:
+                e = compliance.normalize_email(addr)
+            except compliance.ComplianceError:
+                continue                                 # 'contact', an @handle or an id: not an address
+            compliance.suppress(e, "unsubscribe", note="said stop in the inbox")
+    except Exception as e:                               # noqa: BLE001 — the opt-out above already stands
+        log.error("inbox.suppress_failed", space=space, conversation=zcid, error=f"{type(e).__name__}: {e}"[:200])
 
 
 def mark_read(space: str, zcid: str) -> None:

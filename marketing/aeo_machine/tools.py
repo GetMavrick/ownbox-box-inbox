@@ -130,9 +130,16 @@ def status():
         "topics": count,
         "waiting_on_you": count["refused"] + count["failed"] - sum(1 for r in rows if plan.is_unpublished(r)),
         "suggestions_waiting_for_ok": _suggestions_waiting(),
+        "search_console": _wrong_site(),
         "note": ("The machine publishes on its own, within the weekly number, once nothing is "
                  "missing. Articles that stopped are listed by aeo.articles with the reason."),
     }
+
+
+def _wrong_site() -> str:
+    """"" or the sentence: Search Console reports on another website than this machine writes for (#1793 F5 1.2)."""
+    from . import site
+    return site.mismatch()
 
 
 def _suggestions_waiting() -> int:
@@ -275,6 +282,9 @@ def searches():
         if s.get("why") == "no_property":
             return tools.NotConfigured("Google Search Console is connected but no site is chosen. "
                                        "The owner chooses it on Settings → Google Search Console.")
+        if s.get("wrong_site"):                           # another website's searches (#1793 F5 1.2): a choice to fix
+            return tools.NotConfigured(say.plain(s.get("why")) + " The owner chooses the site on Settings → "
+                                       "Google Search Console.")
         return {"available": False, "why": s.get("why"),
                 "unavailable": say.unavailable("Google Search Console", own=False)}
     lo, hi = sc.OPPORTUNITY
@@ -313,7 +323,7 @@ def sources():
     """Each data source: connected or not, and for Airtable which table. Never a credential."""
     from core.vendors import google_search_console as gsc
 
-    from . import posthog, sources as src
+    from . import posthog, site as _site, sources as src
     san, air, ph = src.sanity_state(), src.airtable_state(), posthog.state()
     try:
         google = gsc.status()
@@ -326,7 +336,9 @@ def sources():
                      **(_airtable_fields(src) if air["connected"] else {})},
         "posthog": {"connected": ph["connected"], "required": False, "recommended": True},
         "google_search_console": {"connected": bool(google.get("connected")),
-                                  "site": google.get("property") or None},
+                                  "site": google.get("property") or None,
+                                  "writes_for": _site.site() or None,
+                                  "problem": _site.mismatch(google.get("property")) or None},
         "google_analytics": {"connected": False, "note": "coming soon"},
         "note": "Credentials are never shown. The owner connects each on AEO → Data sources.",
     }
@@ -395,6 +407,8 @@ def _render_status(r: dict) -> str:
     counted = [f"{say.n(topics[k])} {w}" for k, w in words.items() if topics.get(k)]
     if counted:
         lines.append("Topics: " + ", ".join(counted) + ".")
+    if r.get("search_console"):
+        lines.append(f"{say.plain(r['search_console'])} {_page('SOURCES')}")
     waiting = int(r.get("waiting_on_you") or 0)
     if waiting:
         lines.append(f"{say.plural(waiting, 'article waits', 'articles wait')} on you: {_page('TOPICS')}")
@@ -558,6 +572,8 @@ def _render_sources(r: dict) -> str:
              f"Google Search Console, what people search: {on(gsc)}"
              + (f", for {gsc['site']}" if gsc.get("site") else ""),
              "Google Analytics: coming soon"]
+    if gsc.get("problem"):
+        lines.insert(4, say.plain(gsc["problem"]))
     return say.answer(
         say.section("Your AEO Machine's data sources:", lines),
         f"Keys are never shown. Connect each one on {_page('SOURCES')}",

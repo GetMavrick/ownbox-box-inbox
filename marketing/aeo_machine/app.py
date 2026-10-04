@@ -785,9 +785,13 @@ def aeo_sources():
     # CORE'S GOOGLE SCREEN IS THE OWNER'S ALONE, so a member is not shown a door they are refused at
     # (tests/test_a_buyer_can_walk_every_screen.py walks every link as a member).
     if _is_owner():
-        body += ('<div class="card"><h2>Google Search Console</h2>'
+        from . import site as _site
+        wrong = _site.mismatch()                         # one AEO site per box (#1793 F5 1.2)
+        body += ('<div class="card"' + (' style="border-color:var(--warn)"' if wrong else '')
+                 + '><h2>Google Search Console</h2>'
                  '<p>How your articles do in Google search.</p>'
-                 f'<div class="foot"><a href="{GOOGLE}">Open Google Search Console &rarr;</a></div>'
+                 + (f'<p><b>{_esc(wrong)}</b></p>' if wrong else '')
+                 + f'<div class="foot"><a href="{GOOGLE}">Open Google Search Console &rarr;</a></div>'
                  '</div>')
     return _page(SOURCES, "Data Sources",
                  "Where your articles are planned and published, and how they are doing.", body), 200
@@ -1240,6 +1244,11 @@ def _searches() -> str:
             return (f'<div class="card"><h2>{head}</h2><p>What people search for when your website '
                     'shows up, and the searches one good article could move onto the first '
                     f'screen.</p>{link}</div>')
+        if s.get("wrong_site"):                          # another website's searches (#1793 F5 1.2)
+            link = (f'<div class="foot"><a href="{GOOGLE}">Choose your site &rarr;</a></div>'
+                    if _is_owner() else '<p class="sub">The owner of this box can change it.</p>')
+            return ('<div class="card" style="border-color:var(--warn)"><h2>Search Console is reading another '
+                    f'website</h2><p>{_esc(why)}</p>{link}</div>')
         return ('<div class="card" style="border-color:var(--warn)"><h2>No searches right now</h2>'
                 f'<p>{_esc(why)}</p></div>')
     lo, hi = searches.OPPORTUNITY

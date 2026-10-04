@@ -1,4 +1,5 @@
-"""The seam machines call, and nothing else (plan §6): `sites()`, `day(site, day)`, `week(site, end_day)`, and
+"""The seam machines call, and nothing else (plan §6): `sites()`, `newest(site)`, `day(site, day)`,
+`week(site, end_day)`, and
 `pages(site, start, end, prefix)`, what each page brought (the AEO Machine's articles, #1793 Phase 2.4).
 
 Local DB reads only, from the store. No machine calls PostHog or Google directly: a machine that needs
@@ -17,6 +18,11 @@ def sites() -> list[str]:
     (setup fixes itself). ONLY THOSE (OSDev1, 2026-10-02): a site found once and since replaced by a typed list stays
     in the store, but never again gets a line on the review or the card."""
     return list(settings.sites())
+
+
+def newest(site: str) -> date | None:
+    """The last day stored for a site. The sync stores whole days (yesterday, after 06:00), so never today."""
+    return store.newest_day(site)
 
 
 def _totals(rows: list[dict]) -> dict:

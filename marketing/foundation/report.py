@@ -68,6 +68,15 @@ def _sent_by_ai(weeks: list[dict]) -> str:
             + "".join(f", {name} {v:,}" for name, v in rest))
 
 
+def _end(site: str, day: date) -> date | None:
+    """THE WEEK ENDS ON THE LAST WHOLE DAY STORED, never past it (OSDev1's finding, 10-04 14:08). The sync stores
+    yesterday after 06:00 and never today, so a week ending on the review's own day held six days: brian-macdonald.com
+    read 179 on Oct 3's review and 172 on Oct 4's, a fall nobody had, which the box's AI ranked, while the website and
+    AEO answers (the week ending yesterday) said 179. None when the site has nothing stored."""
+    newest = seam.newest(site)
+    return min(day, newest) if newest else None
+
+
 def _people(site: str, day: date) -> int | None:
     w = seam.week(site, day)
     return int(w["totals"]["sessions"] or 0) if w and w["days"] else None
@@ -78,20 +87,23 @@ def report(day: date) -> dict:
 
     THE HEADLINE IS THE WEEK'S VISITS FROM PEOPLE, ACROSS HIS SITES (OSDev1's assignment, 2026-10-02, scope #1839).
     The owner's AI read this segment's headline as label "" and value 0 beside "179 visits from people this week".
-    It is the sum of the per-site numbers below it, people only (visitors.py), so the two can never disagree. The
-    delta is this week against the week ending the day before, from the store, not from yesterday's stored row:
+    It is the sum of the per-site numbers below it, people only (visitors.py), so the two can never disagree. Each
+    site's week ends on its last stored day (`_end`), so today's review, before today is synced, carries the same
+    whole week as yesterday's. The delta is that week against the week ending the day before it, from the store, not
+    from yesterday's stored row:
     every row stored before this fix says 0, and "+185 vs the day before" would be a number nobody earned. A site
     without a week ending the day before means no change at all: its whole week would read as growth."""
     happened, total, before, sites, weeks = [], 0, 0, 0, []
     for site in seam.sites():
-        w = seam.week(site, day)
+        end = _end(site, day)
+        w = seam.week(site, end) if end else None
         if not w or not w["days"]:
             continue
         weeks.append(w)
         happened.append({"text": _line(site, w), "href": "/settings/sources"})
         total += int(w["totals"]["sessions"] or 0)
         sites += 1
-        prev = _people(site, day - timedelta(days=1))
+        prev = _people(site, end - timedelta(days=1))
         before = None if (before is None or prev is None) else before + prev
     sent = _sent_by_ai(weeks)
     if sent:

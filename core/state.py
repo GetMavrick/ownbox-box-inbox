@@ -715,6 +715,8 @@ _MIGRATION_OWNER: dict[int, str] = {
     56: "customer_voice",
     # 57 adds seo_plan.title — the AEO Machine's plan table, only on a box that carries it.
     57: "aeo_machine",
+    # 58 adds seo_plan.site, .airtable_id and .airtable_pushed — the same table, same reason.
+    58: "aeo_machine",
 }
 # A table each machine is known by, for the one-time bootstrap of boxes that predate the split.
 _MACHINE_MARKER = {"customer_voice": "voice_rails", "content": "reel_scripts", "lead": "gtm_leads"}
@@ -796,7 +798,7 @@ def _replay_machine(conn, machine: str, upto: int) -> None:
 # concurrent migrators: worker, dispatch, and watchdog can all boot and call init_db;
 # exactly one runs the steps, the rest wait on the lock then see the bumped version.
 
-SCHEMA_VERSION = 57
+SCHEMA_VERSION = 58
 
 
 def _migration_1(c) -> None:
@@ -1915,6 +1917,28 @@ def _migration_57(c) -> None:
         _add_column_if_missing(c, "seo_plan", "title")
 
 
+def _migration_58(c) -> None:
+    """EVERY AEO ROW CARRIES ITS SITE, AND THE AIRTABLE ROW IT CAME FROM (#1793 F5 items 1.2 and 1.4).
+
+    `site`: the bare host the article was planned for (`ownbox.io`), so a box whose website changes
+    never mixes one site's plan with another's (owner, 2026-10-02: one AEO site per box). NULL on
+    every existing row, which is the honest value: those rows were filed before the box kept it.
+
+    `airtable_id` and `airtable_pushed`: the Airtable record a topic came from, and the last state
+    written back to it (docs/PLAN_AEO_AIRTABLE_TOPIC_SYNC.md §7). The record id is unique where it
+    is set, so one Airtable row can never become two articles; NULL and '' are never compared.
+
+    Nothing is copied, moved or dropped (test_aeo_rename_keeps_the_data). Tagged `aeo_machine` in
+    _MIGRATION_OWNER: a box without the machine has no such table.
+    """
+    if _table_exists(c, "seo_plan"):
+        _add_column_if_missing(c, "seo_plan", "site")
+        _add_column_if_missing(c, "seo_plan", "airtable_id")
+        _add_column_if_missing(c, "seo_plan", "airtable_pushed")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS seo_plan_airtable_id ON seo_plan (airtable_id) "
+                  "WHERE airtable_id IS NOT NULL AND airtable_id != ''")
+
+
 MIGRATIONS = {
     46: _migration_46,   # the schema split's bootstrap (kernel step)
     1: _migration_1, 2: _migration_2, 3: _migration_3, 4: _migration_4,
@@ -1932,7 +1956,7 @@ MIGRATIONS = {
               45: _migration_45, 47: _migration_47, 48: _migration_48,
               49: _migration_49, 50: _migration_50, 51: _migration_51, 52: _migration_52,
               53: _migration_53, 54: _migration_54, 55: _migration_55,
-              56: _migration_56, 57: _migration_57}
+              56: _migration_56, 57: _migration_57, 58: _migration_58}
 
 
 # init_db IS SAFE TO CALL FROM MANY THREADS AND PROCESSES AT ONCE. Main went red on 2026-09-06
