@@ -263,14 +263,45 @@ UPGRADES_MAX_AGE_S = 48 * 3600
 CERT_MIN_DAYS = 14
 
 
+# WHERE THE TIMER WRITES ITS LAST RUN (Persistent=true timers keep a stamp file; its mtime is the last trigger).
+# MEASURED ON UBUNTU 24.04, systemd 255 (OSDev1, 2026-10-03): `systemctl show` on a timer has no
+# LastTriggerUSecRealtime at all, and prints LastTriggerUSec formatted ("Sat 2026-10-03 06:29:24 UTC") whatever
+# --timestamp says. Reading the missing property made every box older than 48 hours page "red upgrades".
+UPGRADES_STAMP = "/var/lib/systemd/timers/stamp-apt-daily-upgrade.timer"
+
+
+def _parse_show(text: str) -> dict:
+    """`systemctl show` output as {property: value}."""
+    return dict(ln.split("=", 1) for ln in str(text or "").splitlines() if "=" in ln)
+
+
 def _systemctl_show(unit: str) -> dict:
     """`systemctl show` for one unit, as {property: value}; {} where there is no systemctl."""
     try:
-        r = subprocess.run(["systemctl", "show", unit, "-p", "ActiveState", "-p", "LastTriggerUSecRealtime"],
+        r = subprocess.run(["systemctl", "show", unit, "-p", "ActiveState", "-p", "LastTriggerUSec"],
                            capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return {}
-    return dict(ln.split("=", 1) for ln in r.stdout.splitlines() if "=" in ln)
+    return _parse_show(r.stdout)
+
+
+def _last_upgrade_run(got: dict) -> float | None:
+    """When the upgrade timer last fired, as epoch seconds, or None: its stamp file first, then LastTriggerUSec as
+    systemd prints it ("Sat 2026-10-03 06:29:24 UTC"; "n/a" or empty when it never has)."""
+    try:
+        return os.path.getmtime(UPGRADES_STAMP)
+    except OSError:
+        pass
+    raw = str(got.get("LastTriggerUSec") or "").strip()
+    if not raw or raw.lower() in ("n/a", "0"):
+        return None
+    head, _, zone = raw.rpartition(" ")
+    try:
+        when = datetime.strptime(head, "%a %Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    # A server box runs on UTC; anything else is the box's own local time, which a naive datetime already is.
+    return (when.replace(tzinfo=timezone.utc) if zone.upper() in ("UTC", "GMT") else when).timestamp()
 
 
 def _box_age_s() -> float | None:
@@ -282,18 +313,15 @@ def _box_age_s() -> float | None:
         return None
 
 
-def check_upgrades(show=None, age=None) -> bool:
+def check_upgrades(show=None, age=None, last=None) -> bool:
     """The box's security updates still run: Ubuntu's upgrade timer is active and fired in the last 48 hours.
 
     A BOX YOUNGER THAN 48 HOURS PASSES WHILE THE TIMER IS ACTIVE (OSDev1's review of #1867): the timer fires once a
     day around 06:00, so the rehearsal box a release waits on, minutes old, has never fired it, and calling that a
     break of ours would stop every release. Past 48 hours, it must have run."""
     got = (show or _systemctl_show)(UPGRADES_TIMER)
-    try:
-        last_us = int(got.get("LastTriggerUSecRealtime") or 0)
-    except ValueError:
-        last_us = 0
-    fresh = last_us > 0 and (_now().timestamp() - last_us / 1e6) < UPGRADES_MAX_AGE_S
+    ran = (last or _last_upgrade_run)(got)
+    fresh = ran is not None and (_now().timestamp() - ran) < UPGRADES_MAX_AGE_S
     born = (age or _box_age_s)()
     young = born is not None and born < UPGRADES_MAX_AGE_S
     return got.get("ActiveState") == "active" and (fresh or young)

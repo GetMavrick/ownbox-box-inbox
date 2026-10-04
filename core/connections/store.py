@@ -35,7 +35,7 @@ SCHEMA_MAX = 8_000             # one tool's argument schema; a bigger one is kep
 DESCRIPTION_MAX = 1_000
 APP_MAX = 300_000              # one app's tools, as saved: the gateway reads them on every request
 # A TOOL THAT CHANGES THINGS IS NEVER "ON" (docs/SCOPE_CONNECTIONS_MCP_FIRST.md, phase 1): a coworker may only ASK
-# for it, and a person approves each one on Waiting for you (core/approvals.py).
+# for it, and a person approves each one on Approvals (core/approvals.py).
 ACTIONS_LATER = "That one changes things, so a coworker can only ask for it, and you approve each time."
 
 

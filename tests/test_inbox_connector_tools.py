@@ -83,6 +83,8 @@ PROPOSE_TOOLS = ("inbox.propose_reply", "inbox.propose_drafts",
                  "inbox.propose_signature",
                  # cold pitches turned around (owner, 2026-10-02): switched on from a chat, on one tap
                  "inbox.propose_pitch_back",
+                 # reply style per channel (owner, 2026-10-04): changed from a chat, on one tap
+                 "inbox.propose_reply_style",
                  # saved replies (#1821): one added from a chat, on one tap
                  "inbox.propose_saved_reply")
 
@@ -358,7 +360,8 @@ def test_a_chat_sees_what_the_screens_show():
     st = inbox_tools.settings()
     names = [x["name"] for x in st["settings"]]
     ok("settings lists every Inbox setting",
-       names == ["writing_replies", "opener", "hourly_send_cap", "mailbox_drafts"], str(names))
+       names == ["writing_replies", "opener", "hourly_send_cap", "reply_style_email", "reply_style_dms",
+                 "mailbox_drafts"], str(names))
     ok("...each with what it means and where it is changed",
        all(x.get("means") and x.get("changed_at") for x in st["settings"]))
     ok("...and the connections, by state only",

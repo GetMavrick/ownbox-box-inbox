@@ -1,4 +1,4 @@
-"""Waiting for you: a coworker asks, a person approves, the box does it once (core/approvals.py, connections).
+"""Approvals: a coworker asks, a person approves, the box does it once (core/approvals.py, connections).
 
 docs/SCOPE_CONNECTIONS_MCP_FIRST.md phase 1: a shift uses a connected app "with approvals and receipts". Against a
 real local MCP server:
@@ -6,7 +6,7 @@ real local MCP server:
   · a tool that changes things is never simply on: ticked on Data Sources, a coworker may only ASK for it;
   · asking writes one proposal and tells the owner's phone once; the app is not called; asking again is the same one;
   · only a seat that may draft for approval (act, write:proposals) sees the tool; a read-only key never does;
-  · Waiting for you shows exactly what will run, who asked and until when; the Dashboard says something waits;
+  · Approvals shows exactly what will run, who asked and until when; the Dashboard says something waits;
   · approve runs it once, with exactly the arguments shown, and shows what the app said; a second approve, a
     decline, an expired proposal, a disconnected app and a forged id never call the app;
   · the ask itself is on the coworker's receipt;
@@ -153,12 +153,29 @@ with state.connect() as c:
 ok("the ask itself is on the coworker's receipt", {"tool": "app_clinic_notes.create_note", "outcome": "ok"}
    in receipt, str(receipt))
 
-print("\nWaiting for you —")
+print("\nApprovals —")
 page = owner.get("/approvals").get_data(as_text=True)
 ok("it shows exactly what will run, who asked, and until when", "Create a note in Clinic Notes" in page
    and "Aftercare FAQ" in page and "No makeup for 24 hours." in page and "coworker weekly-digest run_1" in page
    and "waits until" in page)
-ok("the Dashboard says something is waiting", "Waiting for you" in owner.get("/dashboard").get_data(as_text=True))
+ok("the Dashboard says something is waiting", "<h2>Approvals</h2>" in owner.get("/dashboard").get_data(as_text=True))
+# ONE NAME (plan #1857 F2, D4: "The approvals screen is named 'Approvals'", owner 10-03): the screen, the Dashboard's
+# card, the push, Data Sources' link and every answer an AI reads say Approvals, and none says the old name.
+from core import approvals as _ap  # noqa: E402
+from core.connector import words as _words  # noqa: E402
+from marketing.aeo_machine import tools as _aeo_tools  # noqa: E402
+
+_screen = owner.get("/approvals").get_data(as_text=True)
+_said = {"screen": _screen, "dashboard": owner.get("/dashboard").get_data(as_text=True),
+         "push": _ap.PUSH_BODY, "sources": owner.get("/settings/sources").get_data(as_text=True),
+         "answer": _words.approve_line("Add a topic"),
+         "aeo tool": str({k: v for k, v in __import__("core.connector.tools", fromlist=["x"])._REGISTRY.items()
+                          if str(k).startswith("aeo.")})}
+ok("ONE NAME: Approvals on the screen, the card, the push, Data Sources and every answer; never 'Waiting for you'",
+   ("<title>Approvals" in _screen or "<h1>Approvals</h1>" in _screen)
+   and all("Approvals" in v for k, v in _said.items() if k != "aeo tool")
+   and not any("Waiting for you" in v for v in _said.values()),
+   {k: ("Waiting for you" in v, "Approvals" in v) for k, v in _said.items()})
 r = member.get("/approvals")
 ok("a member can't open it", r.status_code in (302, 303, 403), str(r.status_code))
 r = member.post("/approvals", data={"do": "approve", "id": got["approval"]})

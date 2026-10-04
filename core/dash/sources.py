@@ -124,7 +124,7 @@ def _app_row(slug: str, rec: dict, opened: bool = False) -> str:
                         + (f'<br><span class="quiet">{said}</span>' if said else "") + '</span></label>')
         else:
             # A TOOL THAT CHANGES THINGS IS NEVER SIMPLY ON: ticked, a coworker may ASK for it, and each ask waits
-            # for you on Waiting for you (core/approvals.py).
+            # for you on Approvals (core/approvals.py).
             app = _esc(rec.get("name"))
             why = (f"Changes things in {app}." if t.get("changes") else
                    f"{app} doesn't say whether this only reads, so the box treats it as changing things.")
@@ -434,7 +434,7 @@ def _render(note: str, kept: dict, cards: dict | None = None):
                     'tick <b>Read from the apps you connected</b>. Each call it makes is on its run\'s '
                     'receipt. Anything a coworker asks to change waits for you.</p>'
                     '<p><a href="/settings/shifts">Coworkers &rarr;</a> &nbsp; '
-                    '<a href="/approvals">Waiting for you &rarr;</a></p></div>')
+                    '<a href="/approvals">Approvals &rarr;</a></p></div>')
     body.append(_ideas_card(items, on))
     body.append(_connect_form(kept))
     body.append(_back())

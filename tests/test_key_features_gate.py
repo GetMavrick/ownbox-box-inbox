@@ -56,9 +56,23 @@ ai_health.test = lambda **kw: {"ok": True, "answer": "ready"}     # the AI's ans
 import time as _time  # noqa: E402
 
 UPKEEP = {"state": "active", "ago_s": 3600, "days": 60.0}
-key_features._systemctl_show = lambda unit: {"ActiveState": UPKEEP["state"], "LastTriggerUSecRealtime":
-                                             "0" if UPKEEP["ago_s"] is None else
-                                             str(int((_time.time() - UPKEEP["ago_s"]) * 1e6))}
+# WHAT systemd 255 ACTUALLY PRINTS for `systemctl show apt-daily-upgrade.timer -p ActiveState -p LastTriggerUSec`
+# (OSDev1, measured on Ubuntu 24.04.4): the stand-in hands back that text, through the check's own parser. No
+# LastTriggerUSecRealtime: timers don't have it, and reading it is what paged the owner's box on 2026-10-03.
+import datetime as _dt  # noqa: E402
+
+
+def _show_text() -> str:
+    last = ("n/a" if UPKEEP["ago_s"] is None else
+            _dt.datetime.fromtimestamp(_time.time() - UPKEEP["ago_s"], _dt.timezone.utc)
+            .strftime("%a %Y-%m-%d %H:%M:%S UTC"))
+    return f"ActiveState={UPKEEP['state']}\nLastTriggerUSec={last}\n"
+
+
+key_features._systemctl_show = lambda unit: key_features._parse_show(_show_text())
+import tempfile as _tempfile  # noqa: E402
+
+key_features.UPGRADES_STAMP = os.path.join(_tempfile.mkdtemp(), "stamp-apt-daily-upgrade.timer")   # absent by default
 import tempfile as _tmp  # noqa: E402
 
 from core import claim as _claim  # noqa: E402
@@ -421,6 +435,21 @@ res = key_features.run(post=post, url="https://box.example")
 ok("...and in the gate both are named, as ours, so they block a release",
    res["failed"] == ["certificate"] and res["why"] == {"certificate": "ours"}, res)
 UPKEEP["days"] = 60.0
+
+print("\nThe last run is read as systemd keeps it (OSDev1: the owner's box paged 'red upgrades' on 2026-10-03)\n")
+REAL = "ActiveState=active\nLastTriggerUSec=Sat 2026-10-03 06:29:24 UTC\n"     # systemd 255's output, verbatim
+got = key_features._parse_show(REAL)
+ok("THE REAL OUTPUT HAS NO REALTIME LINE, and its formatted stamp is read as 06:29:24 UTC that day",
+   "LastTriggerUSecRealtime" not in got and key_features._last_upgrade_run(got)
+   == _dt.datetime(2026, 10, 3, 6, 29, 24, tzinfo=_dt.timezone.utc).timestamp(), got)
+UPKEEP["ago_s"] = None                                   # systemd says n/a; only the stamp file can say it ran
+open(key_features.UPGRADES_STAMP, "w").close()
+os.utime(key_features.UPGRADES_STAMP, (_time.time() - 3600, _time.time() - 3600))
+ok("A STAMP FILE AN HOUR OLD: the timer ran, green", key_features.check_upgrades() is True)
+os.utime(key_features.UPGRADES_STAMP, (_time.time() - 50 * 3600, _time.time() - 50 * 3600))
+ok("...a stamp 50 hours old on a box 10 days old: red", key_features.check_upgrades() is False)
+os.remove(key_features.UPGRADES_STAMP)
+UPKEEP["ago_s"] = 3600
 
 print("\nALL KEY FEATURES GATE CHECKS PASS" if not _failed else f"\n{_failed} KEY FEATURES GATE CHECK(S) FAILED")
 sys.exit(1 if _failed else 0)

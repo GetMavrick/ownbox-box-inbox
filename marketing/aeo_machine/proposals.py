@@ -5,7 +5,7 @@ ruling the same morning: a person's own-AI seat is `act` by default, so it can "
 never send, publish or charge (no seat holds act:, every proposal is a tap)."
 
 ONE QUEUE, NOT A NEW ONE. Each proposal goes into core/approvals.py, the queue connected apps already
-use: it waits on Waiting for you and the owner's mobile app is told; Approve runs it once, Decline
+use: it waits on Approvals and the owner's mobile app is told; Approve runs it once, Decline
 changes nothing, and after a week it expires and never runs. Nothing here writes the plan or a setting
 on its own: `_run` is reached only from `approvals.decide`, which needs a person.
 
@@ -65,7 +65,7 @@ def _ask(title: str, detail: dict, seat) -> dict:
             "text": (f"Already waiting: \"{a['title']}\" is waiting for the owner's OK. Nothing has changed yet."
                      if repeat else
                      f"Asked: \"{a['title']}\" is waiting for the owner, who approves or declines on "
-                     "Waiting for you. Nothing has changed yet. Don't ask again for the same thing.")}
+                     "Approvals. Nothing has changed yet. Don't ask again for the same thing.")}
 
 
 # ── checks shared by proposing and running ─────────────────────────────────────────────────────────

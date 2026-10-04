@@ -1,4 +1,4 @@
-"""Waiting for you: what a coworker asked to do that changes something, for the owner to approve or decline.
+"""Approvals: what a coworker asked to do that changes something, for the owner to approve or decline.
 
 core/approvals.py holds the rules (nothing runs without a person; once; a week to decide). This is the one screen
 that decides: each proposal shows exactly what will run, in the app's own words, with who asked and when. Approve
@@ -21,7 +21,7 @@ from core.dash.home import chrome
 
 DOOR = approvals.PAGE
 _ID = re.compile(r"^ap_[0-9a-f]{20}$")
-_TITLE = "Waiting for you"
+_TITLE = "Approvals"   # ONE NAME (plan #1857 F2, D4 ruled by the owner 10-03)
 LEDE = "What your coworkers asked to do. Nothing changes until you approve it."
 
 
@@ -87,7 +87,7 @@ def card() -> str:
         return ""
     if not n:
         return ""
-    return (f'<div class="card"><h2>Waiting for you</h2><p class="sub">{n} '
+    return (f'<div class="card"><h2>Approvals</h2><p class="sub">{n} '
             f'{"thing a coworker asked" if n == 1 else "things your coworkers asked"} to do. Nothing changes '
             f'until you approve.</p><p><a href="{DOOR}">Review &rarr;</a></p></div>')
 

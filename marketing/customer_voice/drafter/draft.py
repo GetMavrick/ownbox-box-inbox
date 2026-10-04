@@ -73,9 +73,40 @@ def pitch_back() -> dict:
     return {"on": on and bool(link), "link": link}
 
 
-def _system() -> str:
-    pb = pitch_back()
-    return SYSTEM + (PITCH_CASE.format(link=pb["link"]) if pb["on"] else "")
+# REPLY STYLE, PER CHANNEL (owner, 2026-10-04: "I wish there was a setting of a style of response that we could select
+# per channel... I just always want to be trying to get more business so want to always be closing ABC"). Inbox
+# Settings, Reply Style writes `inbox / reply_style.email` and `reply_style.dms` (inbox/reply_style.py); the drafter
+# reads them by the conversation's platform. The same one model call: the style is a paragraph of instructions, never a
+# second call. The rules above still bind it: nothing invented, nothing promised, a person sends.
+STYLE_SALES = (
+    "\nSTYLE FOR THIS REPLY: SALES. This business always wants more business. When someone asks the business "
+    "something (case 1), answer it first, then move them one clear step closer to buying or booking: end with a "
+    "specific next step, such as booking a time, visiting the website{site}, or replying with the one detail you need "
+    "to help them. If they show any interest, ask for the booking or the sale, plainly. Warm and confident, never pushy "
+    "or desperate. A price, a time or an offer you were not told is still never invented: the next step is to ask for "
+    "what you need or point them to where they can see it.")
+STYLE_SERVICE = (
+    "\nSTYLE FOR THIS REPLY: CUSTOMER SERVICE. Solve what they need, clearly and kindly. Do not sell or push; offer "
+    "more help only where it follows naturally.")
+
+
+def reply_style(platform) -> str:
+    """"sales" or "service" as the owner chose it for this conversation's channel (email, or a DM on any other
+    platform), or "" when nobody has chosen: then the instructions are exactly what every box already had."""
+    ch = "email" if str(platform or "").strip().lower() == "email" else "dms"
+    try:
+        from core import box_settings
+        v = str(box_settings.get("inbox", f"reply_style.{ch}", default="") or "")
+    except Exception:                                    # noqa: BLE001 — a setting never costs a draft
+        return ""
+    return v if v in ("sales", "service") else ""
+
+
+def _system(platform=None) -> str:
+    pb, chosen = pitch_back(), reply_style(platform)
+    style = (STYLE_SALES.format(site=f" ({pb['link']})" if pb["link"] else "") if chosen == "sales" else
+             STYLE_SERVICE if chosen == "service" else "")
+    return SYSTEM + (PITCH_CASE.format(link=pb["link"]) if pb["on"] else "") + style
 
 
 def _bare(link: str) -> str:
@@ -146,7 +177,7 @@ def _pitch_back_on() -> bool:
 
 
 def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
-              history: list[dict] | None = None) -> str | None:
+              history: list[dict] | None = None, platform: str | None = None) -> str | None:
     """One model call → one stored draft. Returns the text, or None if nothing was written.
 
     THE ONLY CALL TO A MODEL IN THIS MACHINE, and it goes through `core.brain.think` — never an
@@ -205,7 +236,7 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
         # business — which is why every draft it wrote asked "could you tell me what service
         # you're interested in?" instead of answering. Passed as cached_context, it is the facts
         # without the setting sources.
-        text = brain.think(task="inbox_draft", prompt=prompt, system=_system(),
+        text = brain.think(task="inbox_draft", prompt=prompt, system=_system(platform),
                            cached_context=brain.knowledge_context() or None,
                            max_tokens=300, isolated=True,
                            job_id=f"draft:{space}:{in_reply_to}")
@@ -397,7 +428,7 @@ def sweep(space: str) -> dict:
         except Exception:                        # noqa: BLE001 — draft on the inbound alone
             history = []
         if draft_one(space=space, zcid=row["zcid"], in_reply_to=row["inbound_id"],
-                     inbound=row.get("inbound_body") or "", history=history):
+                     inbound=row.get("inbound_body") or "", history=history, platform=row.get("platform")):
             drafted += 1
     # A SWEEP THAT LOOKED AT WORK AND DID NONE OF IT SAYS SO, OUT LOUD. This is the alarm that was
     # missing when the drafter sat head-blocked for seven hours on the owner's own box: every

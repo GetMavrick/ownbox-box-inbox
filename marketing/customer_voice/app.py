@@ -1208,6 +1208,7 @@ shell.register_section(
         {"key": "overview", "label": "Overview", "href": "/inbox/settings"},
         {"key": "mailbox", "label": "Mailbox", "href": "/inbox/mailbox"},
         {"key": "signature", "label": "Email Signature", "href": "/inbox/signature"},
+        {"key": "reply_style", "label": "Reply Style", "href": "/inbox/reply-style"},
         {"key": "pitch_back", "label": "Cold Pitches", "href": "/inbox/pitch-back"},
         {"key": "snippets", "label": "Saved Replies", "href": "/inbox/snippets"},
         {"key": "channels", "label": "Social Accounts", "href": "/inbox/connect"},
@@ -5085,6 +5086,55 @@ def r_signature():
             '<p class="quiet" style="margin:0">Leave it empty to stop adding one.</p>'
             '<button class="btn" type="submit" style="min-height:48px">Save signature</button></form>')
     return _shell(head + form + _back_link(), here="/inbox/signature"), 200
+
+
+# ── reply style, per channel (inbox/reply_style.py, drafter STYLE_SALES / STYLE_SERVICE) ─────────────────────────────
+# Owner, 2026-10-04: "I wish there was a setting of a style of response that we could select per channel... I just
+# always want to be trying to get more business so want to always be closing ABC." Owner edits; members read.
+@blueprint.route("/inbox/reply-style", methods=["GET", "POST"])
+def r_reply_style():
+    from marketing.customer_voice.inbox import reply_style as _rs
+    gate = _gate()
+    if gate is not None:
+        return gate
+    owner = _is_owner()
+    if request.method == "POST" and not owner:
+        return _owner_refusal()
+    note = ""
+    if request.method == "POST":
+        try:
+            u = dash.session_user(request) or {}
+        except Exception:                        # noqa: BLE001 — only whose name the audit line carries
+            u = {}
+        try:
+            _rs.put(email=request.form.get("email"), dms=request.form.get("dms"), by=u.get("id"))
+            return redirect("/inbox/reply-style?saved=1", code=303)
+        except ValueError as e:
+            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
+    cur = _rs.get()
+    saved = request.args.get("saved") and not note
+    head = ('<h1>Reply style</h1>'
+            '<p class="quiet">How your box writes the replies it drafts, for each channel. <b>Sales</b> answers, then '
+            'always moves the person one step closer to booking or buying. <b>Customer service</b> solves what they '
+            'need without selling. Every reply still waits for you to send it.</p>'
+            + ('<p class="quiet">Saved. New drafts are written this way.</p>' if saved else "") + note)
+    if not owner:
+        rows = "".join(f'<p>{_rs.CHANNEL_WORDS[ch]}: {_rs.STYLES[cur[ch]]}</p>' for ch in _rs.CHANNELS)
+        return _shell(head + rows + _back_link(), here="/inbox/reply-style"), 200
+    field = ('font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;width:100%;'
+             'min-height:48px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)')
+
+    def pick(ch):
+        opts = "".join(f'<option value="{k}"{" selected" if cur[ch] == k else ""}>{_esc(v)}</option>'
+                       for k, v in _rs.STYLES.items())
+        return ('<label style="display:block"><span class="t" style="display:block;'
+                f'font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px">{_rs.CHANNEL_WORDS[ch]}</span>'
+                f'<select name="{ch}" aria-label="{_rs.CHANNEL_WORDS[ch]}" style="{field}">{opts}</select></label>')
+    form = ('<form class="compose" method="post" action="/inbox/reply-style" '
+            'style="display:flex;flex-direction:column;gap:12px;align-items:stretch">'
+            + pick("email") + pick("dms")
+            + '<button class="btn" type="submit" style="min-height:48px">Save</button></form>')
+    return _shell(head + form + _back_link(), here="/inbox/reply-style"), 200
 
 
 # ── cold pitches, turned around (inbox/pitch_back.py, drafter PITCH_BACK) ───────────────────────────────────────────

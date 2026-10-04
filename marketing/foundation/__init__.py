@@ -22,6 +22,7 @@ from core.worker import register_periodic as _register_periodic
 
 from . import report as _report  # noqa: F401 — registers the reporter
 from . import card as _card  # noqa: F401 — registers the Data Sources card (core/source_cards.py)
+from . import tools as _tools  # noqa: F401 — registers website.detail for the owner's AI (#1857 F1)
 from . import jobs as _jobs
 from . import sync as _sync
 from .schema import DDL as _DDL

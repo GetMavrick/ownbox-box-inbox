@@ -158,6 +158,29 @@ def unavailable(vendor: str, when=None, *, own: bool = True) -> dict:
     return {"vendor": vendor, "at": at, "words": f"{vendor} didn't answer at {clock(at)}{tail}"}
 
 
+def could_find_out(source_key: str) -> str:
+    """"I could find out: connect Search Console: <link>", when a tool cannot answer for want of a source (#1857 F1).
+
+    `source_key` is a source the box knows: "search_console" (the box's own Google sign-in), an app from the Data
+    Sources ideas (core/connections/ideas.py, e.g. "posthog", "notion"), or a Data Sources card ("website"). The name
+    and the address come from those, so the sentence names what the owner sees on the page. "" for anything else."""
+    key = str(source_key or "")
+    try:
+        from core import source_cards
+        from core.connections import ideas
+        if key == "search_console":
+            name, path = ideas.SEARCH_CONSOLE_IDEA[0], ideas.SEARCH_CONSOLE
+        elif ideas.get(key):
+            name, path = ideas.get(key)["name"], "/settings/sources"
+        elif source_cards.get(key):
+            name, path = source_cards.get(key)["title"], f"/settings/sources/{key}"
+        else:
+            return ""
+    except Exception:                                    # noqa: BLE001 — a sentence is never worth an answer
+        return ""
+    return f"I could find out: connect {name}: {link(path)}"
+
+
 def as_of(iso, stale: bool = False) -> str:
     """Freshness in words. `stale`: said, never hidden (core/report_tools.py: stale-and-labelled is survivable)."""
     when = clock(iso)

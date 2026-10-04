@@ -387,6 +387,11 @@ def status():
     }
 
 
+def _rs_get() -> dict:
+    from marketing.customer_voice.inbox import reply_style
+    return reply_style.get()
+
+
 def settings():
     """Every Inbox setting, its value, and what it means — the Settings screen, in words."""
     from marketing.customer_voice.inbox import mailbox_drafts
@@ -405,6 +410,10 @@ def settings():
             {"name": "hourly_send_cap", "value": int(cfg.get("hourly_send_cap") or 40),
              "means": "the most messages the box sends in any hour, counted across every send",
              "changed_at": "the box's configuration (not on a screen yet)"},
+            *[{"name": f"reply_style_{ch}", "value": _rs_get()[ch],
+               "means": f"how the box writes drafted replies to {'email' if ch == 'email' else 'direct messages'}: "
+                        "sales moves them toward booking or buying, service solves it without selling",
+               "changed_at": "/inbox/reply-style"} for ch in ("email", "dms")],
             {"name": "mailbox_drafts", "value": "on" if mailbox_drafts.enabled() else "off",
              "means": "replies to email are also left in the mailbox's own Drafts folder",
              "changed_at": "the box's configuration (not on a screen yet)"},
@@ -947,6 +956,23 @@ def propose_signature(text=None, seat=None):
                         "Set your email signature" if t else "Stop adding an email signature", seat)
 
 
+def propose_reply_style(email=None, dms=None, seat=None):
+    """Ask the owner to change how the box drafts replies: Sales or Customer service, for email and for DMs."""
+    from marketing.customer_voice.inbox import reply_style
+    if email is None and dms is None:
+        return {"asked": False, "error": "give email, dms or both: sales or service"}
+    try:
+        want = {ch: reply_style.clean(v) for ch, v in (("email", email), ("dms", dms)) if v is not None}
+    except ValueError as e:
+        return {"asked": False, "error": str(e)}
+    cur = reply_style.get()
+    if all(cur[ch] == v for ch, v in want.items()):
+        return {"asked": False, "note": "the reply style is already that"}
+    words = {reply_style.CHANNEL_WORDS[ch]: reply_style.STYLES[v] for ch, v in want.items()}
+    what = "Reply style: " + ", ".join(f"{k} {v}" for k, v in words.items())
+    return _ask_control("reply_style", want, {"Change": what, **words}, what, seat)
+
+
 def propose_pitch_back(on=None, link=None, seat=None):
     """Ask the owner to turn cold pitches around (or stop), with the website each reply points to."""
     from marketing.customer_voice.inbox import pitch_back
@@ -1024,6 +1050,14 @@ def _run_control(detail: dict) -> dict:
             return {"ok": False, "text": f"Not changed: {e}"}
         return {"ok": True, "text": "Signature saved. Every email reply ends with it." if t
                 else "No signature is added any more."}
+    if action == "reply_style":
+        from marketing.customer_voice.inbox import reply_style
+        try:
+            cur = reply_style.put(email=detail.get("email"), dms=detail.get("dms"), by=_who_approved())
+        except ValueError as e:
+            return {"ok": False, "text": f"Not changed: {e}"}
+        return {"ok": True, "text": "Saved. New drafts are written this way: " + ", ".join(
+            f"{reply_style.CHANNEL_WORDS[ch]} {reply_style.STYLES[cur[ch]]}" for ch in reply_style.CHANNELS) + "."}
     if action == "pitch_back":
         from marketing.customer_voice.inbox import pitch_back
         try:
@@ -1072,6 +1106,18 @@ tools.register(
                 "(name, title, website). An empty text stops adding one. Nothing changes until the owner approves.",
     args={"text": {"type": "string", "required": True,
                    "description": "The whole signature, rows separated by new rows; empty to stop adding one."}},
+)
+
+tools.register(
+    "propose_reply_style",
+    title="Ask before changing how replies are written",
+    fn=propose_reply_style, machine=MACHINE, min_role="act", render=_render_proposal,
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to change the style the box drafts replies in, per channel: sales (answer, then always "
+                "move them a step closer to booking or buying) or service (solve it, no selling). Drafts still wait "
+                "to be sent. Nothing changes until the owner approves.",
+    args={"email": {"type": "string", "required": False, "description": "sales or service, for email."},
+          "dms": {"type": "string", "required": False, "description": "sales or service, for direct messages."}},
 )
 
 tools.register(

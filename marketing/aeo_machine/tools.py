@@ -246,7 +246,8 @@ def searches():
     if not s.get("ok"):
         if s.get("why") == "not_connected":
             return tools.NotConfigured("Google Search Console is not connected. The owner "
-                                       "connects it on Settings → Google Search Console.")
+                                       "connects it on Settings → Google Search Console. "
+                                       + say.could_find_out("search_console"))
         if s.get("why") == "no_property":
             return tools.NotConfigured("Google Search Console is connected but no site is chosen. "
                                        "The owner chooses it on Settings → Google Search Console.")
@@ -563,7 +564,7 @@ tools.register(
     fn=sources, machine=MACHINE, min_role="read", capability=CAPABILITY, render=_render_sources,
     description="Whether Sanity, Airtable, PostHog and Google Search Console are connected, and "
                 "which table and site. Never a credential.")
-# THE PROPOSALS. Each asks; only a person's Approve on Waiting for you runs it (proposals.py).
+# THE PROPOSALS. Each asks; only a person's Approve on Approvals runs it (proposals.py).
 from . import proposals  # noqa: E402
 
 
@@ -579,7 +580,7 @@ tools.register(
     render=_render_proposal,
     wants_seat=True,
     description="Ask the owner to add a topic to the AEO Machine's plan. It is NOT added: it waits on "
-                "Waiting for you until the owner approves or declines. With now=true, an approved topic "
+                "Approvals until the owner approves or declines. With now=true, an approved topic "
                 "goes next and is written and published within minutes.",
     args={"question": {"type": "string", "required": True,
                        "description": "The question the article answers, as a customer would ask it."},

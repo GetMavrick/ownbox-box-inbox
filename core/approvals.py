@@ -1,4 +1,4 @@
-"""Waiting for you: what an AI coworker asked to do that changes something, held until a person says yes.
+"""Approvals: what an AI coworker asked to do that changes something, held until a person says yes.
 
 docs/SCOPE_CONNECTIONS_MCP_FIRST.md, phase 1 (owner-approved 2026-10-01): a shift can use a connected app "with
 approvals and receipts". A coworker never changes anything in an app on its own. It PROPOSES; the proposal waits
@@ -39,7 +39,7 @@ _KINDS: dict[str, dict] = {}
 _PROVIDERS = {"app_action": "core.connections.gateway", "box_pause": "core.box_tools"}
 # THE LOCK SCREEN NAMES NO APP AND NO MACHINE (core/machine_breaks.py keeps the same rule): the page it opens does.
 PUSH_TITLE = "Ownbox"
-PUSH_BODY = "A coworker is waiting for your OK. Tap to review."
+PUSH_BODY = "A coworker is waiting for your OK on Approvals. Tap to review."
 
 
 # WHO IS DECIDING, while an approved proposal runs. `run(detail)` takes only what was proposed, so a kind that

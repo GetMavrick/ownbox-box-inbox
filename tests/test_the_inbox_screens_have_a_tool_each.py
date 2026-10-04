@@ -40,6 +40,7 @@ TOOLS = {
     "/inbox/drafts": ("inbox.propose_drafting",),
     "/inbox/signature": ("inbox.propose_signature",),
     "/inbox/pitch-back": ("inbox.propose_pitch_back",),
+    "/inbox/reply-style": ("inbox.propose_reply_style",),
     "/inbox/snippets": ("inbox.saved_replies", "inbox.propose_saved_reply"),
 }
 

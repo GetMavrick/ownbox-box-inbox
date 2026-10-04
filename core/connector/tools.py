@@ -110,12 +110,14 @@ _CAPABILITY = re.compile(r"^(read|write|act):[a-z][a-z0-9_]{2,39}$")
 # because every seat on a box is minted by its owner for their own assistant, and which tools are on at all
 # is the owner's choice per connection (core/connections/store.py). Actions are not this capability: they
 # come later, each behind a person's yes.
+# `read:people` ("Who is this?", core/person_tool.py) is held by act and service and NOT by read: owner, 2026-10-03,
+# D7 on #1857, "Only connections allowed to take actions can look up who a person is. Names stay hidden by default."
 _ROLE_CAPABILITIES = {
     "read":    frozenset({"read:manifest", "read:reports", "read:inbox", "read:health", "read:apps"}),
     "act":     frozenset({"read:manifest", "read:reports", "read:inbox", "read:health",
-                          "read:spend", "write:proposals", "read:apps"}),
+                          "read:spend", "write:proposals", "read:apps", "read:people"}),
     "service": frozenset({"read:manifest", "read:reports", "read:inbox", "read:health",
-                          "read:spend", "write:proposals", "read:apps"}),
+                          "read:spend", "write:proposals", "read:apps", "read:people"}),
 }
 
 
