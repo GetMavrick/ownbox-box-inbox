@@ -57,6 +57,12 @@ MAX_USD = 0.50                             # an API-key box: one question never 
 KEEP_S = 24 * 3600                         # an answer can be collected for a day, then it is gone
 QUESTION_MIN, QUESTION_MAX = 3, 1000
 MCP_URL = "http://127.0.0.1:8000/mcp"      # the box's MCP, as the sandboxed CLI reaches it (runner.MCP_URL)
+OFFERS = "offers:"                         # box_settings key per ask seat: the propose tools its tools offered
+OFFERS_MAX = 6
+QUEUE_MAX = 5                              # questions waiting their turn; one more is told the box is busy
+RUN_S = MAX_MINUTES * 60 + 150             # how long one run can hold the box (the sandbox's kill plus grace)
+TURN_POLL_S = 2.0                          # how often a waiting question looks for its turn
+QUEUED_ALIVE_S = 30                        # a waiting question that hasn't looked for its turn in this long is gone
 SLUG = "ask"                               # names the sandbox unit: aios-coworker-ask-<id>
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # "_ask": runner.discover() skips folders starting with "_", so this is never read as a coworker.
@@ -77,6 +83,9 @@ cause you cannot see. If the box can't see something, say so plainly and say whi
 full links the tools give you when pointing the owner somewhere.
 - Only draft or propose something (tools with draft or propose in the name) when the question asks you to act. \
 Every proposal waits for the owner's tap on Approvals; nothing sends, publishes or spends without it.
+- Offering is not doing: when a tool you read offered something under "I can start", or your answer names \
+something the owner could act on and a propose tool fits it, put it in can_start. Leave can_start empty only when \
+no task fits.
 - Never call core_ask or core_ask_result: you are the one answering.
 - Never use these words: phone, ring, call, dial, line, voice, engine. Say mobile app.
 
@@ -149,10 +158,83 @@ def _prune() -> None:
                           [(NS, _key(i)) for i in old])
 
 
-def _busy() -> bool:
-    """Another question is being answered right now (its run can't outlast MAX_MINUTES plus the sandbox's grace)."""
-    return any(row.get("status") == "working" and _age_s(row.get("started_at")) < MAX_MINUTES * 60 + 150
-               for _, row, _ in _all())
+def _live(row: dict) -> bool:
+    """A question still holding or waiting for the box: working inside one run's time, or queued inside the
+    time every question ahead of it could take."""
+    if row.get("status") == "working":
+        return _age_s(row.get("run_at") or row.get("started_at")) < RUN_S
+    if row.get("status") == "queued":
+        # A WAITING QUESTION IS ALIVE ONLY WHILE IT KEEPS LOOKING FOR ITS TURN (OSDev4's review of #1901). It waits in
+        # a thread of a web process; a deploy's restart ends that thread and leaves the row queued, and counted by its
+        # age alone it held every later question back for half an hour. Each look writes `polled_at`.
+        return _age_s(row.get("polled_at") or row.get("started_at")) < QUEUED_ALIVE_S
+    return False
+
+
+def _waiting() -> int:
+    return sum(1 for _, row, _ in _all() if row.get("status") == "queued" and _live(row))
+
+
+# ONE ANSWER AT A TIME, AND THE REST WAIT THEIR TURN (OSDev1, 2026-10-04). The box's AI runs one question at a time
+# (one sandbox, one budget), and a second question used to be refused: "I'm answering another question right now."
+# The daily check met it as soon as an AI asked two things at once. Now a second question is queued and answered
+# in the order asked. THE TURN IS TAKEN IN ONE WRITE TRANSACTION, so the two web processes can never both start one.
+def _claim(ask_id: str) -> bool:
+    """Take the box for `ask_id` if nothing is running and nothing asked earlier is waiting. -> taken."""
+    from core import state
+    key = _key(ask_id)
+    with state.connect() as c:
+        c.execute("BEGIN IMMEDIATE")
+        rows = {}
+        for k, value in c.execute("SELECT key, value FROM box_settings WHERE machine = ? AND key LIKE ? "
+                                  "AND user_id = ''", (NS, PREFIX + "%")).fetchall():
+            try:
+                rows[k] = json.loads(value)
+            except ValueError:
+                continue
+        mine = rows.get(key)
+        if not isinstance(mine, dict) or mine.get("status") != "queued":
+            return False
+        ahead = (str(mine.get("started_at") or ""), ask_id)
+        blocked = any(
+            row.get("status") == "working" or (str(row.get("started_at") or ""), k[len(PREFIX):]) < ahead
+            for k, row in rows.items() if k != key and isinstance(row, dict) and _live(row))
+        mine = {**mine, "polled_at": _iso()} if blocked else {**mine, "status": "working", "run_at": _iso()}
+        c.execute("UPDATE box_settings SET value = ? WHERE machine = ? AND key = ? AND user_id = ''",
+                  (json.dumps(mine), NS, key))
+        return not blocked
+
+
+def _turn(ask_id: str) -> bool:
+    """Wait for this question's turn. -> True when it holds the box, False when its wait ran out."""
+    deadline = time.monotonic() + RUN_S * (QUEUE_MAX + 1)
+    while time.monotonic() < deadline:
+        if _claim(ask_id):
+            return True
+        time.sleep(TURN_POLL_S)
+    return False
+
+
+# ── what a question's own AI was offered (core/connector/words.py `can_start`) ─────────────────────────────────
+def note_offers(seat_id: str, tool_names) -> None:
+    """Keep the propose tools a tool's answer offered this ask's AI, newest last, at most OFFERS_MAX."""
+    if not seat_id or not tool_names:
+        return
+    from core import box_settings
+    had = box_settings.get(NS, OFFERS + seat_id)
+    had = [str(x) for x in had] if isinstance(had, list) else []
+    keep = list(dict.fromkeys([*had, *(str(t) for t in tool_names)]))[-OFFERS_MAX:]
+    box_settings.put(NS, OFFERS + seat_id, keep, set_by="ask")
+
+
+def _offers(seat_id: str, *, forget: bool = False) -> list[str]:
+    """The offers kept for this seat, NEWEST FIRST (the tools read last are the ones closest to the answer)."""
+    from core import box_settings, state
+    got = box_settings.get(NS, OFFERS + seat_id) if seat_id else None
+    if forget and seat_id:
+        with state.connect() as c:
+            c.execute("DELETE FROM box_settings WHERE machine = ? AND key = ? AND user_id = ''", (NS, OFFERS + seat_id))
+    return [str(x) for x in reversed(got)] if isinstance(got, list) else []
 
 
 # ── what an answer looks like ───────────────────────────────────────────────────────────────────────────────
@@ -221,6 +303,9 @@ def _text(row: dict) -> str:
     if st == "working":
         return (f"I'm still working on that. Ask me for the answer in a minute: it's ask {row['ask_id']} "
                 f"(core.ask_result).")
+    if st == "queued":
+        return (f"I'm finishing another question first; yours is next in line. Ask me for the answer in a couple of "
+                f"minutes: it's ask {row['ask_id']} (core.ask_result).")
     if st == "failed":
         said = f"I couldn't answer that this time: {row.get('why') or 'the box AI did not finish'}."
         return "\n\n".join(x for x in (said, row.get("fallback") or "") if x)
@@ -274,8 +359,12 @@ def _agent(ask_id: str, question: str, caps: list, *, run_agent=None) -> dict:
                            mcp={"url": MCP_URL, "credential": cred}, web=(), max_turns=MAX_TURNS,
                            max_minutes=MAX_MINUTES, max_usd=MAX_USD, task=AI_TASK)
         got = _parse(result.get("text") or "")
-        return {"status": "answered", "answered_by": "box_ai", **got,
-                "can_start": _starts(got["can_start"], set(caps)),
+        starts = _starts(got["can_start"], set(caps))
+        if not starts:
+            # THE AI LEFT OUT A TASK ITS OWN TOOLS OFFERED IT: the answer carries them, through the same filter (a
+            # real propose tool this asker may use), so nothing is offered that the tools did not offer first.
+            starts = _starts([{"tool": t, "why": ""} for t in _offers(seat_id)], set(caps))
+        return {"status": "answered", "answered_by": "box_ai", **got, "can_start": starts,
                 "proposed": _proposed((label, seat_id), since), "took_s": round(time.monotonic() - t0, 1)}
     except Exception as e:                                # noqa: BLE001 — every ending has a sentence
         log.warning("ask.failed", ask_id=ask_id, error=f"{type(e).__name__}: {str(e)[:200]}")
@@ -286,6 +375,7 @@ def _agent(ask_id: str, question: str, caps: list, *, run_agent=None) -> dict:
         return {"status": "failed", "why": why, "proposed": _proposed((label, seat_id), since),
                 "took_s": round(time.monotonic() - t0, 1), **_fallback()}
     finally:
+        _offers(seat_id, forget=True)
         seats.revoke(seat_id)
 
 
@@ -364,17 +454,23 @@ def ask(question: str | None = None, seat=None, *, run_agent=None, think=None, w
                             **_fallback()})
 
     _prune()
-    if _busy():
-        return {"status": "busy", "text": "I'm answering another question right now. Ask me again in a minute."}
+    if _waiting() >= QUEUE_MAX:
+        return {"status": "busy", "text": "I'm answering other questions right now. Ask me again in a few minutes."}
     ask_id = "ask_" + secrets.token_hex(6)
-    row = {"ask_id": ask_id, "status": "working", "question": q, "started_at": _iso(),
+    row = {"ask_id": ask_id, "status": "queued", "question": q, "started_at": _iso(),
            "seat": str(seat.get("id") or "")}
     _save(ask_id, row)
     log.info("ask.started", ask_id=ask_id, seat=row["seat"], capabilities=len(caps))
 
     def work():
+        if not _turn(ask_id):
+            _save(ask_id, {**row, "status": "failed", "why": "other questions held the box too long",
+                           **_fallback(), "finished_at": _iso()})
+            log.warning("ask.no_turn", ask_id=ask_id)
+            return
+        held = _load(ask_id) or row
         done = _agent(ask_id, q, caps, run_agent=run_agent)
-        _save(ask_id, {**row, **done, "finished_at": _iso()})
+        _save(ask_id, {**held, **done, "finished_at": _iso()})
         log.info("ask.finished", ask_id=ask_id, status=done["status"], took_s=done.get("took_s"))
 
     # THE QUESTION OUTLIVES THE WAIT. The run goes on in its own thread (a gthread worker heartbeats from its own
@@ -401,7 +497,7 @@ def ask_result(ask_id: str | None = None, seat=None) -> dict:
     if not row or row.get("seat") != str(seat.get("id") or ""):
         return {"status": "not_found", "text": f"There's no question {aid or '(none)'} from this connection. "
                                                "Answers are kept for a day."}
-    if row.get("status") == "working" and _age_s(row.get("started_at")) > MAX_MINUTES * 60 + 150:
+    if row.get("status") in ("working", "queued") and not _live(row):
         row = {**row, "status": "failed", "why": "the box AI did not finish in time"}
     return _public(row)
 

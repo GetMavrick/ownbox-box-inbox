@@ -261,6 +261,10 @@ def _deploy_authorized(req) -> bool:
     stores a stage from a fixed list, and `/deploy/prepare-restart` holds the update lock for at
     most 30 minutes, and only while an upgrade is under way. Leaked, the worst either does is show a
     wrong stage or delay an update by half an hour. Neither reads or sends anything.
+
+    AND 2026-10-04 (core/labs.py): `/deploy/labs`, where HQ switches one labs feature on or off for one box. It
+    stores true or false under a name from a fixed list (labs.KNOWN), and answers with the state held. Leaked, the
+    worst it does is show a feature HQ built but has not yet released, or hide it again. It reads and sends nothing.
     """
     narrow = getattr(settings, "deploy_token", "") or ""
     if not narrow:

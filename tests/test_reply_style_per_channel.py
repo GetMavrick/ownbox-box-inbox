@@ -74,8 +74,8 @@ ok("...and Settings shows Customer service for both", reply_style.get() == {"ema
 print("\nSales on email, Customer service on DMs\n")
 reply_style.put(email="sales", dms="service", by="owner")
 c = ask("email")
-ok("an email draft learns the sales style", "STYLE FOR THIS REPLY: SALES" in c.get("system", "")
-   and "closer to buying or booking" in c.get("system", ""), c.get("system", "")[-300:])
+ok("an email draft learns the sales style", "STYLE FOR THIS REPLY: STRONG SALES" in c.get("system", "")
+   and "push for the booking or the sale" in c.get("system", ""), c.get("system", "")[-300:])
 ok("...in the same one model call", len(calls) == 1)
 ok("...and the rules still bind it: nothing invented", "never invented" in c.get("system", "")
    and "Never invent a price" in c.get("system", ""))
@@ -96,7 +96,7 @@ for bad in ("pushy", "", "SALES!"):
         said = ""
     except ValueError as e:
         said = str(e)
-    ok(f"{bad!r} is refused in words", "Sales or Customer service" in said, said)
+    ok(f"{bad!r} is refused in words", "Customer service, Subtle sales or Strong sales" in said, said)
 ok("...and nothing changed", reply_style.get() == {"email": "sales", "dms": "sales"})
 
 print("\nInbox Settings, Reply Style\n")
@@ -109,12 +109,12 @@ ok("...at 16px, 48px tall, on a mobile", "max(16px" in html and "min-height:48px
 r = o.post("/inbox/reply-style", data={"email": "service", "dms": "sales"})
 ok("saving works", r.status_code == 303 and reply_style.get() == {"email": "service", "dms": "sales"})
 r = o.post("/inbox/reply-style", data={"email": "rude", "dms": "sales"})
-ok("a bad value is refused on the page, in words", r.status_code == 200 and "Sales or Customer service"
+ok("a bad value is refused on the page, in words", r.status_code == 200 and "Subtle sales or Strong sales"
    in r.get_data(as_text=True) and reply_style.get()["email"] == "service")
 ok("the settings menu lists it", "/inbox/reply-style" in o.get("/inbox/settings").get_data(as_text=True))
 m = app.test_client()
 m.set_cookie(dash.COOKIE, dash.new_session(state.add_user("sam@example-medspa.com", name="Sam", role="member")["id"]))
-ok("a member reads it", "Direct messages: Sales" in m.get("/inbox/reply-style").get_data(as_text=True))
+ok("a member reads it", "Direct messages: Strong sales" in m.get("/inbox/reply-style").get_data(as_text=True))
 m.post("/inbox/reply-style", data={"email": "sales", "dms": "service"})
 ok("...but can't change it", reply_style.get() == {"email": "service", "dms": "sales"})
 
@@ -131,6 +131,43 @@ ok("a bad style is refused before anyone is asked",
    inbox_tools.propose_reply_style(dms="loud", seat={"label": "Claude"}).get("asked") is False)
 ok("asking for what is already set asks nothing",
    inbox_tools.propose_reply_style(email="sales", seat={"label": "Claude"}).get("asked") is False)
+
+print("\nLevels (owner, 2026-10-04: \"That's why we should have levels and settings.\")\n")
+reply_style.put(email="subtle", dms="service", by="owner")
+c = ask("email")
+sm = c.get("system", "")
+ok("Subtle sales: every written reply ends with one light sentence about the business, his website named",
+   "SUBTLE SALES" in sm and "end every reply you write (cases 1, 2 and 4; never case 3)" in sm
+   and "one short, light, natural sentence" in sm and "(www.example-medspa.com)" in sm, sm[-600:])
+ok("...without the strong close", "STRONG SALES" not in sm and "ask for the booking or the sale" not in sm)
+ok("every level reads who wrote first: a prospect, a customer, anyone else (owner 10-04: adaptive)",
+   all(k in sm for k in ("A PROSPECT", "A CUSTOMER", "ANYONE ELSE", "This level only shades")), sm[-900:])
+ok("...and a customer with a problem gets service first, at every level", "never sell on top of a problem" in sm
+   and "except to a customer with an open problem" in sm)
+reply_style.put(email="sales", by="owner")
+sm = ask("email").get("system", "")
+ok("Strong sales: prospects are pushed for the booking or the sale (owner 10-04: PROSPECTS)",
+   "STRONG SALES" in sm and "- Prospect: answer it first, then always push for the booking or the sale" in sm
+   and "ask for the booking or the sale, plainly" in sm, sm[-900:])
+ok("...and every reply to a prospect ends with a CTA (owner 10-04: \"all include CTA's\")",
+   "Every reply to a prospect ends with one clear CTA" in sm and "never let a reply to a prospect end without one" in sm)
+ok("...customers switch to problem-solving service", "- Customer: switch to problem-solving service" in sm)
+ok("...and everyone else gets the light sentence, never a hard sell", "THE LIGHT SENTENCE" in sm
+   and "- Anyone else: the light sentence, never a hard sell." in sm)
+sv = ask("instagram").get("system", "")
+ok("Customer service adapts too, and sells to nobody", "CUSTOMER SERVICE" in sv and "A PROSPECT" in sv
+   and "THE LIGHT SENTENCE" not in sv and "No selling, no upsell" in sv, sv[-600:])
+ok("...pure service: how to book only if they asked (owner 10-04: \"more extreme one way or the other\")",
+   "never to sell" in sv and "only if they asked" in sv)
+page = o.get("/inbox/reply-style").get_data(as_text=True)
+ok("the page explains each level for prospects, customers and anyone else (owner 10-04)",
+   all(x in page for x in ("Your box reads every message", "a <b>prospect</b>", "a <b>customer</b>",
+                           "Startup mode", "a clear next step in every reply", "Customers: problem-solving service", "sets how far it leans")),
+   page[:800])
+ok("the levels are offered gentlest first, on the page", [*reply_style.STYLES] == ["service", "subtle", "sales"]
+   and o.get("/inbox/reply-style").get_data(as_text=True).count("Subtle sales") >= 2)
+ok("names a person might use are understood", reply_style.clean("Strong") == "sales"
+   and reply_style.clean("aggressive") == "sales" and reply_style.clean("Subtle sales") == "subtle")
 
 print("\nALL REPLY STYLE CHECKS PASS" if not FAILS else f"\n{len(FAILS)} REPLY STYLE CHECK(S) FAILED")
 sys.exit(1 if FAILS else 0)

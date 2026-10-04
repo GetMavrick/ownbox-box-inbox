@@ -277,14 +277,19 @@ def section(heading: str, lines) -> str:
 
 # ── what to ask next, what the box can start ─────────────────────────────────────────────────────
 
-def _offered(pairs) -> list:
+def _offered_pairs(pairs) -> list[tuple[str, str]]:
+    """`(tool, words)` for each offer this connection can use, the words de-duplicated, in order."""
     seen, out = set(), []
     for tool, words in pairs or ():
         w = str(words or "").strip()
         if w and w not in seen and usable(tool):
             seen.add(w)
-            out.append(w)
+            out.append((tool, w))
     return out
+
+
+def _offered(pairs) -> list:
+    return [w for _, w in _offered_pairs(pairs)]
 
 
 def ask_next(*pairs) -> str:
@@ -300,8 +305,28 @@ def ask_next(*pairs) -> str:
 
 def can_start(*pairs) -> str:
     """`I can start:` and what this connection may ask the box to do, each `(propose tool, the offer)`, or ""."""
-    offers = _offered(pairs)[:MOST_ASKS]
-    return f"{CAN_START}\n{bullets(offers)}" if offers else ""
+    picked = _offered_pairs(pairs)[:MOST_ASKS]
+    if picked:
+        _remember_offers([tool for tool, _ in picked])
+    return f"{CAN_START}\n{bullets([w for _, w in picked])}" if picked else ""
+
+
+# WHAT A QUESTION'S OWN AI WAS OFFERED (OSDev1, 2026-10-04; H2's mark 4, "I can start"). The daily check found core.ask
+# leaving out a task that a tool it had just read offered, e.g. aeo.searches' "Write an article on your top search".
+# So while the box's AI answers a question on its own seat ("Ask ask_<id>", core/ask.py), every offer a tool shows it
+# is kept, and the answer carries them when the AI's own reply names none. Tool names only, never a customer's words.
+_ASK_SEAT_LABEL = "Ask ask_"
+
+
+def _remember_offers(tool_names) -> None:
+    seat = _SEAT.get()
+    if not seat or not str(seat.get("label") or "").startswith(_ASK_SEAT_LABEL):
+        return
+    try:
+        from core import ask
+        ask.note_offers(str(seat.get("id") or ""), tool_names)
+    except Exception as e:                                  # noqa: BLE001 — an answer never fails on bookkeeping
+        log.warning("words.offers_not_kept", error=type(e).__name__)
 
 
 def approve_line(what: str) -> str:

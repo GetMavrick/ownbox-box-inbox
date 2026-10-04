@@ -13,7 +13,11 @@ from __future__ import annotations
 
 NS = "inbox"
 CHANNELS = ("email", "dms")
-STYLES = {"sales": "Sales", "service": "Customer service"}
+# THREE LEVELS (owner, 2026-10-04: "That's why we should have levels and settings."), gentlest first. "sales" stays the
+# stored value of Strong sales, so a box that chose Sales before the levels keeps exactly what it chose.
+STYLES = {"service": "Customer service", "subtle": "Subtle sales", "sales": "Strong sales"}
+_ALIASES = {"customer service": "service", "customer_service": "service", "subtle sales": "subtle",
+            "strong": "sales", "strong sales": "sales", "aggressive": "sales"}
 DEFAULT = "service"
 CHANNEL_WORDS = {"email": "Email", "dms": "Direct messages"}
 
@@ -24,9 +28,10 @@ def channel_of(platform) -> str:
 
 def clean(style) -> str:
     """The style as stored. Raises ValueError with a sentence for anything but the two."""
-    s = str(style or "").strip().lower().replace("customer service", "service").replace("customer_service", "service")
+    s = str(style or "").strip().lower()
+    s = _ALIASES.get(s, s)
     if s not in STYLES:
-        raise ValueError("Choose Sales or Customer service.")
+        raise ValueError("Choose Customer service, Subtle sales or Strong sales.")
     return s
 
 

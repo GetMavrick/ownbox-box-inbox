@@ -2066,6 +2066,23 @@ def deploy_plan():
     except tiers.PlanRefused as e:
         return jsonify({"error": "stale_seq" if e.stale else "bad_plan", "message": str(e),
                         "plan": tiers.current()}), (409 if e.stale else 400)
+@blueprint.post("/deploy/labs")
+def deploy_labs():
+    """HQ switching one labs feature on or off for this box: {"name": <a name in core/labs.py KNOWN>, "on": bool}.
+
+    Behind the per-box deploy token, like its siblings. Any other name, or an `on` that is not true or false, is
+    refused and nothing is stored. The answer carries the state the box now holds, so the provisioner knows its
+    message landed. The setting's row keeps who (HQ) and when."""
+    from core import labs
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name") or "").strip()
+    try:
+        labs.switch(name, body.get("on"), by=labs.HQ)
+    except ValueError as e:
+        return jsonify({"error": "bad_labs", "message": str(e), "known": list(labs.KNOWN)}), 400
+    return jsonify({"ok": True, "name": name, "on": labs.on(name)}), 200
+
+
 @blueprint.post("/deploy/upgrade-status")
 def deploy_upgrade_status():
     """The provisioner saying where this box's upgrade to Pro is (docs/SCOPE_UPGRADE_TO_PRO.md).

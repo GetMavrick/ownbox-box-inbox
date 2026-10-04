@@ -1,4 +1,5 @@
-"""The seam machines call, and nothing else (plan §6): `sites()`, `day(site, day)`, `week(site, end_day)`.
+"""The seam machines call, and nothing else (plan §6): `sites()`, `day(site, day)`, `week(site, end_day)`, and
+`pages(site, start, end, prefix)`, what each page brought (the AEO Machine's articles, #1793 Phase 2.4).
 
 Local DB reads only, from the store. No machine calls PostHog or Google directly: a machine that needs
 a number the seam doesn't give asks for the seam to grow, in review.
@@ -58,6 +59,51 @@ def _span(site: str, start: date, end: date) -> dict:
         "left_out": store.items_between(site, start, end, "left_out"),
         "unchecked": sum(n for _, n in store.items_between(site, start, end, "unchecked")),
     }
+
+
+def _path(p: str) -> str:
+    return str(p or "").split("?")[0].split("#")[0].rstrip("/") or "/"
+
+
+def pages(site: str, start: date, end: date, prefix: str = "/") -> dict:
+    """What each page under `prefix` brought over [start, end] (#1793 Phase 2.4):
+    {path: {"people": visits, "ai": visits from AI answers, "assistants": {name: visits}, "converted": visits}}.
+
+    PEOPLE are the stored pages (visits that viewed the page, people only); the sync keeps each day's top ten, so a
+    page outside them that day counts nothing for it. FROM AI ANSWERS reads each AI referrer's stored pages: the
+    views its visits made of the page, never more than its visits that day, so a reader who opens an article twice
+    is one visit. A page an AI answer sent people to counts at least those people, even on a day it missed the top
+    ten. CONVERTED are the visits that read the page and converted that day (#1793 Phase 2.4b); a day stored before
+    the sync kept them counts none."""
+    out: dict = {}
+
+    def slot(p: str) -> dict:
+        return out.setdefault(_path(p), {"people": 0, "ai": 0, "assistants": {}, "converted": 0})
+
+    for path, n in store.items_between(site, start, end, "page"):
+        if str(path).startswith(prefix):
+            slot(path)["people"] += n
+    for ref, visits, detail in store.rows_between(site, start, end, "referrer"):
+        bucket, name = sources.classify(ref)
+        if bucket != sources.AI:
+            continue
+        try:
+            viewed = json.loads(detail or "[]")
+        except ValueError:
+            continue
+        for path, views in viewed:
+            if not str(path).startswith(prefix):
+                continue
+            k = min(int(views or 0), visits)
+            s = slot(path)
+            s["ai"] += k
+            s["assistants"][name] = s["assistants"].get(name, 0) + k
+    for path, n in store.items_between(site, start, end, "page_conversion"):
+        if str(path).startswith(prefix):
+            slot(path)["converted"] += n
+    for s in out.values():
+        s["people"] = max(s["people"], s["ai"], s["converted"])
+    return out
 
 
 def week(site: str, end_day: date) -> dict | None:

@@ -9,7 +9,8 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
   · Sanity's proof writes a real document (every write it makes must be a dry run);
   · Airtable's proof writes anything at all;
   · a read-only Sanity token is accepted, or refused without saying "Editor";
-  · an Airtable table without the template's fields is accepted, or the missing field is not named;
+  · an Airtable table is refused over a field's name (field matching, #1793 §1.3: it is matched instead,
+    and tests/test_aeo_field_matching.py proves the matching);
   · the token lands anywhere but the name the publisher reads;
   · a member, or a GET, changes anything;
   · a screen uses one of the nouns reserved for the receptionist machine (CLAUDE.md).
@@ -85,7 +86,8 @@ def use(fake):
 
 SAN_OK = {"/users/me": (200, '{"id":"p1"}')}
 MUTATE_OK = {"/data/mutate/": (200, '{"results":[]}')}
-FIELDS = [{"name": n} for n in sources.TEMPLATE_FIELDS]
+FIELDS = [{"name": "Seed Idea", "type": "multilineText"}, {"name": "Status", "type": "singleSelect"},
+          {"name": "URL", "type": "url"}]
 BASE, TABLE, VIEW = "app" + "A" * 14, "tbl" + "B" * 14, "viw" + "C" * 14
 TABLES = {"tables": [{"id": TABLE, "fields": FIELDS + [{"name": "Notes"}], "views": [{"id": VIEW}]}]}
 AIR_OK = {"/meta/whoami": (200, '{"id":"usr1"}'),
@@ -143,7 +145,7 @@ ok("an address is rebuilt from what was saved", sources.table_url(BASE, TABLE, V
 
 print("\ntest_the_airtable_proof")
 f = use(Net(gets=AIR_OK))
-ok("a key that can read a table with the template's fields passes",
+ok("a key that can read the table passes",
    sources.check_airtable(AIR_KEY, BASE, TABLE, VIEW) is None)
 ok("...and the proof never writes to the owner's table", all(s[0] == "GET" for s in f.seen), f.seen)
 ok("...reading one record, in the view the machine follows",
@@ -166,18 +168,18 @@ got = air(gets={f"/meta/bases/{BASE}/tables": (200, json.dumps({"tables": []}))}
 ok("a table that is not in the base", got and "no table at that address" in got, got)
 got = air(view="viw" + "D" * 14)
 ok("a view that is not in the table", got and "no view at that address" in got, got)
-thin = {"tables": [{"id": TABLE, "fields": [{"name": "Seed Idea"}], "views": []}]}
+thin = {"tables": [{"id": TABLE, "fields": [{"name": "Seed Idea", "type": "multilineText"}], "views": []}]}
 got = air(gets={f"/meta/bases/{BASE}/tables": (200, json.dumps(thin))}, view="")
-ok("a table missing the template's fields names each one",
-   got and "Status" in got and "URL" in got and "Seed Idea" not in got.split("missing", 1)[1], got)
+ok("a table missing fields is not refused over them: they are matched, and offered on the screen",
+   got is None, got)
 
 print("\ntest_the_owners_own_field_names")
 # OWNER, 2026-09-27, via OSDev1: his table has Seed Idea, Status and URL, and nobody is asked to
 # rename a column. Extra fields and extra tables are his business and pass.
-ok("the fields are exactly the owner's names", sources.TEMPLATE_FIELDS == ("Seed Idea", "Status", "URL"),
-   sources.TEMPLATE_FIELDS)
-ok("...and the question is read from Seed Idea", sources.QUESTION_FIELD == "Seed Idea"
-   and sources.STATUS_FIELD == "Status" and sources.URL_FIELD == "URL")
+ok("the machine names roles, never columns", [r.name for r in sources.ROLES] == ["question", "status", "url", "title"]
+   and not hasattr(sources, "TEMPLATE_FIELDS"))
+ok("...and the owner's names come first among the likely ones", sources.ROLES[0].aliases[0] == "Seed Idea"
+   and sources.ROLES[1].aliases[0] == "Status" and sources.ROLES[2].aliases[0] == "URL")
 his = {"tables": [
     {"id": "tbl" + "E" * 14, "name": "Reels", "fields": [{"name": "Seed"}, {"name": "Hook"}], "views": []},
     {"id": TABLE, "name": "Articles", "views": [{"id": VIEW}], "fields": [
@@ -186,11 +188,11 @@ his = {"tables": [
 got = air(gets={f"/meta/bases/{BASE}/tables": (200, json.dumps(his))})
 ok("a table with his fields plus unrelated extras, in a base with other tables, connects",
    got is None, got)
-old = {"tables": [{"id": TABLE, "fields": [{"name": "Question"}, {"name": "Status"}, {"name": "URL"}],
+old = {"tables": [{"id": TABLE, "fields": [{"name": "Question", "type": "multilineText"},
+                                         {"name": "Status", "type": "singleSelect"}, {"name": "URL", "type": "url"}],
                    "views": [{"id": VIEW}]}]}
 got = air(gets={f"/meta/bases/{BASE}/tables": (200, json.dumps(old))})
-ok("a table with our old placeholder name is refused, naming Seed Idea",
-   got and "Seed Idea" in got and "sample table" in got, got)
+ok("a table calling the question 'Question' connects too", got is None, got)
 ok("a key that can see the schema but not the rows",
    air(gets={f"/v0/{BASE}/{TABLE}?": (403, "")}) == sources.AIRTABLE_NO_READ)
 ok("no answer at all", air(gets={"/meta/whoami": (0, "")}) == sources.AIRTABLE_UNREACHABLE)
@@ -275,12 +277,11 @@ PASTED_KEY = "pat" + "W" * 50
 r = owner.post("/aeo/sources/airtable", data={"table_url": PASTED_KEY, "api_key": ""})
 ok("a key pasted into Table address is never shown back on the refusal (OSDev1, #1572)",
    r.status_code == 400 and PASTED_KEY not in r.get_data(as_text=True))
-thin = {"tables": [{"id": TABLE, "fields": [{"name": "Question"}], "views": [{"id": VIEW}]}]}
-use(Net(gets={**AIR_OK, f"/meta/bases/{BASE}/tables": (200, json.dumps(thin))}))
+use(Net(gets={**AIR_OK, "/meta/whoami": (401, "")}))
 r = owner.post("/aeo/sources/airtable", data={"table_url": URL, "api_key": AIR_KEY})
 html = r.get_data(as_text=True)
-ok("a table without the template's fields is refused, naming them",
-   r.status_code == 400 and "Status" in html and not box_secrets.is_set(sources.AIRTABLE_KEY))
+ok("a key Airtable refuses is refused, and not saved",
+   r.status_code == 400 and not box_secrets.is_set(sources.AIRTABLE_KEY))
 ok("...and the key is not shown back", AIR_KEY not in html)
 use(Net(gets=AIR_OK))
 r = owner.post("/aeo/sources/airtable", data={"table_url": URL, "api_key": AIR_KEY})
@@ -291,8 +292,8 @@ ok("...with its key in box_secrets, apart from the box's other Airtable key",
    box_secrets.get(sources.AIRTABLE_KEY) == AIR_KEY and sources.AIRTABLE_KEY != "AIRTABLE_API_KEY")
 page = owner.get("/aeo/sources/airtable").get_data(as_text=True)
 ok("the key is never shown back", AIR_KEY not in page and "Leave blank to keep it" in page)
-ok("the screen lists the fields the table needs", all(fl in page for fl in sources.TEMPLATE_FIELDS))
-ok("...and says his other fields can stay", "Any other fields and tables can stay as they are." in page)
+ok("the screen shows the field matched for each thing, in a dropdown",
+   all(f'<option value="{fl}" selected>' in page for fl in ("Seed Idea", "Status", "URL")), page[-1500:])
 # THE OWNER'S SAMPLE TABLE (owner, 2026-09-26: "put this link so people can go ahead and download a
 # sample Airtable that works"), offered under the table address and opening in a new tab.
 ok("the owner's sample table is offered, in a new tab",

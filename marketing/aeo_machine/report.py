@@ -12,14 +12,17 @@ So this reports OUTCOMES ONLY, and only when there are some:
   * **Needs you**: every article the machine could not publish and that is still waiting for the
     owner, refused by the guard or failed on the way, with a link to Articles, where the reason is
     and where "Try again now" lives.
+  * **What an article brought** (#1793 Phase 2.4): the live article that brought the most people in
+    the seven days ending that day, and how many came from AI answers, from the box's own website
+    store. No line when none brought anyone, or the box keeps no website numbers.
 
 A QUIET DAY IS AN EMPTY REPORT: no headline number, no lines. There is no "0 published", no "has not
 run yet", and no line for settings a new box has not filled in; a machine with nothing to say says
 nothing, and the review leaves its section out.
 
 LOCAL DATABASE READS ONLY, like every reporter (core/report.py `register_reporter`): no network, no
-model, never slow. What Google or PostHog says about the articles is on the Performance screen,
-fetched when the owner opens it, never from here.
+model, never slow. The website numbers come from the box's own store (marketing/foundation/seam.py),
+never from PostHog or Google directly.
 """
 from __future__ import annotations
 
@@ -62,6 +65,22 @@ def _stuck_line(r: dict) -> str:
     return f"{_quoted(what)} could not be published. Articles says why"
 
 
+def _top_article(live: list[dict], day) -> str:
+    """The article that brought the most people in the seven days ending `day`, from the box's own website store
+    (#1793 Phase 2.4): "“How much does Botox cost” brought 14 people this week, 3 from ChatGPT". "" when none did,
+    or the box keeps no website numbers."""
+    try:
+        from . import brought
+        got = brought.top_of_week(live, day)
+    except Exception:                                     # noqa: BLE001 — a reporter never raises
+        return ""
+    if not got:
+        return ""
+    r, counts = got
+    name = " ".join(str(r.get("title") or r.get("question") or r.get("topic") or "").split())
+    return f"{_quoted(name)} brought {brought.words(counts, 'this week')}" if name else ""
+
+
 def report(day) -> dict:
     """The day's AEO outcomes, or {} when there are none (a fresh box, or a quiet day)."""
     start, end = window(day)
@@ -79,13 +98,19 @@ def report(day) -> dict:
         stuck = [dict(r) for r in c.execute(
             f"SELECT question, topic, status FROM {_TABLE} WHERE status IN ('refused', 'failed') "
             "AND updated_at < ? ORDER BY updated_at DESC, id DESC", (end,))]
-    if not published and not stuck:
+        live = [dict(r) for r in c.execute(
+            f"SELECT id, status, {title}, question, topic, url, published_at FROM {_TABLE} "
+            "WHERE status = 'published' AND url IS NOT NULL AND published_at < ?", (end,))]
+    top = _top_article(live, day)
+    if not published and not stuck and not top:
         return {}
     out: dict = {"title": TITLE}
     if published:
         n = len(published)
         out["headline"] = {"value": n, "label": "article published" if n == 1 else "articles published"}
         out["happened"] = [{"text": _published_line(r)} for r in published]
+    if top:
+        out.setdefault("happened", []).append({"text": top, "href": ARTICLES})
     if stuck:
         out["needs_you"] = [{"text": _stuck_line(r), "href": ARTICLES} for r in stuck]
     return out

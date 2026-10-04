@@ -23,7 +23,8 @@ import json as _json
 import re
 from urllib.parse import quote, urlencode, urlsplit
 
-from core import box_secrets, net
+from core import box_secrets, box_settings, net
+from core.airtable import fields as af
 from core.logging import get_logger
 
 from . import settings
@@ -113,14 +114,32 @@ def sanity_state() -> dict:
 AIRTABLE_KEY = "AIRTABLE_API_KEY_SEO"   # storage name kept: see settings.MACHINE
 _API = "https://api.airtable.com/v0"
 
-# THE FIELDS THE MACHINE READS AND WRITES, IN THE OWNER'S OWN NAMES (owner, 2026-09-27, via OSDev1:
-# his table has Seed Idea, Status and URL). The question each article answers is read from Seed
-# Idea; the machine writes back Status and URL. A buyer never renames a column to suit us, and any
-# other field or table in the base is left alone and passes the check below.
-QUESTION_FIELD = "Seed Idea"
-STATUS_FIELD = "Status"
-URL_FIELD = "URL"
-TEMPLATE_FIELDS = (QUESTION_FIELD, STATUS_FIELD, URL_FIELD)
+# WHAT THE MACHINE NEEDS FROM A TABLE, AS ROLES, NEVER AS COLUMN NAMES (#1793 §1.3, OSDev1's 10-01
+# assignment). Owner, 2026-10-01, after the box refused his table over "Seed" versus "Seed Idea":
+# "Clients are gonna be having lots of issues and there's going to be a ton of technical support
+# tickets!!!" Each role is matched to the business's own field by core/airtable/fields.py, saved once,
+# and every read or write asks `field_name(role)`. The likely names, best first, are the sync plan's
+# (docs/PLAN_AEO_AIRTABLE_TOPIC_SYNC.md §3); the sample table's names come first.
+FIELD_MACHINE = "aeo_machine"
+ROLES = (
+    af.Role("question", "the question each article answers", "long_text",
+            ("Seed Idea", "Seed", "Question", "Topic", "Idea", "Title")),
+    af.Role("status", "where each article stands", "status", ("Status", "Stage", "State")),
+    af.Role("url", "the published article's address", "url",
+            ("URL", "Live URL", "Published URL", "Link", "Article URL")),
+    af.Role("title", "the published title", "text", ("Article Title", "Published Title"), required=False),
+)
+# WHAT "ADD THIS FIELD FOR ME" CREATES: the sample table's own name and type for each role, so a table
+# the box completes looks like the sample. Status gets the two options the machine needs to see.
+ADD_AS = {
+    "question": ("Seed Idea", "multilineText", None),
+    "status": ("Status", "singleSelect", {"choices": [{"name": "Create Article"}, {"name": "Posted"}]}),
+    "url": ("URL", "url", None),
+    "title": ("Article Title", "singleLineText", None),
+}
+# Adding a field is the one write to a buyer's schema, so it needs one more scope, asked for only when
+# they press the button, and named in Airtable's own words when the token lacks it.
+ADD_SCOPE = "schema.bases:write"
 # THE SAMPLE TABLE, shared by the owner. Owner, 2026-09-26: "On the Airtable settings page in the
 # dashboard, put this link so people can go ahead and download a sample Airtable that works."
 # Empty would mean no link is drawn.
@@ -188,7 +207,17 @@ def _json_or_empty(body: str) -> dict:
 
 
 def check_airtable(key: str, base: str, table: str, view: str = "") -> str | None:
-    """None if this key can read this table and it has the template's fields, else what to fix.
+    """None if this key can read this table, else what to fix. See `read_table`."""
+    return read_table(key, base, table, view)["problem"]
+
+
+def read_table(key: str, base: str, table: str, view: str = "") -> dict:
+    """{"problem": what to fix or None, "key_ok": Airtable accepted the key, "fields": the table's fields}.
+
+    `key_ok` lets the screen save the key the moment Airtable accepts it (#1793 §1.3), so a person who
+    pasted the wrong table address doesn't have to find the token again. `fields` are names and types
+    only, for matching; a table missing a field is not refused, it is matched, and what can't be matched
+    is offered on the same screen.
 
     THREE REQUESTS, each a question the owner can act on:
       1. `whoami`: is the key real? Where Airtable lists the token's scopes, any missing one is
@@ -201,62 +230,160 @@ def check_airtable(key: str, base: str, table: str, view: str = "") -> str | Non
     to the owner's table, and a set-up screen that edits the plan is not a check.
     """
     headers = {"Authorization": f"Bearer {key}"}
+    out = {"problem": None, "key_ok": False, "fields": []}
+
+    def no(problem: str) -> dict:
+        out["problem"] = problem
+        return out
 
     status, body = net.get_public(f"{_API}/meta/whoami", headers=headers)
     if status == 0:
-        return AIRTABLE_UNREACHABLE
+        return no(AIRTABLE_UNREACHABLE)
     if status in (401, 403):
-        return AIRTABLE_BAD_KEY
+        return no(AIRTABLE_BAD_KEY)
     if status != 200:
-        return f"Airtable answered with an error ({status}). Try again in a minute."
+        return no(f"Airtable answered with an error ({status}). Try again in a minute.")
     scopes = _json_or_empty(body).get("scopes")
     if isinstance(scopes, list):
         lacking = [s for s in SCOPES if s not in scopes]
         if lacking:
-            return ("That key is missing " + ", ".join(lacking) + ". In Airtable, edit the "
-                    "token and add " + ("it." if len(lacking) == 1 else "them."))
+            return no("That key is missing " + ", ".join(lacking) + ". In Airtable, edit the "
+                      "token and add " + ("it." if len(lacking) == 1 else "them."))
+    out["key_ok"] = True
 
     status, body = net.get_public(f"{_API}/meta/bases/{base}/tables", headers=headers,
                                   max_bytes=_SCHEMA_MAX_BYTES)
     if status == 0:
-        return AIRTABLE_UNREACHABLE
+        return no(AIRTABLE_UNREACHABLE)
     if status == 401:
-        return AIRTABLE_BAD_KEY
+        return no(AIRTABLE_BAD_KEY)
     if status in (403, 404):
-        return AIRTABLE_NO_BASE
+        return no(AIRTABLE_NO_BASE)
     if status != 200:
-        return f"Airtable answered with an error ({status}). Try again in a minute."
+        return no(f"Airtable answered with an error ({status}). Try again in a minute.")
     schema = _json_or_empty(body)
     if not isinstance(schema.get("tables"), list):
-        return AIRTABLE_UNREADABLE
+        return no(AIRTABLE_UNREADABLE)
     tables = schema["tables"]
     found = next((t for t in tables if isinstance(t, dict) and t.get("id") == table), None)
     if found is None:
-        return ("That base has no table at that address. Open the table in Airtable and copy "
-                "the address again.")
+        return no("That base has no table at that address. Open the table in Airtable and copy "
+                  "the address again.")
     if view and not any(isinstance(v, dict) and v.get("id") == view
                         for v in found.get("views") or []):
-        return ("That table has no view at that address. Open the view in Airtable and copy "
-                "the address again.")
-    names = {str(f.get("name") or "") for f in found.get("fields") or [] if isinstance(f, dict)}
-    lacking = [f for f in TEMPLATE_FIELDS if f not in names]
-    if lacking:
-        return ("Your table is missing " + ("the field " if len(lacking) == 1 else "the fields ")
-                + ", ".join(lacking) + ". Add " + ("it" if len(lacking) == 1 else "them")
-                + " with exactly that name, or start from our sample table.")
+        return no("That table has no view at that address. Open the view in Airtable and copy "
+                  "the address again.")
+    out["fields"] = [{"name": str(f["name"]), "type": str(f.get("type") or "")}
+                     for f in found.get("fields") or [] if isinstance(f, dict) and f.get("name")]
 
     query = {"maxRecords": "1"}
     if view:
         query["view"] = view
     status, _body = net.get_public(f"{_API}/{base}/{table}?{urlencode(query)}", headers=headers)
     if status == 0:
-        return AIRTABLE_UNREACHABLE
+        return no(AIRTABLE_UNREACHABLE)
     if status == 401:
-        return AIRTABLE_BAD_KEY
+        return no(AIRTABLE_BAD_KEY)
     if status in (403, 404):
-        return AIRTABLE_NO_READ
+        return no(AIRTABLE_NO_READ)
     if status != 200:
-        return f"Airtable answered with an error ({status}). Try again in a minute."
+        return no(f"Airtable answered with an error ({status}). Try again in a minute.")
+    return out
+
+
+# ── the field map: which of the business's fields holds each role ─────────────────────────────────
+# Kept with core/airtable/fields.py's map ("airtable" settings namespace), with the table's field
+# names and types beside it so the screen can draw its dropdowns without asking Airtable each time.
+
+_TABLE_FIELDS = f"table_fields:{FIELD_MACHINE}"
+
+
+def remember_fields(table_fields: list, *, by: str = "") -> dict:
+    """Store the table's fields, then match every role. A choice the person already made is kept while
+    its field still exists and can hold the role; only empty or broken roles are matched again."""
+    clean = [{"name": str(f.get("name")), "type": str(f.get("type") or "")}
+             for f in table_fields or [] if isinstance(f, dict) and f.get("name")]
+    box_settings.put(af.NS, _TABLE_FIELDS, clean, set_by=by or FIELD_MACHINE)
+    fresh, kept = af.match(ROLES, clean), af.load_map(FIELD_MACHINE)
+    out = {}
+    for role in ROLES:
+        mine = kept.get(role.name)
+        out[role.name] = mine if mine in af.candidates(role, clean) else fresh.get(role.name)
+    taken = [v for v in out.values() if v]
+    if len(taken) != len(set(taken)):                 # a kept choice now collides: trust the fresh match
+        out = fresh
+    af.save_map(FIELD_MACHINE, out, by=by)
+    return out
+
+
+def table_fields() -> list:
+    got = box_settings.get(af.NS, _TABLE_FIELDS, default=[]) or []
+    return got if isinstance(got, list) else []
+
+
+def field_name(role: str) -> str | None:
+    """The business's own field for this role, as matched and saved. Every read and write asks this."""
+    return af.field(FIELD_MACHINE, role)
+
+
+def fields_state() -> dict:
+    """{"map": role -> field or None, "missing": [(role, label)], "candidates": role -> [fields]}."""
+    have, saved = table_fields(), af.load_map(FIELD_MACHINE)
+    mapping = {r.name: saved.get(r.name) for r in ROLES}
+    return {"map": mapping,
+            "missing": [(name, label) for name, label, _kind in af.missing(ROLES, mapping)],
+            "candidates": {r.name: af.candidates(r, have) for r in ROLES}}
+
+
+def choose_fields(choices: dict, *, by: str = "") -> str | None:
+    """Save the person's own picks from the dropdowns. None, or what to fix. Each pick must be a field that
+    can hold the role, and one field serves one role."""
+    have, out = table_fields(), {}
+    for role in ROLES:
+        pick = str((choices or {}).get(role.name) or "").strip()
+        if pick and pick not in af.candidates(role, have):
+            return f"That field can't hold {role.label}. Pick one from the list."
+        out[role.name] = pick or None
+    picked = [v for v in out.values() if v]
+    if len(picked) != len(set(picked)):
+        return "One field can hold only one of these. Pick a different field for each."
+    af.save_map(FIELD_MACHINE, out, by=by)
+    return None
+
+
+def add_field(key: str, base: str, table: str, role_name: str) -> str | None:
+    """Add the missing field for one role to the business's table, the sample's way. None, or what to fix.
+
+    The only change the box ever makes to a buyer's schema, and only when they press the button for that
+    one role. Needs schema.bases:write; a token without it gets that scope named in Airtable's words."""
+    if role_name not in ADD_AS:
+        return "There is nothing to add for that."
+    name, kind, options = ADD_AS[role_name]
+    if name in {f["name"] for f in table_fields()}:
+        return (f"Your table already has a field called {name}, of a kind that can't hold this. "
+                "Rename that field in Airtable, or pick another one from the list.")
+    body = {"name": name, "type": kind}
+    if options:
+        body["options"] = options
+    try:
+        status, text = net.post_public(f"{_API}/meta/bases/{base}/tables/{table}/fields",
+                                       json=body, headers={"Authorization": f"Bearer {key}"})
+    except net.PostRefused:
+        return AIRTABLE_UNREACHABLE
+    if status in (401,):
+        return AIRTABLE_BAD_KEY
+    if status in (403,):
+        return (f"Your token can't add fields. In Airtable, edit the token and add the {ADD_SCOPE} "
+                "scope, then press the button again. Or add the field in Airtable yourself.")
+    if status != 200:
+        return f"Airtable didn't add the field ({status}). Try again in a minute, or add it in Airtable."
+    got = _json_or_empty(text)
+    added = {"name": str(got.get("name") or name), "type": str(got.get("type") or kind)}
+    remember_fields(table_fields() + [added])
+    mapping = af.load_map(FIELD_MACHINE)
+    mapping[role_name] = added["name"]
+    af.save_map(FIELD_MACHINE, mapping)
+    log.info("aeo.airtable_field_added", role=role_name, kind=kind)
     return None
 
 

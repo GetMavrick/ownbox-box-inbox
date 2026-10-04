@@ -10,9 +10,11 @@ from core import state
 def write_day(site: str, day: date, *, traffic: tuple[int, int, int], conversions: list[tuple[str, int, int]],
               pages: list[tuple[str, int]], utms: list[tuple[str, int]],
               referrers: list[tuple[str, int, list[tuple[str, int]]]],
-              left_out: dict[str, int] | None = None, unchecked: int = 0) -> None:
+              left_out: dict[str, int] | None = None, unchecked: int = 0,
+              page_conversions: list[tuple[str, int]] | None = None) -> None:
     """Replace everything stored for (site, day) in one transaction, so a reader never sees half a day. `left_out` is
-    the visits visitors.py left out, by reason; `unchecked` the kept visits whose address couldn't be checked."""
+    the visits visitors.py left out, by reason; `unchecked` the kept visits whose address couldn't be checked;
+    `page_conversions` the visits that read an article and converted, per article (posthog.article_conversions)."""
     d = day.isoformat()
     pv, visitors, sessions = (int(x or 0) for x in traffic)
     converted = sum(int(s or 0) for _, _, s in conversions)
@@ -21,7 +23,8 @@ def write_day(site: str, day: date, *, traffic: tuple[int, int, int], conversion
             + [(site, d, "utm", src, int(n or 0), None) for src, n in utms]
             + [(site, d, "referrer", ref, int(v or 0), json.dumps(pg)) for ref, v, pg in referrers]
             + [(site, d, "left_out", why, int(n or 0), None) for why, n in (left_out or {}).items() if n]
-            + ([(site, d, "unchecked", "visits", int(unchecked), None)] if unchecked else []))
+            + ([(site, d, "unchecked", "visits", int(unchecked), None)] if unchecked else [])
+            + [(site, d, "page_conversion", path, int(n or 0), None) for path, n in (page_conversions or []) if n])
     with state.connect() as c:
         c.execute("DELETE FROM web_site_day_items WHERE site = ? AND day = ?", (site, d))
         c.executemany("INSERT OR REPLACE INTO web_site_day_items (site, day, kind, name, n, detail) "
@@ -65,6 +68,15 @@ def items_between(site: str, start: date, end: date, kind: str) -> list[tuple[st
                          "AND kind = ? GROUP BY name ORDER BY n DESC, name",
                          (site, start.isoformat(), end.isoformat(), kind)).fetchall()
     return [(r["name"], int(r["n"] or 0)) for r in rows]
+
+
+def rows_between(site: str, start: date, end: date, kind: str) -> list[tuple[str, int, str]]:
+    """Each day's rows of `kind` in [start, end], unsummed: (name, n, detail). A referrer's detail is the pages its
+    visits viewed that day, which a sum across days cannot keep."""
+    with state.connect() as c:
+        rows = c.execute("SELECT name, n, detail FROM web_site_day_items WHERE site = ? AND day >= ? AND day <= ? "
+                         "AND kind = ? ORDER BY day, name", (site, start.isoformat(), end.isoformat(), kind)).fetchall()
+    return [(r["name"], int(r["n"] or 0), r["detail"] or "") for r in rows]
 
 
 def search_between(site: str, start: date, end: date) -> dict:

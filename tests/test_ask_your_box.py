@@ -8,7 +8,7 @@ only the AI's own words stood in for:
   * the box's AI answers on a seat holding exactly the asker's capabilities, revoked after
   * the four parts come back in words; what it proposed is read from Approvals, never from its own claim
   * a slow answer returns an ask id inside the wait, and core.ask_result collects it, for that connection only
-  * one question at a time; a run seat can't ask; a failure is a sentence; a ChatGPT box answers from the facts
+  * one question at a time, the next waits its turn; a run seat can't ask; a failure is a sentence; a ChatGPT box answers from the facts
   * no AI signed in: plain words and the D5 line
 
 Run: python tests/test_ask_your_box.py
@@ -160,9 +160,11 @@ t0 = time.monotonic()
 got = ask_mod.ask("Which searches bring people to my site?", owner, run_agent=slow_agent, wait_s=0.2)
 ok("it answers inside the wait, saying it is still working, with an ask id", got["status"] == "working"
    and got["ask_id"].startswith("ask_") and "core.ask_result" in got["text"] and time.monotonic() - t0 < 5, got)
-busy = ask_mod.ask("And another?", owner, run_agent=fake_agent, wait_s=1)
-ok("one question at a time: a second is told so, in words", busy["status"] == "busy" and "another question"
-   in busy["text"], busy)
+ask_mod.TURN_POLL_S = 0.05
+second = ask_mod.ask("And another?", owner, run_agent=fake_agent, wait_s=1)
+ok("one question at a time: a second waits its turn, in words, with its own ask id (OSDev1 10-04: queued, never "
+   "refused)", second["status"] == "queued" and "next in line" in second["text"]
+   and second["ask_id"].startswith("ask_") and second["ask_id"] != got["ask_id"], second)
 early = ask_mod.ask_result(got["ask_id"], owner)
 ok("collected early, it is still working", early["status"] == "working", early)
 gate.set()
@@ -173,6 +175,12 @@ for _ in range(50):
 later = ask_mod.ask_result(got["ask_id"], owner)
 ok("collected after, the answer is there", later["status"] == "answered" and later["text"] == "Here it is, later.",
    later)
+for _ in range(200):
+    if (ask_mod._load(second["ask_id"]) or {}).get("status") not in ("queued", "working"):
+        break
+    time.sleep(0.05)
+then = ask_mod.ask_result(second["ask_id"], owner)
+ok("...and the second, which waited, is answered after the first", then["status"] == "answered", then)
 other = ask_mod.ask_result(got["ask_id"], reader)
 ok("another connection can't collect it, or learn it exists", other["status"] == "not_found", other)
 ok("a made-up id is not found, in words", ask_mod.ask_result("ask_000000000000", owner)["status"] == "not_found")

@@ -141,8 +141,13 @@ def articles(status=None, limit=None):
         return {"error": f"status must be one of {', '.join(_STATE)}, or left out for all"}
     rows = [r for r in plan.rows() if not want or r.get("status") == want]
     lim = _clamp(limit, 25)
-    return {"articles": [_article(r) for r in rows[:lim]], "total": len(rows),
-            "note": "waiting topics first (the one asked for now leading), then the rest newest first"}
+    got = _brought(rows[:lim])
+    note = "waiting topics first (the one asked for now leading), then the rest newest first"
+    if got:
+        note += (". brought: visits from people and from AI answers to each live article, this week and since it "
+                 "went live, from the box's own numbers")
+    return {"articles": [{**_article(r), **got.get(r.get("id"), {})} for r in rows[:lim]], "total": len(rows),
+            "note": note}
 
 
 def article(id=None):
@@ -154,7 +159,17 @@ def article(id=None):
         return {"error": "give the article's id, from aeo.articles"}
     if not row:
         return {"error": f"there is no article with id {id}"}
-    return _article(row)
+    return {**_article(row), **_brought([row]).get(row.get("id"), {})}
+
+
+def _brought(rows: list[dict]) -> dict:
+    """{id: {"brought": ...}} for the live rows the box's store has numbers for (#1793 Phase 2.4). Never raises."""
+    try:
+        from . import brought
+        return {k: {"brought": v} for k, v in brought.for_articles(rows).items()}
+    except Exception as e:                                # noqa: BLE001 — a count, never the answer
+        log.warning("aeo.brought_failed", error=type(e).__name__)
+        return {}
 
 
 def _store_week() -> dict | None:
@@ -163,9 +178,8 @@ def _store_week() -> dict | None:
         from marketing.foundation import seam
         from marketing.foundation import sync as fsync
 
-        from . import posthog
-        own = posthog._site_host().removeprefix("www.")
-        site = next((x for x in seam.sites() if x.removeprefix("www.") == own), None) if own else None
+        from . import brought
+        site = brought.site()
         return seam.week(site, fsync.yesterday()) if site else None
     except Exception as e:                                # noqa: BLE001 — no store is no store, never an error
         log.warning("aeo.store_unreadable", error=f"{type(e).__name__}: {str(e)[:120]}")
@@ -274,6 +288,17 @@ def current_settings():
     return out
 
 
+def _airtable_fields(src) -> dict:
+    """Which of the business's fields holds each thing, and what still needs a field, in words."""
+    try:
+        fs = src.fields_state()
+    except Exception:                                   # noqa: BLE001 — a section, never the answer
+        return {}
+    labels = {r.name: r.label for r in src.ROLES}
+    return {"fields": {labels[k]: v for k, v in fs["map"].items() if v},
+            "fields_missing": [label for _name, label in fs["missing"]]}
+
+
 def sources():
     """Each data source: connected or not, and for Airtable which table. Never a credential."""
     from core.vendors import google_search_console as gsc
@@ -287,7 +312,8 @@ def sources():
     return {
         "sanity": {"connected": san["connected"], "required": True, "project": san["project"],
                    "dataset": san["dataset"]},
-        "airtable": {"connected": air["connected"], "required": True, "table": air["url"] or None},
+        "airtable": {"connected": air["connected"], "required": True, "table": air["url"] or None,
+                     **(_airtable_fields(src) if air["connected"] else {})},
         "posthog": {"connected": ph["connected"], "required": False, "recommended": True},
         "google_search_console": {"connected": bool(google.get("connected")),
                                   "site": google.get("property") or None},
@@ -315,12 +341,22 @@ def _topic_name(a: dict) -> str:
     return say.quoted(a.get("title") or a.get("topic") or a.get("question") or "Untitled", 90)
 
 
+def _brought_words(b: dict) -> str:
+    """"brought 14 people this week, 3 from ChatGPT; 120 people since it went live"."""
+    from . import brought
+    week, since = b.get("this_week") or {}, b.get("since_live") or {}
+    out = "brought " + (brought.words(week, "this week") + "; " if week.get("people") else "nobody this week; ")
+    return out + brought.words(since, "since it went live")
+
+
 def _article_line(a: dict) -> str:
     st = a.get("status")
     bits = [_topic_name(a)]
     if st == "published":
         when = say.day_words(str(a.get("published_at") or "")[:10]) if a.get("published_at") else ""
         bits.append("live" + (f" since {when}" if when else "") + (f" at {a['url']}" if a.get("url") else ""))
+        if (a.get("brought") or {}).get("since_live"):
+            bits.append(_brought_words(a["brought"]))
     elif st in _WAITING_ON_YOU:
         bits.append(f"{a.get('state')}: {say.plain(a.get('why') or 'no reason was kept').rstrip('.')}. "
                     f"{say.plain(a.get('what_to_do') or '')}".strip())

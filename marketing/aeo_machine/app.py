@@ -53,6 +53,7 @@ SETTINGS = "/aeo/settings"
 SOURCES = "/aeo/sources"
 SANITY = "/aeo/sources/sanity"
 AIRTABLE = "/aeo/sources/airtable"
+AIRTABLE_FIELDS = "/aeo/sources/airtable/fields"
 POSTHOG = "/aeo/sources/posthog"
 PERFORMANCE = "/aeo/performance"
 GOOGLE = "/settings/aeo/google"          # core's own screen (core/dash/google_search.py)
@@ -301,6 +302,9 @@ _SAID = {
                   True),
     # PostHog feeds Performance, not the articles, so its own sentence (OSDev1's review of #1584).
     "posthog_connected": ("Connected", "Checked and saved. Your numbers are on Performance.", True),
+    "fields_saved": ("Saved", "The AEO Machine uses these fields from now on.", True),
+    "field_added": ("Field added", "It is in your Airtable table now, and the AEO Machine uses it.", True),
+    "fields_checked": ("Checked", "Your table's fields were read again from Airtable.", True),
 }
 
 
@@ -384,6 +388,7 @@ max-height:2.8em;overflow:hidden}
 .ar-s{grid-row:3;grid-column:2/4;display:flex;flex-wrap:wrap;align-items:center;gap:0 14px;
 font-size:calc(15 * var(--px, 1px));color:var(--ink-3)}
 .ar-s b{color:var(--ink-2);font-weight:600}
+.ar-b{color:var(--ink-2)}
 .ar-s form{display:inline}
 button.ar-go{display:inline-flex;align-items:center;width:auto;min-height:44px;margin:0;padding:0;
 border:0;background:none;color:var(--link);font-size:calc(15 * var(--px, 1px));font-weight:600}
@@ -396,7 +401,19 @@ _STATE = {"published": ("ok", "Live"), "writing": ("ink", "Writing"), "refused":
           "failed": ("bad", "Failed")}
 
 
-def _topic_row(row: dict, *, can_go: bool) -> str:
+def _brought_span(b: dict | None) -> str:
+    """What a live article brought (#1793 Phase 2.4), from the box's own numbers: "Brought 14 people this week, 3
+    from ChatGPT · 120 since it went live". Nothing when the store has no visits for it."""
+    if not b or not (b.get("since_live") or {}).get("people"):
+        return ""
+    from . import brought
+    week, since = b.get("this_week") or {}, b["since_live"]
+    said = (brought.words(week, "this week") + " · " + f"{since['people']:,} since it went live"
+            if week.get("people") else brought.words(since, "since it went live"))
+    return f'<span class="ar-b">Brought {_esc(said)}</span>'
+
+
+def _topic_row(row: dict, *, can_go: bool, brought: dict | None = None) -> str:
     st = row.get("status")
     tone, word = _STATE.get(st, ("ink", "Next") if row.get("requested_at") else ("", "Planned"))
     q = f'<p class="ar-p">{_esc(row["question"])}</p>' if row.get("question") else ""
@@ -409,9 +426,21 @@ def _topic_row(row: dict, *, can_go: bool) -> str:
     # THE DETAIL ROW ONLY SAYS WHAT THE STATE WORD CANNOT: when it went live and where, or why it
     # was held. "Planned." under "Planned" is a row's worth of nothing.
     detail = f"<span>{_status(row)}</span>" if st in ("published", "refused", "failed") else ""
+    if st == "published":
+        detail += _brought_span(brought)
     return (f'<div class="ar"><span class="ar-d {tone}"></span>'
             f'<span class="ar-t">{_esc(row["topic"])}</span><span class="ar-w">{word}</span>{q}'
             + (f'<div class="ar-s">{detail}{btn}</div>' if detail or btn else "") + '</div>')
+
+
+def _brought(rows: list[dict]) -> dict:
+    """{id: what it brought} for the live rows; {} on any trouble, so the list always draws."""
+    try:
+        from . import brought
+        return brought.for_articles(rows)
+    except Exception as e:                                # noqa: BLE001 — a count, never the screen
+        log.warning("aeo.brought_failed", error=type(e).__name__)
+        return {}
 
 
 def weekly_cap() -> int:
@@ -490,8 +519,10 @@ def _topics_page(title: str, lede: str, *, note: str = "", typed=("", "")) -> st
     # refused add comes back with what was typed, so the fix is where the eye already is.
     rows = plan.rows()
     if rows:
+        got = _brought(rows)
         listed = ('<div class="card ar-list">'
-                  + "".join(_topic_row(r, can_go=owner and ready and writer) for r in rows)
+                  + "".join(_topic_row(r, can_go=owner and ready and writer, brought=got.get(r.get("id")))
+                            for r in rows)
                   + '</div>')
     else:
         listed = ('<div class="card"><h2>No topics yet</h2><p>Each topic becomes one article '
@@ -791,8 +822,6 @@ def _airtable_form(typed=None) -> str:
     sample = (f'<a href="{_esc(sources.TEMPLATE_URL)}" target="_blank" rel="noopener">'
               'Copy our sample table &rarr;</a>') if sources.TEMPLATE_URL else ""
     start = f'<p class="sub">No table yet? {sample}</p>' if sample else ""
-    template = f'<div class="foot">{sample}</div>' if sample else ""
-    fields = ", ".join(sources.TEMPLATE_FIELDS)
     return (f'<form method="post" action="{AIRTABLE}"><div class="card">'
             + _text_input("table_url", "Table address", url,
                           "https://airtable.com/app.../tbl.../viw...", kind="url")
@@ -809,9 +838,46 @@ def _airtable_form(typed=None) -> str:
                      "Under Access, add only the base that holds your content plan.",
                      "Create it, copy the token and paste it above.")
             + '<p class="sub">The token is stored on this box and never shown again.</p></div>'
-            f'<div class="card"><h2>Your table</h2><p>It needs these fields, with exactly these '
-            f'names: {_esc(fields)}. Any other fields and tables can stay as they are.</p>'
-            f'{template}</div>')
+            + (_fields_card() if st["connected"] else
+               '<div class="card"><h2>Your fields</h2><p>Use the names you already have. Once the '
+               'table is connected, the AEO Machine finds the field for each thing it needs, and '
+               'you can change any of its choices here. Nothing in your table is renamed.</p></div>'))
+
+
+def _fields_card() -> str:
+    """WHICH OF THEIR FIELDS HOLDS EACH THING, with a dropdown each (#1793 §1.3). A role nothing can hold
+    gets its plain label and a one-tap Add this field for me. Mobile first: one full-width dropdown per
+    row, the button full width beneath it."""
+    fs = sources.fields_state()
+    rows, adds = [], []
+    for role in sources.ROLES:
+        pick, options = fs["map"].get(role.name), fs["candidates"].get(role.name) or []
+        need = "" if role.required else " (optional)"
+        if options:
+            opts = '<option value="">Not used</option>' if not role.required else \
+                '<option value="">Pick a field</option>'
+            opts += "".join(f'<option value="{_esc(o)}"{" selected" if o == pick else ""}>{_esc(o)}</option>'
+                            for o in options)
+            rows.append(f'<label for="f-{role.name}">{_esc(role.label.capitalize() + need)}</label>'
+                        f'<select id="f-{role.name}" name="{role.name}">{opts}</select>')
+        elif role.required:
+            adds.append(
+                f'<div class="card" style="border-color:var(--danger)"><h2>{_esc(role.label.capitalize())}</h2>'
+                '<p>No field in your table can hold this yet. The AEO Machine can add one for you, named '
+                f'{_esc(sources.ADD_AS[role.name][0])}. Nothing else in your table changes.</p>'
+                + _post(AIRTABLE_FIELDS, "add", "Add this field for me",
+                        extra=f'<input type="hidden" name="role" value="{_esc(role.name)}">')
+                + f'<p class="sub">This needs one more permission on your token, {_esc(sources.ADD_SCOPE)}. '
+                  'Airtable asks for it once.</p></div>')
+    missing = [label for name, label in fs["missing"]
+               if fs["candidates"].get(name)]
+    head = ('<p>Pick the field that holds ' + ", ".join(missing) + '.</p>') if missing else \
+        '<p>These are the fields the AEO Machine uses. Change any of them here.</p>'
+    form = (f'<form method="post" action="{AIRTABLE_FIELDS}"><input type="hidden" name="do" value="save">'
+            + "".join(rows) + '<button type="submit">Save fields</button></form>') if rows else ""
+    return ('<div class="card"><h2>Your fields</h2>' + head + form
+            + _post(AIRTABLE_FIELDS, "refresh", "Read my fields again", cls="ghost")
+            + '</div>' + "".join(adds))
 
 
 @blueprint.route(AIRTABLE, methods=["GET", "POST"])
@@ -831,10 +897,15 @@ def aeo_airtable():
                 raise _Refused(str(e)) from None
             key, typed = _secret(form.get("api_key"), sources.AIRTABLE_KEY,
                                  "an Airtable personal access token")
-            problem = sources.check_airtable(key, base, table, view)
-            if problem:
-                raise _Refused(problem)
             uid = str(_who().get("id") or "")
+            got = sources.read_table(key, base, table, view)
+            # SAVED THE MOMENT IT IS VALID (#1793 §1.3): a key Airtable accepted is kept even when the
+            # table address was wrong, so the next try doesn't start with finding the token again.
+            if got["key_ok"] and typed:
+                box_secrets.put(sources.AIRTABLE_KEY, key, user_id=uid)
+                typed = False
+            if got["problem"]:
+                raise _Refused(got["problem"])
             box_settings.put(settings.MACHINE, "airtable_base", base, set_by=uid)
             box_settings.put(settings.MACHINE, "airtable_table", table, set_by=uid)
             if view:
@@ -843,13 +914,14 @@ def aeo_airtable():
                 box_settings.clear(settings.MACHINE, "airtable_view")
             if typed:
                 box_secrets.put(sources.AIRTABLE_KEY, key, user_id=uid)
+            sources.remember_fields(got["fields"], by=uid)
         except (_Refused, box_secrets.SecretRejected) as e:
             log.info("aeo.airtable_refused", reason=str(e)[:120])
             return _page(AIRTABLE, title, lede, _note("", str(e)) + _airtable_form(form)), 400
-        log.info("aeo.airtable_connected", user=uid, base=base, table=table, key_changed=typed)
+        log.info("aeo.airtable_connected", user=uid, base=base, table=table)
         return redirect(f"{AIRTABLE}?said=connected", code=303)
     said = request.args.get("said") or ""
-    body = _note(said) if said == "connected" else ""
+    body = _note(said) if said in ("connected", "fields_saved", "field_added", "fields_checked") else ""
     if _is_owner():
         body += _airtable_form()
     else:
@@ -858,6 +930,40 @@ def aeo_airtable():
                  + ("Connected." if st["connected"] else "Not connected.")
                  + '</b></p><p class="sub">Only the owner of this box can change this.</p></div>')
     return _page(AIRTABLE, title, lede, body), 200
+
+
+@blueprint.route(AIRTABLE_FIELDS, methods=["POST"])
+def aeo_airtable_fields():
+    """Save the dropdowns, add one missing field, or read the table's fields again. Owner only."""
+    refuse = _admit()
+    if refuse is not None:
+        return refuse
+    title, lede = "Airtable", "Where you plan your articles. The AEO Machine works from this table."
+    if not _is_owner():
+        return _owner_refusal(AIRTABLE, title)
+    st, do, uid = sources.airtable_state(), request.form.get("do") or "", str(_who().get("id") or "")
+    if not st["connected"]:
+        return _page(AIRTABLE, title, lede, _note("", "Connect your table first.") + _airtable_form()), 400
+    key = box_secrets.get(sources.AIRTABLE_KEY) or ""
+    if do == "save":
+        problem = sources.choose_fields({r.name: request.form.get(r.name) for r in sources.ROLES}, by=uid)
+        said = "fields_saved"
+    elif do == "add":
+        problem = sources.add_field(key, st["base"], st["table"], request.form.get("role") or "")
+        said = "field_added"
+    elif do == "refresh":
+        got = sources.read_table(key, st["base"], st["table"], st["view"])
+        problem = got["problem"]
+        if not problem:
+            sources.remember_fields(got["fields"], by=uid)
+        said = "fields_checked"
+    else:
+        problem, said = "That isn't something this page does.", ""
+    if problem:
+        log.info("aeo.airtable_fields_refused", do=do[:20], reason=problem[:120])
+        return _page(AIRTABLE, title, lede, _note("", problem) + _airtable_form()), 400
+    log.info("aeo.airtable_fields", do=do, user=uid)
+    return redirect(f"{AIRTABLE}?said={said}", code=303)
 
 
 # ── PostHog, and the Performance screen it feeds ────────────────────────────────────────────────

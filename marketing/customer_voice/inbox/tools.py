@@ -412,7 +412,8 @@ def settings():
              "changed_at": "the box's configuration (not on a screen yet)"},
             *[{"name": f"reply_style_{ch}", "value": _rs_get()[ch],
                "means": f"how the box writes drafted replies to {'email' if ch == 'email' else 'direct messages'}: "
-                        "sales moves them toward booking or buying, service solves it without selling",
+                        "service sells nothing, subtle ends every reply with one light sentence about the business, "
+                        "sales (strong) ends every reply to a prospect with a clear next step and asks for the sale",
                "changed_at": "/inbox/reply-style"} for ch in ("email", "dms")],
             {"name": "mailbox_drafts", "value": "on" if mailbox_drafts.enabled() else "off",
              "means": "replies to email are also left in the mailbox's own Drafts folder",
@@ -960,7 +961,7 @@ def propose_reply_style(email=None, dms=None, seat=None):
     """Ask the owner to change how the box drafts replies: Sales or Customer service, for email and for DMs."""
     from marketing.customer_voice.inbox import reply_style
     if email is None and dms is None:
-        return {"asked": False, "error": "give email, dms or both: sales or service"}
+        return {"asked": False, "error": "give email, dms or both: service, subtle or sales"}
     try:
         want = {ch: reply_style.clean(v) for ch, v in (("email", email), ("dms", dms)) if v is not None}
     except ValueError as e:
@@ -1113,11 +1114,14 @@ tools.register(
     title="Ask before changing how replies are written",
     fn=propose_reply_style, machine=MACHINE, min_role="act", render=_render_proposal,
     capability="write:proposals", wants_seat=True,
-    description="Ask the owner to change the style the box drafts replies in, per channel: sales (answer, then always "
-                "move them a step closer to booking or buying) or service (solve it, no selling). Drafts still wait "
-                "to be sent. Nothing changes until the owner approves.",
-    args={"email": {"type": "string", "required": False, "description": "sales or service, for email."},
-          "dms": {"type": "string", "required": False, "description": "sales or service, for direct messages."}},
+    description="Ask the owner to change the style the box drafts replies in, per channel. Every level adapts to who "
+                "wrote (a prospect, a customer, anyone else) and a customer's problem is always solved first; the "
+                "level shades how far it leans to selling: service (no selling), subtle (a light invitation to "
+                "prospects, one light sentence to everyone) or sales (strong: every reply to a prospect ends with a clear next step and asks for the booking or sale). "
+                "Drafts still wait to be sent. Nothing changes until the owner approves.",
+    args={"email": {"type": "string", "required": False, "description": "service, subtle or sales, for email."},
+          "dms": {"type": "string", "required": False,
+                  "description": "service, subtle or sales, for direct messages."}},
 )
 
 tools.register(

@@ -5088,6 +5088,33 @@ def r_signature():
     return _shell(head + form + _back_link(), here="/inbox/signature"), 200
 
 
+# WHAT EACH LEVEL DOES, said on the page (owner, 2026-10-04: "And that should be explained on the webpage"). One card per
+# level, stacked: a table three columns wide does not fit a mobile screen. The words follow the drafter's STYLE_* text.
+_LEVELS = (
+    ("Customer service", "For an established business with steady work coming in. Pure service, never salesy.",
+     ("Prospects: a complete, helpful answer. How to book only if they ask.",
+      "Customers: their problem solved, clearly and kindly. No upsell.",
+      "Anyone else: nothing about what you sell.")),
+    ("Subtle sales", "A light touch. People learn what you do without feeling sold to.",
+     ("Prospects: an answer, then a gentle invitation to book or visit your website.",
+      "Customers: their problem solved first, then one light sentence about what you do.",
+      "Anyone else: one light sentence about what you do, with your website.")),
+    ("Strong sales", "Startup mode, for a business still finding its market. Every reply works to win business.",
+     ("Prospects: an answer, then a clear next step in every reply, and a plain ask for the booking or the sale.",
+      "Customers: problem-solving service first. Once they are happy, an invitation to book again.",
+      "Anyone else: one light sentence about what you do, never a hard sell.")),
+)
+
+
+def _style_levels() -> str:
+    cards = "".join(
+        f'<div class="card" style="margin-top:10px"><div class="t"><b>{_esc(name)}</b></div>'
+        f'<p class="quiet" style="margin:4px 0 6px">{_esc(lede)}</p>'
+        + "".join(f'<p style="margin:2px 0">{_esc(x)}</p>' for x in rows) + '</div>'
+        for name, lede, rows in _LEVELS)
+    return f'<div style="margin:6px 0 16px">{cards}</div>'
+
+
 # ── reply style, per channel (inbox/reply_style.py, drafter STYLE_SALES / STYLE_SERVICE) ─────────────────────────────
 # Owner, 2026-10-04: "I wish there was a setting of a style of response that we could select per channel... I just
 # always want to be trying to get more business so want to always be closing ABC." Owner edits; members read.
@@ -5114,9 +5141,13 @@ def r_reply_style():
     cur = _rs.get()
     saved = request.args.get("saved") and not note
     head = ('<h1>Reply style</h1>'
-            '<p class="quiet">How your box writes the replies it drafts, for each channel. <b>Sales</b> answers, then '
-            'always moves the person one step closer to booking or buying. <b>Customer service</b> solves what they '
-            'need without selling. Every reply still waits for you to send it.</p>'
+            '<p class="quiet">Your box reads every message before it drafts a reply. It tells a <b>prospect</b> '
+            '(not a customer yet) from a <b>customer</b> (already bought or booked) and from <b>anyone else</b> (a '
+            'recruiter, a supplier, someone pitching you), and writes to each the way a good owner would. That is '
+            'built in, and a customer with a problem always gets it solved first.</p>'
+            '<p class="quiet">The style sets how far it leans: further toward service, or further toward the sale. Pick '
+            'one for each channel. Every draft still waits for you to send it.</p>'
+            + _style_levels()
             + ('<p class="quiet">Saved. New drafts are written this way.</p>' if saved else "") + note)
     if not owner:
         rows = "".join(f'<p>{_rs.CHANNEL_WORDS[ch]}: {_rs.STYLES[cur[ch]]}</p>' for ch in _rs.CHANNELS)

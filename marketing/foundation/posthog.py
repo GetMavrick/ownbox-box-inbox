@@ -136,6 +136,25 @@ def top(conn: Conn, host: str, d: date, tz: str, prop: str, n: int = 10, keep: s
     return [(str(p), int(s or 0)) for p, s in rows if p not in (None, "")]
 
 
+def article_conversions(conn: Conn, host: str, d: date, tz: str, defs: list[tuple[str, str]], keep: str = "1 = 1",
+                        prefix: str = "/articles/", n: int = 25) -> list[tuple[str, int]]:
+    """Each page under `prefix` and the visits that read it and converted that day, by any of the site's conversions
+    (the same definitions `conversions` counts): [(path, visits)]. Nothing is asked when the site has none. What each
+    article brought (#1793 Phase 2.4b): the store kept conversions per site only."""
+    conds = " or ".join(f"({cond})" for _, cond in defs)
+    if not conds:
+        return []
+    f = day_filter(d, tz)
+    rows = q(conn, f"""
+        select v.url, count(distinct v.sid) from (
+          select $session_id sid, properties.$pathname as url from events
+          where event = '$pageview' and {host_is(host)} and {f} and {keep}
+            and startsWith(properties.$pathname, {_lit(prefix)})) v
+        where v.sid in (select $session_id from events where {host_is(host)} and ({conds}) and {f} and {keep})
+        group by v.url order by count(distinct v.sid) desc limit {int(n)}""")
+    return [(str(p), int(s or 0)) for p, s in rows if p not in (None, "")]
+
+
 def referrers(conn: Conn, host: str, d: date, tz: str, n: int = 25,
               keep: str = "1 = 1") -> list[tuple[str, int, list[tuple[str, int]]]]:
     """Each referring site, its visits, and the pages those visits viewed. A visit is attributed to the site that

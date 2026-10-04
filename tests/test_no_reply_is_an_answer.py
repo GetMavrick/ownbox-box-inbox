@@ -62,7 +62,7 @@ def says(answer):
 # ── 1. the prompt tells the model it may decline ────────────────────────────────────────────
 print("test_the_model_is_told_the_three_shapes_and_how_to_decline")
 S = draft.SYSTEM
-ok("it names the case where the business itself started the thread", "BUSINESS ITSELF STARTED" in S)
+ok("it names the case where the business itself started the thread", "THE BUSINESS IS THE ONE WHO STARTED IT" in S)
 ok("...and forbids the sentence the owner actually read",
    "wrong address" in S and "sent this by mistake" in S, S[-300:])
 ok("it names the case where nobody needs an answer", "NOBODY NEEDS AN ANSWER" in S)

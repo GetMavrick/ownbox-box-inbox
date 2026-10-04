@@ -77,6 +77,18 @@ def history_for(space: str, zcid: str, *, limit: int = 12) -> list[dict]:
     return [dict(r) for r in reversed(rows)]
 
 
+def started_by(space: str, zcid: str) -> str:
+    """Who wrote the first message this box holds for the conversation: "business", "them", or "" when it holds none.
+    The drafter says it, because "Them" writing first does not make them the customer: a reply to the owner's own job
+    application, order or support ticket starts with their message too (owner, 2026-10-04)."""
+    with state.connect() as c:
+        row = c.execute("SELECT direction FROM inbox_messages WHERE space = ? AND zernio_conversation_id = ? "
+                        "ORDER BY created_at ASC, id ASC LIMIT 1", (space, str(zcid))).fetchone()
+    if row is None:
+        return ""
+    return "business" if str(row["direction"]) == "out" else "them"
+
+
 def dismiss(space: str, draft_id: str) -> None:
     """He said no. NEVER a DELETE — standing owner rule, and a draft he rejected is the most
     useful record this table holds: it is the evidence that the machine got one wrong."""

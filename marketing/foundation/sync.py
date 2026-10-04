@@ -8,6 +8,7 @@ import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from core import labs
 from core.logging import get_logger
 
 from . import posthog, settings, store, visitors
@@ -31,6 +32,16 @@ def sync_site_day(conn: posthog.Conn, site: str, d: date, tz: str) -> None:
     first, and every number after that reads the ones kept. Raises posthog.Refused."""
     out, why, unchecked = visitors.sort(posthog.visits(conn, site, d, tz))
     keep = visitors.keep(out)
+    # CONVERSIONS PER ARTICLE (#1793 Phase 2.4b) ARE A BREAKDOWN, NOT THE DAY: if this one query fails, the day's
+    # numbers still land and only the breakdown is missing; it is asked again on the next re-sync of the day.
+    # BEHIND THE LABS SWITCH (OSDev1 on #1904): a new query runs against a buyer's own PostHog only on a box HQ has
+    # switched article_results on for (default first), until it is proven there.
+    by_article: list = []
+    if labs.on("article_results"):
+        try:
+            by_article = posthog.article_conversions(conn, site, d, tz, settings.conversions(site), keep)
+        except Exception as e:                          # noqa: BLE001
+            log.warning("website.article_conversions_skipped", site=site, why=type(e).__name__)
     store.write_day(
         site, d,
         traffic=posthog.traffic(conn, site, d, tz, keep),
@@ -38,7 +49,7 @@ def sync_site_day(conn: posthog.Conn, site: str, d: date, tz: str) -> None:
         pages=posthog.top(conn, site, d, tz, "properties.$pathname", keep=keep),
         utms=posthog.top(conn, site, d, tz, "properties.utm_source", keep=keep),
         referrers=posthog.referrers(conn, site, d, tz, keep=keep),
-        left_out=why, unchecked=unchecked)
+        left_out=why, unchecked=unchecked, page_conversions=by_article)
 
 
 def _search_day(site: str, d: date) -> None:
