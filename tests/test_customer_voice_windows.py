@@ -85,7 +85,7 @@ ok("tiktok is still limited a month later — only their reply reopens it",
 
 
 # ── fail closed ──────────────────────────────────────────────────────────────────────────
-for p in ("reddit", "whatsapp", "instagram_comment", "", "MESSENGER_TYPO", "google_review"):
+for p in ("reddit", "sms", "instagram_comment", "", "MESSENGER_TYPO", "google_review"):
     r = d(p, ago(hours=1))
     ok(f"an unwritten platform {p!r} REFUSES — adding a string to the poller cannot authorise it",
        r["decision"] == window.BLOCKED, str(r))

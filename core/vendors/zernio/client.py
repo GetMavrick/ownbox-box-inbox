@@ -132,6 +132,27 @@ class _AccountsResource:
                 out[plat] = aid
         return out
 
+    def all(self) -> list:
+        """Every connected account in THIS Space, named the way a person knows it -> [{"id", "platform", "name"}].
+
+        For the Social Accounts screen (owner, 10-04: "which account is this, and let me change it"). `discover`
+        keeps one account per platform and no names; this keeps every one, so a workspace holding two Instagram
+        accounts can say which is which. The name is the @handle when the platform has one, else the display name.
+        Profile-scoped and read-only, like discover()."""
+        s = self._s
+        r = transport.call(
+            "accounts.list",
+            lambda: transport.raw_client(s.key).accounts.list(profile_id=s.profile_id))
+        out = []
+        for a in model.items(r, "accounts", "data", "items"):
+            plat, aid = model.platform_value(a), model.obj_id(a)
+            if not plat or not aid:
+                continue
+            handle = str(model.field(a, "username", "platformUsername") or "").strip().lstrip("@")
+            name = ("@" + handle) if handle else str(model.field(a, "displayName", "name") or "").strip()
+            out.append({"id": str(aid), "platform": plat, "name": name[:80]})
+        return out
+
     def identities(self) -> dict:
         """THIS Space's own identity per platform -> {platform: {id, @handle, …} lowercased}, so a reader can
         tell the account's own comments from a person's. Read-only, profile-scoped like discover()."""

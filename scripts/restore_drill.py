@@ -21,9 +21,15 @@ a box keeps writing while the drill runs. RED: not a database, corrupt, a differ
 or empty, a row live had at the copy's moment missing from it, or a copy more than 26 hours behind live.
 
 Exit 0 only when GREEN. Run it after any change to replication, and once before you hand a box to anybody.
+
+EVERY WEEK, ON THE BOX ITSELF (launch bar 9's last step): nobody can shell into a sold box, so aios-restore-drill.timer
+runs `restore_drill.sh --last-night --record`. `--last-night` restores the newest nightly copy (scripts/backup_db.py,
+<db dir>/backups/aios-YYYY-MM-DD.db) into a temporary file beside live and compares that; `--record` keeps the verdict
+as the heartbeat `backup_restore` (core/restore_check.py), which core.health, the Dashboard and the check-in read.
 """
 import argparse
 import hashlib
+import io
 import os
 import pathlib
 import shutil
@@ -218,7 +224,65 @@ def _verdict(live: pathlib.Path, out: pathlib.Path, a) -> int:
     return 0
 
 
+class _Tee(io.TextIOBase):
+    """Everything printed goes where it always went, and is kept, so --record can read the verdict line."""
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, text):
+        for st in self.streams:
+            st.write(text)
+        return len(text)
+
+    def flush(self):
+        for st in self.streams:
+            st.flush()
+
+
+def _reasons(said: str) -> list[str]:
+    """The RED line's reasons, or the last thing said when the drill stopped before a verdict."""
+    lines = [x.strip() for x in said.splitlines() if x.strip()]
+    red = [x for x in lines if x.startswith("RESTORE DRILL: RED")]
+    if red:
+        return [r.strip() for r in red[-1].split("—", 1)[-1].split(";") if r.strip()]
+    return [lines[-1][:160]] if lines else []
+
+
+def _record(rc: int, said: str) -> None:
+    """Keep the verdict as the heartbeat `backup_restore` (core/restore_check.py). Never fails the drill."""
+    try:
+        sys.path.insert(0, str(ROOT))
+        from core import restore_check
+        restore_check.record(rc == 0, [] if rc == 0 else _reasons(said))
+    except Exception as e:                               # noqa: BLE001 — the verdict printed stands either way
+        print(f"  the verdict could not be recorded: {type(e).__name__}", file=sys.stderr)
+
+
+def _last_night(live: pathlib.Path) -> pathlib.Path | None:
+    """The newest nightly copy beside the live database (scripts/backup_db.py), or None."""
+    found = sorted((live.resolve().parent / "backups").glob("aios-????-??-??.db"))
+    return found[-1] if found else None
+
+
 def main(argv=None) -> int:
+    if "--record" not in (sys.argv[1:] if argv is None else argv):
+        return _main(argv)
+    keep = io.StringIO()
+    out, err = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = _Tee(out, keep), _Tee(err, keep)
+    try:
+        rc = _main(argv)
+    except Exception as e:                               # noqa: BLE001 — a drill that crashed is a red drill
+        print(f"RESTORE DRILL: RED — the drill stopped: {type(e).__name__}", file=sys.stderr)
+        rc = 1
+    finally:
+        sys.stdout, sys.stderr = out, err
+    _record(rc, keep.getvalue())
+    return rc
+
+
+def _main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(ROOT / "deploy" / "litestream.yml"))
     ap.add_argument("--db", default=str(ROOT / "aios.db"))
@@ -227,6 +291,10 @@ def main(argv=None) -> int:
     ap.add_argument("--copy", default="", help="compare THIS already-restored copy instead of restoring the replica")
     ap.add_argument("--max-lag-hours", type=float, default=MAX_LAG_H,
                     help=f"red when the copy's newest row is older than live's by more than this (default {MAX_LAG_H})")
+    ap.add_argument("--last-night", action="store_true",
+                    help="restore the newest nightly copy (<db dir>/backups/aios-YYYY-MM-DD.db) and compare that")
+    ap.add_argument("--record", action="store_true",
+                    help="keep the verdict as the heartbeat backup_restore (core.health, the Dashboard, the check-in)")
     ap.add_argument("--root", default=str(ROOT),
                     help="the install root the overlay paths are relative to (a test points it at a fixture)")
     a = ap.parse_args(argv)
@@ -235,6 +303,19 @@ def main(argv=None) -> int:
     if not live.exists():
         print(f"no live database at {live}", file=sys.stderr)
         return 1
+    if a.last_night:
+        night = _last_night(live)
+        if not night:
+            print("RESTORE DRILL: RED — no nightly copy to restore (the nightly backup has not run)", file=sys.stderr)
+            return 1
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="aios-restore-drill-"))
+        try:
+            out = tmp / "restored.db"
+            print(f"restoring last night's copy {night.name} into {out} …")
+            shutil.copy2(night, out)                     # the copy is never opened where it is kept
+            return _verdict(live, out, a)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
     if a.copy:
         copy = pathlib.Path(a.copy)
         if not copy.is_file() or copy.stat().st_size == 0:

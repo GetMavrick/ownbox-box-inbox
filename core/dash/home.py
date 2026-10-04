@@ -132,6 +132,10 @@ letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
 .nav .badge,.row .badge{display:inline-block;margin-left:7px;padding:1px 7px;border:1px solid currentColor;
 border-radius:var(--r-pill,999px);font-size:calc(11 * var(--px, 1px));font-weight:600;letter-spacing:.02em;
 color:var(--link);vertical-align:1px}
+/* how many wait behind a row (Approvals): a small filled pill at the row's right edge, only when there are any */
+.nav a .count{flex:none;margin-left:8px;min-width:20px;padding:1px 7px;border-radius:var(--r-pill,999px);
+background:var(--link);color:var(--card);font-size:calc(12 * var(--px, 1px));font-weight:600;text-align:center;
+font-variant-numeric:tabular-nums}
 .nav a .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nav a .out{color:var(--faint);margin-left:2px}
 .nav a .fwd{color:var(--faint);flex:none}
@@ -571,6 +575,12 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
                 badge = _tiers.badge(it.feature)
             except Exception:                    # noqa: BLE001 — a badge is never worth a broken menu
                 badge = ""
+        waits = 0
+        if it.count is not None:
+            try:
+                waits = max(0, int(it.count()))
+            except Exception:                    # noqa: BLE001 — a count is never worth a broken menu
+                waits = 0
         cur = ' aria-current="page"' if shell.is_current(it, path) else ""
         # A LINK THAT LEAVES OPENS AWAY FROM THE BOX and carries `noopener`: the destination is
         # outside this box's control, and a menu row is not a reason to hand it this window.
@@ -583,6 +593,7 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
                     + f'{cur}>{_svg(it.icon) if got.level == 1 else ""}'
                     + f'<span class="lbl">{_esc(it.label)}'
                     + (f'<span class="badge">{_esc(badge)}</span>' if badge else "") + '</span>'
+                    + (f'<span class="count" aria-label="{waits} waiting">{waits}</span>' if waits else "")
                     + (_OUT_ARROW if (off or it.tone == "away") else "")
                     + (_FWD_CHEVRON if it.submenu else "") + '</a>')
 
@@ -802,7 +813,7 @@ def _this_machine_card() -> str:
     worker = h.get("worker") or {}
     if pause.is_paused():
         word, tone = "Stopped by you", "stale"
-    elif (h.get("alerts") or {}).get("failing"):
+    elif (h.get("alerts") or {}).get("failing") or (h.get("backup") or {}).get("state") in ("red", "stale"):
         word, tone = "Needs attention", "stale"
     elif worker.get("ok"):
         word, tone = "Running", "ok"
@@ -820,6 +831,17 @@ def _this_machine_card() -> str:
     if last:
         rows.append('<div class="row"><span class="what">Last backup</span>'
                     f'<span>{_esc(last)}</span></div>')
+    # THE BACKUP, PROVED WEEKLY (core/restore_check.py, launch bar 9). No row before the first check: a line
+    # without data is not drawn. A red or stopped check says so, and how to get it fixed.
+    from core import restore_check
+    checked = h.get("backup") or {}
+    if checked.get("state") == "green":
+        rows.append('<div class="row"><span class="what">Backup checked</span>'
+                    f'<span>{_esc(restore_check.day_words(checked.get("at")))}: everything came back</span></div>')
+    elif checked.get("state") in ("red", "stale"):
+        mail = restore_check.SUPPORT
+        said = _esc(restore_check.sentence(checked)).replace(mail, f'<a href="mailto:{mail}">{mail}</a>')
+        rows.append(f'<div class="row"><span class="what">Backup checked</span><span>{said}</span></div>')
     try:
         du = shutil.disk_usage("/")
         rows.append(f'<div class="row"><span class="what">Disk</span>'
@@ -1646,6 +1668,21 @@ def add_machine():
 # because installed apps and bookmarks open it.
 shell.register_section("dashboard", order=0, machine="core", title="Base Machine",
                        href="/dashboard", home=True, icon=_HOME_ICON)
+
+# APPROVALS SITS RIGHT BELOW BASE MACHINE, ON EVERY PAGE. Owner, 10-04: "Where is the approvals Page? It should be in
+# the dashboard I guess." Its only doors were the Dashboard card, drawn only while something waits, and the push. So
+# it is a row of the box's own, with how many wait beside its name. OWNER-ONLY, like its page (core/dash/approvals.py:
+# approving acts in the owner's apps with the owner's connections), so a member is shown no row.
+_CHECK_ICON = "M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0ZM8.5 12.2l2.4 2.4 4.6-4.9"
+
+
+def _approvals_waiting() -> int:
+    from core import approvals
+    return approvals.waiting_count()
+
+
+shell.register_section("approvals", order=5, machine="core", title="Approvals", href="/approvals",
+                       icon=_CHECK_ICON, owner_only=True, count=_approvals_waiting)
 
 # THE MORNING REVIEW HEADS THE ADD-ON MACHINES. Owner, 2026-09-29: "Add the Morning Review to the
 # menu" (it had no row; the 8 AM message and the email were its only doors), and then: "move

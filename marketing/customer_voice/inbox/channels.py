@@ -80,6 +80,10 @@ NAMES = {"messenger": "Messenger", "instagram": "Instagram", "email": "Email",
 POLLED: tuple[Channel, ...] = (
     Channel("facebook", "messenger"),
     Channel("instagram", "instagram"),
+    # WHATSAPP (owner 10-04, the Social Accounts rework): a WhatsApp Business number connected through the buyer's own
+    # Zernio workspace, read like the two above. Its send rule is Meta's 24-hour customer service window
+    # (window._RULES["whatsapp"]); outside it a reply blocks, since the box holds no approved templates.
+    Channel("whatsapp", "whatsapp"),
     # EMAIL IS ON. The rule it was waiting for is written (`window._RULES["email"]`, with its
     # citations), so the pairing `test_inbox_instagram` enforces is satisfied and this line is the
     # switch the comment here promised it would be.
@@ -140,3 +144,55 @@ def label(key: str | None) -> str:
     next notification to need it invents its own wording.
     """
     return name(key, fallback="this channel")
+
+
+# ── WHAT THE OWNER CHOSE ON SOCIAL ACCOUNTS (owner 10-04: "I should be able to edit settings") ──────────────────────
+# Two choices, kept on the box and never at Zernio: a channel he DISCONNECTED is not read (the account stays connected
+# in his Zernio workspace, where other machines may post through it), and where his workspace holds more than one
+# account on a platform, the one he PICKED is the only one read. Both are by Zernio's platform token.
+_NS = "inbox"
+
+
+def stopped() -> set:
+    """The platforms the owner disconnected on Social Accounts. Never raises: unreadable is none."""
+    try:
+        from core import box_settings
+        got = box_settings.get(_NS, "channels_stopped") or []
+        return {str(v) for v in got if isinstance(v, str)}
+    except Exception:                                   # noqa: BLE001
+        return set()
+
+
+def stop(vendor: str, off: bool, *, by: str | None = None) -> None:
+    """Stop reading `vendor`, or read it again."""
+    from core import box_settings
+    now = stopped()
+    now = (now | {vendor}) if off else (now - {vendor})
+    box_settings.put(_NS, "channels_stopped", sorted(now), set_by=by)
+
+
+def chosen() -> dict:
+    """{platform: account id} for the platforms where the owner picked one account. Never raises."""
+    try:
+        from core import box_settings
+        got = box_settings.get(_NS, "channel_accounts") or {}
+        return {str(k): str(v) for k, v in got.items() if isinstance(v, str) and v} if isinstance(got, dict) else {}
+    except Exception:                                   # noqa: BLE001
+        return {}
+
+
+def choose(vendor: str, account_id: str | None, *, by: str | None = None) -> None:
+    """Read only `account_id` on `vendor`, or every account there again (None)."""
+    from core import box_settings
+    now = chosen()
+    if account_id:
+        now[vendor] = str(account_id)
+    else:
+        now.pop(vendor, None)
+    box_settings.put(_NS, "channel_accounts", now, set_by=by)
+
+
+def forget_choices(*, by: str | None = None) -> None:
+    """A new key or workspace holds other accounts: the picks made for the old one mean nothing there."""
+    from core import box_settings
+    box_settings.put(_NS, "channel_accounts", {}, set_by=by)

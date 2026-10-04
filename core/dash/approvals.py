@@ -127,7 +127,7 @@ def box_approvals():
         body += [_waiting_card(a) for a in waiting]
     else:
         body.append('<div class="card"><p>Nothing is waiting. When a coworker asks to change something in an app '
-                    'you connected, it shows here and on your phone.</p>'
+                    'you connected, it shows here and in the mobile app.</p>'
                     '<p><a href="/settings/sources">Data Sources &rarr;</a></p></div>')
     body.append(_history(approvals.recent()))
     return chrome(DOOR, title=_TITLE, lede=LEDE, body="".join(body)), (400 if note else 200)

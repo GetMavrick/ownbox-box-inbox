@@ -1,0 +1,20 @@
+# The weekly restore drill (scripts/restore_drill.py --last-night --record): restores the newest nightly copy into a
+# temporary file beside live, compares them, prints GREEN or RED with what it compared, and keeps the verdict as the
+# heartbeat backup_restore (core/restore_check.py), which core.health, the Dashboard and the check-in read. Never
+# touches the live database or the copy where it is kept, and never prints a row. A RED drill fails the unit.
+[Unit]
+Description=AIOS restore drill: last night's backup restored and checked
+ConditionPathExists=/opt/aios/aios.db
+After=aios-backup.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aios
+EnvironmentFile=/opt/aios/.env
+ExecStart=/bin/bash /opt/aios/scripts/restore_drill.sh --last-night --record
+TimeoutStartSec=1800
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

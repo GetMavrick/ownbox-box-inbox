@@ -364,8 +364,6 @@ DOORS: dict[str, str] = {
            "(docs/BOX_DESIGN_REFERENCE.md); signed-in only",
     "/settings/sources/callback": "where an app's own login page sends the owner back after Connect on Data "
                                   "Sources (core/connections/oauth.py); never a link",
-    "/approvals": "Approvals: opened from the phone notification and the Dashboard's card while a coworker's "
-                  "request waits, and from Data Sources once an app is connected (core/approvals.py)",
 }
 
 _reached = set(fresh) | set(done) | set(mem) | set(pro)

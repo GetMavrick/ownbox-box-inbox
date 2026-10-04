@@ -431,6 +431,7 @@ def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, 
     """
     space = sp["name"]
     scanned = enqueued = 0
+    picked = channels.chosen()
     for conv in page["conversations"]:
         zcid = str(_f(conv, "id", "_id", "conversation_id") or "")
         if not zcid:
@@ -458,6 +459,11 @@ def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, 
         if not acctid:
             log.warning("inbox.conv_missing_account", space=space,
                         channel=ch.key, conversation=zcid)
+            continue
+        # THE ACCOUNT THE OWNER PICKED, where his workspace holds more than one on this platform (Social Accounts →
+        # Change): a conversation on another account of the same platform is not read.
+        want = picked.get(getattr(ch, "vendor", ""))
+        if want and acctid != want:
             continue
         # Activity watermark: the real field is `updatedTime` (A-5) — the
         # earlier `updatedAt`/`lastMessageAt` never matched, so the
@@ -681,6 +687,10 @@ def poll_sweep() -> dict:
                 ok_channels += 1 if ch_ok else 0
                 continue
             if z is None:
+                continue
+            # A CHANNEL THE OWNER DISCONNECTED ON SOCIAL ACCOUNTS IS NOT READ (channels.stopped): the account stays in
+            # his Zernio workspace, and the box asks nothing about it.
+            if ch.vendor in channels.stopped():
                 continue
             try:
                 # `platform` is PASSED, never left to the client default. The default is

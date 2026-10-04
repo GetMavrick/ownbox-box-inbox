@@ -119,11 +119,11 @@ ok("...and a year-old email thread says exactly the same thing",
    (e_old["state"], e_old["can_try"]) == (e["state"], True)
    and "while since" not in e_old["headline"], str(e_old))
 
-u = window.explain("whatsapp", ago(1), NOW)
+u = window.explain("sms", ago(1), NOW)
 ok("AN UNWRITTEN RULE IS OURS, AND IS SAID AS OURS — never 'wait out a window'",
    u["state"] == "unknown" and "not switched on" in u["headline"]
    and "window" not in u["detail"].lower(), str(u))
-ok("...and the channel is named the way a person writes it", "Whatsapp" in u["headline"], u["headline"])
+ok("...and the channel is named the way a person writes it", "SMS" in u["headline"], u["headline"])
 
 n = window.explain("instagram", None, NOW)
 ok("no inbound on record explains reply-only, and still lets them try",
@@ -136,14 +136,14 @@ ok("a future timestamp is admitted as unreadable, never dressed up as a window",
 ok("every state a screen can meet is one of six known strings",
    {window.explain(p, ago(h), NOW)["state"]
     for p, h in (("instagram", 1), ("instagram", 30), ("messenger", 30), ("tiktok", 60),
-                 ("email", 1), ("whatsapp", 1))} <= {"open", "tagged", "limited", "closed",
+                 ("email", 1), ("sms", 1))} <= {"open", "tagged", "limited", "closed",
                                                      "no_lane", "unknown"})
 
 print("\ntest_the_developer_sentence_and_the_buyer_sentence_stay_separate")
-d = window.decide("whatsapp", ago(1), NOW)
+d = window.decide("sms", ago(1), NOW)
 ok("`decide`'s reason is unchanged — it is what a dev reads in a queue row",
    "nobody has read" in d["reason"], d["reason"])
-_x = window.explain("whatsapp", ago(1), NOW)
+_x = window.explain("sms", ago(1), NOW)
 ok("...and neither sentence a SCREEN binds to quotes it back at them",
    "nobody has read" not in _x["headline"] + _x["detail"], _x["headline"] + _x["detail"])
 ok("...while `reason` still rides through for the log, where that wording belongs",
@@ -190,11 +190,11 @@ ok("the send path's one question to this module takes NO timestamp, so it cannot
 # — on the unattended path, where nobody is watching — may refuse an unwritten channel.
 ok("...and no channel is refused a lane today, an unknown platform least of all",
    not any(window.no_send_lane_why(p)
-           for p in ("email", "instagram", "messenger", "tiktok", "whatsapp", "", "TYPO")),
-   str({p: window.no_send_lane_why(p) for p in ("email", "whatsapp", "TYPO")}))
+           for p in ("email", "instagram", "messenger", "tiktok", "sms", "", "TYPO")),
+   str({p: window.no_send_lane_why(p) for p in ("email", "sms", "TYPO")}))
 ok("...while `decide` DOES still refuse an unwritten channel, which is the half that protects us",
-   window.decide("whatsapp", ago(1), NOW).get("no_rule") is True,
-   str(window.decide("whatsapp", ago(1), NOW)))
+   window.decide("sms", ago(1), NOW).get("no_rule") is True,
+   str(window.decide("sms", ago(1), NOW)))
 # AND THE SEND PATH KEEPS NO COPY OF THE SENTENCE. It is data on the rule, beside the policy it
 # explains, so the words a buyer reads and the reason they are true cannot drift apart. My first
 # version of this check grepped reply.py FOR the sentence and failed — correctly, and it is the

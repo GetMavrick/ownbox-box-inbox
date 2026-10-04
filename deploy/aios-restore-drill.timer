@@ -1,0 +1,13 @@
+# THE BOX PROVES ITS OWN BACKUP, EVERY WEEK (plan #1857 launch bar 9): Sunday, an hour and a half after the nightly
+# copy (aios-backup.timer, 03:00), so the copy it restores is a few hours old. Persistent: a box that was off on
+# Sunday runs it when it comes back.
+[Unit]
+Description=AIOS weekly restore drill: restore last night's backup and check it came back
+
+[Timer]
+OnCalendar=Sun *-*-* 04:30:00 America/Los_Angeles
+Persistent=true
+RandomizedDelaySec=900
+
+[Install]
+WantedBy=timers.target

@@ -125,6 +125,10 @@ class Item:
     # (core/tiers.py). The renderer shows the row either way, with the plan's badge when the box
     # lacks it (owner, 2026-10-02: "a little pro badge", and an upsell rather than a missing row).
     feature: str = ""
+    # HOW MANY ARE WAITING BEHIND THIS ROW, drawn beside its name when there are any (owner, 10-04: "Where is the
+    # approvals page? It should be in the dashboard"). A zero-argument callable, asked when the menu is drawn; a
+    # count that cannot be read is drawn as no count, never as a broken menu. Set from the section's own `count`.
+    count: object = None
 
 
 @dataclass(frozen=True)
@@ -146,6 +150,8 @@ class Section:
     parent: str = ""
     # {group: name} for the sub-menu's groups (Item.label_above); empty draws a gap and no name.
     group_labels: tuple = ()
+    # A COUNT FOR ITS ROW (Item.count): a zero-argument callable, or None.
+    count: object = None
     # A SECTION ONLY THE OWNER MAY OPEN, dropped from everyone else's menu exactly as an owner-only
     # `Item` is. The first is the Morning Review (owner, 2026-09-29: "Add the Morning Review to the
     # menu"): its page publishes what the box spends, and its gate sends anyone else to sign in.
@@ -188,7 +194,7 @@ GROUPS = ("base", "addons")
 def register_section(key: str, *, order: int, machine: str, title: str, href: str,
                      items: Iterable = (), home: bool = False, icon: str = "",
                      group: str = "", parent: str = "", owner_only: bool = False,
-                     group_labels: dict | None = None) -> None:
+                     group_labels: dict | None = None, count=None) -> None:
     """Declare one rail section. Called at import, like every other seam in this box.
 
     CHECKED HERE, AT IMPORT, where a mistake is a failed boot line — not on the screen, where it
@@ -229,6 +235,8 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
             raise ValueError(f"rail section {key!r} cannot nest under {parent!r}, itself nested")
         if home:
             raise ValueError(f"rail section {key!r} cannot be both nested and home")
+    if count is not None and not callable(count):
+        raise ValueError(f"rail section {key!r} count must be a zero-argument callable")
     if owner_only and home:
         # THE HOME IS WHERE EVERY BACK ARROW LANDS, for a member too; hiding it strands them.
         raise ValueError(f"rail section {key!r} cannot be both owner-only and home")
@@ -274,7 +282,7 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
 
     _SECTIONS[key] = Section(key=key, order=order, machine=machine, title=title.strip(),
                              href=href, items=tuple(built), home=bool(home), icon=str(icon or ""),
-                             group=group, parent=str(parent or ""), owner_only=bool(owner_only),
+                             group=group, parent=str(parent or ""), owner_only=bool(owner_only), count=count,
                              group_labels=tuple((str(k), str(v)) for k, v in (group_labels or {}).items()))
     log.info("shell.section_registered", key=key, machine=machine, items=len(built))
 
@@ -424,7 +432,7 @@ def rail(path: str) -> Rail:
     # a template has one row to draw and not two. A NESTED section is reached from its parent,
     # never listed here.
     got = tuple(s for s in sections() if not s.parent)
-    top = tuple(Item(key=s.key, label=s.title, href=s.href, icon=s.icon,
+    top = tuple(Item(key=s.key, label=s.title, href=s.href, icon=s.icon, count=s.count,
                      owner_only=s.owner_only, submenu=bool(s.items) and not s.home,
                      group_start=i > 0 and s.group != got[i - 1].group)
                 for i, s in enumerate(got))

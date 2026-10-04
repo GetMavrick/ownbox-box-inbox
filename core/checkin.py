@@ -63,7 +63,11 @@ FIELDS = frozenset({"v", "host", "order_id", "droplet_id", "release", "update", 
                     "people", "features",
                     # WHAT THE BOX CAN DO RIGHT NOW: an AI signed in, apps connected, coworkers with a shift on.
                     # A yes/no and counts, never an app's name or a person. The receiver learned it first.
-                    "ready"})
+                    "ready",
+                    # THE BACKUP, PROVED WEEKLY ON THE BOX (core/restore_check.py, launch bar 9): green, red, stale or
+                    # never, when, and a red's one-line reasons (table names and counts, never a row). The receiver
+                    # (provisioner/checkin.py) learns it in the same PR; it must be deployed before a release sends it.
+                    "restore_drill"})
 FEATURE_ID = re.compile(r"^[a-z0-9_:.-]{1,64}$")   # the receiver's shape (PLAN_TIER_INTEGRITY step 2)
 FEATURES_MAX = 50
 
@@ -287,6 +291,20 @@ def _ready() -> dict | None:
     return out or None
 
 
+def _restore_drill() -> dict | None:
+    """{"state": green|red|stale|never, "at": iso or None, and for a red, "why"}: the weekly restore drill's last
+    verdict (core/restore_check.py). None if unreadable."""
+    try:
+        from core import restore_check
+        r = restore_check.last()
+    except Exception:                                    # noqa: BLE001
+        return None
+    out = {"state": r["state"], "at": r.get("at")}
+    if r["state"] == "red":
+        out["why"] = "; ".join(r.get("reasons") or [])[:160]
+    return out
+
+
 def payload(*, on: bool | None = None) -> dict | None:
     """The whole check-in, or None on a box that is not a sold box (no host or order in provision.json):
     the operator's own box and a developer's checkout say nothing to anyone."""
@@ -298,7 +316,8 @@ def payload(*, on: bool | None = None) -> dict | None:
     out = {"v": FORMAT, "host": host, "order_id": order, "droplet_id": _droplet_id(),
            "release": _release(), "update": _update(), "doctor": doctor, "plan": _plan(),
            "watchdog_ok": watchdog_ok, "enabled": enabled() if on is None else bool(on),
-           "sent_at": _iso(_now()), "people": _people(), "features": _features(), "ready": _ready()}
+           "sent_at": _iso(_now()), "people": _people(), "features": _features(), "ready": _ready(),
+           "restore_drill": _restore_drill()}
     assert set(out) == FIELDS, "the check-in's fields changed without the list changing"
     return out
 

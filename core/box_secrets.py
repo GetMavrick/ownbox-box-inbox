@@ -217,6 +217,11 @@ def put_zernio(value: str, *, user_id: str | None = None) -> None:
     ok, detail = _zverify.verify_key(value)
     if not ok:
         raise SecretRejected(detail)
+    # A DIFFERENT KEY OPENS A DIFFERENT ACCOUNT (Social Accounts → Replace key, owner 10-04): the workspace resolved
+    # under the old one is not in it, and handing its id to the new key would attach channels to nothing. Forgotten,
+    # so the next visit resolves the new account's workspace. The same key pasted again keeps it.
+    if get(ZERNIO) and get(ZERNIO) != value:
+        clear(ZERNIO_PROFILE, user_id=user_id)
     put(ZERNIO, value, user_id=user_id)
     put(ZERNIO_STATUS, "connected", user_id=user_id)
     put(ZERNIO_DETAIL, " ", user_id=user_id)

@@ -10,7 +10,8 @@
 set -uo pipefail
 AIOS="${AIOS_DIR:-/opt/aios}"
 changed=0
-for n in aios-checkin.service aios-checkin.timer aios-keyfeatures.service aios-keyfeatures.timer; do
+for n in aios-checkin.service aios-checkin.timer aios-keyfeatures.service aios-keyfeatures.timer \
+         aios-restore-drill.service aios-restore-drill.timer; do
   f="$AIOS/deploy/$n"; t="/etc/systemd/system/$n"
   [ -f "$f" ] || { echo "check-in: $n missing from this release; skipped"; exit 0; }
   cmp -s "$f" "$t" 2>/dev/null && continue
@@ -26,4 +27,8 @@ systemctl enable --now aios-checkin.timer >/dev/null 2>&1 && echo "check-in: ena
 # approval the way a buyer does, every hour, and the check-in it nudges carries the counts.
 systemctl enable --now aios-keyfeatures.timer >/dev/null 2>&1 && echo "key features check: enabled" \
   || echo "key features check: could not be enabled"
+# THE BOX PROVES ITS OWN BACKUP, EVERY WEEK (core/restore_check.py, launch bar 9): last night's copy restored beside
+# live and compared, the verdict kept for core.health, the Dashboard and the check-in.
+systemctl enable --now aios-restore-drill.timer >/dev/null 2>&1 && echo "weekly restore drill: enabled" \
+  || echo "weekly restore drill: could not be enabled"
 exit 0

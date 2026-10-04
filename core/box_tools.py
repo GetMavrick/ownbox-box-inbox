@@ -167,11 +167,16 @@ def health():
     except Exception as e:                           # noqa: BLE001
         out["degraded"].append(f"queue and alerts unreadable: {type(e).__name__}")
 
+    # THE BACKUP, PROVED WEEKLY ON THE BOX (core/restore_check.py, launch bar 9): green, red, stale or never.
+    # A red or stopped check needs attention; never (a new box, before its first Sunday) is neither good nor bad.
+    from core import restore_check
+    out["backup"] = restore_check.last()
+
     # `ok` is withheld — None, not True — whenever any input was unreadable or any component is
     # itself unknown. A green light computed from data we could not read is the one output of this
     # tool that would be worse than no tool.
     parts = [out["brain"].get("ok"), out["worker"].get("ok"),
-             out.get("alerts", {}).get("ok")]
+             out.get("alerts", {}).get("ok")] + ([False] if out["backup"]["state"] in ("red", "stale") else [])
     if out["degraded"] or any(p is None for p in parts):
         out["ok"] = None
         out["ok_note"] = ("withheld: something here is unknown rather than good or bad — read "
@@ -287,6 +292,12 @@ def _render_health(r: dict) -> str:
         when = _seconds_ago(last.get("s_ago"))
         if when:
             lines.append(f"The last job that failed did so {when}.")
+    backup = r.get("backup") if isinstance(r.get("backup"), dict) else {}
+    if backup.get("state") == "never":
+        lines.append("Your backup has not been restored and checked yet: the box does it every Sunday.")
+    elif backup.get("state"):
+        from core import restore_check
+        lines.append(restore_check.sentence(backup))
     if r.get("degraded"):
         lines.append("Some of the box's records could not be read just now, so this answer is partial.")
     release = _release_words(r.get("release"))

@@ -189,7 +189,7 @@ def test_no_channel_is_polled_that_nobody_wrote_a_send_rule_for():
     ok("every polled channel has a send rule written for it", not missing, str(missing))
     fresh = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     ok("...and a channel with no rule BLOCKS rather than inheriting one",
-       window.decide("whatsapp", fresh)["decision"] == window.BLOCKED)
+       window.decide("sms", fresh)["decision"] == window.BLOCKED)
     ok("...as does an empty channel, which is what a row with no platform would give",
        window.decide("", fresh)["decision"] == window.BLOCKED)
 
@@ -300,6 +300,7 @@ def test_a_channel_that_fails_forever_never_costs_the_other_one_anything():
         # just broke: live Messenger intake dying is the alarm that matters most on this box.
         warns.clear()
         INBOX.raises["facebook"] = zernio.ZernioError("revoked key")
+        INBOX.raises["whatsapp"] = zernio.ZernioError("revoked key")     # WhatsApp is read too (owner 10-04)
         poller.poll_sweep()
         ok("Messenger's FIRST failure still warns, though Instagram is mid-throttle",
            "messenger" in [k.get("channel") for m, k in warns
@@ -359,11 +360,11 @@ def test_the_send_window_is_asked_about_this_threads_own_channel():
         # Before the handler passed a platform through, this thread would have been judged
         # by Messenger's clock and auto-replied — which is the whole point of the change.
         asked.clear()
-        store.upsert_conversation(space=SPACE, zcid="zc-unknown", platform="whatsapp",
+        store.upsert_conversation(space=SPACE, zcid="zc-unknown", platform="sms",
                                   account_id="acc-wa", last_inbound_at=now.isoformat())
         job_u = {"id": "ju", "slack_channel_id": "C_VOICE", "raw_text": json.dumps(
             {"space": SPACE, "zcid": "zc-unknown", "account_id": "acc-wa",
-             "platform": "whatsapp", "inbound_msg_id": "m-u",
+             "platform": "sms", "inbound_msg_id": "m-u",
              "inbound_text": "hello?", "inbound_at": now.isoformat()})}
         before = len(INBOX.sent)
         res = handler.handle(job_u)

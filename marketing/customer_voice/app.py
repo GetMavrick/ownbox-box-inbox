@@ -906,6 +906,8 @@ button.txt{color:var(--href);cursor:pointer;font:inherit;padding:4px 0}
 .seg{display:flex;gap:4px;background:var(--bg);border-radius:12px;padding:4px;margin-top:4px}
 .setrow{display:flex;flex-direction:column;gap:2px;padding:14px 0;border-bottom:1px solid var(--hair)}
 .setrow:last-child{border-bottom:0}
+.setrow .acts{display:flex;flex-wrap:wrap;align-items:center;gap:4px 18px;margin:6px 0 0}
+.setrow .acts a{color:var(--href);text-decoration:none}
 .setrow b{font-weight:var(--w-regular);font-size:calc(16.5 * var(--px, 1px))}
 .setrow span{color:var(--dim);font-size:calc(14.5 * var(--px, 1px));line-height:1.45}
 /* A <b> INSIDE THE SENTENCE IS EMPHASIS, NOT A SECOND TITLE. `.setrow b` above sizes each row's
@@ -4469,7 +4471,9 @@ def r_mailbox():
 # rather than everything the vendor supports. Offering a person a channel the poller never reads
 # is a button that appears to work, takes a real OAuth grant, and delivers silence.
 # `channels.POLLED` is the authority; these are its vendor tokens with a human name each.
-_CONNECTABLE = (("instagram", "Instagram"), ("facebook", "Messenger"))
+_CONNECTABLE = (("instagram", "Instagram"), ("facebook", "Messenger"), ("whatsapp", "WhatsApp"))
+# WHAT A CHANNEL NEEDS BEFORE ITS BUTTON CAN WORK, said beside the button rather than discovered at the vendor.
+_CONNECT_NEEDS = {"whatsapp": "Needs a WhatsApp Business account."}
 
 
 def _connect_space():
@@ -4538,6 +4542,9 @@ def r_connect():
             return _owner_refusal()
         return _shell(_connect_for_member(box_secrets.zernio_state()), here="/inbox/connect"), 200
 
+    if request.method == "POST" and request.form.get("do") in ("stop", "read", "pick"):
+        return _connect_change(request.form, whoami)
+
     if request.method == "POST" and request.form.get("off"):
         # A POST, never the old ?off=1 link (see `_post_button`).
         # Disconnect. The key AND the profile resolved with it — `clear_zernio` is one call for
@@ -4548,15 +4555,22 @@ def r_connect():
     note = ""
     if request.method == "POST":
         try:
+            was = box_secrets.zernio_key()
             box_secrets.put_zernio(str(request.form.get("key") or ""), user_id=whoami)
+            if was and was != box_secrets.zernio_key():
+                # A NEW KEY OPENS ANOTHER ACCOUNT: the accounts picked in the old one are not in it.
+                from .inbox import channels as _ch
+                _ch.forget_choices(by=whoami)
             return redirect("/inbox/connect?from=setup" if _from_setup() else "/inbox/connect",
                             code=303)
         except box_secrets.SecretRejected as e:
             # Never an echo of what they pasted. Same discipline as the AI key form.
             note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
 
-    if not box_secrets.is_set(box_secrets.ZERNIO):
-        return _shell(_connect_key_form(note), here="/inbox/connect"), 200
+    if not box_secrets.is_set(box_secrets.ZERNIO) or request.args.get("replace") or note:
+        # REPLACE KEY (owner 10-04): the same form, while the old key keeps working until a new one is checked.
+        return _shell(_connect_key_form(note, replacing=box_secrets.is_set(box_secrets.ZERNIO)),
+                      here="/inbox/connect"), 200
 
     # ── connected: show what is on, and what can still be added ──────────────────────────────
     sp = _connect_space()
@@ -4567,7 +4581,17 @@ def r_connect():
         brand = ""                               # only labels a folder the buyer will recognise
     chosen = request.args.get("profile")
     if chosen:
-        box_secrets.put_zernio_profile(chosen, user_id=whoami)
+        # ONLY A WORKSPACE IN THIS ACCOUNT (owner 10-04, Switch workspace): an id from anywhere else is ignored. A new
+        # workspace holds other accounts, so the accounts picked in the old one are forgotten.
+        try:
+            known = {w.get("id") for w in z.connect.profiles()}
+        except zernio.ZernioError:
+            known = set()
+        if chosen in known:
+            if chosen != sp.get("zernio_profile_id"):
+                from .inbox import channels as _ch
+                _ch.forget_choices(by=whoami)
+            box_secrets.put_zernio_profile(chosen, user_id=whoami)
         return redirect("/inbox/connect", code=303)
 
     try:
@@ -4576,9 +4600,13 @@ def r_connect():
             pid, choices = _resolve_profile(z, brand)
         if choices:
             return _shell(_connect_profile_chooser(choices) + _setup_way_back(), here="/inbox/connect"), 200
+        if request.args.get("workspace"):
+            # SWITCH WORKSPACE (owner 10-04): every workspace in his account, the one in use marked.
+            return _shell(_connect_profile_chooser(z.connect.profiles(), current=pid), here="/inbox/connect"), 200
         sp = dict(sp, zernio_profile_id=pid)
         z = zernio.client(sp)
-        live = z.accounts.discover()
+        accounts = z.accounts.all()
+        workspace = next((w.get("name") for w in z.connect.profiles() if w.get("id") == pid), "") or ""
     except zernio.ZernioError as e:
         # `payment_required` is recorded so SETTINGS can say it too, without a network call.
         detail = str(e)
@@ -4594,7 +4622,7 @@ def r_connect():
             "in a minute."), here="/inbox/connect"), 200
 
     just = request.args.get("connected") or ""
-    return _shell(_connect_page(live, just) + _setup_way_back(), here="/inbox/connect"), 200
+    return _shell(_connect_page(accounts, just, workspace=workspace) + _setup_way_back(), here="/inbox/connect"), 200
 
 
 def _connect_for_member(st: dict) -> str:
@@ -4640,16 +4668,38 @@ def r_connect_start(platform: str):
     return redirect(url, code=303)
 
 
-def _connect_key_form(note: str) -> str:
+def _connect_key_form(note: str, *, replacing: bool = False) -> str:
     """State one: no social account connected yet.
 
     SAME SHAPE AS THE AI KEY FORM ON PURPOSE. A buyer who has done one of these already should
     recognise the second on sight, and the sentence underneath is the same promise in both places:
     the account is theirs, on their bill, and they can take it back."""
+    if replacing:
+        # REPLACE KEY (owner 10-04): the old key keeps working until this one is checked and saved.
+        return (
+          '<h1>Replace your Zernio key.</h1>'
+          '<div class="card"><div class="setrow">'
+          '<span>Paste the new key from your Zernio account. Ownbox checks it with Zernio before it is saved, and '
+          'the key in use now keeps working until then. A key from another Zernio account brings that '
+          'account&rsquo;s workspace and channels with it.</span></div></div>'
+          + note +
+          '<form class="compose" method="post" action="/inbox/connect">'
+          '<label style="display:block">'
+          '<span class="t" style="display:block;font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px">'
+          'Your new Zernio key</span>'
+          '<input type="password" name="key" autocomplete="off" spellcheck="false"'
+          ' aria-label="Paste your key" placeholder="Paste your key" '
+          'style="width:100%;font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;'
+          'border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)">'
+          '</label>'
+          '<button class="btn" type="submit">Save the new key</button>'
+          '</form>'
+          '<p style="margin-top:14px"><a href="/inbox/connect" style="color:var(--href)">'
+          '&larr; Keep the key I have</a></p>')
     return (
       '<h1>Connect your social accounts.</h1>'
       '<div class="card"><div class="setrow">'
-      '<span>Ownbox reads your Instagram and Messenger through your own social account, so the '
+      '<span>Ownbox reads your Instagram, Messenger and WhatsApp through your own social account, so the '
       'connection stays yours and you can take it back any day without asking us.</span>'
       # THE SITE ROOT, NOT A GUESSED DEEP LINK. scripts/doctor.py:154 says "zernio.com → API key"
       # and that is the whole of what we actually know; a made-up /settings/api path that 404s in
@@ -4695,11 +4745,13 @@ def _connect_contract() -> str:
                if e.get("note") else ""))
 
 
-def _connect_profile_chooser(choices: list) -> str:
-    """The rare state: their account already holds several folders, so they say which one."""
+def _connect_profile_chooser(choices: list, *, current: str | None = None) -> str:
+    """Their account holds several folders, so they say which one; or they asked to switch (owner 10-04), and the one
+    in use is marked."""
     rows = "".join(
-        f'<p style="margin:10px 0 0"><a class="btn" '
-        f'href="/inbox/connect?profile={_esc(c["id"])}">{_esc(c["name"] or "Untitled")}</a></p>'
+        f'<p style="margin:10px 0 0"><a class="btn{" ghost" if c["id"] == current else ""}" '
+        f'href="/inbox/connect?profile={_esc(c["id"])}">{_esc(c["name"] or "Untitled")}'
+        f'{" (in use)" if c["id"] == current else ""}</a></p>'
         for c in choices)
     return (
       '<h1>Which one is this business?</h1>'
@@ -4711,11 +4763,30 @@ def _connect_profile_chooser(choices: list) -> str:
       '&larr; Settings</a></p>')
 
 
-def _connect_page(live: dict, just: str) -> str:
-    """State two: connected, with a row per channel saying on or off.
+def _connect_names(accounts: list, platform: str) -> list:
+    return [a for a in accounts if a.get("platform") == platform]
+
+
+def _platform_button(action_value: str, label: str, platform: str) -> str:
+    """A per-channel switch: `_post_button`, carrying which channel it is for."""
+    return (f'<form method="post" action="/inbox/connect" class="inline">'
+            f'<input type="hidden" name="platform" value="{_esc(platform)}">'
+            f'<button type="submit" class="ghost txt" name="do" value="{_esc(action_value)}">{_esc(label)}</button>'
+            '</form>')
+
+
+def _connect_page(accounts: list, just: str, *, workspace: str = "") -> str:
+    """State two: connected. A row per channel naming the account it reads, with Change and Disconnect; the channels
+    still to add; iMessage, honestly; and the Zernio account itself (owner 10-04: "I should be able to edit settings,
+    similar to how GSC functions").
 
     IT SAYS WHAT IS ON BEFORE IT OFFERS WHAT IS NOT. A person arriving back from a consent screen
-    has one question — did that work — and the answer is the first thing on the page."""
+    has one question — did that work — and the answer is the first thing on the page.
+
+    DISCONNECT ON A CHANNEL STOPS OWNBOX READING IT; it never removes the account from Zernio, where other machines
+    may post through it (channels.stop). Disconnecting Zernio itself is the last row, and stops everything."""
+    from .inbox import channels as _ch
+    stopped, picked = _ch.stopped(), _ch.chosen()
     done = ""
     if just:
         label = dict(_CONNECTABLE).get(just, just.title())
@@ -4723,29 +4794,122 @@ def _connect_page(live: dict, just: str) -> str:
         # handed; the only honest confirmation is the account list the vendor just returned.
         done = ('<p class="quiet" style="color:var(--accent)">'
                 + _esc(f"{label} is connected. New messages start arriving on the next check.")
-                + '</p>') if live.get(just) else (
+                + '</p>') if _connect_names(accounts, just) else (
                 '<p class="quiet">' + _esc(f"{label} did not finish connecting. Try it again.")
                 + '</p>')
-    rows = []
+    rows, adds = [], []
     for vendor_token, label in _CONNECTABLE:
-        if live.get(vendor_token):
-            rows.append(f'<div class="setrow"><b>{_esc(label)}</b>'
-                        '<span>Connected. Messages arrive on their own.</span></div>')
-        else:
-            rows.append(f'<div class="setrow"><b>{_esc(label)}</b>'
-                        '<span>Not connected yet.</span>'
+        mine = _connect_names(accounts, vendor_token)
+        if not mine:
+            need = _CONNECT_NEEDS.get(vendor_token)
+            adds.append(f'<div class="setrow"><b>{_esc(label)}</b>'
+                        f'<span>Not connected yet.{" " + _esc(need) if need else ""}</span>'
                         '<p style="margin:10px 0 0"><a class="btn" '
-                        f'href="/inbox/connect/{_esc(vendor_token)}">Connect {_esc(label)}</a>'
-                        '</p></div>')
+                        f'href="/inbox/connect/{_esc(vendor_token)}">Connect {_esc(label)}</a></p></div>')
+            continue
+        read = [a for a in mine if a["id"] == picked.get(vendor_token)] or mine
+        names = ", ".join(a["name"] or "your account" for a in read)
+        if vendor_token in stopped:
+            rows.append(f'<div class="setrow"><b>{_esc(label)}</b>'
+                        f'<span>Disconnected: Ownbox is not reading {_esc(names)}. It stays in your Zernio '
+                        'workspace.</span><p class="acts">'
+                        + _platform_button("read", "Read it again", vendor_token) + '</p></div>')
+            continue
+        rows.append(f'<div class="setrow"><b>{_esc(label)}</b>'
+                    f'<span>Connected. Reading {_esc(names)}.</span><p class="acts">'
+                    f'<a href="/inbox/connect/{_esc(vendor_token)}/change">Change</a>'
+                    + _platform_button("stop", "Disconnect", vendor_token) + '</p></div>')
+    # iMESSAGE, SAID ONCE AND TRUE: Apple offers no way for any app outside Apple to read or answer iMessages
+    # (docs/PLAN_OWNBOX_UNIFIED_INBOX_MACHINE_V3.md §6: "No third-party API. This is how a list becomes a lie").
+    adds.append('<div class="setrow"><b>iMessage</b><span>Not available. Apple does not let any app outside Apple '
+                'read or answer iMessages, so no inbox can carry them.</span></div>')
     return (
       '<h1>Your social accounts.</h1>'
-      + done +
-      '<div class="card">' + "".join(rows) + '</div>'
-      '<p class="quiet" style="margin-top:12px">Connected with your own social account. '
-      + _post_button("/inbox/connect", "off", "1", "Disconnect it") + ' and Ownbox '
-      'stops reading immediately — nothing you have already received is deleted.</p>'
+      + done
+      + ('<div class="card">' + "".join(rows) + '</div>' if rows else '')
+      + '<h2 class="eyebrow" style="margin-top:18px">Add a channel</h2>'
+      '<div class="card">' + "".join(adds) + '</div>'
+      '<h2 class="eyebrow" style="margin-top:18px">Your Zernio account</h2>'
+      '<div class="card">'
+      f'<div class="setrow"><b>Workspace</b><span>{_esc(workspace or "Your workspace")}: the channels above are '
+      'the ones in it.</span><p class="acts"><a href="/inbox/connect?workspace=1">Switch workspace</a></p></div>'
+      '<div class="setrow"><b>Key</b><span>Saved, and checked with Zernio.</span><p class="acts">'
+      '<a href="/inbox/connect?replace=1">Replace key</a></p></div>'
+      '<div class="setrow"><b>Disconnect Zernio</b><span>Ownbox stops reading every channel above. Nothing you '
+      'have already received is deleted.</span><p class="acts">'
+      + _post_button("/inbox/connect", "off", "1", "Disconnect Zernio") + '</p></div>'
+      '</div>'
       '<p style="margin-top:14px"><a href="/inbox/settings" style="color:var(--href)">'
       '&larr; Settings</a></p>')
+
+
+def _connect_change(form, whoami):
+    """The owner's per-channel choices, posted from Social Accounts: stop reading one channel, read it again, or read
+    only one account where the workspace holds several. Each is checked against what the screen offers; anything else
+    changes nothing."""
+    from core.vendors import zernio
+    from .inbox import channels as _ch
+    platform, do = str(form.get("platform") or ""), str(form.get("do") or "")
+    if platform not in {p for p, _ in _CONNECTABLE}:
+        return redirect("/inbox/connect", code=303)
+    if do in ("stop", "read"):
+        _ch.stop(platform, do == "stop", by=whoami)
+        return redirect("/inbox/connect", code=303)
+    account = str(form.get("account") or "")
+    if account == "all":
+        _ch.choose(platform, None, by=whoami)
+        return redirect("/inbox/connect", code=303)
+    try:
+        known = {a["id"] for a in zernio.client(_connect_space()).accounts.all() if a.get("platform") == platform}
+    except zernio.ZernioError:
+        known = set()
+    if account in known:                               # ONLY AN ACCOUNT IN THIS WORKSPACE, ON THIS PLATFORM
+        _ch.choose(platform, account, by=whoami)
+        _ch.stop(platform, False, by=whoami)
+    return redirect("/inbox/connect", code=303)
+
+
+@blueprint.get("/inbox/connect/<platform>/change")
+def r_connect_change(platform: str):
+    """CHANGE, for one channel (owner 10-04): the accounts on this platform in the workspace, the one being read
+    marked, and a way to connect another. Like Search Console's "change the website"."""
+    from core.vendors import zernio
+    from .inbox import channels as _ch
+    gate = _gate()
+    if gate is not None:
+        return gate
+    if not _is_owner():
+        return _owner_refusal()
+    label = dict(_CONNECTABLE).get(platform)
+    if not label:
+        return redirect("/inbox/connect", code=303)
+    try:
+        mine = [a for a in zernio.client(_connect_space()).accounts.all() if a.get("platform") == platform]
+    except zernio.ZernioError:
+        return _shell(_connect_trouble("Ownbox could not reach your social account just now. Nothing is lost — "
+                                       "try again in a minute."), here="/inbox/connect"), 200
+    want = _ch.chosen().get(platform)
+    reading = want or (mine[0]["id"] if len(mine) == 1 else "")
+
+    def pick(value: str, text: str, on: bool) -> str:
+        return ('<form method="post" action="/inbox/connect" style="margin:10px 0 0">'
+                f'<input type="hidden" name="do" value="pick"><input type="hidden" name="platform" '
+                f'value="{_esc(platform)}"><input type="hidden" name="account" value="{_esc(value)}">'
+                f'<button class="btn{" ghost" if on else ""}" type="submit">{_esc(text)}'
+                f'{" (reading now)" if on else ""}</button></form>')
+    rows = "".join(pick(a["id"], a["name"] or f"Your {label} account", reading == a["id"]) for a in mine)
+    if len(mine) > 1:
+        rows += pick("all", f"Read all {len(mine)}", not want)
+    return _shell(
+        f'<h1>Change {_esc(label)}.</h1>'
+        '<div class="card"><div class="setrow"><span>'
+        + (f"The {_esc(label)} accounts in your Zernio workspace. Ownbox reads the one you pick."
+           if mine else f"No {_esc(label)} account is in your Zernio workspace yet.")
+        + f'</span>{rows}</div></div>'
+        f'<p style="margin-top:14px"><a class="btn ghost" href="/inbox/connect/{_esc(platform)}">'
+        f'Connect another {_esc(label)} account</a></p>'
+        '<p style="margin-top:14px"><a href="/inbox/connect" style="color:var(--href)">&larr; Social accounts</a></p>',
+        here="/inbox/connect"), 200
 
 
 def _connect_trouble(sentence: str) -> str:

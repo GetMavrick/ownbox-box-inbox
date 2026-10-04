@@ -129,6 +129,14 @@ def waiting() -> list[dict]:
         return [_row(r) for r in c.execute("SELECT * FROM approvals WHERE status='waiting' ORDER BY created_at")]
 
 
+def waiting_count() -> int:
+    """How many wait for a person, read only: the menu asks on every page, so this never writes (waiting() expires
+    rows as it reads; here an expired row is simply not counted)."""
+    with state.connect() as c:
+        return int(c.execute("SELECT COUNT(*) FROM approvals WHERE status='waiting' AND expires_at > ?",
+                             (_iso(_now()),)).fetchone()[0])
+
+
 def recent(limit: int = 20) -> list[dict]:
     """What was decided, newest first."""
     with state.connect() as c:

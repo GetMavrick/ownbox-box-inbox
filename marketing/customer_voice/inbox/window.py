@@ -79,6 +79,19 @@ _RULES = {
                            "disagree is not a rule. Raising this needs a citation, not a guess.",
     },
 
+    # "When a WhatsApp user messages you or calls you, a 24-hour timer called a customer service window starts."
+    # "...you can send any of the service message types listed below to the user." Once it closes, "you can only
+    #  send pre-approved template messages."
+    #   developers.facebook.com/docs/whatsapp/cloud-api/guides/send-messages#customer-service-windows
+    #
+    # NO TAG LANE, AND NO TEMPLATES HERE: a template is a pre-approved message the box does not hold, so outside the
+    # 24 hours a WhatsApp reply BLOCKS (owner 10-04, the Social Accounts rework that added WhatsApp).
+    "whatsapp": {
+        "free_hours": 24, "tag_hours": None,
+        "cite": "https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-messages"
+                "#customer-service-windows",
+    },
+
     # "Initial 48-hour window: After receiving the first message from a TikTok user, Business
     #  Account can send up to 10 messages within the next 48 hours."
     # "If more than 48 hours have passed since the TikTok user's last reply, the Business Account
@@ -362,7 +375,7 @@ def pretty_platform(platform: str) -> str:
     # Title-cased rather than echoed raw, because the fallback is what a buyer reads when we have
     # not written a rule for their channel — "whatsapp" in a sentence looks like a bug in the box.
     return {"instagram": "Instagram", "messenger": "Messenger", "tiktok": "TikTok",
-            "email": "Email",
+            "email": "Email", "whatsapp": "WhatsApp", "sms": "SMS",
             # NAMED, NOT DERIVED. The fallback would give "Comment" for a channel every screen
             # and every sentence in this product calls "Comments" — `channels.NAMES` has said so
             # since before the channel was polled, and two spellings of one channel is how a

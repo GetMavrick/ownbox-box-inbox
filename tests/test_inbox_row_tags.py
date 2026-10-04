@@ -59,13 +59,13 @@ SEED = [
     # empty expectation is the point of this row: it proves a calm conversation stays calm.
     ("zc-new",    "Dana Whitfield",  "messenger", 1,    None,           "acct-1", 1, False,
      []),
-    # WHATSAPP, NOT EMAIL, IS THE RULELESS CHANNEL NOW. Email was this suite's stand-in for "no
+    # SMS IS THE RULELESS CHANNEL NOW (WhatsApp got its rule 10-04). Email was this suite's stand-in for "no
     # policy written" and it stopped being one the moment the email rule landed: written, cited,
     # and since 2026-09-22 sendable — the box mails it from the buyer's own address. Swapping in
     # a channel that genuinely has no rule keeps the state covered instead of quietly deleting
     # it, and the email row below now covers the opposite state: a channel with nothing to warn
     # about at all.
-    ("zc-norule", "Terrence Hall",   "whatsapp",  2,    None,           "acct-1", 2, False,
+    ("zc-norule", "Terrence Hall",   "sms",       2,    None,           "acct-1", 2, False,
      ["No reply rule"]),
     # EMAIL NOW CARRIES NO PILL AT ALL, and that is the assertion. It used to say "Send in your
     # mail app"; the owner ruled on 2026-09-22 and the box sends email itself, so the row has
@@ -199,7 +199,7 @@ def test_a_channel_with_no_written_policy_gets_no_reply_box():
     c = _seeded()
     t = c.get("/inbox/inbox/zc-norule").get_data(as_text=True)
     ok("no reply box on a channel with no send rule", 'id="reply"' not in t)
-    ok("...and it says so in the buyer's words, not ours", "no reply rule for WhatsApp" in t)
+    ok("...and it says so in the buyer's words, not ours", "no reply rule for SMS" in t)
     # AND EMAIL IS THE OTHER SIDE OF THE SAME GUARD. It used to be hidden here too, because the
     # box had no SMTP path; the owner ruled on 2026-09-22 and it has one, so the box gets its
     # reply box like any channel with a written rule. This pair is what keeps the guard honest:
@@ -232,7 +232,7 @@ def test_the_rule_probe_answers_from_window_and_not_from_a_second_table():
         # because the box does not send UNATTENDED, not because a person may not. So the probe
         # asks whether a rule EXISTS, and the flags carry the second, different facts.
         ok(f"a written rule is found for {key}", voice._has_send_rule(key))
-    ok("a channel with no rule is refused", not voice._has_send_rule("whatsapp"))
+    ok("a channel with no rule is refused", not voice._has_send_rule("sms"))
     ok("...and so is one nobody has ever heard of", not voice._has_send_rule("carrier-pigeon"))
     ok("...and so is an empty platform", not voice._has_send_rule(""))
     # READ AS CODE, NOT AS TEXT. `"_RULES" in src` was the first version and it failed on this

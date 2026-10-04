@@ -118,7 +118,7 @@ finally:
     window._RULES.pop("__probe__", None)
 
 print("\n— and an unknown channel still refuses, which is the most important line in that file —")
-for plat in ("whatsapp", "sms", "", "EMAIL_TYPO"):
+for plat in ("telegram", "sms", "", "EMAIL_TYPO"):
     d = window.decide(plat, NOW.isoformat(), NOW)
     ok(f"{plat!r} is blocked", d["decision"] == window.BLOCKED, str(d))
     ok(f"...and is NOT mistaken for the written-rule case ({plat!r})",
@@ -260,7 +260,7 @@ from marketing.customer_voice import app as voice_app  # noqa: E402
 ok("email is no longer a channel whose send happens somewhere else",
    not voice_app._no_send_lane("email"))
 ok("...and a channel nobody has ruled on is still NOT that either — it is a gap, said as a gap",
-   not voice_app._no_send_lane("whatsapp"))
+   not voice_app._no_send_lane("sms"))
 ok("messenger is neither — it has a real window", not voice_app._no_send_lane("messenger"))
 
 tags = dict((t, cls) for t, cls in voice_app._tag_list(

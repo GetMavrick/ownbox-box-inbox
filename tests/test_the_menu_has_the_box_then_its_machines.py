@@ -7,7 +7,7 @@ machines. Which would be unified inbox and then add a machine."* And of that sec
 subtle. Almost just like an extra space."*
 
 So this suite renders the real menu, the way a buyer's box draws it, and holds:
-  1. the rows, in order: Base Machine, System Settings, then the Morning Review heading the add-on
+  1. the rows, in order: Base Machine, Approvals, System Settings, then the Morning Review heading the add-on
      machines, then Add a Machine — and a member is not shown the Morning Review, which refuses them;
   2. exactly one row opens a new group: the Morning Review for the owner, the first add-on machine
      for a member;
@@ -67,8 +67,9 @@ rows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', n
 # THE ADD-ON MACHINES SIT BETWEEN THE BOX'S OWN ROWS AND ADD A MACHINE, in their registered order.
 # THE MORNING REVIEW HEADS THE ADD-ON MACHINES (owner, 2026-09-29: "move morning review down to the
 # top of the list of the add-on machines. That way it's sort of grouped with what it is related to").
-ok("Base Machine, System Settings, then the Morning Review heading the add-on machines, then Add a Machine",
-   rows == ["Base Machine", "System Settings", "Morning Review", "AEO Machine", "Unified Inbox",
+# APPROVALS RIGHT BELOW BASE MACHINE (owner, 10-04: "Where is the approvals Page? It should be in the dashboard").
+ok("Base Machine, Approvals, System Settings, then the Morning Review heading the add-on machines, then Add a Machine",
+   rows == ["Base Machine", "Approvals", "System Settings", "Morning Review", "AEO Machine", "Unified Inbox",
             "Add a Machine"], str(rows))
 ok("...and the Morning Review row opens the review", '<a href="/app/review"' in nav)
 _rv = c.get("/app/review")
@@ -87,7 +88,7 @@ _m_nav = _m.get("/dashboard").get_data(as_text=True).split('<nav class="rail"', 
 _m_rows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', _m_nav, re.S)
 ok("a member's menu has no Morning Review row", "Morning Review" not in _m_rows
    and "/app/review" not in _m_nav, str(_m_rows))
-ok("...and still has the rest, in the same order",
+ok("...and still has the rest, in the same order (no Approvals: approving is the owner's)",
    _m_rows == ["Base Machine", "System Settings", "AEO Machine", "Unified Inbox", "Add a Machine"],
    str(_m_rows))
 # THE GAP IS CARRIED, not dropped with the row a member is not shown: it opens above their first machine.
