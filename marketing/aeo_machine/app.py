@@ -166,6 +166,9 @@ def _page(path: str, title: str, lede: str, body: str) -> str:
 
 # ── what this box has been given ──────────────────────────────────────────────────────────────
 
+FACTS_MISSING = "facts the writer may state"
+
+
 def missing() -> list[str]:
     """What the box still needs before it can publish, in the words the screen uses. [] = ready."""
     s = settings.get()
@@ -174,6 +177,10 @@ def missing() -> list[str]:
         out.append("your website's address")
     if not sources.sanity_state()["connected"]:
         out.append("a Sanity connection")
+    # NOTHING PUBLISHES UNTIL FACTS ARE SET (owner, 2026-10-04; job.periodic holds the line). Named here so
+    # the screens and the owner's AI say so, instead of "ready" over an empty list.
+    if not settings.facts():
+        out.append(FACTS_MISSING)
     return out
 
 
@@ -359,6 +366,8 @@ def _status(row: dict) -> str:
         return f"<b>Live</b> since {_esc(_when(row.get('published_at')))}.{link}"
     if st == "writing":
         return "<b>Being written now.</b>"
+    if plan.is_unpublished(row):
+        return f"<b>Unpublished.</b> {_esc(row.get('refusal'))}"
     if st == "refused":
         return f"<b>Held back.</b> {_esc(row.get('refusal'))}"
     if st == "failed":
@@ -416,11 +425,15 @@ def _brought_span(b: dict | None) -> str:
 def _topic_row(row: dict, *, can_go: bool, brought: dict | None = None) -> str:
     st = row.get("status")
     tone, word = _STATE.get(st, ("ink", "Next") if row.get("requested_at") else ("", "Planned"))
+    off = plan.is_unpublished(row)
+    if off:
+        tone, word = "", "Off"
     q = f'<p class="ar-p">{_esc(row["question"])}</p>' if row.get("question") else ""
     btn = ""
     if can_go and st in ("planned", "refused", "failed") and not (
             st == "planned" and row.get("requested_at")):
-        label = "Write and publish now" if st == "planned" else "Try again now"
+        # An unpublished article goes back at its own address, written from today's facts (plan.is_rewrite).
+        label = "Write and publish now" if st == "planned" else ("Rewrite from your facts" if off else "Try again now")
         btn = _post(TOPICS, "now", label, cls="ghost ar-go",
                     extra=f'<input type="hidden" name="id" value="{int(row["id"])}">')
     # THE DETAIL ROW ONLY SAYS WHAT THE STATE WORD CANNOT: when it went live and where, or why it

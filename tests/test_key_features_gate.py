@@ -271,8 +271,19 @@ from http.server import BaseHTTPRequestHandler, HTTPServer  # noqa: E402
 seen = []
 
 
+def _read_the_body(handler) -> None:
+    """READ WHAT WAS SENT BEFORE ANSWERING. A handler that answers a POST without reading its body closes a socket
+    with unread bytes in it, and the kernel then sends a RESET, not a close: if it lands before the client has read
+    the answer, the client gets ConnectionResetError instead of the 302. That was this suite's flake (about half the
+    runs under parallel load, OSDev1 10-04): a race in the test's own server, never in key_features._http."""
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n:
+        handler.rfile.read(n)
+
+
 class Elsewhere(BaseHTTPRequestHandler):
     def do_POST(self):
+        _read_the_body(self)
         seen.append(self.headers.get("Authorization"))
         self.send_response(200)
         self.end_headers()
@@ -288,6 +299,7 @@ other = HTTPServer(("127.0.0.1", 0), Elsewhere)
 
 class Redirects(BaseHTTPRequestHandler):
     def do_POST(self):
+        _read_the_body(self)
         self.send_response(302)
         self.send_header("Location", f"http://127.0.0.1:{other.server_port}/mcp")
         self.end_headers()

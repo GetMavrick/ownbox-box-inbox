@@ -69,6 +69,11 @@ def _article(row: dict) -> dict:
         out["why"] = row.get("refusal")
         out["what_to_do"] = ("Reword the question, or remove the topic, on AEO → Articles."
                              if st == "refused" else "Press Try again now on AEO → Articles.")
+    from . import plan
+    if plan.is_unpublished(row):
+        # OFF THE WEBSITE AT THE OWNER'S REQUEST, not held back by the check: its own words, and its own next step.
+        out["state"] = "unpublished"
+        out["what_to_do"] = "Leave it, or ask to rewrite it from your facts (you approve it on Approvals)."
     return out
 
 
@@ -96,6 +101,10 @@ def status():
     # One failed check of the sign-in (`unchecked`, #1820) is not a failure: its ok is None, and the next check decides.
     failing = brain.get("state") == "fail" or brain.get("ok") is False
     ai_ready = can and not failing
+    from .app import FACTS_MISSING, SETTINGS
+    if FACTS_MISSING in need:                          # with the page that fixes it, as a full address
+        from core.connector import words
+        need[need.index(FACTS_MISSING)] = f"{FACTS_MISSING}: add them on AEO Settings, {words.link(SETTINGS)}"
     if not can:
         need.insert(0, "a signed-in AI account (System Settings → AI account)")
     elif failing:
@@ -118,7 +127,7 @@ def status():
         "published_last_7_days": published_week,
         "left_this_week": max(0, cap - published_week),
         "topics": count,
-        "waiting_on_you": count["refused"] + count["failed"],
+        "waiting_on_you": count["refused"] + count["failed"] - sum(1 for r in rows if plan.is_unpublished(r)),
         "suggestions_waiting_for_ok": _suggestions_waiting(),
         "note": ("The machine publishes on its own, within the weekly number, once nothing is "
                  "missing. Articles that stopped are listed by aeo.articles with the reason."),
@@ -650,6 +659,26 @@ tools.register(
           "change": {"type": "string", "required": False,
                      "description": "set (site_url, weekly_cap), add or remove (the lists). "
                                     "Defaults to set or add."}})
+
+tools.register(
+    "propose_unpublish", title="Suggest unpublishing an AEO article",
+    fn=proposals.propose_unpublish, machine=MACHINE, min_role="act", capability="write:proposals",
+    render=_render_proposal,
+    wants_seat=True,
+    description="Ask the owner to take one live AEO article off the website. Nothing changes until the "
+                "owner approves. It is kept as a draft in Sanity, never deleted, and can be rewritten later.",
+    args={"id": {"type": "integer", "required": True,
+                 "description": "The article's id, from aeo.articles."}})
+tools.register(
+    "propose_rewrite", title="Suggest rewriting an AEO article from your facts",
+    fn=proposals.propose_rewrite, machine=MACHINE, min_role="act", capability="write:proposals",
+    render=_render_proposal,
+    wants_seat=True,
+    description="Ask the owner to have one live or unpublished AEO article written again from today's facts "
+                "and published at the same address. Nothing changes until the owner approves, and it needs "
+                "facts on AEO Settings.",
+    args={"id": {"type": "integer", "required": True,
+                 "description": "The article's id, from aeo.articles."}})
 
 # Every role sees the reads above. Explicit, so a reviewer sees it (core/connector/tools.py grant()).
 tools.grant(CAPABILITY)

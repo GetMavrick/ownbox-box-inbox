@@ -21,6 +21,7 @@ HQ = "ownbox-hq"                 # set_by on a switch HQ flipped through /deploy
 # EVERY LABS FEATURE THERE IS. A new one is added here in the PR that builds it.
 KNOWN = (
     "article_results",           # #1793 Phase 2.4: what each article brought (marketing/aeo_machine/brought.py)
+    "aeo_topic_sync",            # #1793 Phase 3: topics read from the buyer's Airtable (marketing/aeo_machine/topic_sync.py)
 )
 
 

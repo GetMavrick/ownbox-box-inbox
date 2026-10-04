@@ -30,8 +30,11 @@ def is_configured() -> bool:
                 and settings.airtable_videos_table)
 
 
-def _headers() -> dict:
-    return {"Authorization": f"Bearer {settings.airtable_api_key}",
+def _headers(key: str | None = None) -> dict:
+    """The content machine's key, unless a caller passes its own. `key=` is how another machine's sync (the AEO
+    Machine's topic sync, docs/PLAN_AEO_AIRTABLE_TOPIC_SYNC.md R4) shares this client's pacing and quota guard
+    with its own token; without it nothing changes."""
+    return {"Authorization": f"Bearer {key or settings.airtable_api_key}",
             "Content-Type": "application/json"}
 
 
@@ -101,7 +104,8 @@ def _request(method: str, url: str, **kw):
 def list_records(table: str | None = None, *, base: str | None = None,
                  page_size: int = 100,
                  max_records: int | None = None, fields: list[str] | None = None,
-                 sort: list[dict] | None = None, filter_formula: str | None = None) -> list[dict]:
+                 sort: list[dict] | None = None, filter_formula: str | None = None,
+                 view: str | None = None, key: str | None = None) -> list[dict]:
     """Return [{id, fields, createdTime}], following pagination up to max_records
     (None = all). Bounded by page_size per request. `filter_formula` is an Airtable
     filterByFormula (e.g. '{VID}=25') applied server-side. A list failure raises — the
@@ -113,6 +117,8 @@ def list_records(table: str | None = None, *, base: str | None = None,
         params["fields[]"] = fields
     if filter_formula:
         params["filterByFormula"] = filter_formula
+    if view:
+        params["view"] = view
     if sort:
         for i, s in enumerate(sort):
             params[f"sort[{i}][field]"] = s["field"]
@@ -122,7 +128,7 @@ def list_records(table: str | None = None, *, base: str | None = None,
         if offset:
             q["offset"] = offset
         try:
-            resp = _request("get", _url(table, base=base), headers=_headers(), params=q)
+            resp = _request("get", _url(table, base=base), headers=_headers(key), params=q)
         except requests.RequestException as e:
             raise AirtableError(f"airtable list transport error: {str(e)[:200]}")
         body = _raise(resp)
@@ -146,10 +152,10 @@ def create_record(fields: dict, table: str | None = None, base: str | None = Non
 
 
 def update_record(rec_id: str, fields: dict, table: str | None = None,
-                  base: str | None = None) -> dict:
+                  base: str | None = None, *, key: str | None = None) -> dict:
     """PATCH one record (leaves unlisted fields untouched). Raises on failure."""
     try:
-        resp = _request("patch", _url(table, rec_id, base=base), headers=_headers(),
+        resp = _request("patch", _url(table, rec_id, base=base), headers=_headers(key),
                               json={"fields": fields, "typecast": True})
     except requests.RequestException as e:
         raise AirtableError(f"airtable update transport error: {str(e)[:200]}")
@@ -210,13 +216,13 @@ def delete_record(rec_id: str, table: str | None = None, base: str | None = None
 # caller must treat AirtableError as "not supported on this token/plan, fall back to a manual
 # spec" rather than a hard failure. ─────────────────────────────────────────────────────────
 
-def get_base_schema(base: str | None = None) -> dict:
+def get_base_schema(base: str | None = None, *, key: str | None = None) -> dict:
     """{"tables": [{id, name, fields: [{id, name, type}, ...]}, ...]} for one base. Raises
     AirtableError on any failure (including insufficient token scope) — callers decide whether
     that means 'skip, fall back to manual setup' or 'surface to the owner'."""
     base_id = base or settings.airtable_base_id
     try:
-        resp = _request("get", f"{_META_API}/{base_id}/tables", headers=_headers())
+        resp = _request("get", f"{_META_API}/{base_id}/tables", headers=_headers(key))
     except requests.RequestException as e:
         raise AirtableError(f"airtable schema transport error: {str(e)[:200]}")
     return _raise(resp)

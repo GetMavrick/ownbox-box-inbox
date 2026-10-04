@@ -427,6 +427,36 @@ def publish(*, lists=None, **fields) -> dict:
     return {"doc_id": doc_id, "url": article_url(slug), "slug": slug, "created": True}
 
 
+def unpublish(slug: str) -> dict:
+    """Take the live article at this slug off the website, KEPT AS A DRAFT, never deleted. -> {doc_id, unpublished}.
+
+    Owner, 2026-10-04: unpublish, never delete. Sanity's own "Unpublish" is exactly this: the document's
+    content is copied to `drafts.<id>` and the published `<id>` is removed, in ONE transaction (both
+    mutations in one request apply together or not at all), so there is never a moment with the article
+    neither live nor kept. Nothing live at that slug is an answer, not an error: `unpublished` is False.
+    """
+    ready, why = is_configured()
+    if not ready:
+        raise RuntimeError(f"aeo publisher not configured: {why}")
+    existing = find_by_slug(slug)
+    if not existing:
+        return {"doc_id": None, "unpublished": False}
+    doc_id = existing["_id"]
+    url = _endpoint("query") + "?" + urlencode({"query": "*[_id==$id][0]", "$id": _json.dumps(doc_id)})
+    status, body = net.get_public(url, headers=_headers())
+    full = _json_or_raise(status, body, "query").get("result") or {}
+    if not full:
+        raise RuntimeError(f"sanity returned no document for {doc_id!r}")
+    draft = {k: v for k, v in full.items() if k not in ("_rev", "_createdAt", "_updatedAt")}
+    draft["_id"] = f"drafts.{doc_id}"
+    status, body = net.post_public(
+        _endpoint("mutate"), headers=_headers(),
+        json={"mutations": [{"createOrReplace": draft}, {"delete": {"id": doc_id}}]})
+    _json_or_raise(status, body, "unpublish")
+    log.info("aeo.article_unpublished", slug=slug, doc_id=doc_id)
+    return {"doc_id": doc_id, "unpublished": True}
+
+
 def _host(c: dict) -> str:
     """The IndexNow host is the site's own host, derived from `site_url`, never a second setting
     that can disagree with it (OSDev1, #1554 contract gaps). A bare "example.com" is accepted."""

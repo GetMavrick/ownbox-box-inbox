@@ -93,8 +93,11 @@ def model_says(*replies):                                          # 3 of 3: the
 def configure(**lists):
     for k in ("never_words", "never_phrases", "competitors", "allowed_numbers", "facts"):
         box_settings.clear("seo", k)
-    for k, v in dict(project_id="proj1234", dataset="production",
-                     site_url="https://northwind.example", weekly_cap=50, **lists).items():
+    # ONE FACT, ALWAYS: nothing publishes until facts are set (owner, 2026-10-04; job.periodic), and these
+    # scenarios are about the guard, not the gate. A fact with no number, so allowed_numbers stays the test's.
+    for k, v in {**dict(project_id="proj1234", dataset="production", site_url="https://northwind.example",
+                        weekly_cap=50, facts=["Northwind plans articles for local businesses."]),
+                 **lists}.items():
         box_settings.put("seo", k, v)
 
 

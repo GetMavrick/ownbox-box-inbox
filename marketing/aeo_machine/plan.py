@@ -84,6 +84,44 @@ def request_now(plan_id: int) -> str | None:
     return now if cur.rowcount > 0 else None
 
 
+# AN UNPUBLISHED ARTICLE IS A STOPPED ROW WITH THIS REASON (owner, 2026-10-04: unpublish, never delete).
+# Not a status of its own: `status`'s CHECK is in the table, and changing it is a table rebuild, hard to
+# undo, while migration 58 is already promised to F5. The reason is written only by `mark_unpublished`
+# and read only by `is_unpublished`, so the day a migration adds the status, these two change and
+# nothing else does.
+UNPUBLISHED = "Unpublished at your request"
+
+
+def mark_unpublished(plan_id: int, when: str) -> None:
+    """The article is off the website, kept as a draft in Sanity. Its slug and URL stay on the row, so a
+    rewrite lands at the same address."""
+    mark(plan_id, "refused", refusal=f"{UNPUBLISHED} on {when}. It is kept as a draft in Sanity.")
+
+
+def is_unpublished(row: dict | None) -> bool:
+    return bool(row) and row.get("status") == "refused" and str(row.get("refusal") or "").startswith(UNPUBLISHED)
+
+
+def rewrite(plan_id: int) -> str | None:
+    """Send a live (or unpublished) article back to be written again from today's facts, next up, at its
+    own address. Returns the request's time, or None when the row isn't one: a second tap changes nothing.
+
+    The slug and URL stay: the publisher patches the article at that address, and the date it first went
+    live is kept (publisher.publish never sends publishedAt on a patch)."""
+    now = state._now()
+    with state.connect() as c:
+        cur = c.execute("UPDATE seo_plan SET status = 'planned', refusal = NULL, requested_at = ?, updated_at = ? "
+                        "WHERE id = ? AND slug IS NOT NULL AND (status = 'published' OR "
+                        "(status = 'refused' AND refusal LIKE ?))",
+                        (now, now, int(plan_id), UNPUBLISHED + "%"))
+    return now if cur.rowcount > 0 else None
+
+
+def is_rewrite(row: dict | None) -> bool:
+    """A planned row that has been live before: it replaces an article, it does not add one."""
+    return bool(row) and row.get("status") == "planned" and bool(row.get("url"))
+
+
 def next_up(limit: int = 1, *, requested_only: bool = False) -> list[dict]:
     """The rows the writing job should take next: asked-for first, oldest first, then the queue."""
     where = "status = 'planned'" + (" AND requested_at IS NOT NULL" if requested_only else "")
@@ -125,7 +163,9 @@ def mark(plan_id: int, status: str, *, slug: str | None = None, url: str | None 
         sets.append("title = ?")
         args.append(str(title).strip()[:300])
     if status == "published":
-        sets += ["published_at = ?", "requested_at = NULL", "refusal = NULL"]
+        # THE DATE IT FIRST WENT LIVE IS KEPT: a rewrite republishes at the same address, and the week's
+        # count (published_since) must not take it for a new article. Sanity keeps its publishedAt too.
+        sets += ["published_at = COALESCE(published_at, ?)", "requested_at = NULL", "refusal = NULL"]
         args.append(now)
     elif status in ("refused", "failed"):
         sets += ["refusal = ?", "requested_at = NULL"]

@@ -39,6 +39,7 @@ STALE_WRITING = timedelta(minutes=30)
 INTERRUPTED = "interrupted, press Write and publish now"
 # Each try is one lookup on the site. Past this many articles on one question, stop and say so.
 MAX_SLUG_TRIES = 50
+NO_FACTS = "no facts the writer may state yet: add them on AEO Settings"
 
 
 def _now() -> datetime:
@@ -191,8 +192,19 @@ def periodic() -> dict:
     ready, why = publisher.is_configured()
     if not ready:
         return {"skipped": "not_configured", "why": why}
+    # NOTHING PUBLISHES UNTIL FACTS ARE SET (owner, 2026-10-04). On his box two articles went live with an
+    # empty fact list, and one told readers his own Unified Inbox's capabilities were "not established".
+    # The facts are the only claims the writer may make, so with none it can only hedge or invent. Every
+    # article, a rewrite too, starts here; the row stays planned and the screens say what is missing.
+    if not settings.facts():
+        return {"skipped": "no_facts", "why": NO_FACTS}
     if room() <= 0:
-        return {"skipped": "weekly_cap"}
+        # A REWRITE REPLACES AN ARTICLE, IT DOESN'T ADD ONE, so it doesn't wait for the week's room: the
+        # owner asked for it, it is the same address, and the count of live articles doesn't change.
+        redo = [r for r in plan.next_up(5, requested_only=True) if plan.is_rewrite(r)]
+        if not redo:
+            return {"skipped": "weekly_cap"}
+        return _write_and_publish(redo[0])
     nxt = plan.next_up(1)
     if not nxt:
         return {"skipped": "nothing_planned"}

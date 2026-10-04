@@ -16,11 +16,14 @@ THE SAME CHECKS AS THE SCREENS, TWICE. A proposal is checked when it is made, so
 that a topic is a duplicate or a number is out of range, and again when it runs, because a week may
 have passed and the plan or the settings may have changed.
 
-THREE ACTIONS, THE SCREENS' OWN:
+FIVE ACTIONS:
   * add a topic (AEO → Articles, "Add a topic"), optionally next up ("Write and publish now");
   * try a stopped article again (AEO → Articles, "Try again now");
   * change one setting (AEO → Settings): the website, articles a week, or one entry added to or removed
-    from a list. Connections and their keys are never proposable: those stay on Data sources.
+    from a list. Connections and their keys are never proposable: those stay on Data sources;
+  * unpublish a live article: off the website, kept as a draft in Sanity, never deleted (owner, 2026-10-04);
+  * rewrite a live or unpublished article from today's facts, at its own address (owner, 2026-10-04,
+    after two articles went out with an empty fact list).
 """
 from __future__ import annotations
 
@@ -164,6 +167,59 @@ def propose_retry(id=None, seat=None):
                 {"app": APP, "do": "retry", "arguments": args}, seat)
 
 
+def _article_row(plan_id) -> dict:
+    try:
+        row = plan.get(int(plan_id))
+    except (TypeError, ValueError):
+        raise Refused("Give the article's id, from aeo.articles.") from None
+    if not row:
+        raise Refused(f"There is no article with id {plan_id}.")
+    return row
+
+
+def _live(plan_id) -> dict:
+    row = _article_row(plan_id)
+    if row.get("status") != "published" or not row.get("slug"):
+        raise Refused(f"Only a live article can be unpublished. This one is {row.get('status')}.")
+    return row
+
+
+def _rewritable(plan_id) -> dict:
+    row = _article_row(plan_id)
+    if not (row.get("slug") and (row.get("status") == "published" or plan.is_unpublished(row))):
+        raise Refused("Only a live or unpublished article can be rewritten. "
+                      f"This one is {row.get('status')}.")
+    if not settings.facts():
+        raise Refused("There are no facts for the writer yet, so a rewrite would say no more than the "
+                      "first one. Add them on AEO Settings first.")
+    return row
+
+
+def propose_unpublish(id=None, seat=None):
+    """Ask the owner to take a live article off the website. Kept as a draft in Sanity, never deleted."""
+    try:
+        row = _live(id)
+    except Refused as e:
+        return {"asked": False, "error": str(e)}
+    args = {"article": int(row["id"]), "title": row.get("title") or row.get("topic"),
+            "address": row.get("url") or "-", "what happens": "Off your website. Kept as a draft in Sanity."}
+    return _ask(f"Unpublish this AEO article: {_short(row.get('title') or row.get('topic') or '')}",
+                {"app": APP, "do": "unpublish", "arguments": args}, seat)
+
+
+def propose_rewrite(id=None, seat=None):
+    """Ask the owner to have a live or unpublished article written again from today's facts."""
+    try:
+        row = _rewritable(id)
+    except Refused as e:
+        return {"asked": False, "error": str(e)}
+    args = {"article": int(row["id"]), "title": row.get("title") or row.get("topic"),
+            "address": row.get("url") or "-",
+            "what happens": "Written again from today's facts and published at the same address."}
+    return _ask(f"Rewrite this AEO article from your facts: {_short(row.get('title') or row.get('topic') or '')}",
+                {"app": APP, "do": "rewrite", "arguments": args}, seat)
+
+
 def propose_setting(name=None, value=None, change=None, seat=None):
     """Ask the owner to change one setting: set the website or articles a week, or add or remove one entry."""
     key = str(name or "").strip().lower()
@@ -199,6 +255,24 @@ def _run(detail: dict) -> dict:
             if not plan.request_now(int(row["id"])):
                 raise Refused("It is no longer stopped, so nothing was changed.")
             return {"ok": True, "text": f"\"{row.get('topic')}\" is next up again."}
+        if do == "unpublish":
+            from datetime import datetime, timezone
+
+            from . import publisher
+            row = _live(args.get("article"))
+            got = publisher.unpublish(row["slug"])
+            plan.mark_unpublished(int(row["id"]), datetime.now(timezone.utc).strftime("%b %-d, %Y"))
+            if not got["unpublished"]:
+                return {"ok": True, "text": f"\"{row.get('title') or row.get('topic')}\" was already off your "
+                                            "website, so nothing changed there. The plan now says so."}
+            return {"ok": True, "text": f"\"{row.get('title') or row.get('topic')}\" is off your website. "
+                                        "It is kept as a draft in Sanity, and can be rewritten from your facts."}
+        if do == "rewrite":
+            row = _rewritable(args.get("article"))
+            if not plan.rewrite(int(row["id"])):
+                raise Refused("It can't be rewritten any more, so nothing was changed.")
+            return {"ok": True, "text": f"\"{row.get('title') or row.get('topic')}\" is next up to be written again "
+                                        "from your facts, at the same address. It takes a few minutes."}
         if do == "setting":
             name = str(detail.get("name") or "")
             how = {"set to": "set"}.get(args.get("change"), args.get("change"))
