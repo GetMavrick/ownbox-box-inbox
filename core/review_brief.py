@@ -97,7 +97,10 @@ def _moving(rows: list[dict]) -> list[dict]:
         if not bits:
             continue
         title = ", ".join(bits[:3])
-        out.append({"title": title[:1].upper() + title[1:], "why": "", "href": "",
+        # A SITE IS NOT A SENTENCE: "example.com: 163 visits" keeps its name; "7 companies found" takes a capital.
+        if "." not in title.split(" ", 1)[0]:
+            title = title[:1].upper() + title[1:]
+        out.append({"title": title, "why": "", "href": "",
                     "machine": str(r.get("title") or r.get("machine") or "")})
     return out[:MAX_MOVING]
 
@@ -109,6 +112,40 @@ def _moving(rows: list[dict]) -> list[dict]:
 # sentence is an age or a date, never a count (OSDev1's review of #1779: "last ran 4d ago" read as a rise of one,
 # every morning, for 8 mornings).
 _FILLER = {"is", "are", "was", "were", "has", "have", "a", "an", "the"}
+MAX_NUMBERS = 5
+
+
+def _numbers(rows: list[dict]) -> list[dict]:
+    """By the numbers: each machine's headline, as a number with its label, the way the numbers page
+    draws it big (core/dash/review.py `_segment`). Only a real headline counts (`report._stored_number`: a number
+    with a label), never a zero (owner, 2026-09-29: a line with no data is not shown). Stored with the brief, so
+    the page, the email and Slack show the same figures (owner, 2026-10-04: "pulling all the best data and
+    displaying it on the box and in the email equally")."""
+    out = []
+    for r in rows:
+        if r.get("error"):
+            continue
+        v = report._stored_number(r)
+        label = str((r.get("headline") or {}).get("label") or "").strip()
+        if v is None or not label or not v:
+            continue
+        out.append({"machine": str(r.get("title") or r.get("machine") or ""), "value": v, "label": label})
+    return out[:MAX_NUMBERS]
+
+
+def _plain_good_news(moving: list[dict]) -> str:
+    """The good-news line with no AI: true, grounded, never a zero, and never the same words as "Already moving"
+    item 01. One machine reads as it always did; several read across the box, one phrase each."""
+    if not moving:
+        return ""
+    if len(moving) == 1:
+        return f"Yesterday, {moving[0]['machine']}: {moving[0]['title']}."
+    bits = []
+    for m in moving[:3]:
+        first = str(m["title"]).split(", ", 1)[0].strip()
+        if first:
+            bits.append(f"{m['machine']}: {first}")
+    return "Yesterday, " + "; ".join(bits) + "." if bits else ""
 _LEAD_NUM = re.compile(r"\s*(\d[\d,]*(?:\.\d+)?)")
 
 
@@ -327,11 +364,11 @@ def _compose(about: date, now: datetime | None, *, think=None, ai: bool = True) 
         good, ideas = _ai(_facts(rows_y, rows_t, worth, moving), list(idea_log), think=think)
         ideas = [i for i in ideas if _norm_idea(i["title"]) not in idea_log]
     if not good and moving:
-        good = f"Yesterday, {moving[0]['machine']}: {moving[0]['title']}."     # plain, true, and never a zero
+        good = _plain_good_news(moving)                                     # plain, true, and never a zero
     m = _morning(about, now)
     brief = {
         "about": about.isoformat(), "date_label": _label(m), "quote": _quote(m),
-        "good_news": good, "worth": worth, "moving": moving, "ideas": ideas,
+        "good_news": good, "worth": worth, "moving": moving, "ideas": ideas, "numbers": _numbers(rows_y),
         "ideas_from": "ai" if ideas else "", "empty": not (worth or moving or ideas),
         "link": report.page_url(about), "built_at": state._now(),
     }

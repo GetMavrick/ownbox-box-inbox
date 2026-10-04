@@ -853,7 +853,7 @@ def set_watermark(space: str, zcid: str, *, last_seen_msg_id: str | None,
             (space, zcid, last_seen_msg_id, last_activity, state._now()))
 
 
-def awaiting_reply(space: str) -> int:
+def awaiting_reply(space: str, *, within_days: int | None = None) -> int:
     """How many conversations are WAITING ON A PERSON — their message was the last one.
 
     THE ONE NUMBER THE PRODUCT IS FOR, and until now nothing in the box could answer it. The
@@ -873,10 +873,18 @@ def awaiting_reply(space: str) -> int:
     never heard a word on; `MAX(created_at)` over an empty set is NULL and the join drops them,
     which is the right answer rather than a lucky one.
     """
+    # `within_days`: only a thread whose newest message from them is that recent (the Morning Review's 30, owner
+    # 2026-10-04: "skip threads older than 30 days"). None is every waiting thread, as the inbox screen counts.
+    recent, args = "", [space]
+    if within_days is not None:
+        from datetime import datetime, timedelta, timezone
+        recent = (" AND (SELECT MAX(m.created_at) FROM inbox_messages m WHERE m.space = k.space "
+                  "      AND m.zernio_conversation_id = k.zernio_conversation_id AND m.direction = 'in') >= ?")
+        args.append((datetime.now(timezone.utc) - timedelta(days=int(within_days))).isoformat())
     with state.connect() as c:
         row = c.execute(
             "SELECT COUNT(*) n FROM inbox_conversations k "
-            f" WHERE k.space = ? AND {_WAITING}", (space,)).fetchone()
+            f" WHERE k.space = ? AND {_WAITING}{recent}", tuple(args)).fetchone()
     return int(row["n"]) if row else 0
 
 

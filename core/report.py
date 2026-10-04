@@ -186,6 +186,36 @@ def _bounded(items, label: str) -> list:
     return items[:MAX_ITEMS] + [{"text": f"+{rest} more {label}", "truncated": True}]
 
 
+# ONE IS NOT PLURAL (owner, 2026-10-04, before an investor demo: the live review read "1 messages came in, 1 people
+# wrote for the first time"). A reporter writes its noun once, for every count; this agrees it with a count of one,
+# here, so the page, the email, Slack and the AI's answers all read it right without each reporter counting.
+_ONE = {"people": "person", "children": "child", "men": "man", "women": "woman"}
+
+
+def _one(text: str) -> str:
+    """The text for a count of one: the first plural noun in its first two words made singular. "messages came in"
+    -> "message came in", "first emails sent" -> "first email sent", "people wrote" -> "person wrote"."""
+    words = str(text or "").split(" ")
+    for i, w in enumerate(words[:2]):
+        low = w.lower()
+        if low in _ONE:
+            words[i] = _ONE[low]
+            break
+        if len(low) > 3 and low[:1].isalpha() and low.replace("-", "").isalpha() and low.endswith("s") \
+                and not low.endswith(("ss", "us", "is")):
+            words[i] = w[:-3] + "y" if low.endswith("ies") and len(low) > 4 else w[:-1]
+            break
+    return " ".join(words)
+
+
+def _agree(item: dict, value_key: str = "value", text_key: str = "text") -> dict:
+    v = item.get(value_key)
+    t = item.get(text_key)
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v == 1 and isinstance(t, str) and t[:1].islower():
+        item[text_key] = _one(t)
+    return item
+
+
 def _normalize(machine: str, title: str, rep) -> dict:
     """The one shape (§2.4), defaults filled, states bounded, every value JSON-safe. A reporter
     that returns garbage still yields a row the page can draw, because every list is a list and
@@ -199,15 +229,15 @@ def _normalize(machine: str, title: str, rep) -> dict:
     return {
         "machine": machine,
         "title": str(rep.get("title") or title)[:80],
-        "headline": {"value": _plain(head.get("value", 0)), "label": str(head.get("label") or "")[:80],
-                     "delta": _plain(head.get("delta"))},
+        "headline": _agree({"value": _plain(head.get("value", 0)), "label": str(head.get("label") or "")[:80],
+                            "delta": _plain(head.get("delta"))}, text_key="label"),
         "needs_you": _bounded(rep.get("needs_you"), "waiting"),
-        "happened": _bounded(rep.get("happened"), "outcomes"),
+        "happened": [_agree(x) for x in _bounded(rep.get("happened"), "outcomes")],
         "watch": watch,
         "notes": [str(x)[:MAX_TEXT] for x in (rep.get("notes") or [])][:MAX_ITEMS],
         # EVERY NUMBER THE PAGE COULD WANT, ALREADY COMPUTED AND NAMED. OSDev5 renders `figures`
         # without deciding what anything means: {key: {"value": …, "label": …, "href": …}}.
-        "figures": {str(k): _item(v) for k, v in (rep.get("figures") or {}).items()},
+        "figures": {str(k): _agree(_item(v), text_key="label") for k, v in (rep.get("figures") or {}).items()},
     }
 
 
@@ -770,6 +800,8 @@ def slack_text(b: dict) -> str:
     lines = [f"*{_slack_escape(b.get('date_label'))}*", f"> _{_slack_escape(b.get('quote'))}_"]
     if b.get("good_news"):
         lines += ["", _slack_escape(b["good_news"])]
+    if review_email.numbers_line(b):
+        lines += ["", _slack_escape(review_email.numbers_line(b))]
     for key, heading in review_email.SECTIONS:
         items = [it for it in b.get(key) or [] if str(it.get("title") or "").strip()]
         if not items:

@@ -39,20 +39,57 @@ def text(e: dict) -> str:
     lines = [e["date_label"], "", e["quote"], ""]
     if e.get("good_news"):
         lines += [e["good_news"], ""]
+    if numbers_line(e):
+        lines += [numbers_line(e), ""]
     for key, heading in SECTIONS:
         items = e.get(key) or []
         if not items:
             continue
         lines.append(heading.upper())
         for n, it in enumerate(items, 1):
-            lines.append(f"  {n:02d}  {it['title']}")
-            if it.get("why"):
-                lines.append(f"      {it['why']}")
-            if it.get("machine"):
-                lines.append(f"      {it['machine']}")
+            title, why, machine = it["title"], it.get("why"), it.get("machine")
+            if key == "moving" and machine:          # what a machine did reads machine first, as on the page
+                title, why, machine = machine, title, ""
+            lines.append(f"  {n:02d}  {title}")
+            if why:
+                lines.append(f"      {why}")
+            if machine:
+                lines.append(f"      {machine}")
         lines.append("")
     lines.append(f"The full review: {e['link']}")
     return "\n".join(lines)
+
+
+def numbers_line(e: dict) -> str:
+    """By the numbers, in one line: "15 waiting on you (Unified Inbox) · 23 emails sent (Lead Machine)".
+    The same figures the page draws on its band; "" when the brief carries none."""
+    bits = []
+    for n in e.get("numbers") or []:
+        if not isinstance(n, dict) or not report.has_value(n.get("value")) or not str(n.get("label") or "").strip():
+            continue
+        bits.append(f"{report._fmt_value(n['value'])} {n['label']}" + (f" ({n['machine']})" if n.get("machine") else ""))
+    return "By the numbers: " + " · ".join(bits) if bits else ""
+
+
+def _numbers_html(e: dict) -> str:
+    tiles = []
+    for n in e.get("numbers") or []:
+        if not isinstance(n, dict) or not report.has_value(n.get("value")) or not str(n.get("label") or "").strip():
+            continue
+        esc = _html.escape
+        tiles.append(f'<td style="padding:14px 16px 0 0;vertical-align:top;width:50%">'
+                     f'<div style="font-size:24px;font-weight:600;line-height:1.1;color:{_INK}">{esc(report._fmt_value(n["value"]))}</div>'
+                     f'<div style="color:{_SOFT};font-size:14px;margin-top:3px">{esc(n["label"])}</div>'
+                     + (f'<div style="color:{_GREY};font-size:11px;letter-spacing:.08em;text-transform:uppercase;'
+                        f'margin-top:2px">{esc(n["machine"])}</div>' if n.get("machine") else "") + '</td>')
+    if not tiles:
+        return ""
+    return (f'<div style="border-top:1px solid {_HAIR};margin:18px 0 0;padding-top:4px">'
+            f'<div style="font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:{_GREY};'
+            f'margin-top:12px">By the numbers</div>'
+            # TWO TO A ROW: four across is unreadable on a mobile, and most mail clients ignore media queries.
+            '<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%">'
+            + "".join("<tr>" + "".join(tiles[i:i + 2]) + "</tr>" for i in range(0, len(tiles), 2)) + '</table></div>')
 
 
 def _href(h: str, base: str) -> str:
@@ -72,6 +109,7 @@ def html(e: dict) -> str:
            f'<div style="border-top:1px solid {_SOFT};margin:22px 0 0;width:100%"></div>']
     if e.get("good_news"):
         out.append(f'<p style="color:{_SOFT};margin:14px 0 0">{esc(e["good_news"])}</p>')
+    out.append(_numbers_html(e))
     out.append('</div></div><div style="max-width:600px;margin:0 auto;padding:8px 20px 40px">')
     for key, heading in SECTIONS:
         items = e.get(key) or []
@@ -81,14 +119,17 @@ def html(e: dict) -> str:
                    f'text-transform:uppercase;color:{_SOFT}">{esc(heading)}</p>'
                    '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">')
         for n, it in enumerate(items, 1):
-            title = esc(it["title"])
+            t_title, t_why, t_machine = it["title"], it.get("why"), it.get("machine")
+            if key == "moving" and t_machine:        # what a machine did reads machine first, as on the page
+                t_title, t_why, t_machine = t_machine, t_title, ""
+            title = esc(t_title)
             href = _href(it.get("href") or "", base)
             if href:
                 title = (f'<a href="{esc(href, quote=True)}" style="color:{_INK};text-decoration:none;'
                          f'border-bottom:1px solid {_HAIR}">{title}</a>')
-            why = f'<div style="color:{_SOFT};margin-top:4px">{esc(it["why"])}</div>' if it.get("why") else ""
-            who = (f'<div style="color:{_GREY};font-size:13px;margin-top:2px">{esc(it["machine"])}</div>'
-                   if it.get("machine") else "")
+            why = f'<div style="color:{_SOFT};margin-top:4px">{esc(t_why)}</div>' if t_why else ""
+            who = (f'<div style="color:{_GREY};font-size:13px;margin-top:2px">{esc(t_machine)}</div>'
+                   if t_machine else "")
             out.append(f'<tr><td style="width:30px;vertical-align:top;padding:14px 0;color:{_GREY};font-size:13px">'
                        f'{n:02d}</td><td style="padding:14px 0"><div style="font-weight:600">{title}</div>{why}{who}'
                        '</td></tr>')

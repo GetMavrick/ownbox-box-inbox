@@ -174,6 +174,15 @@ color:var(--ink-3);font-size:calc(15 * var(--px, 1px))}
   .mr-quote{font-size:calc(34 * var(--px, 1px))}
 }
 """
+_BRIEF_CSS_SRC += """
+.mr-nums{display:flex;flex-wrap:wrap;gap:16px 26px;margin:18px 0 0;padding-top:16px;border-top:1px solid var(--hairline)}
+.mr-num{min-width:120px}
+.mr-num b{display:block;font-size:calc(24 * var(--px, 1px));font-weight:600;line-height:1.1;color:var(--ink);font-variant-numeric:tabular-nums}
+.mr-num small{display:block;margin-top:3px;color:var(--ink-2);font-size:calc(14 * var(--px, 1px));line-height:1.35}
+.mr-num i{display:block;margin-top:2px;font-style:normal;color:var(--ink-3);font-size:calc(12 * var(--px, 1px));letter-spacing:.08em;text-transform:uppercase}
+.mr-nums-h{margin:0 0 -6px;width:100%;color:var(--ink-3);font-size:calc(12 * var(--px, 1px));letter-spacing:.14em;text-transform:uppercase;font-weight:600}
+.mr-m{display:block;margin-top:4px;color:var(--ink-3);font-size:calc(13 * var(--px, 1px))}
+"""
 BRIEF_CSS = re.sub(r"\s*/\*.*?\*/", "", _BRIEF_CSS_SRC, flags=re.S)
 
 # A MORNING, DRAWN ONCE: a low sun, two birds, still water. Thin strokes in the page's own greys, the sun in its
@@ -576,8 +585,12 @@ def _brief_items(heading: str, items: list, *, moving: bool = False) -> str:
         # in a browser) and never a scheme. Anything else is drawn as words.
         head = (f'<a class="mr-t" href="{_esc(href)}">{_esc(title)}</a>' if _LOCAL.match(href) else
                 f'<span class="mr-t">{_esc(title)}</span>')
+        # WHICH MACHINE, under the item, as the email has always shown it (owner, 2026-10-04: the box and the
+        # email equally). Not under "Already moving", where the machine IS the title.
+        machine = "" if moving else str(it.get("machine") or "").strip()
         rows.append(f'<li><span class="mr-n">{i:02d}</span><div>{head}'
-                    + (f'<p class="mr-w">{_esc(why)}</p>' if why else "") + '</div></li>')
+                    + (f'<p class="mr-w">{_esc(why)}</p>' if why else "")
+                    + (f'<span class="mr-m">{_esc(machine)}</span>' if machine else "") + '</div></li>')
     if not rows:
         return ""
     return f'<section class="mr-sec"><h2>{_esc(heading)}</h2><ol>{"".join(rows)}</ol></section>'
@@ -603,7 +616,22 @@ def brief_html(b: dict | None, *, live: bool, first: str = "") -> str:
     return (f'<style>{BRIEF_CSS}</style><div class="mr"><section class="mr-band">'
             + (f'<p class="mr-quote">&ldquo;{_esc(quote)}&rdquo;</p>' if quote else "")
             + _SCENE + (f'<p class="mr-good">{_esc(good)}</p>' if good else "")
+            + _numbers_html(b.get("numbers"))
             + '</section>' + lists + quiet + sign + '</div>')
+
+
+def _numbers_html(nums) -> str:
+    """By the numbers, on the band: each machine's headline figure, the same ones the email and Slack
+    carry (core/review_brief.py `_numbers`). Nothing when there are none."""
+    tiles = []
+    for n in nums or []:
+        if not isinstance(n, dict) or not report.has_value(n.get("value")) or not str(n.get("label") or "").strip():
+            continue
+        tiles.append(f'<div class="mr-num"><b>{_esc(_fmt(n["value"]))}</b><small>{_esc(n["label"])}</small>'
+                     + (f'<i>{_esc(n["machine"])}</i>' if n.get("machine") else "") + '</div>')
+    if not tiles:
+        return ""
+    return '<div class="mr-nums"><p class="mr-nums-h">By the numbers</p>' + "".join(tiles) + '</div>'
 
 
 def _brief_for(day: str, live: bool, now: datetime | None):

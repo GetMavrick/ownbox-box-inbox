@@ -8,7 +8,7 @@ FOUR STATES, RENDERED (docs/PLAN_CUSTOMER_VOICE.md §1.10). A rail he does not o
 entirely; one he owns but has not connected says so and is `connect`, never `fail`. Getting that
 backwards is how a dashboard turns an activation step into a support ticket.
 """
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from core import state
 from core.report import register_reporter, window
@@ -115,6 +115,19 @@ def _rail_line(rail: str, st: str) -> dict | None:
         return {"text": f"{name} — we could not reach it" + (f" since {since}" if since else " yet"),
                 "state": rails.FAIL}
     return None                                     # ok rails speak through their numbers below
+
+
+RECENT_DAYS = 30
+
+
+def _iso(s: str) -> str:
+    """A stored stamp in the one form the cutoff compares with: aware, UTC, ISO. "" when it can't be read."""
+    from datetime import datetime, timezone
+    try:
+        t = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return ""
+    return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
 
 
 def _waited(iso: str) -> str:
@@ -249,7 +262,10 @@ def report(day: date, space: str | None = None) -> dict:
     # this page exists not to do.
     inbox_space = space or _space_name()
     counts = inbox_store.day_counts(inbox_space, lo, hi)
-    waiting = inbox_store.awaiting_reply(inbox_space)
+    # THIRTY DAYS (owner, 2026-10-04: "skip threads older than 30 days"). A thread nobody has written on in a month is
+    # not someone waiting on a reply this morning; on a mailbox with years in it, counting those made "waiting" a
+    # number nobody could act on and "oldest waiting" read 319 days. The inbox screen still lists every one.
+    waiting = inbox_store.awaiting_reply(inbox_space, within_days=RECENT_DAYS)
     # UNREAD IS PRODUCED HERE BECAUSE THE SCREEN IS NOT ALLOWED TO COMPUTE IT. `r_today` adds no
     # figure of its own on purpose — one producer is the only way the 8am message and the screen
     # can never disagree — and the greeting it now opens with needs this number. It is the same
@@ -312,7 +328,8 @@ def report(day: date, space: str | None = None) -> dict:
     if waiting:
         try:
             rows = inbox_store.list_conversations(inbox_space, limit=500, waiting=True)
-            stamps = sorted(str(r.get("last_inbound_at") or "") for r in rows if r.get("last_inbound_at"))
+            cut = (datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS)).isoformat()
+            stamps = sorted(s for s in (str(r.get("last_inbound_at") or "") for r in rows) if s and _iso(s) >= cut)
             age = _waited(stamps[0]) if stamps else ""
         except Exception:                        # noqa: BLE001 — a figure, never the report
             age = ""
