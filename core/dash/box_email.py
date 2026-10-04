@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from flask import request
 
-from core import box_mail
+from core import box_mail, setup_errors
 from core.dash import blueprint
 from core.dash.box_settings import _admit, _back, _esc, _is_owner, _who
 from core.dash.home import chrome
@@ -110,8 +110,9 @@ def _smtp_form() -> str:
 
 
 def _note(ok: bool, head: str, said: str) -> str:
-    tone = "" if ok else ' style="border-color:var(--danger)"'
-    return f'<div class="card"{tone}><h2>{_esc(head)}</h2><p>{_esc(said)}</p></div>'
+    if not ok:
+        return setup_errors.card("email", said, head=head)     # names the fix, links the page (plan #1857)
+    return f'<div class="card"><h2>{_esc(head)}</h2><p>{_esc(said)}</p></div>'
 
 
 @blueprint.route(DOOR, methods=["GET", "POST"])
@@ -161,7 +162,7 @@ def box_email_screen():
                         box_mail.clear_own(user_id=uid)
                     note = _note(False, "Not saved — the test did not send", said)
         else:
-            note = _note(False, "Nothing happened", "That button is not one this page knows.")
+            note = _note(False, "Nothing happened", "That button is not one this page knows. Reload the page and try again.")
 
     d = box_mail.describe()
     body = note + _status_card(d)

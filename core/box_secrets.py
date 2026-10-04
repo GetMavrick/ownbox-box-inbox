@@ -333,7 +333,8 @@ def put_email(*, host: str, user: str, password: str, user_id: str | None = None
         # never reach this table. It is far broader than the box needs, and it would keep working after
         # they revoked the thing they believed they had given us.
         raise SecretRejected("That looks like your Google password, not an app password. An app "
-                             "password is 16 letters, shown as four groups of four.")
+                             "password is 16 letters, shown as four groups of four: make one in your Google "
+                             "account's security settings and paste it here.")
     # VERIFIED BY SIGNING IN, NOT BY COUNTING CHARACTERS. Found by OSDev5, 2026-09-16: this wrote
     # `status = connected` straight after the shape check above and never once opened the mailbox,
     # so a buyer who pasted a revoked app password — which is what Google silently does to every
@@ -479,7 +480,7 @@ def validate(name: str, value: str) -> str:
         prefix, least = _ANTHROPIC_SHAPE
         if not value.startswith(prefix) or len(value) < least:
             raise SecretRejected(f"That does not look like an Anthropic key — they start "
-                                 f"with {prefix} and are longer than that.")
+                                 f"with {prefix} and are longer than that. Copy it again from your AI account.")
     if name == CLAUDE_OAUTH:
         prefix, least = _CLAUDE_OAUTH_SHAPE
         if not value.startswith(prefix):

@@ -1306,7 +1306,7 @@ _BOX_TITLES = {"anthropic": "Your AI account (Claude, ChatGPT, Gemini, Grok)"}
 # rather than "Not connected yet", which reads oddly against an app somebody installs.
 _BOX_SAID = {
     "connected":        ("Connected", ""),
-    "needs_reauth":     ("Needs a new password", "stale"),
+    "needs_reauth":     ("Needs signing in again", "stale"),   # an AI account has no password (plan #1857 launch bar 1)
     "admin_disabled":   ("Switched off by your administrator", "stale"),
     "payment_required": ("Needs a payment method", "stale"),
     "not_connected":    ("Not set up yet", "quiet"),

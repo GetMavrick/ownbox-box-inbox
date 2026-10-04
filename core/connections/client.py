@@ -70,11 +70,13 @@ def check_address(url: str) -> str:
         raise ConnectionFailed("That isn't a web address. Paste the MCP address from the app's own "
                                "instructions, like https://mcp.example.com/mcp.")
     if parts.scheme not in SCHEMES:
-        raise ConnectionFailed("The address has to start with https://, so the token travels encrypted.")
+        raise ConnectionFailed("The address has to start with https://, so the token travels encrypted. Use the "
+                               "https:// address the app gives you.")
     if parts.username or parts.password:
         raise ConnectionFailed("Put the token in the token box, not in the address.")
     if not net.url_is_public(url, RESOLVE):
-        raise ConnectionFailed(f"{parts.hostname} isn't on the public internet, so the box can't reach it.")
+        raise ConnectionFailed(f"{parts.hostname} isn't on the public internet, so the box can't reach it. Use the "
+                               "app's public MCP address.")
     return url
 
 
@@ -196,7 +198,8 @@ class Client:
                                              "clientInfo": CLIENT_INFO})
         result = reply.get("result")
         if "error" in reply or not isinstance(result, dict):
-            raise ConnectionFailed(f"{self.host} wouldn't start a session: {_rpc_error(reply)}")
+            raise ConnectionFailed(f"{self.host} wouldn't start a session: {_rpc_error(reply)}. Check the "
+                                   "app's MCP address, then press Connect again.")
         self.protocol = str(result.get("protocolVersion") or PROTOCOL)[:20]
         info = result.get("serverInfo")
         self.server = info if isinstance(info, dict) else {}
@@ -210,7 +213,8 @@ class Client:
         for _ in range(PAGES_MAX):
             reply = self._request("tools/list", {"cursor": cursor} if cursor else {})
             if "error" in reply:
-                raise ConnectionFailed(f"{self.host} wouldn't list its tools: {_rpc_error(reply)}")
+                raise ConnectionFailed(f"{self.host} wouldn't list its tools: {_rpc_error(reply)}. Check "
+                                       "the app's MCP address, then press Connect again.")
             result = reply.get("result") if isinstance(reply.get("result"), dict) else {}
             out.extend(t for t in (result.get("tools") or []) if isinstance(t, dict))
             cursor = result.get("nextCursor")

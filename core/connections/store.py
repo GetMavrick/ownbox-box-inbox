@@ -170,7 +170,8 @@ def add(name: str, url: str, token: str = "", *, by: str, conn: dict | None = No
     except _client.ConnectionFailed as e:
         raise Refused(str(e)) from None
     if not found:
-        raise Refused(f"{_client.host_of(url)} answered, but has no tools to offer.")
+        raise Refused(f"{_client.host_of(url)} answered, but has no tools to offer. Check that "
+                      "your account there allows MCP, then press Connect again.")
     _fits(found, url)
     data = load()
     save_secret(slug, conn, user_id=by or None)
@@ -217,7 +218,7 @@ def set_enabled(slug: str, tool_ids, *, by: str, asks=None) -> dict:
     if any(not tools[t]["read_only"] for t in want):
         raise Refused(ACTIONS_LATER)
     if any(tools[t]["read_only"] for t in ask):
-        raise Refused("That one only reads, so it's simply on or off.")
+        raise Refused("That one only reads, so it's simply on or off: turn it on or off instead.")
     rec["enabled"] = sorted(set(want), key=list(tools).index)
     if asks is not None:
         rec["ask_first"] = sorted(set(ask), key=list(tools).index)

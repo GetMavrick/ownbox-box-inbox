@@ -239,7 +239,8 @@ def start(*, consented: bool = False, user_id: str | None = None,
             env={**os.environ, "PYTHONPATH": str(root)})
     except Exception as e:                               # noqa: BLE001
         _reap("helper would not start", machine)
-        raise LoginError(f"This box could not start the ChatGPT sign-in ({type(e).__name__}).") from e
+        raise LoginError(f"This box could not start the ChatGPT sign-in ({type(e).__name__}). Press Connect to "
+                         "try again; if it happens again, email support@ownbox.io.") from e
     finally:
         try:
             logf.close()                                 # noqa: F821 — set above or the except ran

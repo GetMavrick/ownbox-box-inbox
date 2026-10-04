@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from flask import redirect, request
 
-from core import claim
+from core import claim, setup_errors
 from core.dash import blueprint
 from core.dash.box_settings import _admit, _esc, _is_owner, _who
 from core.dash.home import chrome
@@ -40,7 +40,8 @@ _SAID = {
     "disconnected": ("Google is disconnected", "This box no longer reads your Search Console.", True),
     "not_ours": ("That sign-in was not started here", "Press Connect again from this page.", False),
     "too_slow": ("That sign-in took too long", "Press Connect again and finish it within ten minutes.", False),
-    "cancelled": ("Google was not connected", "The sign-in was cancelled on Google's page.", False),
+    "cancelled": ("Google was not connected", "The sign-in was cancelled on Google's page. Press Connect to try again.",
+                  False),
     "no_search_console": ("Search Console was not allowed",
                           "Press Connect again and leave the Search Console permission ticked.", False),
     "not_switched_on": ("Google sign-in is not switched on yet",
@@ -52,9 +53,15 @@ _SAID = {
                    "Connect again.", False),
     "not_a_site": ("That site is not in this Google account", "Pick one from the list.", False),
     "not_a_sold_box": ("This box cannot sign in to Google",
-                       "Google sign-in works on boxes bought at ownbox.io.", False),
+                       "Google sign-in works on boxes bought at ownbox.io. Email support@ownbox.io to have it "
+                       "switched on for this one.", False),
     "wrong_host": ("Open this page at your box's own address",
-                   "Google sign-in works from your box's ownbox.app address.", False),
+                   "Google sign-in works from your box's ownbox.app address. Open this page there and press "
+                   "Connect.", False),
+    # EVERY REFUSAL THE VENDOR MODULE RAISES HAS A SENTENCE (plan #1857 launch bar 1): these three showed nothing.
+    "not_connected": ("Google is not connected", "Press Connect to sign in with Google.", False),
+    "no_property": ("Choose your site first", "Pick the site this box works on from the list, then save.", False),
+    "google_down": ("Google could not be reached", "Nothing was changed. Try again in a minute.", False),
 }
 
 
@@ -63,8 +70,9 @@ def _note(key: str) -> str:
     if not said:
         return ""
     head, text, good = said
-    tone = "" if good else ' style="border-color:var(--danger)"'
-    return f'<div class="card"{tone}><h2>{_esc(head)}</h2><p>{_esc(text)}</p></div>'
+    if not good:
+        return setup_errors.card("search_console", text, head=head)   # names the fix, links the page
+    return f'<div class="card"><h2>{_esc(head)}</h2><p>{_esc(text)}</p></div>'
 
 
 def _host() -> str:
@@ -105,7 +113,8 @@ def _connected_card(st: dict) -> str:
     try:
         rows = gsc.sites()
     except gsc.Refused as e:
-        out.append(f"<p>{_esc(_SAID.get(e.key, _SAID['google_said_no'])[1])}</p>")
+        out.append(f"<p>{_esc(_SAID.get(e.key, _SAID['google_said_no'])[1])}</p><p>{setup_errors.link('search_console')}"
+                   "</p>")
         if e.key == "signed_out":
             out.append(_post("connect", "Connect again"))
         rows = None

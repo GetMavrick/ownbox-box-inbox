@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 from flask import redirect, request
 
-from core import source_cards
+from core import source_cards, setup_errors
 from core.connections import ideas as _ideas
 from core.connections import oauth, store
 from core.dash import blueprint
@@ -282,7 +282,8 @@ def box_sources_signed_in():
     if request.args.get("error"):
         oauth.cancel(user_id=who)
         said = "you chose not to allow it" if request.args.get("error") == "access_denied" else "it said no"
-        return _render(f"Nothing was connected: on the app's own page, {said}.", {})
+        return _render(f"Nothing was connected: on the app's own page, {said}. Press Connect on it again to "
+                       "allow it.", {})
     try:
         rec = oauth.finish(request.args.get("code") or "", request.args.get("state") or "", by=who, user_id=who)
     except (store.Refused, oauth.SignInFailed) as e:
@@ -401,7 +402,7 @@ def _render(note: str, kept: dict, cards: dict | None = None):
     items = store.load()["items"]
     body = []
     if note:
-        body.append(f'<div class="card"><p>{_esc(note)}</p></div>')
+        body.append(setup_errors.card("sources", note))  # names the fix, links the page (plan #1857 launch bar 1)
     for flag, said in (("added", "Connected. The tools that only read are on."), ("saved", "Saved."),
                        ("checked", "Checked. Its tools are up to date.")):
         rec = items.get(str(request.args.get(flag) or ""))

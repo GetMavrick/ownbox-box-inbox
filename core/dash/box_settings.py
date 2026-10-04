@@ -44,6 +44,7 @@ import subprocess
 from flask import jsonify, redirect, request
 
 from core.dash import blueprint
+from core import setup_errors
 from core.dash.home import chrome
 from core.logging import get_logger
 
@@ -227,7 +228,7 @@ def box_ai():
             # the top, whichever model is picked below.
             + '</p><p class="quiet">' + _esc(AI_NEEDS) + '</p></div>', _picker(e, picked)]
     if note:
-        body.append(f'<div class="card"><p>{_esc(note)}</p></div>')
+        body.append(setup_errors.card("ai", note))       # names the fix, links the page (plan #1857 launch bar 1)
 
     # A MODEL THIS BOX CANNOT DRAFT WITH GETS THE WHOLE SCREEN TO ITSELF AND NO FIELD ON IT.
     # Owner, 2026-09-22: *"the page is gonna have to be completely different according to which
@@ -360,7 +361,7 @@ def box_chatgpt():
             'draft on your own subscription. There is no key, and the box never sees your '
             'password.</p></div>']
     if note:
-        body.append(f'<div class="card"><p>{_esc(note)}</p></div>')
+        body.append(setup_errors.card("ai", note))
     refresh = ""
     if live.get("url") and live.get("code"):
         body.append(
@@ -450,7 +451,8 @@ def _ai_health_lines() -> str:
         out.append(f'<p class="quiet">Last failed: {_esc(_local_when(fail["at"]))}: {_esc(fail.get("why"))}</p>')
     if request.args.get("tested") and t:
         said = (f'It answered "{_esc(t.get("answer"))}" in {_esc(t.get("seconds"))} seconds. Your AI is working.'
-                if t.get("ok") else f'It did not answer: {_esc(t.get("why"))}')
+                if t.get("ok") else f'It did not answer: {_esc(t.get("why"))} Sign in again under Use a different '
+                                    'account below, then press Test it now.')
         out.append(f'<p><b>{said}</b></p>')
     out.append('<form method="post" action="/settings/ai" style="margin-top:12px"><input type="hidden" '
                'name="do" value="test"><button class="ghost" type="submit">Test it now</button></form>')
@@ -880,7 +882,7 @@ def box_mobile():
         body.append('<div class="card notice"><p>One thing first: this box cannot send '
                     f'notifications yet — {_esc(why)}. The steps below still work and are worth '
                     'doing. The box tries again every time it updates; if this is still here after '
-                    'an update, tell us.</p></div>')
+                    f'an update, email {setup_errors.SUPPORT}.</p></div>')
 
     # THE DEVICE IN YOUR HAND, FIRST (walk #9). The card below is the box as a whole; this one is
     # the answer a person who just installed is looking for.
@@ -1241,7 +1243,7 @@ def box_agent():
         try:
             _sid, credential = seats.mint(label, role)
         except ValueError as e:
-            note = f'<p class="quiet">{_esc(e)}</p>'
+            note = setup_errors.card("mcp", str(e), head="That key was not made")
         else:
             root = str(request.host_url or "").rstrip("/")
             # NEVER A REDIRECT AND NEVER A QUERY STRING. The credential is rendered into this one
@@ -1481,17 +1483,19 @@ def box_access_screen(move_note: str = "", checkin_note: str = ""):
         except box_access.KeyRefused as e:
             # THE REFUSAL IS THE TEACHING. Every message from box_access names what to do instead,
             # so it is shown verbatim rather than replaced with "invalid key".
-            note = f'<div class="card"><h2>That was not stored.</h2><p>{_esc(e)}</p></div>'
+            note = setup_errors.card("access", str(e), head="That was not stored.")
         except OSError as e:                             # noqa: BLE001
-            note = (f'<div class="card"><h2>The box could not write the file.</h2>'
-                    f'<p class="quiet">{_esc(type(e).__name__)} — nothing was changed.</p></div>')
+            note = setup_errors.card("access", f"Nothing was changed ({type(e).__name__}). Try again in a minute; "
+                                     f"if it happens again, email {setup_errors.SUPPORT}.",
+                                     head="The box could not write the file.")
 
     try:
         keys = box_access.listed(box_access.read())
     except OSError:
         keys = []
-        note += ('<div class="card"><p>This box cannot read its key file right now, so the list '
-                 'below may be incomplete. Nothing has been changed.</p></div>')
+        note += setup_errors.card("access", "This box cannot read its key file right now, so the list below may be "
+                                  f"incomplete. Nothing has been changed. Reload in a minute; if it stays, email "
+                                  f"{setup_errors.SUPPORT}.", head="The key list could not be read")
 
     form = (
         '<div class="card"><h2>Add your key</h2>'
@@ -1678,7 +1682,8 @@ def _updates_page(note: str = ""):
     except Exception as e:                               # noqa: BLE001 — a settings screen never 500s
         st = {"release": None, "ok": None, "checked_at": None, "checked_s_ago": None,
               "said": f"This box could not read its own update state ({type(e).__name__}). It is "
-                      f"still running the release it has; nothing has changed."}
+                      f"still running the release it has; nothing has changed. Reload in a minute; if it "
+                      f"stays, email {setup_errors.SUPPORT}."}
 
     release = st.get("release")
     resume_card = ('<div class="card"><h2>Managed</h2><p>Updates come with Ownbox Managed. Resume it '

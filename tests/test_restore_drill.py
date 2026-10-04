@@ -135,5 +135,60 @@ r = _run(tmp, 'import shutil; shutil.copy(pathlib.Path(__file__).parent / "live.
 ok("an overlay on disk that was never captured is said out loud, and an older box still PASSES",
    r.returncode == 0 and "NOT in the backup table" in r.stdout, (r.stdout + r.stderr)[-400:])
 
+# ── THE VERDICT A PERSON RUNS ON A REAL BOX'S COPY (plan #1857 launch bar 9, OSDev1) ───────────────────────────────
+# One command, `--copy` for a copy already restored, a GREEN or RED line, and what was compared: rows per table, newest
+# row times, a sample read back by hash. Never a row's contents. A box keeps writing while the drill runs, so rows live
+# gained after the copy's moment (its highest rowid) are said, not failed; rows it is missing from before are red.
+import shutil as _shutil  # noqa: E402
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz  # noqa: E402
+
+
+def _drill_copy(live, copy):
+    return subprocess.run([sys.executable, str(DRILL), "--db", str(live), "--copy", str(copy),
+                           "--config", "/nonexistent"], capture_output=True, text=True, timeout=180)
+
+
+def _box(path, *, secret="sk-ant-api03-NOT-A-REAL-KEY-but-shaped-like-one", jobs=5, hours_ago=1.0):
+    now = _dt.now(_tz.utc)
+    with sqlite3.connect(path) as c:
+        c.execute("CREATE TABLE box_secrets (name TEXT PRIMARY KEY, value TEXT)")
+        c.execute("INSERT INTO box_secrets VALUES ('anthropic_api_key', ?)", (secret,))
+        c.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, created_at TEXT, raw_text TEXT)")
+        c.executemany("INSERT INTO jobs (created_at, raw_text) VALUES (?, ?)",
+                      [((now - _td(hours=hours_ago + i)).isoformat(), f"job {i}") for i in range(jobs)])
+    return path
+
+
+vt = pathlib.Path(tempfile.mkdtemp())
+live9, copy9 = _box(vt / "live.db"), vt / "copy.db"
+_shutil.copy(live9, copy9)
+with sqlite3.connect(live9) as c:                        # the box kept working after the copy was taken
+    c.executemany("INSERT INTO jobs (created_at, raw_text) VALUES (?, ?)",
+                  [(_dt.now(_tz.utc).isoformat(), "new") for _ in range(2)])
+r = _drill_copy(live9, copy9)
+ok("A BUSY BOX: rows live gained after the copy are said ('+2 since'), and the verdict is GREEN",
+   r.returncode == 0 and "RESTORE DRILL: GREEN" in r.stdout and "+2 since" in r.stdout, (r.stdout + r.stderr)[-600:])
+ok("...it shows what it compared: each table's rows, newest row times, and rows read back by hash",
+   all(w in r.stdout for w in ("jobs", "box_secrets", "copy newest", "read back", "same")), r.stdout[-800:])
+ok("...and NEVER a row's contents: no secret, no job text", "sk-ant-api03" not in r.stdout + r.stderr
+   and "job 0" not in r.stdout + r.stderr, (r.stdout + r.stderr)[-400:])
+with sqlite3.connect(live9) as c:                        # a nightly prune took the oldest job after the copy
+    c.execute("DELETE FROM jobs WHERE id = 1")
+r = _drill_copy(live9, copy9)
+ok("rows deleted from live since the copy are said, not failed", r.returncode == 0 and "1 deleted since" in r.stdout,
+   r.stdout[-500:])
+with sqlite3.connect(copy9) as c:                        # the copy lost a row it should have
+    c.execute("DELETE FROM jobs WHERE id = 3")
+r = _drill_copy(live9, copy9)
+ok("A COPY MISSING A ROW LIVE HAD AT ITS MOMENT is RED, naming the table",
+   r.returncode == 1 and "RESTORE DRILL: RED" in r.stdout and "jobs: the copy has" in r.stdout
+   and "lacks 1" in r.stdout, r.stdout[-500:])
+stale_live, stale_copy = _box(vt / "live2.db"), _box(vt / "copy2.db", hours_ago=30.0)
+r = _drill_copy(stale_live, stale_copy)
+ok("A STALE COPY, its newest row 30 hours behind live, is RED", r.returncode == 1 and "STALE" in r.stdout
+   and "hours behind live" in r.stdout, r.stdout[-500:])
+r = _drill_copy(live9, vt / "nothing-here.db")
+ok("no copy at the path is RED, said plainly", r.returncode == 1 and "no copy at" in (r.stdout + r.stderr))
+
 print(f"{_failed} FAILED" if _failed else "all ok")
 sys.exit(1 if _failed else 0)

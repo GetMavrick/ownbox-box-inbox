@@ -184,7 +184,8 @@ def discover(url: str, challenge: str = "") -> dict:
                            "offers a token, paste that instead.")
     ends = {k: str(meta[k]) for k in ("authorization_endpoint", "token_endpoint", "registration_endpoint")}
     if not all(_public(v) for v in ends.values()):
-        raise SignInFailed(f"{host}'s sign-in points somewhere the box can't safely go.")
+        raise SignInFailed(f"{host}'s sign-in points somewhere the box can't safely go. Connect "
+                           "it with a token instead.")
     return {"resource": resource, "issuer": issuer, "authorize": ends["authorization_endpoint"],
             "token": ends["token_endpoint"], "register": ends["registration_endpoint"], "scope": scope[:500]}
 
@@ -315,7 +316,7 @@ def token_for(slug: str, conn: dict, *, force: bool = False) -> str:
             # back for an app the owner removed.
             current = store.secret(slug)
             if not current:
-                raise SignInFailed("This app was disconnected on Data Sources.")
+                raise SignInFailed("This app was disconnected on Data Sources. Connect it again there.")
             conn = current
             if (conn.get("token") != seen) or (not force and fresh(conn)):
                 return str(conn.get("token") or "")          # another worker refreshed while this one waited

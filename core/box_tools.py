@@ -49,7 +49,7 @@ MACHINE = "core"
 # backend is up now.
 _HEARTBEAT_STALE_S = 300
 _BACKEND_STALE_S = 3900
-_BACKEND_COMPONENTS = ("brain_backend", "probe:claude_code", "probe:anthropic_api")
+from core.health import BACKEND_COMPONENTS as _BACKEND_COMPONENTS  # noqa: E402 — one list, health.py says why
 
 
 def _age_s(iso: str | None) -> int | None:

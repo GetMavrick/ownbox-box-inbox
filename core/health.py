@@ -17,7 +17,13 @@ from core.config import settings
 # watchdog passes) can't be trusted, so it shows AMBER rather than a confident green.
 _HEARTBEAT_STALE_S = 300
 _BACKEND_STALE_S = 3900
-_BACKEND_COMPONENTS = ("brain_backend", "probe:claude_code", "probe:anthropic_api")
+# EVERY NAME THE BACKEND'S HEALTH IS RECORDED UNDER: the worker's startup probe (`brain_backend`) and the watchdog's
+# `probe:<key>` for each backend `watchdog.probe_backend()` can pick: claude_code, codex, anthropic_api. `probe:codex`
+# was missing (OSDev1, 2026-10-04): on a box signed in to ChatGPT the watchdog's every-30-minute probe was never read,
+# so about an hour after each restart its health said "some of what it checks is unknown" until the next restart (the
+# owner's box on release 2026.10.03.4). core/box_tools.py reads this same tuple.
+BACKEND_COMPONENTS = ("brain_backend", "probe:claude_code", "probe:codex", "probe:anthropic_api")
+_BACKEND_COMPONENTS = BACKEND_COMPONENTS
 
 
 def _age_s(iso: str | None) -> int:

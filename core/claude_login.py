@@ -686,7 +686,8 @@ def start(*, consented: bool = False, machine: str | None = None) -> str:
     try:
         logf = open(d / "log", "wb")                     # noqa: SIM115 — handed to the child
     except OSError as e:
-        raise LoginError(f"This box could not start the Claude sign-in ({type(e).__name__}).") from e
+        raise LoginError(f"This box could not start the Claude sign-in ({type(e).__name__}). Press Connect to "
+                         "try again; if it happens again, email support@ownbox.io.") from e
     try:
         proc = subprocess.Popen(
             [sys.executable, "-m", "core.claude_login", "--serve", str(d)],
@@ -696,7 +697,8 @@ def start(*, consented: bool = False, machine: str | None = None) -> str:
     except Exception as e:                               # noqa: BLE001
         logf.close()
         _reap("helper would not start", machine)
-        raise LoginError(f"This box could not start the Claude sign-in ({type(e).__name__}).") from e
+        raise LoginError(f"This box could not start the Claude sign-in ({type(e).__name__}). Press Connect to "
+                         "try again; if it happens again, email support@ownbox.io.") from e
     finally:
         try:
             logf.close()

@@ -34,7 +34,8 @@ def _line(site: str, w: dict) -> str:
              f"this week" + (f" ({aside})" if aside else "")]
     ai = w["by_source"].get("ai", 0)
     if ai:
-        parts.append(f"{ai:,} from AI answers")
+        named = _named(w["by_source"].get("assistants"))
+        parts.append(f"{ai:,} from AI answers" + (f" ({named})" if named else ""))
     if t["converted"]:
         # NAMES ARE LABELS, NEVER PLURALISED ("4 book a calls" is nobody's sentence): the count, then the top
         # conversions by name with their own counts.
@@ -43,6 +44,28 @@ def _line(site: str, w: dict) -> str:
     # NO FULL STOP: the Morning Review joins a machine's lines with commas (review_brief._moving), so a line that
     # ended in one read "...AI answers., brian-macdonald.com: ..." on the owner's first review with websites.
     return ", ".join(parts)
+
+
+def _named(assistants, n: int = 3) -> str:
+    """The AI apps that sent visits, most first: "ChatGPT 21, Perplexity 9"."""
+    top = sorted(((str(k), int(v or 0)) for k, v in (assistants or {}).items() if v), key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(f"{name} {v:,}" for name, v in top[:n])
+
+
+def _sent_by_ai(weeks: list[dict]) -> str:
+    """THE AI THAT SENT PEOPLE, NAMED (OSDev1's pick, owner D5 10-03: "reports may name the AI app that sent a
+    visitor"). The foundation counts visits per assistant (sources.py); this line said only "N from AI answers". A med
+    spa owner reading "ChatGPT sent you 3 visits this week" sees AEO work in their own numbers. '' when none came."""
+    total: dict = {}
+    for w in weeks:
+        for name, v in ((w.get("by_source") or {}).get("assistants") or {}).items():
+            total[name] = total.get(name, 0) + int(v or 0)
+    top = sorted(((k, v) for k, v in total.items() if v), key=lambda kv: (-kv[1], kv[0]))
+    if not top:
+        return ""
+    (first, n), rest = top[0], top[1:3]
+    return (f"{first} sent you {n:,} visit{'s' if n != 1 else ''} this week"
+            + "".join(f", {name} {v:,}" for name, v in rest))
 
 
 def _people(site: str, day: date) -> int | None:
@@ -59,16 +82,20 @@ def report(day: date) -> dict:
     delta is this week against the week ending the day before, from the store, not from yesterday's stored row:
     every row stored before this fix says 0, and "+185 vs the day before" would be a number nobody earned. A site
     without a week ending the day before means no change at all: its whole week would read as growth."""
-    happened, total, before, sites = [], 0, 0, 0
+    happened, total, before, sites, weeks = [], 0, 0, 0, []
     for site in seam.sites():
         w = seam.week(site, day)
         if not w or not w["days"]:
             continue
+        weeks.append(w)
         happened.append({"text": _line(site, w), "href": "/settings/sources"})
         total += int(w["totals"]["sessions"] or 0)
         sites += 1
         prev = _people(site, day - timedelta(days=1))
         before = None if (before is None or prev is None) else before + prev
+    sent = _sent_by_ai(weeks)
+    if sent:
+        happened.insert(0, {"text": sent, "href": "/settings/sources"})   # first, so the brief carries it too
     out: dict = {}
     if happened:
         label = (f"visit{'s' if total != 1 else ''} from people this week"
