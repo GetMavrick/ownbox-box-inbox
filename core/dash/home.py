@@ -1238,7 +1238,10 @@ def _home() -> str:
     # WAITING FOR YOU GOES FIRST, while something is (core/approvals.py): a coworker asked to change something in
     # an app, and nothing happens until the owner answers. Its own file draws it; '' when nothing waits.
     from core.dash import approvals as _approvals
-    body = _approvals.card() + _setup_card() + body
+    from core.dash import business as _business
+    # TELL YOUR BOX ABOUT YOUR BUSINESS (#1957 C2): after anything waiting and the set-up steps, until the owner has
+    # answered or dismissed it.
+    body = _approvals.card() + _setup_card() + _business.home_card() + body
     # BOTH LAST, AND IN THIS ORDER. Stop everything is the control you want findable and never
     # the one you want your thumb near while reading the morning's numbers on a phone; Managed is
     # a thing you go looking for on a particular day, so it sits below the numbers and above the
@@ -1726,9 +1729,14 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                        # coworkers that work on the box. It is the order a box is set up in: "connect to their AI
                        # account, figure out how to do the inbound MCP server set up and then add outbound MCP data
                        # connections. And then set up the mobile app."
-                       group_labels={"ai": "AI", "general": "General", "server": "Server"},
+                       group_labels={"business": "Business", "ai": "AI", "general": "General", "server": "Server"},
                        items=[
                            {"key": "overview", "label": "Overview", "href": "/settings"},
+                           # YOUR BUSINESS FIRST (owner, 2026-10-04: business context "at the top of the base machine
+                           # settings"; #1957 C2): what the business does, who it serves, how it plans to grow. Every
+                           # machine on the box reads it (core/business_context.py). Anyone reads; the owner edits.
+                           {"key": "business", "label": "Your Business", "href": "/settings/business",
+                            "group": "business"},
                            {"key": "ai", "label": "AI Account", "href": "/settings/ai",
                             "owner_only": True, "group": "ai"},
                            # MCP SERVER, ON EVERY BOX (owner, 2026-10-02: "standard base machines should be able to

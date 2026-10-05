@@ -790,6 +790,20 @@ def _slack_escape(t) -> str:
     return str(t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _planned_names() -> list[str]:
+    try:
+        from core import business_context
+        return [str(p.get("what") or "").strip().lower() for p in business_context.get().get("coming") or []
+                if str(p.get("what") or "").strip()]
+    except Exception:                                    # noqa: BLE001 — no context: nothing planned to hide
+        return []
+
+
+def _names_a_plan(item: dict, planned: list[str]) -> bool:
+    text = f"{item.get('title') or ''} {item.get('why') or ''}".lower()
+    return any(p in text for p in planned)
+
+
 def slack_text(b: dict) -> str:
     """The stored brief as a Slack message: the same words as the email and the app page (core/review_email.py,
     core/dash/review.py), short. The date, the day's quote, the good news, then Worth your time today, Already
@@ -802,8 +816,15 @@ def slack_text(b: dict) -> str:
         lines += ["", _slack_escape(b["good_news"])]
     if review_email.numbers_line(b):
         lines += ["", _slack_escape(review_email.numbers_line(b))]
+    # PLANS NEVER GO TO SLACK (OSDev1 on #1964): a channel is read by more people than the owner, and a planned offer
+    # is the owner's until its month. So "What's coming" stays on the page and in the owner's email, and an idea that
+    # names a planned offer stays there too.
+    planned = _planned_names()
     for key, heading in review_email.SECTIONS:
-        items = [it for it in b.get(key) or [] if str(it.get("title") or "").strip()]
+        if key == "coming":
+            continue
+        items = [it for it in b.get(key) or [] if str(it.get("title") or "").strip()
+                 and not (key == "ideas" and _names_a_plan(it, planned))]
         if not items:
             continue
         lines += ["", f"*{heading}*"]

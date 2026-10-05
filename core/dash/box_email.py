@@ -27,7 +27,7 @@ from flask import request
 
 from core import box_mail, setup_errors
 from core.dash import blueprint
-from core.dash.box_settings import _admit, _back, _esc, _is_owner, _who
+from core.dash.box_settings import _admit, _back, _esc, _is_owner, _who, alerts_word
 from core.dash.home import chrome
 
 DOOR = "/settings/email"
@@ -39,7 +39,7 @@ def _status_card(d: dict) -> str:
     kind, sender = d.get("kind") or "", _esc(d.get("from") or "")
     if not kind:
         return ('<div class="card"><h2>No email is set up</h2>'
-                '<p>Your Morning Review and inbox alerts still reach you as notifications in the '
+                f'<p>Your Morning Review and {alerts_word()} still reach you as notifications in the '
                 'mobile app. Add a way to send email below and they arrive in your inbox too.</p>'
                 '</div>')
     if d.get("operator"):

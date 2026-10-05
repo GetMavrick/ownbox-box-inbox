@@ -601,7 +601,10 @@ def brief_html(b: dict | None, *, live: bool, first: str = "") -> str:
     what is already moving and ideas to try. Exactly the words of core/review_brief.py's contract."""
     if not b:
         return ""
-    lists = (_brief_items("Worth your time today", b.get("worth"))
+    lists = (_brief_items("What your box learned about you", b.get("learned"))
+             + _brief_items("Your goals, and how your box helps", b.get("aims"))
+             + _brief_items("What's coming", b.get("coming"))
+             + _brief_items("Worth your time today", b.get("worth"))
              + _brief_items("Already moving", b.get("moving"), moving=True)
              + _brief_items("Ideas to try", b.get("ideas")))
     good = str(b.get("good_news") or "").strip()
@@ -685,12 +688,74 @@ def render(day: str, now: datetime | None = None, *, live: bool | None = None) -
     # buyer's box; it wore `page()`, the dark console, while every other buyer screen wears the box's
     # look (owner's order, 2026-09-24, relayed by OSDev1). Now it has the menu and the tokens.
     from core.dash.home import chrome
+    page = notify_card() + page
     # THE MORNING IT WAS READ, from the brief that went out; a past day with no stored brief (before these
     # existed) is named as the day it is about, since a preview carries today's date.
     stored = bool(b) and not live and _stored_brief(day)
     lede = ((b or {}).get("date_label") if (live or stored) else v.get("label")) or \
         "What needs you, and what your box did."
     return chrome("/app/review", title="Morning Review", lede=lede, body=page), status
+
+
+# ── WHERE THE BASE MACHINE ASKS FOR NOTIFICATIONS (owner, 10-04 22:2x: "finish them in Base"; OSDev1's 23:24) ──
+#
+# The Morning Review is the app's first screen and what a notification there is about, so where the Base Machine's
+# phone worker is the box's (core/push.py, ONE PHONE WORKER PER BOX), this is where the box asks. Where a machine
+# brings its own worker, that machine asks (the inbox, in Messages) and this draws nothing.
+#
+# HIDDEN UNTIL IT CAN WORK, AND ONLY A PRESS ASKS. Shown only in the installed app (ownboxCanNotify: on an iPhone a
+# Safari tab can never be notified, so asking there spends the one answer a person gets) and only while permission
+# is neither granted nor refused. Granted already: it re-subscribes quietly, as the inbox does, which fires no prompt
+# and repairs a subscription iOS dropped. The press registers the worker at the root, then asks.
+NOTIFY_JS = """
+(function () {
+  var box = document.getElementById('ownbox-notify');
+  if (!box || !window.ownboxCanNotify || !window.ownboxEnableNotifications || !navigator.serviceWorker) { return; }
+  if (!window.ownboxCanNotify()) { return; }
+  function register() {
+    return navigator.serviceWorker.register('/ui/sw.js', { scope: '/' }).catch(function () {});
+  }
+  var perm = (window.Notification && Notification.permission) || 'default';
+  if (perm === 'denied') { return; }
+  if (perm === 'granted') { register(); window.ownboxEnableNotifications(); return; }
+  try { if (localStorage.getItem('ownbox.notify.hidden')) { return; } } catch (e) {}
+  box.hidden = false;
+  var yes = document.getElementById('ownbox-notify-yes'), said = document.getElementById('ownbox-notify-said');
+  document.getElementById('ownbox-notify-no').addEventListener('click', function () {
+    box.hidden = true;
+    try { localStorage.setItem('ownbox.notify.hidden', '1'); } catch (e) {}
+  });
+  yes.addEventListener('click', function () {
+    yes.disabled = true;
+    said.textContent = 'Asking your device…';
+    register();
+    window.ownboxEnableNotifications().then(function (r) {
+      if (r && r.ok) {
+        said.textContent = 'Done. This mobile will be notified.';
+        yes.style.display = 'none';
+        document.getElementById('ownbox-notify-no').textContent = 'Close';
+      } else {
+        said.textContent = 'Not turned on: ' + ((r && r.why) || 'your device declined') + '.';
+        yes.disabled = false;
+      }
+    });
+  });
+})();
+"""
+
+
+def notify_card() -> str:
+    """The Morning Review's notification card, hidden until it can work; "" where a machine brings its own worker."""
+    from core import push
+    if push.machine_worker():
+        return ""
+    return ('<div class="card" id="ownbox-notify" hidden><h2>Notifications</h2>'
+            '<p>Turn them on and this mobile hears from the box when your Morning Review is ready or something '
+            'waits for your OK.</p>'
+            '<p><button type="button" id="ownbox-notify-yes">Turn on notifications</button> '
+            '<button type="button" class="ghost" id="ownbox-notify-no">Not now</button></p>'
+            '<p id="ownbox-notify-said" class="quiet" aria-live="polite"></p></div>'
+            f'<script>{push.CLIENT_JS}{NOTIFY_JS}</script>')
 
 
 @blueprint.get("/app/review")

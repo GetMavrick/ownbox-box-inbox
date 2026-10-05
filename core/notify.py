@@ -195,7 +195,7 @@ def _key(key: str) -> str:
     return f"notify:{key}"
 
 
-def _notify_devices(person_id: str, waiting: int | None) -> int:
+def _notify_devices(person_id: str, waiting: int | None, body: str | None = None) -> int:
     """Notify every device this person has installed the app on. Returns how many were reached.
 
     NEVER RAISES, like everything else here — it is called from the poller's pass. A push service
@@ -210,7 +210,7 @@ def _notify_devices(person_id: str, waiting: int | None) -> int:
         subs = push.subscriptions_for(str(person_id))
         if not subs:
             return 0
-        return sum(1 for sub in subs if push.send(sub, waiting=waiting)[0])
+        return sum(1 for sub in subs if push.send(sub, waiting=waiting, body=body)[0])
     except Exception as e:                     # noqa: BLE001 — the floor must survive this
         log.warning("notify.push_failed", error=str(e)[:120])
         return 0
@@ -218,7 +218,7 @@ def _notify_devices(person_id: str, waiting: int | None) -> int:
 
 def send_notice(key: str, subject: str, text_body: str, html_body: str | None = None, *,
                 user_id: str | None = None, now: datetime | None = None,
-                waiting: int | None = None) -> dict:
+                waiting: int | None = None, by_mail: bool = True, push_body: str | None = None) -> dict:
     """Tell this box's people one thing. NEVER RAISES. -> {"sent", "skipped", "detail"}.
 
     `key` is what the gap is counted against, so two different kinds of notice do not silence each
@@ -226,6 +226,9 @@ def send_notice(key: str, subject: str, text_body: str, html_body: str | None = 
 
     The idempotency key is per key, per recipient, per gap window, so a worker that retries after
     an ambiguous timeout collapses to one vendor send rather than two identical emails.
+
+    `by_mail=False` IS THE MOBILE APP ONLY: for a notice the owner has ruled must never arrive as mail (the Inbox's
+    waiting notice, 2026-10-05). `push_body` is a fixed sentence the caller owns, as `core.push.send` describes.
     """
     now = now or datetime.now(timezone.utc)
     try:
@@ -244,18 +247,19 @@ def send_notice(key: str, subject: str, text_body: str, html_body: str | None = 
         people = box_mail.to_box_people(user_id)
         if not people:
             return {"sent": 0, "skipped": "nobody", "detail": "this box has no signed-in people"}
-        mail_ok = box_mail.is_configured()
+        mail_ok = by_mail and box_mail.is_configured()
         if not mail_ok and not any(_has_device(p["id"]) for p in people):
             # NEITHER CHANNEL EXISTS, and that is said as "off" — never as a send that failed.
             return {"sent": 0, "skipped": "off",
-                    "detail": "no email is set up on this box and nobody has the app installed"}
+                    "detail": ("no email is set up on this box and nobody has the app installed" if by_mail
+                               else "nobody has the app installed")}
 
         sent, failed, notified = 0, [], 0
         for p in people:
             # THE APP AND THEN THE MAIL, BOTH, EVERY TIME (owner, 2026-09-20, superseding his
             # own earlier ruling the same day). A notification that fails costs nothing here because the
             # mail goes regardless; that is the whole point of sending both while push is new.
-            if _notify_devices(p["id"], waiting):
+            if _notify_devices(p["id"], waiting, push_body):
                 notified += 1
             if not mail_ok:
                 continue                       # the app notification was the whole delivery

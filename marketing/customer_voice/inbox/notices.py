@@ -15,10 +15,17 @@ now an 8 AM and a 5 PM email will work." So the trigger is the CLOCK plus the ba
 poll — the first version mailed on arrival behind a thirty-minute gap, which was a cadence a
 developer picked, and cadence is his word.
 
-THE BACKLOG IS THE RIGHT QUESTION NOW, where under the old shape it was the wrong one. "Anyone
-waiting?" asked continuously would mail every half hour forever about a thread he has decided to
-leave; asked twice a day it is exactly the question he wants answered. `awaiting_reply` already
-excludes opted-out rows, so a STOP never becomes a number he is asked to act on.
+THE BACKLOG WAS THE QUESTION UNTIL 2026-10-05, and it turned out to be the wrong one: asked twice a day it gave
+the same number twice a day, for as long as nobody cleared it. `awaiting_reply` still excludes opted-out rows, so a
+STOP never becomes a number he is asked to act on.
+
+ONLY SOMEBODY NEW, AND NEVER BY EMAIL. Owner, 2026-10-05, on the 8 AM and 5 PM mails saying "72 people are
+waiting for a reply" every day: "These are very annoying emails that I get every day. Can you please turn them off.
+We shouldn't ever annoy and nag people with redundant messages." So the notice no longer carries the backlog, which
+repeats the same number until somebody clears it, and it no longer goes by email; the Morning Review already says
+who is waiting, once a day. What is left goes to the mobile app, and only when somebody has written since the last
+one: it counts the threads whose newest message from them came after the box last looked, and says nothing if
+that is none. The first look on a box starts from now, so an existing backlog is never announced as news.
 
 NO MODEL IN THIS PATH. Counting rows and writing a sentence about the count is deterministic work
 (spec §11-6), so none of it goes near `brain.think` — and `tests/test_customer_voice.py` enforces
@@ -26,7 +33,7 @@ that for this file as for every other one here.
 """
 from __future__ import annotations
 
-from core import notify
+from core import box_settings, notify
 from core.logging import get_logger
 
 from . import store
@@ -36,16 +43,16 @@ log = get_logger(__name__)
 NOTICE_KEY = "inbox_waiting"
 
 
-def _sentence(n: int) -> tuple[str, str]:
-    """(subject, body). Singular and plural written out rather than pluralised with an 's', because
+def _sentence(n: int) -> str:
+    """What the mobile app shows. Singular and plural written out rather than pluralised with an 's', because
     "1 messages" on a lock screen is the whole impression a person forms of the product."""
     if n == 1:
-        return ("1 person is waiting for a reply",
-                "Someone messaged your business and is waiting for a reply.\n"
-                "Open your inbox to read it and send an answer.")
-    return (f"{n} people are waiting for a reply",
-            f"{n} people messaged your business and are waiting for a reply.\n"
-            "Open your inbox to read them and send answers.")
+        return "1 new person is waiting for a reply"
+    return f"{n} new people are waiting for a reply"
+
+
+def _seen_key(space: str) -> str:
+    return f"notice.seen_through.{space}"
 
 
 def tick(now=None) -> dict:
@@ -61,19 +68,31 @@ def tick(now=None) -> dict:
     try:
         if notify.due_slot(now) is None:
             return {"sent": 0, "skipped": "outside_slot"}
+        from datetime import datetime, timezone
+        stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
         sent = 0
         details = []
         for space in _spaces():
-            waiting = store.awaiting_reply(space)
-            if waiting <= 0:
-                # SKIPPED WHEN NOBODY IS WAITING (OSDev1's default, the owner may overrule). An
-                # email that says "nothing needs you" twice a day is how a person learns to stop
-                # opening them, which costs the one that matters.
-                details.append(f"{space}: nobody waiting")
+            since = box_settings.get("inbox", _seen_key(space), default=None)
+            if not since:
+                # THE FIRST LOOK STARTS FROM NOW. A box that already has seventy-two people waiting is not news to
+                # anyone; announcing them would be the very email this replaced.
+                box_settings.put("inbox", _seen_key(space), stamp, set_by="inbox notice")
+                details.append(f"{space}: starting from now")
                 continue
-            subject, body = _sentence(waiting)
-            got = notify.send_notice(NOTICE_KEY, subject, body, now=now)
-            sent += int(got.get("sent") or 0)
+            new = store.awaiting_reply(space, since=since)
+            if new <= 0:
+                # NOBODY NEW, SO NOTHING. The people still waiting are on the inbox and in the Morning Review.
+                details.append(f"{space}: nobody new")
+                continue
+            got = notify.send_notice(NOTICE_KEY, _sentence(new), _sentence(new), now=now,
+                                     waiting=new, by_mail=False, push_body=_sentence(new))
+            delivered = int(got.get("sent") or 0) + int(got.get("notified") or 0)
+            sent += delivered
+            if delivered or got.get("skipped") == "off":
+                # LOOKED, SO THE NEXT NOTICE COUNTS FROM HERE. "off" (nobody has the app) moves it too: installing
+                # the app later must not open with weeks of old arrivals.
+                box_settings.put("inbox", _seen_key(space), stamp, set_by="inbox notice")
             details.append(f"{space}: {got.get('skipped') or 'sent'}")
         return {"sent": sent, "skipped": "" if sent else "nothing_sent",
                 "detail": "; ".join(details)}

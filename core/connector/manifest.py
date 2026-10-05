@@ -32,6 +32,7 @@ _MACHINE_PREFIXES = {
     "marketing.content_machine": "content_machine",
     "marketing.customer_voice": "customer_voice",
     "marketing.ads_machine": "ads_machine",
+    "marketing.aeo_machine": "aeo_machine",
 }
 
 
@@ -64,15 +65,19 @@ def _modules() -> list | None:
     box with a broken config introduces itself confidently as a product it may not be.
     """
     try:
+        from core import tiers
         from core.config import get_config
-        return list(get_config().get("modules") or [])
+        # THE PLAN'S MACHINES ONLY (tiers.module_on, as the worker loads them): the box we sell ships the Unified Inbox
+        # and the AEO Machine, and a Base plan switches one off. Reading the config alone, an AEO-only box told its
+        # owner's AI "This box runs the Unified Inbox" (#1962's walk).
+        return tiers.modules_on(list(get_config().get("modules") or []))
     except Exception as e:                                  # noqa: BLE001
         log.warning("connector.modules_unreadable", error=type(e).__name__)
         return None
 
 
 def machines() -> list:
-    """The machine packages this box loads, per its own config."""
+    """The machine packages this box loads, per its own config and its plan."""
     found = []
     for m in (_modules() or []):
         for prefix, label in _MACHINE_PREFIXES.items():
@@ -82,7 +87,7 @@ def machines() -> list:
 
 
 def box_type() -> str:
-    """base | lead | content | customer_voice | multi_machine | unknown — DERIVED, and labelled as such.
+    """base | lead | content | customer_voice | aeo_machine | multi_machine | unknown — DERIVED, and labelled as such.
 
     Never `aios`: this value reaches the owner's AI in the manifest and the health answer, and the
     product it describes is called Ownbox (tests/test_permissions_read_plainly.py)."""
@@ -96,6 +101,8 @@ def box_type() -> str:
         # unrecognised one. Modules that are present but match no prefix ARE unknown — that is a
         # box running something we did not write, which is a different sentence and stays one.
         return "base" if not mods else "unknown"
+    if found == {"customer_voice", "aeo_machine"}:
+        return "customer_voice"         # the box we sell: the AEO Machine rides it (scripts/export_box.sh)
     if len(found) == 1:
         only = next(iter(found))
         return {"lead_machine": "lead", "content_machine": "content",

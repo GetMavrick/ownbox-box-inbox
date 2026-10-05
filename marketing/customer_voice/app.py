@@ -3508,11 +3508,12 @@ self.addEventListener('notificationclick', function (event) {
   var to = (event.notification.data && event.notification.data.navigate) || '/inbox/inbox';
   // ONLY OUR OWN APP. The payload is authored by the box and encrypted to this subscription, so
   // this is defence in depth, not a fix — the same rule safe_next applies on the way in. The
-  // morning review (/app/review), Shifts (/shifts/, where a coworker's report opens) and Add a
+  // morning review (/app/review), Shifts (/shifts/, where a coworker's report opens), Add a
   // Machine (/add-machine, where an update that stopped a machine the owner built is explained,
-  // core/machine_breaks.py) are the doors outside the inbox a notification may open.
+  // core/machine_breaks.py) and Approvals (/approvals, core/approvals.py: without it, a tap on
+  // "waiting for your OK" opened Messages) are the doors outside the inbox a notification may open.
   var door = typeof to === 'string' && (to === '/app/review' || to.indexOf('/app/review/') === 0
-      || to.indexOf('/shifts/') === 0 || to === '/add-machine');
+      || to.indexOf('/shifts/') === 0 || to === '/add-machine' || to === '/approvals');
   if (typeof to !== 'string' || (to.indexOf('/inbox/') !== 0 && !door)) { to = '/inbox/inbox'; }
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     .then(function (list) {

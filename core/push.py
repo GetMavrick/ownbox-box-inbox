@@ -132,7 +132,7 @@ def public_key() -> str:
 
 # ── the phones ───────────────────────────────────────────────────────────────────────────────────
 
-def save_subscription(*, user_id: str, endpoint: str, p256dh: str, auth: str) -> bool:
+def save_subscription(*, user_id: str, endpoint: str, p256dh: str, auth: str, scope: str = "") -> bool:
     """Remember one browser on one device. Returns True when it is new to us.
 
     PER PERSON *AND* PER DEVICE. A box seats three, and one person has a phone and a laptop. Keying
@@ -152,14 +152,21 @@ def save_subscription(*, user_id: str, endpoint: str, p256dh: str, auth: str) ->
             "  p256dh = excluded.p256dh, auth = excluded.auth, last_error = NULL",
             (user_id, endpoint, p256dh, auth, _now()))
         c.commit()
+    _note_scope(endpoint, scope)
     return before is None
 
 
 def subscriptions_for(user_id: str) -> list[dict[str, Any]]:
+    """The devices to notify for this person: ONE ALERT PER EVENT, NEVER TWO (OSDev1, 10-04). A person reached
+    through a machine's own phone worker (the Unified Inbox's) is reached only through it: the Base Machine's
+    worker (`ROOT_SCOPE`) is theirs only while it is all they have. A Base box that later adds the Inbox, with
+    both turned on, would otherwise ring the same mobile twice for every event."""
     with state.connect() as c:
-        rows = c.execute("SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?",
-                         (user_id,)).fetchall()
-    return [dict(r) for r in rows]
+        rows = [dict(r) for r in c.execute("SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?",
+                                           (user_id,)).fetchall()]
+    roots = _roots()
+    theirs = [r for r in rows if r["endpoint"] not in roots]
+    return theirs or rows
 
 
 def is_mine(user_id: str, endpoint: str) -> bool:
@@ -178,6 +185,7 @@ def forget(endpoint: str) -> bool:
     with state.connect() as c:
         n = c.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,)).rowcount
         c.commit()
+    _note_scope(endpoint, "")
     if n:
         log.info("push.subscription_forgotten")
     return bool(n)
@@ -192,6 +200,93 @@ def note_result(endpoint: str, *, ok: bool, detail: str = "") -> None:
             c.execute("UPDATE push_subscriptions SET last_error = ? WHERE endpoint = ?",
                       (detail[:200], endpoint))
         c.commit()
+
+
+# ── ONE PHONE WORKER PER BOX (owner, 10-04 22:2x, relayed by OSDev1: "finish them in Base") ──────────────────────
+#
+# A notification needs a service worker, and a worker controls only the pages under its scope. The Unified Inbox
+# serves its own at /inbox/ and asks in Messages; a box without it had none at all, so the Morning Review, Approvals
+# and Add a Machine could never reach a phone (WebDev2's finding, 10-04). Now the Base Machine serves one at the
+# root, ROOT_SCOPE, with the same push and click code, and a box uses exactly one: a machine's own when one says
+# it has one (`register_worker`, at import), else the Base Machine's. Core never learns which machine that is.
+ROOT_SCOPE = "/"
+_NS, _ROOTS = "push", "root_endpoints"   # the endpoints the Base Machine's worker holds, in box_settings: no table
+_MACHINE_WORKERS: list[str] = []
+
+
+def register_worker(scope: str) -> None:
+    """A machine that serves its own phone worker says where, once, at import (the Unified Inbox: "/inbox/")."""
+    if scope and scope not in _MACHINE_WORKERS:
+        _MACHINE_WORKERS.append(scope)
+
+
+def machine_worker() -> str:
+    """The scope of a machine's own phone worker on this box, or "" when the Base Machine's is the one."""
+    return _MACHINE_WORKERS[0] if _MACHINE_WORKERS else ""
+
+
+def worker_scope() -> str:
+    """Where this box's phone worker lives."""
+    return machine_worker() or ROOT_SCOPE
+
+
+def _roots() -> set:
+    try:
+        from core import box_settings
+        got = box_settings.get(_NS, _ROOTS, default=[]) or []
+    except Exception:                                    # noqa: BLE001 — unreadable: every row is a machine's
+        return set()
+    return {str(x) for x in got} if isinstance(got, list) else set()
+
+
+def _note_scope(endpoint: str, scope: str) -> None:
+    """Remember whether `endpoint` belongs to the Base Machine's worker. A device that subscribed through a
+    machine's worker, or one forgotten, leaves the list."""
+    roots = _roots()
+    root = scope == ROOT_SCOPE
+    if root == (endpoint in roots):
+        return
+    from core import box_settings
+    box_settings.put(_NS, _ROOTS, sorted(roots | {endpoint} if root else roots - {endpoint}), set_by="push")
+
+
+def worker_js(title: str) -> str:
+    """The Base Machine's phone worker: the Unified Inbox's push and click code (marketing/customer_voice/app.py
+    SW_JS), at the root. Every push shows a notification (Safari revokes the permission after one that doesn't),
+    and a tap opens a page on this box and nothing else. `title` is the box's name, for a push that carries none."""
+    import json
+    return """
+self.addEventListener('install', function () { self.skipWaiting(); });
+self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim()); });
+
+// EVERY PUSH SHOWS A NOTIFICATION, with no exception and no silent path: one silent push and Safari revokes the
+// permission, so the fallback below shows something even when the payload cannot be read.
+self.addEventListener('push', function (event) {
+  var d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (err) { d = {}; }
+  event.waitUntil(self.registration.showNotification(d.title || __TITLE__, {
+    body: d.body || 'Something new needs you.',
+    icon: '/ui/icon-192.png',
+    badge: '/ui/icon-192.png',
+    data: { navigate: d.navigate || '/' }
+  }));
+});
+
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  var to = event.notification.data && event.notification.data.navigate;
+  // ONLY A PAGE ON THIS BOX: a path, never another site (the payload is the box's own, encrypted to this
+  // subscription, so this is defence in depth, the same rule safe_next applies on the way in).
+  if (typeof to !== 'string' || to.charAt(0) !== '/' || to.charAt(1) === '/' || to.charAt(1) === '\\\\') { to = '/'; }
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    .then(function (list) {
+      for (var i = 0; i < list.length; i++) {
+        if ('focus' in list[i]) { list[i].navigate(to); return list[i].focus(); }
+      }
+      return self.clients.openWindow(to);
+    }));
+});
+""".replace("__TITLE__", json.dumps(str(title or "")))
 
 
 # ── sending one ──────────────────────────────────────────────────────────────────────────────────
@@ -349,8 +444,8 @@ def send(subscription: dict, *, waiting: int | None = None, navigate: str = "/in
 # `navigator.serviceWorker.ready` resolves to the registration whose scope covers THE PAGE YOU ARE
 # ON, and this box's worker is registered by a machine, under that machine's own scope. On any
 # other path that promise never settles — no error, no rejection, a button that spins forever. So
-# the endpoints are core's and the asking stays where the worker is. Whoever gives core a
-# root-scoped worker can move it.
+# the endpoints are core's and the asking stays where the worker is. Where the Base Machine's own
+# worker is the box's (ROOT_SCOPE, 10-04), the ask is the Morning Review's card (core/dash/review.py).
 CLIENT_JS = """  window.ownboxCanNotify = function () {
     // ON IPHONE THE INSTALLED APP IS THE ONLY THING THAT CAN RECEIVE A PUSH. A Safari tab cannot,
     // whatever the permission says, so offering the prompt there is a dead end that burns the ask.
@@ -368,9 +463,13 @@ CLIENT_JS = """  window.ownboxCanNotify = function () {
       .then(function (r) { return r.json(); })
       .then(function (k) {
         if (!k.available || !k.key) { return { ok: false, why: k.why || 'this box has no push keys yet' }; }
+        // WHICH WORKER HOLDS THE SUBSCRIPTION, sent with it, so the box rings each person through one
+        // (push.subscriptions_for).
+        var scope = '';
         return Notification.requestPermission().then(function (p) {
           if (p !== 'granted') { return { ok: false, why: 'you said no — Settings can undo it' }; }
           return navigator.serviceWorker.ready.then(function (reg) {
+            try { scope = new URL(reg.scope).pathname; } catch (e) { scope = ''; }
             // RE-SUBSCRIBE EVERY TIME, not just when there is none: iOS drops a subscription after
             // long disuse or cleared storage, and the box would keep pushing at an endpoint that
             // stopped existing. Asking the browser again is cheap and idempotent.
@@ -389,7 +488,7 @@ CLIENT_JS = """  window.ownboxCanNotify = function () {
             return fetch('/settings/push/subscribe', {
               method: 'POST', credentials: 'same-origin',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys })
+              body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, scope: scope })
             }).then(function (r) { return r.json(); })
               .then(function (o) { return { ok: !!o.ok, why: o.error || '' }; });
           });
@@ -419,9 +518,11 @@ CLIENT_JS = """  window.ownboxCanNotify = function () {
 # /settings/mobile opens outside the app, where Safari cannot see the app's storage. The inbox's
 # own Settings tab runs the same check from inside the app, where the answer is real.
 #
-# Re-registering uses CLIENT_JS, which only the inbox loads: /settings/mobile carries no code that
-# can fire the prompt at all (test_the_box_settings_are_the_boxs_own holds that), and there the
-# check says to open the app instead. Fills #ownbox-device and sets data-state on it.
+# Re-registering uses CLIENT_JS, which only the screen that asks loads (the inbox's Messages, or the Morning Review
+# where the Base Machine's worker is the box's): /settings/mobile carries no code that can fire the prompt at all
+# (test_the_box_settings_are_the_boxs_own holds that), and there the check says to open the app instead. Fills
+# #ownbox-device and sets data-state on it. Read through `device_js()`, which fills in this box's worker and what it
+# notifies about.
 DEVICE_JS = """(function () {
   var el = document.getElementById('ownbox-device');
   if (!el) { return; }
@@ -434,7 +535,7 @@ DEVICE_JS = """(function () {
     if (!navigator.serviceWorker || !navigator.serviceWorker.getRegistration) {
       return Promise.resolve(null);
     }
-    return navigator.serviceWorker.getRegistration('/inbox/').then(function (reg) {
+    return navigator.serviceWorker.getRegistration(__SCOPE__).then(function (reg) {
       return reg && reg.pushManager ? reg.pushManager.getSubscription() : null;
     }).then(function (sub) {
       if (!sub) { return false; }
@@ -445,7 +546,7 @@ DEVICE_JS = """(function () {
       }).then(function (r) { return r.json(); }).then(function (o) { return !!o.mine; });
     }).catch(function () { return false; });
   }
-  var CONNECTED = 'Connected. This mobile gets a notification when a customer writes.';
+  var CONNECTED = __CONNECTED__;
   // THE BOX FIRST. A mobile cannot be "connected" to a box that cannot send, so if the box has no
   // push identity, that settles it, whatever this device has done.
   function boxCanSend() {
@@ -483,8 +584,7 @@ DEVICE_JS = """(function () {
                  'Android: hold the app icon, App info, Notifications.');
     }
     if (Notification.permission !== 'granted') {
-      return say('waiting', 'Installed. Notifications are not on yet: the box offers them in ' +
-                 'Messages when your first customer message arrives.');
+      return say('waiting', __WAITING__);
     }
     // ALLOWED, BUT THIS BOX HOLDS NO REGISTRATION FOR IT. Asking again fires no prompt when permission is
     // already granted; it hands the box the endpoint it lost.
@@ -509,3 +609,21 @@ DEVICE_JS = """(function () {
   });
 })();
 """
+
+
+# WHAT A CONNECTED MOBILE GETS, said as this box can keep it: the Unified Inbox's worker rings when a customer
+# writes; the Base Machine's for the Morning Review and what waits on Approvals.
+_SAID = {"machine": ("Connected. This mobile gets a notification when a customer writes.",
+                     "Installed. Notifications are not on yet: the box offers them in Messages when your first "
+                     "customer message arrives."),
+         "base": ("Connected. This mobile gets a notification when your Morning Review is ready or something "
+                  "waits for your OK.",
+                  "Installed. Notifications are not on yet: the box offers them on your Morning Review.")}
+
+
+def device_js() -> str:
+    """DEVICE_JS for this box: its worker's scope, and what a connected mobile gets from it."""
+    import json
+    connected, waiting = _SAID["machine" if machine_worker() else "base"]
+    return (DEVICE_JS.replace("__SCOPE__", json.dumps(worker_scope()))
+            .replace("__CONNECTED__", json.dumps(connected)).replace("__WAITING__", json.dumps(waiting)))

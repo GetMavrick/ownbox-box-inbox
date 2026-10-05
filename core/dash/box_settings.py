@@ -822,6 +822,13 @@ def box_phone_print_moved():
     return redirect("/settings/mobile/print", code=308)
 
 
+def alerts_word() -> str:
+    """What this box's notifications are about, in a sentence's middle: a machine's own worker rings for its
+    inbox; the Base Machine's for the Morning Review and Approvals (core/push.py, ONE PHONE WORKER PER BOX)."""
+    from core import push
+    return "inbox alerts" if push.machine_worker() else "alerts"
+
+
 def _email_line() -> str:
     """What email does alongside the app, said only as far as it is true on THIS box.
 
@@ -837,7 +844,7 @@ def _email_line() -> str:
     except Exception:                            # noqa: BLE001 — unknown is not "yes"
         sending = False
     if sending:
-        return ('<p class="quiet">Your Morning Review and inbox alerts also arrive by email. This '
+        return (f'<p class="quiet">Your Morning Review and {alerts_word()} also arrive by email. This '
                 'is the faster way to hear about them, never the only way.</p>')
     return ('<p class="quiet">This box has no email set up yet, so for now the app is how it '
             'reaches you.'
@@ -905,11 +912,7 @@ def box_mobile():
 
     # WHEN THE ASKING HAPPENS, said plainly, because a set-up step that ends with nothing switched
     # on reads as a step that failed. It did not: the box is waiting on purpose.
-    body.append('<div class="card"><h2>Turning them on</h2>'
-                '<p>The box asks you once, on the screen where you read your messages, the first '
-                'time something real arrives. It waits on purpose: a mobile only lets you answer '
-                'that question once, and saying no is hard to undo.</p>'
-                + _email_line() + '</div>')
+    body.append(_turning_them_on())
 
     body.append('<div class="card"><h2>For somebody else on this box</h2>'
                 '<p>Whoever watches the inbox is often not whoever bought the box. This page '
@@ -918,9 +921,27 @@ def box_mobile():
                 '<p><a href="/settings/mobile/print">Print this for a colleague &rarr;</a></p>'
                 '</div>')
     body.append(_back())
-    return chrome("/settings/mobile", title="Mobile App",
-                  lede="Install the box as an app and it can notify you when a customer writes.",
-                  body="".join(body)), 200
+    # WHAT IT NOTIFIES ABOUT, as this box can keep it: "when a customer writes" only with a machine's own worker
+    # (OSDev1, 10-04: that line becomes the inbox's alone).
+    lede = ("Install the box as an app and it can notify you when a customer writes." if push.machine_worker() else
+            "Install the box as an app and it can notify you when your Morning Review is ready or something "
+            "waits for your OK.")
+    return chrome("/settings/mobile", title="Mobile App", lede=lede, body="".join(body)), 200
+
+
+def _turning_them_on() -> str:
+    """WHEN THE ASKING HAPPENS, said plainly, because a set-up step that ends with nothing switched on reads as a
+    step that failed. THIS PAGE NEVER ASKS (owner, 2026-09-20: an iOS denial is close to permanent), whichever worker
+    the box has. Where a machine brings its own (the inbox's), it asks on the screen where you read your messages;
+    where the Base Machine's is the box's (owner, 10-04 22:2x, "finish them in Base"), the Morning Review asks
+    (core/dash/review.py, notify_card), the app's first screen."""
+    from core import push
+    where = ("on the screen where you read your messages, the first time something real arrives"
+             if push.machine_worker() else "on your Morning Review, the first time you open it from the app")
+    return ('<div class="card"><h2>Turning them on</h2>'
+            f'<p>The box asks you once, {where}. It waits on purpose: a mobile only lets you answer '
+            'that question once, and saying no is hard to undo.</p>'
+            + _email_line() + '</div>')
 
 
 # AN ADDRESS THAT CANNOT WORK FROM ANOTHER DEVICE MUST NEVER REACH PAPER.
@@ -1070,7 +1091,8 @@ def box_push_subscribe():
         fresh = push.save_subscription(user_id=str(who["id"]),
                                        endpoint=str(body.get("endpoint") or ""),
                                        p256dh=str(keys.get("p256dh") or ""),
-                                       auth=str(keys.get("auth") or ""))
+                                       auth=str(keys.get("auth") or ""),
+                                       scope=str(body.get("scope") or ""))
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
     return jsonify({"ok": True, "new": fresh})
@@ -1103,7 +1125,7 @@ def device_card() -> str:
             'connected.</p></div>'
             # DEVICE_JS ONLY. The notification client carries the permission prompt, and this page
             # never loads anything that could fire it (owner, 2026-09-20).
-            f'<script>{push.DEVICE_JS}</script>')
+            f'<script>{push.device_js()}</script>')
 
 
 # ── the AI coworkers ─────────────────────────────────────────────────────────────────────────────

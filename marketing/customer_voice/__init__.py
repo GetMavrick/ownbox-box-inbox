@@ -18,7 +18,12 @@ absent — which is not the same thing as a flag someone set to false.
 """
 # THIS MACHINE DECLARES ITS TABLES (docs/SPEC_GOLDEN_DROPLET_IMPACT.md §5). First, before
 # anything below can touch them; idempotent; correct whether init_db() ran already or not.
-from core import state as _state  # noqa: E402
+from core import push as _push, state as _state  # noqa: E402
+
+# THIS MACHINE BRINGS ITS OWN PHONE WORKER (/inbox/sw.js, app.py), so the box uses it and the Base Machine's stays
+# unregistered: one worker per box, one alert per event (core/push.py). Here, not in app.py, because the worker
+# process sends pushes too and imports this package, never the web app.
+_push.register_worker("/inbox/")
 from .schema import DDL as _DDL  # noqa: E402
 _state.register_schema("customer_voice", _DDL)
 

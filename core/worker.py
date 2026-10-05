@@ -90,6 +90,10 @@ def load_modules() -> None:
         log.info("worker.pack_loaded", slug=m["slug"], module=mod, host=m["host"])
     for slug, why in packs.held_back():                # needs: a feature this plan does not include
         log.warning("worker.pack_not_in_plan", slug=slug, reason=why)
+    # CORE'S OWN TIMERS, HERE AND NOT ONLY AT WORKER START: what the schedule and the doctor list is what this
+    # loads, so a core timer imported only in run() was missing from both, or shown by whichever process happened
+    # to import it (#1963: the doctor imported it via the dashboard, the schedule didn't).
+    from core import business_context  # noqa: F401 — the business's website scans (#1957)
     from core import machines                          # a refused machine.yaml is named, never silent
     for path, why in machines.invalid():
         log.error("worker.machine_manifest_refused", manifest=path, reason=why)
@@ -638,6 +642,7 @@ def run_forever(poll_interval: float = 2.0, pause_interval: float = 300.0,
         from core import watchdog
         from core import cost_digest  # noqa: F401 — registers its own periodic at import
         from core import report  # noqa: F401 — the Morning Review: snapshot, close, send
+        from core import business_context  # noqa: F401 — the light scan of the business's website (#1957 C1)
         watchdog.check_backend_now()
     except Exception as e:  # noqa: BLE001 — a probe hiccup must never block startup
         log.warning("worker.backend_probe_error", error=str(e)[:200])

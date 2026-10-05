@@ -289,6 +289,164 @@ def _grounded(text: str, facts_text: str) -> bool:
     return all(n.replace(",", "") in have for n in _NUM.findall(text))
 
 
+# ── THE WELCOME REVIEW (#1957 C4) ─────────────────────────────────────────────────────────────────────────────────
+# Owner, 2026-10-04: the Morning Review should "be delivered to them the day after they purchase the box and have some
+# sort of information and aspirational ideas on how they can improve ... their business ... Otherwise it's just a dumb
+# box." The FIRST brief a box ever stores is a Welcome edition: what the box learned about the business (from
+# core/business_context.py, quoted where a page said it), the owner's goals and how the box on THIS box works toward
+# each, what's coming, and ideas grounded in all of it. Core names no machine (tests/test_core_boundary.py): the
+# screens a goal may point at are the box's own installed sections, read from the shell at the moment of writing.
+WELCOME_PLANS_MONTHS = 12
+MAX_LEARNED = 4
+
+_WELCOME_SYSTEM = (
+    "You write the first morning review a small business owner gets from their new box. Reply with JSON only: "
+    "{\"good_news\": \"…\", \"aims\": [{\"goal\": \"…\", \"why\": \"…\", \"href\": \"…\"}], "
+    "\"ideas\": [{\"title\": \"…\", \"why\": \"…\"}]}. good_news is one warm sentence welcoming them, about their "
+    "business. aims has one entry per goal in 'goals', in that order: why says in one sentence how the box will work "
+    "toward it, using ONLY a section listed in 'installed', and href is that section's href exactly, or \"\" when no "
+    "installed section serves the goal (then say the box will track it in the morning review). ideas are two or three "
+    "things they could do this week, grounded in the business facts; a title is under 60 characters, a why one or two "
+    "sentences. Use ONLY the facts given: never invent a number, a price, a name or a promise. Never mention a planned "
+    "offer as available. Plain, friendly words; no exclamation marks.")
+
+
+def _is_first(about: date) -> bool:
+    """The morning after the box was bought: no brief stored for any earlier day, and the day it is about is on or
+    after the day the box's owner was created. A box that has been running (an older box, or one whose history was
+    stored before this edition existed) never gets a welcome out of the blue."""
+    try:
+        made = str((state.owner_user() or {}).get("created_at") or "")[:10]
+        if not made or about.isoformat() < made:
+            return False
+        with state.connect() as c:
+            row = c.execute("SELECT 1 FROM daily_reports WHERE machine = ? AND day < ? AND report_json NOT LIKE ? "
+                            "LIMIT 1", (BRIEF, about.isoformat(), _CLAIM_LIKE)).fetchone()
+        return row is None
+    except Exception:                                    # noqa: BLE001 — unsure means an ordinary review
+        return False
+
+
+def _installed() -> list[dict]:
+    """The machines' own sections on this box, as {title, href}. Never core's rows; never one that isn't here."""
+    try:
+        from core import shell
+        return [{"title": s.title, "href": s.href} for s in shell.sections()
+                if s.machine != "core" and s.href.startswith("/")]
+    except Exception:                                    # noqa: BLE001 — no menu, no pointers: still a welcome
+        return []
+
+
+def _ctx() -> dict:
+    try:
+        from core import business_context
+        return business_context.get()
+    except Exception:                                    # noqa: BLE001 — no context yet is an empty one
+        return {}
+
+
+def _host(url: str) -> str:
+    return str(url or "").split("://", 1)[-1].split("/", 1)[0].removeprefix("www.")
+
+
+def _found(ctx: dict) -> list[dict]:
+    """THE LIGHT SCAN'S FIND, AS A QUESTION, when no website is confirmed (OSDev1 on #1964: most buyers won't have
+    filled Your Business in by the first morning). Only what the page said; one tap to Your Business answers it."""
+    s = ctx.get("suggested") or {}
+    if ctx.get("website") or not s.get("website"):
+        return []
+    bits = ", ".join(str(s[k]).strip() for k in ("name", "area") if str(s.get(k) or "").strip())
+    return [{"title": f"We found {_host(s['website'])}{': ' + bits if bits else ''}. Is this you?",
+             "why": "Tell your box, and tomorrow's review starts from it.", "href": "/settings/business",
+             "machine": ""}]
+
+
+def _learned(ctx: dict) -> list[dict]:
+    """What the box knows, said back: the light scan's find when nothing is confirmed, then the profile's quoted lines
+    (each with its page), then the owner's answers."""
+    out = _found(ctx)
+    for p in (ctx.get("profile") or [])[:MAX_LEARNED]:
+        out.append({"title": p["line"], "why": f"From {_host(p.get('source'))}", "href": "/settings/business",
+                    "machine": ""})
+    sells = [s.get("name") for s in ctx.get("sells") or [] if s.get("name")]
+    if sells and len(out) < MAX_LEARNED:
+        listed = ", ".join(sells[:4]) + (f" and {len(sells) - 4} more" if len(sells) > 4 else "")
+        out.append({"title": f"You offer {listed}.", "why": "", "href": "/settings/business", "machine": ""})
+    if ctx.get("customers") and len(out) < MAX_LEARNED:
+        out.append({"title": f"Your customers: {ctx['customers']}.", "why": "", "href": "/settings/business",
+                    "machine": ""})
+    if ctx.get("area") and len(out) < MAX_LEARNED:
+        out.append({"title": f"You serve {ctx['area']}.", "why": "", "href": "/settings/business", "machine": ""})
+    return out[:MAX_LEARNED]
+
+
+def _coming(ctx: dict, today: date) -> list[dict]:
+    """Plans starting from this month to WELCOME_PLANS_MONTHS ahead, soonest first, with the weeks to get ready."""
+    out = []
+    for p in ctx.get("coming") or []:
+        try:
+            y, mth = (int(x) for x in str(p.get("month") or "").split("-"))
+            start = date(y, mth, 1)
+        except (TypeError, ValueError):
+            continue
+        months = (start.year - today.year) * 12 + start.month - today.month
+        if 0 <= months <= WELCOME_PLANS_MONTHS:
+            weeks = max(0, (start - today).days // 7)
+            out.append({"title": f"{p['what']} starts in {start:%B}", "_at": start,
+                        "why": (f"{weeks} weeks to get a page and the word ready." if weeks > 1 else
+                                "It starts this month."), "href": "/settings/business", "machine": ""})
+    return [{k: v for k, v in x.items() if k != "_at"} for x in sorted(out, key=lambda x: x["_at"])]
+
+
+def _welcome_ai(ctx: dict, installed: list[dict], facts: dict, think=None) -> tuple[str, list[dict], list[dict]]:
+    """(good news, aims, ideas) for the Welcome review, from one call, or ("", [], []) without an AI or on a bad answer.
+    Every href must be an installed section's; every number must be in the facts."""
+    goals = list(ctx.get("goals") or [])
+    business = {k: ctx.get(k) for k in ("name", "industry", "area", "customers", "customer_kinds", "sells", "push",
+                                         "stage", "team_size", "workflows") if ctx.get(k)}
+    business["profile"] = [p["line"] for p in ctx.get("profile") or []][:12]
+    payload = {"business": business, "goals": goals, "installed": installed, "facts": facts,
+               "planned_not_yet_available": [p.get("what") for p in ctx.get("coming") or []]}
+    try:
+        if think is None:
+            if os.environ.get("AIOS_HERMETIC_TEST"):
+                return "", [], []
+            from core import brain
+            ready, why = brain.can_think()
+            if not ready:
+                log.info("review_brief.no_ai", why=why[:120])
+                return "", [], []
+            think = brain.think
+        raw = think(AI_TASK, json.dumps(payload, ensure_ascii=False), system=_WELCOME_SYSTEM, max_tokens=900,
+                    timeout=60)
+        got = json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
+    except Exception as e:                               # noqa: BLE001 — a plain welcome, on time
+        log.info("review_brief.welcome_ai_skipped", why=type(e).__name__)
+        return "", [], []
+    facts_text = json.dumps(payload, ensure_ascii=False)
+    hrefs = {i["href"] for i in installed}
+    good = str(got.get("good_news") or "").strip()[:240]
+    good = good if _grounded(good, facts_text) else ""
+    aims = []
+    by_goal = {str(a.get("goal") or "").strip().lower(): a for a in got.get("aims") or [] if isinstance(a, dict)}
+    for g in goals:
+        a = by_goal.get(g.lower()) or {}
+        why, href = str(a.get("why") or "").strip()[:300], str(a.get("href") or "").strip()
+        if href and href not in hrefs:
+            href, why = "", ""                           # a screen this box doesn't have: never pointed at
+        if why and not _grounded(why, facts_text):
+            why = ""
+        aims.append({"title": g[:1].upper() + g[1:], "why": why, "href": href, "machine": ""})
+    ideas = []
+    for i in got.get("ideas") or []:
+        if not isinstance(i, dict):
+            continue
+        t, w = str(i.get("title") or "").strip()[:80], str(i.get("why") or "").strip()[:300]
+        if t and _grounded(t + " " + w, facts_text):
+            ideas.append({"title": t, "why": w, "href": "", "machine": ""})
+    return good, aims, ideas[:MAX_IDEAS]
+
+
 def _ai(facts: dict, recent_ideas: list[str], think=None) -> tuple[str, list[dict]]:
     """("good news", [ideas]) from one cheap call, or ("", []) when there is no AI or its answer fails a check."""
     if not (facts["what_happened_yesterday"] or facts["worth_their_time_today"]):
@@ -363,13 +521,28 @@ def _compose(about: date, now: datetime | None, *, think=None, ai: bool = True) 
     if ai:
         good, ideas = _ai(_facts(rows_y, rows_t, worth, moving), list(idea_log), think=think)
         ideas = [i for i in ideas if _norm_idea(i["title"]) not in idea_log]
+    welcome, learned, aims, coming = _is_first(about), [], [], []
+    if welcome:
+        ctx = _ctx()
+        learned, coming = _learned(ctx), _coming(ctx, t)
+        aims = [{"title": g[:1].upper() + g[1:], "why": "", "href": "", "machine": ""} for g in ctx.get("goals") or []]
+        if ai:
+            w_good, w_aims, w_ideas = _welcome_ai(ctx, _installed(), _facts(rows_y, rows_t, worth, moving),
+                                                  think=think)
+            good, aims = (w_good or good), (w_aims or aims)
+            ideas = [i for i in w_ideas if _norm_idea(i["title"]) not in idea_log] or ideas
+        if not good:
+            name = str(ctx.get("name") or "").strip()
+            good = (f"Welcome to your box{', ' + name if name else ''}. Here is what it knows so far, and where it "
+                    "will help.")
     if not good and moving:
         good = _plain_good_news(moving)                                     # plain, true, and never a zero
     m = _morning(about, now)
     brief = {
         "about": about.isoformat(), "date_label": _label(m), "quote": _quote(m),
         "good_news": good, "worth": worth, "moving": moving, "ideas": ideas, "numbers": _numbers(rows_y),
-        "ideas_from": "ai" if ideas else "", "empty": not (worth or moving or ideas),
+        "welcome": welcome, "learned": learned, "aims": aims, "coming": coming,
+        "ideas_from": "ai" if ideas else "", "empty": not (worth or moving or ideas or learned or aims or coming),
         "link": report.page_url(about), "built_at": state._now(),
     }
     for i in ideas:

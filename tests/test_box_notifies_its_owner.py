@@ -270,36 +270,68 @@ print("\ntest_the_notice_says_the_number_and_nothing_else")
 
 from marketing.customer_voice.inbox import notices  # noqa: E402
 
-s1, b1 = notices._sentence(1)
-ok("one person reads as one person, never '1 messages'", "1 person is waiting" in s1, s1)
-s3, b3 = notices._sentence(3)
-ok("three reads as three", s3.startswith("3 people are waiting"), s3)
+s1 = notices._sentence(1)
+ok("one person reads as one person, never '1 messages'", s1 == "1 new person is waiting for a reply", s1)
+s3 = notices._sentence(3)
+ok("three reads as three", s3 == "3 new people are waiting for a reply", s3)
 ok("NO CUSTOMER NAME AND NO MESSAGE TEXT leaves the box in a notification",
-   all(w not in (s3 + b3).lower() for w in ("said", "wrote:", "@", "http")), s3 + b3)
+   all(w not in s3.lower() for w in ("said", "wrote:", "@", "http")), s3)
+
+# ── 8. never a redundant message (owner, 2026-10-05) ──────────────────────────────────────
+print("\ntest_it_never_nags")
+# "These are very annoying emails that I get every day. Can you please turn them off. We shouldn't ever annoy
+# and nag people with redundant messages." The same backlog, mailed at 8 and 5 every day, was the nag.
+PUSHED = []
+notify._has_device = lambda pid: True
+notify._notify_devices = lambda pid, waiting, body=None: PUSHED.append((pid, waiting, body)) or 1
+ASKED = []
+
+
+def waiting(n):
+    def count(space, **kw):
+        ASKED.append(kw.get("since"))
+        return n
+    return count
+
 
 SENT.clear()
 notices._spaces = lambda: ["default"]
-notices.store.awaiting_reply = lambda space: 2
+notices.store.awaiting_reply = waiting(2)
 res = notices.tick(now=NIGHT)
 ok("OUTSIDE THE WINDOWS IT DOES NOTHING, and cheaply — before touching the database",
-   res["sent"] == 0 and res["skipped"] == "outside_slot", str(res))
+   res["sent"] == 0 and res["skipped"] == "outside_slot" and not ASKED, str(res))
 
 res = notices.tick(now=MORNING)
-ok("inside the morning slot, with two waiting, it sends", res["sent"] == 1, str(res))
+ok("the first look starts from now: a backlog that was already there is never news",
+   res["sent"] == 0 and not PUSHED and not SENT and "starting from now" in res["detail"], str(res))
 
-notices.store.awaiting_reply = lambda space: 0
 res = notices.tick(now=EVENING)
-ok("SKIPPED WHEN NOBODY IS WAITING — an empty email twice a day is how he learns to ignore them",
-   res["sent"] == 0, str(res))
+ok("somebody new since the last look: the mobile app is told how many are NEW",
+   res["sent"] == 1 and PUSHED and PUSHED[-1][1] == 2 and PUSHED[-1][2] == "2 new people are waiting for a reply"
+   and ASKED[-1] == MORNING.isoformat(), (res, PUSHED, ASKED))
+ok("...AND NO EMAIL, EVER, for this notice", not SENT, SENT)
 
-notices.store.awaiting_reply = lambda space: (_ for _ in ()).throw(RuntimeError("no table"))
+PUSHED.clear()
+notices.store.awaiting_reply = waiting(0)
+res = notices.tick(now=MORNING + timedelta(days=1))
+ok("nobody new: nothing at all, however many are still waiting",
+   res["sent"] == 0 and not PUSHED and not SENT and "nobody new" in res["detail"], str(res))
+ok("...and it counted from the last notice, not from the start", ASKED[-1] == EVENING.isoformat(), ASKED[-1:])
+
+notify._has_device = lambda pid: False
+notices.store.awaiting_reply = waiting(4)
+res = notices.tick(now=EVENING + timedelta(days=1))
+ok("nobody has the app: nothing is sent, and email never stands in for it", res["sent"] == 0 and not SENT, str(res))
+notify._has_device = lambda pid: True
+notices.store.awaiting_reply = waiting(1)
 res = notices.tick(now=MORNING + timedelta(days=2))
+ok("...and installing it later does not open with what arrived before",
+   ASKED[-1] == (EVENING + timedelta(days=1)).isoformat(), ASKED[-1:])
+
+notices.store.awaiting_reply = lambda space, **kw: (_ for _ in ()).throw(RuntimeError("no table"))
+res = notices.tick(now=MORNING + timedelta(days=3))
 ok("a broken count answers with a dict rather than taking the rail down", res["sent"] == 0, str(res))
 
-notices.store.awaiting_reply = lambda space: 1
-notices._spaces = lambda: ["acme", "beta"]
-SENT.clear()
-res = notices.tick(now=MORNING + timedelta(days=3))
 ok("IT IS REGISTERED AS A PERIODIC, or it never runs at all",
    any(t["name"] == "inbox_notify" for t in __import__("core.worker", fromlist=["x"]).PERIODIC))
 

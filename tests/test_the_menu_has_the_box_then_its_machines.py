@@ -135,12 +135,12 @@ _srows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _sn, r
 # sources, and then coworkers"; then General (owner, 2026-10-03: the mobile app, the address the box sends from, the
 # people on it: "AI is settled and server is settled, but the other three need to be in another category"), Server.
 ok("the rows, in their groups' order",
-   _srows == ["Overview", "AI Account", "MCP Server", "Data Sources", "Coworkers", "Mobile App", "Sending Email",
+   _srows == ["Overview", "Your Business", "AI Account", "MCP Server", "Data Sources", "Coworkers", "Mobile App", "Sending Email",
               "People", "Time Zone", "Updates", "Server Access"], str(_srows))
 _sgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _sn, re.S)
-ok("...each group opening with a gap", _sgrp == ["AI Account", "Mobile App", "Updates"], str(_sgrp))
+ok("...each group opening with a gap", _sgrp == ["Your Business", "AI Account", "Mobile App", "Updates"], str(_sgrp))
 ok("...and its name above its first row", re.findall(r'<span class="glabel">([^<]*)</span>', _sn)
-   == ["AI", "General", "Server"], re.findall(r'<span class="glabel">([^<]*)</span>', _sn))
+   == ["Business", "AI", "General", "Server"], re.findall(r'<span class="glabel">([^<]*)</span>', _sn))
 ok("...and no old name is left", all(x not in _sn for x in ("AI Coworkers", "Outbound Email", "Coworkers (Agents)",
                                                            "Reaching you", '"glabel">Team<',
                                                            '"lbl">Shifts', '"lbl">Email<')))
@@ -151,10 +151,10 @@ _mn = _mc.get("/settings").get_data(as_text=True).split('<nav class="rail"', 1)[
 _mgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _mn, re.S)
 # A GROUP WHOSE FIRST ROWS A MEMBER IS NOT SHOWN still opens with its gap, on the first row they are.
 ok("a member's shorter menu keeps its gaps on the rows they are shown",
-   _mgrp == ["Coworkers", "Mobile App", "Updates"], str(_mgrp))
+   _mgrp == ["Your Business", "Coworkers", "Mobile App", "Updates"], str(_mgrp))
 # A GROUP'S NAME TRAVELS WITH ITS GAP, and a group a member sees nothing of has no name over another group's rows.
 ok("...and its group names over them, never a name for a group they are shown nothing of",
-   re.findall(r'<span class="glabel">([^<]*)</span>', _mn) == ["AI", "General", "Server"],
+   re.findall(r'<span class="glabel">([^<]*)</span>', _mn) == ["Business", "AI", "General", "Server"],
    re.findall(r'<span class="glabel">([^<]*)</span>', _mn))
 
 

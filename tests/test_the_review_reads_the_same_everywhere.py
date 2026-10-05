@@ -174,6 +174,10 @@ ok("the inbox screen still counts every waiting thread", inbox_store.awaiting_re
    inbox_store.awaiting_reply(SP))
 ok("the review counts the two from the last 30 days", inbox_store.awaiting_reply(SP, within_days=30) == 2,
    inbox_store.awaiting_reply(SP, within_days=30))
+ok("the notice counts only who wrote since it last looked (owner 10-05: never a redundant message)",
+   inbox_store.awaiting_reply(SP, since=(now - timedelta(days=3)).isoformat()) == 1
+   and inbox_store.awaiting_reply(SP, since=now.isoformat()) == 0,
+   inbox_store.awaiting_reply(SP, since=(now - timedelta(days=3)).isoformat()))
 rep = cv_report.report(date.today(), SP)
 fig = rep.get("figures") or {}
 ok("...says 2 waiting, and the oldest is 29 days, never 319",

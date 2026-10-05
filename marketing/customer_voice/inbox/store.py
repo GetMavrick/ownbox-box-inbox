@@ -880,7 +880,7 @@ def set_watermark(space: str, zcid: str, *, last_seen_msg_id: str | None,
             (space, zcid, last_seen_msg_id, last_activity, state._now()))
 
 
-def awaiting_reply(space: str, *, within_days: int | None = None) -> int:
+def awaiting_reply(space: str, *, within_days: int | None = None, since: str | None = None) -> int:
     """How many conversations are WAITING ON A PERSON — their message was the last one.
 
     THE ONE NUMBER THE PRODUCT IS FOR, and until now nothing in the box could answer it. The
@@ -902,12 +902,19 @@ def awaiting_reply(space: str, *, within_days: int | None = None) -> int:
     """
     # `within_days`: only a thread whose newest message from them is that recent (the Morning Review's 30, owner
     # 2026-10-04: "skip threads older than 30 days"). None is every waiting thread, as the inbox screen counts.
+    # `since`: only a thread whose newest message from them came after that ISO instant, which is what "somebody NEW
+    # is waiting" means to the notice (owner, 2026-10-05: "We shouldn't ever annoy and nag people with redundant
+    # messages"). Both bounds are the same comparison, so they share one clause each.
     recent, args = "", [space]
+    _newest_in = (" AND (SELECT MAX(m.created_at) FROM inbox_messages m WHERE m.space = k.space "
+                  "      AND m.zernio_conversation_id = k.zernio_conversation_id AND m.direction = 'in')")
     if within_days is not None:
         from datetime import datetime, timedelta, timezone
-        recent = (" AND (SELECT MAX(m.created_at) FROM inbox_messages m WHERE m.space = k.space "
-                  "      AND m.zernio_conversation_id = k.zernio_conversation_id AND m.direction = 'in') >= ?")
+        recent += _newest_in + " >= ?"
         args.append((datetime.now(timezone.utc) - timedelta(days=int(within_days))).isoformat())
+    if since is not None:
+        recent += _newest_in + " > ?"
+        args.append(str(since))
     with state.connect() as c:
         row = c.execute(
             "SELECT COUNT(*) n FROM inbox_conversations k "

@@ -306,6 +306,16 @@ def ui_manifest():
                     headers={"Cache-Control": "public, max-age=3600"})
 
 
+@blueprint.get("/ui/sw.js")
+def ui_sw():
+    """THE BASE MACHINE'S PHONE WORKER (core/push.py, ROOT_SCOPE). Public, as /inbox/sw.js is: a browser fetches
+    its worker without a session. Served under /ui/ and allowed the whole box by `Service-Worker-Allowed: /`, the
+    one header that lets a worker's scope be wider than its own folder (without it the registration fails)."""
+    from core import push
+    return Response(push.worker_js(base_name()), mimetype="application/javascript",
+                    headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
 def manifest_icons(pattern: str) -> list[dict]:
     """The two sizes every manifest names, at the app's own addresses, versioned by the client's icon.
     `any maskable`: the mark keeps its cream square inside the safe zone, and a client's icon is drawn

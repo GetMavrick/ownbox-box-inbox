@@ -24,7 +24,10 @@ SENDER_NAME = "Morning Review"
 _INK, _SOFT, _GREY, _HAIR, _BG, _WASH = "#2e2c27", "#6b6a63", "#b4b3a8", "#e4e3dc", "#fcfcfb", "#f9f9f7"
 _SERIF = "'Iowan Old Style','Palatino Linotype',Georgia,serif"
 _SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
-SECTIONS = (("worth", "Worth your time today"), ("moving", "Already moving"), ("ideas", "Ideas to try"))
+# THE WELCOME SECTIONS LEAD, AND ARE EMPTY ON EVERY OTHER MORNING (#1957 C4), so an ordinary review is unchanged.
+SECTIONS = (("learned", "What your box learned about you"), ("aims", "Your goals, and how your box helps"),
+            ("coming", "What's coming"), ("worth", "Worth your time today"), ("moving", "Already moving"),
+            ("ideas", "Ideas to try"))
 
 
 def build(day, now=None) -> dict:
@@ -32,7 +35,8 @@ def build(day, now=None) -> dict:
     morning with nothing to say, and then nothing is sent."""
     from core import review_brief
     b = review_brief.ensure(day, now)
-    return {**b, "subject": f"Your Morning Review: {b['quote']}", "skip": bool(b.get("empty"))}
+    subject = "Welcome to your box: your first Morning Review" if b.get("welcome") else f"Your Morning Review: {b['quote']}"
+    return {**b, "subject": subject, "skip": bool(b.get("empty"))}
 
 
 def text(e: dict) -> str:
