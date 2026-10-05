@@ -308,6 +308,28 @@ def test_ci_actually_runs_this_file():
        "CI would skip this file and still print green")
 
 
+def test_the_messages_page_searches_from_its_header():
+    """Owner, 2026-10-05: "integrating the search into the upper area" as Gmail does, "for just the messages page",
+    and "Our inbox should have a different header than the rest"."""
+    c = _seeded()
+    page = c.get("/inbox/inbox?channel=messenger").get_data(as_text=True)
+    bar = page.split('<div class="bar', 1)[1].split("</div></div>", 1)[0] if '<div class="bar' in page else ""
+    ok("the messages page's bar is a search, not a title",
+       'class="barfind"' in bar and 'role="search"' in bar and "Unified Inbox</span>" not in bar, bar[:300])
+    ok("...that keeps the filter he is in", 'name="channel" value="messenger"' in bar, bar[:400])
+    ok("...and finds what people wrote, the same as the page's own search",
+       "Dana Whitfield" in c.get("/inbox/inbox?q=emergency").get_data(as_text=True))
+    css = page.split("<style>", 1)[1].split("</style>", 1)[0]
+    base, desktop = css.split("@media (min-width:821px){", 1)
+    ok("on a mobile the card under the summary is not drawn; on a desktop, where the bar hides, it comes back",
+       ".find-wide{display:none}" in base and ".find-wide{display:block}" in desktop.split("\n}", 1)[0])
+    ok("the pill is a 48px target with 16px type",
+       "min-height:48px" in css.split(".barfind{", 1)[1].split("}", 1)[0]
+       and "max(16px" in css.split(".barfind input{", 1)[1].split("}", 1)[0])
+    other = c.get("/inbox/settings").get_data(as_text=True)
+    ok("every other screen keeps its title", "Unified Inbox</span>" in other and 'class="barfind"' not in other)
+
+
 if __name__ == "__main__":
     for fn in (test_the_buyer_can_search_at_all,
                test_it_searches_what_people_wrote_and_not_only_their_names,
@@ -318,6 +340,7 @@ if __name__ == "__main__":
                test_three_different_empties_never_read_as_each_other,
                test_one_clients_search_is_never_another_clients,
                test_an_empty_query_is_not_a_search,
+               test_the_messages_page_searches_from_its_header,
                test_ci_actually_runs_this_file):
         print(fn.__name__)
         fn()

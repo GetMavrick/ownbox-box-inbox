@@ -7,6 +7,7 @@ data when an update rolls back). The AEO Machine removes its own fields once it 
 from __future__ import annotations
 
 import re
+from datetime import date
 
 from core import box_secrets, box_settings
 
@@ -38,23 +39,63 @@ def _own(key: str, default=None):
     return box_settings.get(NS, key, default=default)
 
 
-def sites() -> list[str]:
-    """The hosts this box watches, as PostHog records them (www. kept: PostHog's $host is exact).
+def business_site() -> str:
+    """THE BUSINESS'S OWN WEBSITE, from Your business (core/business_context.py; #1957 C5), as a host, "" for none.
+    ONE HOME (owner, 10-04: "Add-on machines should draw from it instead of gathering their own"): the foundation
+    keeps no copy of it. Its own list (`sites` below) holds only the other websites it also counts."""
+    try:
+        from urllib.parse import urlsplit
 
-    The sites a person typed on the card, when there are any. Otherwise the ones the box found in this PostHog
-    project (`found()`, refreshed by the sync), then the AEO Machine's site: SETUP FIXES ITSELF (owner, 2026-10-01),
-    so a box whose PostHog already holds two sites watches both without anyone typing them.
-    """
+        from core import business_context
+        host = (urlsplit(business_context.website()).hostname or "").lower()
+    except Exception:                                    # noqa: BLE001 — no business website is a quiet answer
+        return ""
+    return host if _HOST.match(host) else ""
+
+
+def _typed() -> list[str]:
     own = _own("sites") or []
-    out = _one_each([str(h).strip().lower() for h in own
-                     if isinstance(h, str) and _HOST.match(str(h).strip().lower())])
-    if out:
-        return out
+    return [str(h).strip().lower() for h in own if isinstance(h, str) and _HOST.match(str(h).strip().lower())]
+
+
+def _found_list() -> list[str]:
+    """The sites the box found in this PostHog project (`found()`, refreshed by the sync), then the AEO Machine's
+    site: SETUP FIXES ITSELF (owner, 2026-10-01), so a box whose PostHog already holds two sites watches both."""
     out = [h for h in found() if _HOST.match(h)]
     aeo = str(box_settings.get(_AEO_NS, "host") or "").strip().lower()
     if _HOST.match(aeo):
         out.insert(0, aeo)
-    return _one_each(out)
+    return out
+
+
+def sites() -> list[str]:
+    """The hosts this box watches, as PostHog records them (www. kept: PostHog's $host is exact).
+
+    The business's website first, from Your business (`business_site`). Then the other websites a person typed on
+    the card, when there are any; otherwise the ones the box found (`_found_list`).
+    """
+    rest, mine = _typed() or _found_list(), business_site()
+    return _one_each(([_spelled(mine, rest)] if mine else []) + rest)
+
+
+def _spelled(mine: str, rest: list[str]) -> str:
+    """THE BUSINESS'S WEBSITE IN THE SPELLING THE STORE KNOWS (www. or not). PostHog's $host is exact and the store
+    keys each day by it, so the twin wins wherever it is known: the typed or found list, what the box found in
+    PostHog, then the hosts with stored days (the newest first). OSDev1's review of #1974: the card's save drops the
+    twin from the typed list, so a search of that list alone lost the spelling after the first save, and every day
+    kept under it went unread."""
+    bare = mine.removeprefix("www.")
+    twins = [h for h in rest + found() if h.removeprefix("www.") == bare]
+    if twins:
+        return twins[0]
+    try:
+        from . import store
+        kept = [h for h in store.stored_sites() if h.removeprefix("www.") == bare]
+    except Exception:                                    # noqa: BLE001 — no store: the spelling as given
+        kept = []
+    if len(kept) > 1:
+        kept.sort(key=lambda h: store.newest_day(h) or date.min, reverse=True)
+    return kept[0] if kept else mine
 
 
 def _one_each(hosts: list[str]) -> list[str]:
@@ -70,10 +111,17 @@ def _one_each(hosts: list[str]) -> list[str]:
 
 
 def sites_source() -> str:
-    """"yours" when a person typed the list, "found" when the box found it, "" for none."""
-    if [h for h in (_own("sites") or []) if isinstance(h, str) and _HOST.match(h.strip().lower())]:
+    """Where the other websites come from: "yours" when a person typed them, "found" when the box found them, ""
+    for none. The business's own website is Your business's, never a source here."""
+    if _typed():
         return "yours"
-    return "found" if sites() else ""
+    return "found" if _found_list() else ""
+
+
+def others(hosts: list[str]) -> list[str]:
+    """`hosts` without the business's own website or its www twin: what the card's list may hold."""
+    own = business_site().removeprefix("www.")
+    return [h for h in hosts if not own or h.removeprefix("www.") != own]
 
 
 FOUND_KEY = "sites_found"           # {"hosts": [...], "at": iso}: what the sync last found in PostHog

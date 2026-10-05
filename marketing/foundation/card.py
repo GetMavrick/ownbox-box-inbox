@@ -159,20 +159,26 @@ def render(note=None) -> str:
     # WHILE THE WORKER HAS IT, SAY SO, AND OFFER NO SECOND PRESS (jobs.py): the queue is what says it is running.
     syncing, checking_jobs = jobs.running(jobs.SYNC), jobs.running(jobs.CHECK)
     checking = (f"Checking PostHog, started {_esc(_when(checking_jobs[0]['created_at']))}." if checking_jobs else "")
-    facts = ('<dl class="ui-facts">'
+    # THE BUSINESS'S WEBSITE IS YOUR BUSINESS'S (#1957 C5): shown here, changed there, never kept twice.
+    mine = settings.business_site()
+    yours = (f'<dt>Your website</dt><dd>{_esc(mine)}, from <a href="/settings/business">Your business</a></dd>'
+             if mine else
+             '<dt>Your website</dt><dd>Not set yet. <a href="/settings/business">Add it in Your business</a></dd>')
+    facts = ('<dl class="ui-facts">' + yours +
              f'<dt>Websites</dt><dd>{" &middot; ".join(_esc(s) for s in sites) or "None yet. Add them below."}</dd>'
              f'<dt>PostHog</dt><dd>{checking or ph}</dd>'
              f'<dt>Search Console</dt><dd>{_search_console()}</dd>'
              f'<dt>Last sync</dt><dd>{_syncing(syncing) if syncing else _last_sync()}</dd>'
              + _day_row() + '</dl>'
              '<div class="ui-acts">' + (_busy("Syncing") if syncing else _post("sync", "Sync now")) + '</div>')
-    shown = chr(10).join(_own("sites") or sites)
+    shown = chr(10).join(settings.others(_own("sites") or sites))
     # WHERE THE LIST CAME FROM, said on the box (OSDev1, first setup): the box found these in PostHog until a person
     # types their own, and a list saved as it was shown stays found (handle "sites"), so it keeps updating itself.
     found_note = ('<p class="quiet">Found in your PostHog. Type your own list to choose.</p>'
                   if settings.sites_source() == "found" else "")
     sites_form = (_form("sites",
-                        '<label for="wa-sites">Your websites, each on its own row</label>'
+                        ('<label for="wa-sites">Other websites to count, each on its own row</label>' if mine else
+                         '<label for="wa-sites">Your websites, each on its own row</label>')
                         + found_note +
                         f'<textarea id="wa-sites" name="sites" rows="3" autocapitalize="off" spellcheck="false" '
                         f'placeholder="ownbox.io">{_esc(shown)}</textarea>'
@@ -324,7 +330,8 @@ def handle(do: str, form, by: str) -> tuple[bool, str]:
         bad = [t for t, c in zip(typed, clean) if not c]
         if bad:
             return False, f"“{bad[0][:60]}” is not a website address. Type it like ownbox.io."
-        out = list(dict.fromkeys(clean))
+        # NEVER A SECOND COPY OF THE BUSINESS'S WEBSITE (#1957 C5): it is Your business's, and counted first anyway.
+        out = settings.others(list(dict.fromkeys(clean)))
         was = [c for c in (_clean_site(x) for x in re.split(r"[\s,]+", str(form.get("shown") or "")) if x) if c]
         if settings.sites_source() == "found" and out == list(dict.fromkeys(was)):
             return True, "Nothing changed. The box keeps finding your websites in your PostHog."
@@ -334,9 +341,12 @@ def handle(do: str, form, by: str) -> tuple[bool, str]:
         if not out:
             # AN EMPTY LIST HANDS THE CHOICE BACK TO THE BOX (settings.sites): it watches what it finds in PostHog and
             # the AEO Machine's site, so the sentence says which, never "none" while some are watched.
-            now = settings.sites()
-            return True, ("Saved. The box picks the websites itself from your PostHog: " + ", ".join(now) + "."
-                          if now else "Saved. No websites are watched yet; the box adds them when PostHog sees visits.")
+            now = settings.others(settings.sites())
+            if now:
+                return True, "Saved. The box picks the websites itself from your PostHog: " + ", ".join(now) + "."
+            return True, ("Saved. The box counts your website, and adds others when PostHog sees visits."
+                          if settings.business_site() else
+                          "Saved. No websites are watched yet; the box adds them when PostHog sees visits.")
         return True, "Saved: " + ", ".join(out) + "."
     if do == "posthog":
         return _posthog(form, by)

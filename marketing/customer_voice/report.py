@@ -130,6 +130,32 @@ def _iso(s: str) -> str:
     return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
 
 
+ANSWER_FIRST = 3
+SAID_CHARS = 60
+
+
+def answer_first(rows: list[dict], cut: str) -> list[dict]:
+    """WHO TO ANSWER FIRST, BY NAME (#1953 step 1.5): the three longest-waiting people from the last 30 days, anyone
+    who came from an ad ahead of the rest, each with the first words of what they asked and a link to the thread.
+
+    "72 waiting" is a number; "Dana has waited 3 days about Saturday" is a reply sent before breakfast. Read from
+    rows already on this box. It goes to the review page and the owner's email, never to Slack (core/report.py), where
+    more than the owner can read a customer's words."""
+    from urllib.parse import quote
+    keep = [r for r in rows if str(r.get("last_inbound_at") or "") and _iso(r["last_inbound_at"]) >= cut]
+    keep.sort(key=lambda r: (not r.get("ad_meta_id"), _iso(r["last_inbound_at"])))
+    out = []
+    for r in keep[:ANSWER_FIRST]:
+        said = " ".join(str(r.get("preview") or "").split())
+        if len(said) > SAID_CHARS:
+            said = said[:SAID_CHARS - 1].rsplit(" ", 1)[0] + "…"
+        bits = [f"Waiting {_waited(r['last_inbound_at'])}"] + (["from your ad"] if r.get("ad_meta_id") else [])
+        out.append({"text": str(r.get("participant") or "").strip() or "Someone",
+                    "why": " · ".join(bits) + (f": “{said}”" if said else ""),
+                    "href": "/inbox/inbox/" + quote(str(r.get("zernio_conversation_id") or ""), safe="")})
+    return out
+
+
 def _waited(iso: str) -> str:
     """How long ago, in the fewest characters a person reads at a glance: 21m, 3h, 2d."""
     from datetime import datetime, timezone
@@ -325,14 +351,16 @@ def report(day: date, space: str | None = None) -> dict:
         noun = "reply is" if ready == 1 else "replies are"
         needs_you.append({"text": f"{ready} {noun} written and ready to send",
                           "href": "/inbox/waiting"})
+    first: list[dict] = []
     if waiting:
         try:
             rows = inbox_store.list_conversations(inbox_space, limit=500, waiting=True)
             cut = (datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS)).isoformat()
             stamps = sorted(s for s in (str(r.get("last_inbound_at") or "") for r in rows) if s and _iso(s) >= cut)
             age = _waited(stamps[0]) if stamps else ""
+            first = answer_first(rows, cut)
         except Exception:                        # noqa: BLE001 — a figure, never the report
-            age = ""
+            age, first = "", []
         if age:
             figures["inbox_oldest"] = {"value": age, "label": "oldest waiting"}
     for rail in rails.ALL:
@@ -370,7 +398,7 @@ def report(day: date, space: str | None = None) -> dict:
     return {"title": TITLE,
             "headline": {"value": headline, "label": label},
             "needs_you": needs_you, "happened": happened, "watch": watch,
-            "figures": figures, "notes": []}
+            "figures": figures, "notes": [], "answer_first": first}
 
 
 register_reporter(MACHINE, TITLE, report)

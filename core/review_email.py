@@ -26,17 +26,25 @@ _SERIF = "'Iowan Old Style','Palatino Linotype',Georgia,serif"
 _SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
 # THE WELCOME SECTIONS LEAD, AND ARE EMPTY ON EVERY OTHER MORNING (#1957 C4), so an ordinary review is unchanged.
 SECTIONS = (("learned", "What your box learned about you"), ("aims", "Your goals, and how your box helps"),
-            ("coming", "What's coming"), ("worth", "Worth your time today"), ("moving", "Already moving"),
+            ("coming", "What's coming"), ("worth", "Worth your time today"),
+            ("first", "Who to answer first"), ("moving", "Already moving"),
             ("ideas", "Ideas to try"))
 
 
-def build(day, now=None) -> dict:
+def build(day, now=None, *, user_id=None) -> dict:
     """The email as data: the stored brief for `day` (built the first time), with a subject. `skip` is True on a
-    morning with nothing to say, and then nothing is sent."""
+    morning with nothing to say, and then nothing is sent. `hidden` is what the person it goes to chose not to see on
+    the review page (#1953 step 1.6): their email leaves it out too, and says how to see everything."""
     from core import review_brief
     b = review_brief.ensure(day, now)
     subject = "Welcome to your box: your first Morning Review" if b.get("welcome") else f"Your Morning Review: {b['quote']}"
-    return {**b, "subject": subject, "skip": bool(b.get("empty"))}
+    return {**b, "subject": subject, "skip": bool(b.get("empty")),
+            "hidden": sorted(review_brief.hidden_for(user_id))}
+
+
+def _hidden_line(e: dict) -> str:
+    n = len(e.get("hidden") or [])
+    return f"You hid {n} {'section' if n == 1 else 'sections'} of your Morning Review." if n else ""
 
 
 def text(e: dict) -> str:
@@ -47,7 +55,7 @@ def text(e: dict) -> str:
         lines += [numbers_line(e), ""]
     for key, heading in SECTIONS:
         items = e.get(key) or []
-        if not items:
+        if not items or key in (e.get("hidden") or ()):
             continue
         lines.append(heading.upper())
         for n, it in enumerate(items, 1):
@@ -61,6 +69,8 @@ def text(e: dict) -> str:
                 lines.append(f"      {machine}")
         lines.append("")
     lines.append(f"The full review: {e['link']}")
+    if _hidden_line(e):
+        lines.append(f"{_hidden_line(e)} See everything: {e['link']}?all=1")
     return "\n".join(lines)
 
 
@@ -117,7 +127,7 @@ def html(e: dict) -> str:
     out.append('</div></div><div style="max-width:600px;margin:0 auto;padding:8px 20px 40px">')
     for key, heading in SECTIONS:
         items = e.get(key) or []
-        if not items:
+        if not items or key in (e.get("hidden") or ()):
             continue
         out.append(f'<p style="margin:30px 0 4px;font-size:12px;font-weight:600;letter-spacing:.14em;'
                    f'text-transform:uppercase;color:{_SOFT}">{esc(heading)}</p>'
@@ -142,7 +152,11 @@ def html(e: dict) -> str:
         out.append(f'<p style="color:{_GREY};font-size:13px;margin:28px 0 0">The ideas come from your box\'s AI, '
                    'based only on yesterday\'s numbers.</p>')
     out.append(f'<p style="margin:24px 0 0"><a href="{esc(e["link"], quote=True)}" style="color:{_INK}">'
-               'Open the full review</a></p></div></div>')
+               'Open the full review</a></p>')
+    if _hidden_line(e):
+        out.append(f'<p style="color:{_GREY};font-size:13px;margin:12px 0 0">{esc(_hidden_line(e))} '
+                   f'<a href="{esc(e["link"] + "?all=1", quote=True)}" style="color:{_INK}">See everything</a></p>')
+    out.append('</div></div>')
     return "".join(out)
 
 

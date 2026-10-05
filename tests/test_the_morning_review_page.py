@@ -99,7 +99,11 @@ ok("...and is plain words where there is not", '<span class="mr-t">Two posts may
 ok("what a machine did reads machine first", '<span class="mr-t">Lead Machine</span><p class="mr-w">7 companies found</p>'
    in part)
 ok("the AI's ideas say where they came from", "The ideas come from its AI" in part)
-ok("NO BUTTON anywhere in it (owner: \"those huge buttons\")", "<button" not in part and "ui-btn" not in part)
+# THE ONLY BUTTON IS EACH SECTION'S QUIET "Hide" (#1953 step 1.6): a grey word with no fill and no border, because hiding
+# changes a stored choice and so is a form. Anything else that looks like a button is the "huge buttons" he retired.
+_quiet = re.sub(r'<form class="mr-hide".*?</form>', "", part, flags=re.S)
+ok("NO BUTTON anywhere in it (owner: \"those huge buttons\"), only each section's quiet Hide",
+   "<button" not in _quiet and "ui-btn" not in part and "border:0;background:none" in page)
 
 print("\ntest_nothing_empty_is_drawn")
 wipe()

@@ -235,6 +235,9 @@ def _normalize(machine: str, title: str, rep) -> dict:
         "happened": [_agree(x) for x in _bounded(rep.get("happened"), "outcomes")],
         "watch": watch,
         "notes": [str(x)[:MAX_TEXT] for x in (rep.get("notes") or [])][:MAX_ITEMS],
+        # PEOPLE TO ANSWER FIRST, BY NAME (#1953 step 1.5): {"text": who, "why": …, "href": …}. Any machine may carry
+        # them; the review shows them on the page and in the owner's email, never on Slack (slack_text).
+        "answer_first": [_item(x) for x in (rep.get("answer_first") or [])][:3],
         # EVERY NUMBER THE PAGE COULD WANT, ALREADY COMPUTED AND NAMED. OSDev5 renders `figures`
         # without deciding what anything means: {key: {"value": …, "label": …, "href": …}}.
         "figures": {str(k): _agree(_item(v), text_key="label") for k, v in (rep.get("figures") or {}).items()},
@@ -821,7 +824,7 @@ def slack_text(b: dict) -> str:
     # names a planned offer stays there too.
     planned = _planned_names()
     for key, heading in review_email.SECTIONS:
-        if key == "coming":
+        if key in ("coming", "first"):        # a plan, and a customer's name and words, stay off a shared channel
             continue
         items = [it for it in b.get(key) or [] if str(it.get("title") or "").strip()
                  and not (key == "ideas" and _names_a_plan(it, planned))]
@@ -1022,7 +1025,7 @@ def run(now: datetime | None = None, send=None, send_email=None, send_app=None) 
         else:
             out["dm"] = "send_failed"
     if want_mail:
-        out["email"] = _email(email_to, yday, now, t, send_email)
+        out["email"] = _email(email_to, yday, now, t, send_email, user_id=owner)
         if out["email"] == "sent":
             st["emailed"] = mark
     if want_app:
@@ -1036,13 +1039,13 @@ def run(now: datetime | None = None, send=None, send_email=None, send_app=None) 
     return out
 
 
-def _email(to: str, yday: date, now: datetime, t: date, send_email=None) -> str:
+def _email(to: str, yday: date, now: datetime, t: date, send_email=None, *, user_id=None) -> str:
     """The email half of `run`. -> "sent" | "failed:<Kind>". Never raises: a mail failure must not
     cost the DM, its marker or the worker. The idempotency key is per day and recipient, so a
     retry after a timeout that DID deliver cannot deliver the same morning twice."""
     try:
         from core import review_email
-        e = review_email.build(yday, now)
+        e = review_email.build(yday, now, user_id=user_id)   # the owner's own hidden sections (#1953 1.6)
         if e.get("skip"):
             # NOTHING TO SAY, NOTHING SENT (owner-approved, docs/SCOPE_MORNING_REVIEW_V2.md decision 4). Marked
             # done for the morning, so it isn't retried every hour.

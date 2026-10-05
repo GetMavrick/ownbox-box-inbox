@@ -21,6 +21,7 @@ THE CONTRACT (what `get` and `build` return; WebDev2's page draws exactly this):
       "quote":      "A new month, a clean slate, a bright start.",
       "good_news":  "…" | "",                one optimistic sentence on yesterday; "" when there is none
       "worth":      [item …],                worth your time today: decisions only he can make, new or changed
+      "first":      [item …],                who to answer first, by name: up to three, from a reporter's answer_first
       "moving":     [item …],                what the machines did, one per machine, only what happened
       "ideas":      [item …],                two or three from the box's AI, grounded in the numbers above
       "ideas_from": "ai" | "",               "ai" when the ideas came from the box's AI
@@ -266,19 +267,52 @@ _SYSTEM = ("You write two parts of a small business owner's morning review: one 
            "the facts given; never invent a number, a name or an event. Every idea must be something they can "
            "do today, and must name a number from the facts. Never scold, never list problems, never repeat an "
            "idea from the 'already suggested' list. Plain, friendly words; no jargon, no exclamation marks. "
+           "THE WEEK: 'last_7_days' gives each headline by weekday, oldest first, the last being yesterday; notice a "
+           "streak or a change across the week rather than judging one day alone. "
+           "WHO THE BUSINESS IS: when a 'business' block is given, every idea must fit that business, its offers, its "
+           "customers and its goals (in the order given), so a med spa never gets a gym's advice. A planned offer may be "
+           "prepared for, never described as available yet. "
+           "NEVER RESTATE THE TO-DO LIST: the 'worth_their_time_today' lines are already shown above your ideas, so an "
+           "idea must add something new, never repeat or rephrase one of them. "
            "Reply with JSON only: {\"good_news\": \"…\", \"ideas\": [{\"title\": \"…\", \"why\": \"…\"}]}. "
            "A title is under 60 characters; a why is one or two sentences.")
 
 
-def _facts(rows_y: list[dict], rows_t: list[dict], worth: list[dict], moving: list[dict]) -> dict:
+WEEK_DAYS = 7
+
+
+def _week(rows_y: list[dict], about: date) -> dict:
+    """THE LAST SEVEN DAYS, NOT ONE (#1953 step 1.2): each machine's stored headline for the week ending `about`,
+    oldest first, from `report.history` (already kept). "Up three days running" needs the week; yesterday alone can
+    only say yesterday. Days are named by weekday and never by date, so no day-of-month joins the numbers an idea is
+    allowed to use (`_grounded`). A machine with fewer than two days, or no label, says nothing here. Never raises."""
+    try:
+        hist = report.history(about, WEEK_DAYS)
+    except Exception:                                    # noqa: BLE001 — no week is the old one-day review
+        return {}
+    out = {}
+    for r in rows_y:
+        label = str((r.get("headline") or {}).get("label") or "").strip()
+        series = [x for x in hist.get(r.get("machine")) or [] if report.has_value(x.get("value"))]
+        if label and len(series) >= 2:
+            out[f"{r.get('title') or r.get('machine')}: {label}"] = {
+                date.fromisoformat(str(x["day"])).strftime("%A"): x["value"] for x in series}
+    return out
+
+
+def _facts(rows_y: list[dict], rows_t: list[dict], worth: list[dict], moving: list[dict],
+           week: dict | None = None) -> dict:
     def figs(r):
         return {k: v.get("value") for k, v in (r.get("figures") or {}).items()
                 if isinstance(v, dict) and report.has_value(v.get("value"))}
-    return {
+    out = {
         "what_happened_yesterday": [f"{m['machine']}: {m['title']}" for m in moving],
         "worth_their_time_today": [f"{w['machine']}: {w['title']}" for w in worth],
         "figures": {str(r.get("title") or r.get("machine")): figs(r) for r in rows_y + rows_t if figs(r)},
     }
+    if week:
+        out["last_7_days"] = week
+    return out
 
 
 def _grounded(text: str, facts_text: str) -> bool:
@@ -398,6 +432,63 @@ def _coming(ctx: dict, today: date) -> list[dict]:
     return [{k: v for k, v in x.items() if k != "_at"} for x in sorted(out, key=lambda x: x["_at"])]
 
 
+def _business(ctx: dict, today: date | None = None) -> dict:
+    """What the review's AI is told about the business (#1953 step 1.1): the owner's answers on Your Business and the
+    lines the full scan quoted from their own site. Empty when the box knows nothing yet, so the call is unchanged.
+
+    WHY BOTH AND NOT `brain.knowledge_context()` AGAIN: the review's call is not isolated, so `my/knowledge/` (the
+    sent-mail summary, `business-profile.md`) already rides in as its cached context. What never reached it are the
+    owner's own answers, which live in box_settings. A plan whose month has passed is not a plan any more."""
+    about = {k: ctx.get(k) for k in ("name", "industry", "area", "customers", "customer_kinds", "sells", "push",
+                                      "stage", "team_size", "workflows") if ctx.get(k)}
+    profile = [p["line"] for p in ctx.get("profile") or [] if p.get("line")][:12]
+    if profile:
+        about["profile"] = profile
+    month = f"{today or date.today():%Y-%m}"
+    plans = [{"what": p.get("what"), "month": p.get("month")} for p in ctx.get("coming") or []
+             if p.get("what") and str(p.get("month") or "") >= month]
+    out = {}
+    if about:
+        out["about"] = about
+    if ctx.get("goals"):
+        out["goals"] = list(ctx["goals"])
+    if plans:
+        out["planned_not_yet_available"] = plans
+    return out
+
+
+_STOP = frozenset("a an and are at be by for from has have in into is it its of on or our so that the their them "
+                  "they this to today was were what when who will with would you your".split())
+
+
+def _words(text: str) -> set[str]:
+    """The words that carry meaning, crudely stemmed, so "reply" and "replies", "waiting" and "wait" meet."""
+    out = set()
+    for w in re.findall(r"[a-z0-9]+", str(text or "").lower()):
+        if w in _STOP or len(w) < 3:
+            continue
+        for end in ("ing", "ies", "es", "s"):
+            if len(w) > len(end) + 2 and w.endswith(end):
+                w = w[: -len(end)] + ("y" if end == "ies" else "")
+                break
+        out.add(w)
+    return out
+
+
+def _restates(idea: dict, worth: list[dict]) -> bool:
+    """Does this idea only say again what "Worth your time" already says (#1953 step 1.3)? Owner's example of the
+    failure: "Reply to the 4 people waiting" under "4 people waiting". Two shared meaning-words, and most of the
+    idea's title among them, is a restatement; an idea that adds something new has words of its own."""
+    mine = _words(idea.get("title"))
+    if not mine:
+        return False
+    for w in worth:
+        shared = mine & _words(w.get("title"))
+        if len(shared) >= 2 and len(shared) * 3 >= len(mine) * 2:
+            return True
+    return False
+
+
 def _welcome_ai(ctx: dict, installed: list[dict], facts: dict, think=None) -> tuple[str, list[dict], list[dict]]:
     """(good news, aims, ideas) for the Welcome review, from one call, or ("", [], []) without an AI or on a bad answer.
     Every href must be an installed section's; every number must be in the facts."""
@@ -447,11 +538,14 @@ def _welcome_ai(ctx: dict, installed: list[dict], facts: dict, think=None) -> tu
     return good, aims, ideas[:MAX_IDEAS]
 
 
-def _ai(facts: dict, recent_ideas: list[str], think=None) -> tuple[str, list[dict]]:
+def _ai(facts: dict, recent_ideas: list[str], think=None, business: dict | None = None) -> tuple[str, list[dict]]:
     """("good news", [ideas]) from one cheap call, or ("", []) when there is no AI or its answer fails a check."""
     if not (facts["what_happened_yesterday"] or facts["worth_their_time_today"]):
         return "", []
-    prompt = json.dumps({"facts": facts, "already_suggested": recent_ideas[:20]}, ensure_ascii=False)
+    payload = {"facts": facts, "already_suggested": recent_ideas[:20]}
+    if business:
+        payload["business"] = business
+    prompt = json.dumps(payload, ensure_ascii=False)
     try:
         if think is None:
             # A TEST NEVER SPENDS (the AIOS_HERMETIC_TEST convention, as core/slack.py and core/checkin.py): the
@@ -471,7 +565,8 @@ def _ai(facts: dict, recent_ideas: list[str], think=None) -> tuple[str, list[dic
     except Exception as e:                                   # noqa: BLE001 — no AI is a plain review, on time
         log.info("review_brief.ai_skipped", why=type(e).__name__)
         return "", []
-    facts_text = json.dumps(facts, ensure_ascii=False)
+    # THE OWNER'S OWN NUMBERS ARE FACTS TOO: a price he typed on Your Business may be quoted back to him.
+    facts_text = json.dumps({"facts": facts, "business": business or {}}, ensure_ascii=False)
     good = str(got.get("good_news") or "").strip()[:240]
     if not _grounded(good, facts_text):
         good = ""
@@ -482,7 +577,7 @@ def _ai(facts: dict, recent_ideas: list[str], think=None) -> tuple[str, list[dic
         t, w = str(i.get("title") or "").strip()[:80], str(i.get("why") or "").strip()[:300]
         if t and _grounded(t + " " + w, facts_text):
             ideas.append({"title": t, "why": w, "href": "", "machine": ""})
-    return good, ideas[:MAX_IDEAS]
+    return good, ideas                       # capped by the caller, after restatements go (1.3)
 
 
 def _norm_idea(t: str) -> str:
@@ -515,11 +610,17 @@ def _compose(about: date, now: datetime | None, *, think=None, ai: bool = True) 
     seen = box_settings.get(NS, SEEN, default={}) or {}
     worth, seen_after = _worth(rows_t, about, seen, meters)
     moving = _moving(rows_y)
+    week = _week(rows_y, about)                                           # the last 7 days (1.2)
+    # WHO TO ANSWER FIRST, BY NAME (#1953 step 1.5): as today's reporters name them, three at most.
+    first = [{"title": str(x.get("text") or "")[:80], "why": str(x.get("why") or "")[:160],
+              "href": str(x.get("href") or ""), "machine": str(r.get("title") or "")}
+             for r in rows_t for x in (r.get("answer_first") or []) if str(x.get("text") or "").strip()][:3]
     idea_log = {k: v for k, v in (box_settings.get(NS, IDEAS_SEEN, default={}) or {}).items()
                 if _days_since(v, about) < IDEA_DAYS}
     good, ideas = ("", [])
     if ai:
-        good, ideas = _ai(_facts(rows_y, rows_t, worth, moving), list(idea_log), think=think)
+        good, ideas = _ai(_facts(rows_y, rows_t, worth, moving, week), list(idea_log), think=think,
+                          business=_business(_ctx(), t))
         ideas = [i for i in ideas if _norm_idea(i["title"]) not in idea_log]
     welcome, learned, aims, coming = _is_first(about), [], [], []
     if welcome:
@@ -527,7 +628,7 @@ def _compose(about: date, now: datetime | None, *, think=None, ai: bool = True) 
         learned, coming = _learned(ctx), _coming(ctx, t)
         aims = [{"title": g[:1].upper() + g[1:], "why": "", "href": "", "machine": ""} for g in ctx.get("goals") or []]
         if ai:
-            w_good, w_aims, w_ideas = _welcome_ai(ctx, _installed(), _facts(rows_y, rows_t, worth, moving),
+            w_good, w_aims, w_ideas = _welcome_ai(ctx, _installed(), _facts(rows_y, rows_t, worth, moving, week),
                                                   think=think)
             good, aims = (w_good or good), (w_aims or aims)
             ideas = [i for i in w_ideas if _norm_idea(i["title"]) not in idea_log] or ideas
@@ -535,19 +636,58 @@ def _compose(about: date, now: datetime | None, *, think=None, ai: bool = True) 
             name = str(ctx.get("name") or "").strip()
             good = (f"Welcome to your box{', ' + name if name else ''}. Here is what it knows so far, and where it "
                     "will help.")
+    # NEVER THE TO-DO LIST AGAIN (1.3), and the cap comes AFTER: capped first, two restatements cost two of three slots.
+    ideas = [i for i in ideas if not _restates(i, worth)][:MAX_IDEAS]
     if not good and moving:
         good = _plain_good_news(moving)                                     # plain, true, and never a zero
     m = _morning(about, now)
     brief = {
         "about": about.isoformat(), "date_label": _label(m), "quote": _quote(m),
-        "good_news": good, "worth": worth, "moving": moving, "ideas": ideas, "numbers": _numbers(rows_y),
+        "good_news": good, "worth": worth, "first": first, "moving": moving, "ideas": ideas,
+        "numbers": _numbers(rows_y),
         "welcome": welcome, "learned": learned, "aims": aims, "coming": coming,
-        "ideas_from": "ai" if ideas else "", "empty": not (worth or moving or ideas or learned or aims or coming),
+        "ideas_from": "ai" if ideas else "", "empty": not (worth or first or moving or ideas or learned or aims or coming),
         "link": report.page_url(about), "built_at": state._now(),
     }
     for i in ideas:
         idea_log[_norm_idea(i["title"])] = about.isoformat()
     return brief, seen_after, idea_log
+
+
+# ── WHAT EACH PERSON CHOSE NOT TO SEE (#1953 step 1.6, the first of the per-person controls, §4b) ──────────────────
+# Owner, 2026-10-04: "Please ensure that the morning review has the capability for per user controls, where they can
+# change what they want to see." Stored per person in box_settings (which already scopes by user), applied to the page
+# and to their email (OSDev1's recommendation), and never to Slack, which is everyone's. "See everything" undoes it for
+# one look; "Show again" undoes it for good.
+HIDDEN = "review.hidden"
+
+
+def section_keys() -> tuple:
+    from core import review_email
+    return tuple(k for k, _ in review_email.SECTIONS)
+
+
+def hidden_for(user_id) -> set:
+    """The sections this person hid. Empty for nobody (a token, a send with no owner). Never raises."""
+    if not user_id:
+        return set()
+    try:
+        from core import box_settings
+        got = box_settings.get(NS, HIDDEN, user_id=str(user_id), default=[]) or []
+        return {k for k in got if k in section_keys()}
+    except Exception:                                    # noqa: BLE001 — a preference never breaks the review
+        return set()
+
+
+def set_hidden(user_id, key: str, hide: bool) -> bool:
+    """Hide or show one section for one person. False for no person or a section that doesn't exist."""
+    if not user_id or key not in section_keys():
+        return False
+    from core import box_settings
+    now = hidden_for(user_id)
+    now = (now | {key}) if hide else (now - {key})
+    box_settings.put(NS, HIDDEN, sorted(now), user_id=str(user_id), set_by=str(user_id))
+    return True
 
 
 def _remember(seen_after: dict, idea_log: dict) -> None:

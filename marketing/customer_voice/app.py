@@ -575,6 +575,24 @@ a.row:active{background:var(--hair);border-radius:10px}
   -webkit-appearance:none}
 .find button{flex:none;border:0;background:transparent;color:var(--accent);font:inherit;
   font-size:calc(15.5 * var(--px, 1px));font-weight:var(--w-strong);padding:8px 0 8px 4px;cursor:pointer}
+/* THE MESSAGES PAGE'S OWN HEADER (owner, 2026-10-05: "integrating the search into the upper area", like Gmail).
+   On a mobile the search is a pill in the bar beside the menu, and the card above the list is not drawn, so the first
+   conversation sits a card higher. The bar is hidden from 821px, so the card comes back there: one search at every
+   width, never two (the desktop half is in the 821px block below). 48px tall and 16px type, the box's mobile floor. */
+.find-wide{display:none}
+/* ...AND THE SENTENCE UNDER IT IS ONE LINE, NOT A CARD: `.quiet` pads a block 18px above and below, which on this
+   screen was 36px of air between the bar and the first conversation for one line of text. */
+.quiet.sum{margin:0;padding:12px 2px 0}
+.quiet.sum+.find-wide+.pills{margin-top:10px}
+.bar.bar-find{border-bottom-color:transparent}
+.barfind{flex:1;min-width:0;display:flex;align-items:center;gap:10px;min-height:48px;padding:0 16px;
+  background:var(--surface);border-radius:999px;box-shadow:var(--lift)}
+.barfind svg{flex:none;display:block;color:var(--dimmer)}
+.barfind input{flex:1;min-width:0;border:0;background:transparent;color:var(--ink);font:inherit;
+  font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 0;-webkit-appearance:none}
+.barfind input:focus{outline:2px solid var(--accent-line);outline-offset:1px;border-radius:4px}
+.barfind input::placeholder{color:var(--dimmer)}
+.barfind input::-webkit-search-decoration,.barfind input::-webkit-search-cancel-button{-webkit-appearance:none}
 /* QUIETER THAN THE RESULTS IT COUNTS. Set at 14.5px first and the "Show everything" link wrapped
    onto its own line reading like the next thing to do — the loudest thing on a screen whose job is
    the rows underneath it. */
@@ -649,6 +667,10 @@ a.row:active{background:var(--hair);border-radius:10px}
      deleted rather than overridden — an overridden rule for a layout nobody renders is the dead
      code the next person has to reason about. */
   .ib .bar-in{max-width:none;padding-left:20px}
+  /* THE BAR IS HIDDEN FROM HERE, so the messages page's search comes back into the page (`_bar_find`), and the
+     summary over it gets back the room a desktop has. */
+  .find-wide{display:block}
+  .quiet.sum{padding-top:18px}
   /* THE LIST KEEPS A BOUNDED WIDTH AND LEAVES THE DEAD SPACE ON THE RIGHT, not in the middle.
      Two things decided this. A row stretched to the full 1008px put Len's whole message on one
      line — the two-line preview the owner asked for only reads as two lines while the column is
@@ -1411,7 +1433,7 @@ def _trail(path: str) -> str:
         return ""
 
 
-def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> str:
+def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False, bar: str = "") -> str:
     brand = dash.brand()
     # HIS CHOICE IS STAMPED ON <html>. No stamp means he has never chosen, and that renders
     # WHITE — the OS is not consulted (owner, 2026-09-16: white screens first and foremost).
@@ -1442,8 +1464,8 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False) -> s
 <title>{_esc(brand)} · {APP_TITLE}</title>{_look.head_tags()}<style>{CSS}</style></head>
 <body{' class="ib"' if wide else ''}>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
-<div class="bar"><div class="bar-in">{_menu_button()}
-<span class="brand">{APP_TITLE}</span></div></div>
+<div class="bar{' bar-find' if bar else ''}"><div class="bar-in">{_menu_button()}
+{bar or f'<span class="brand">{APP_TITLE}</span>'}</div></div>
 <label class="scrim" for="navtoggle" aria-label="Close menu"></label>
 <div class="lay">{_rail(here or request.path)}
 <main class="main"><div class="wrap">{_trail(here or request.path)}{body}</div></main></div>
@@ -2062,13 +2084,13 @@ def _head(n: int, drafts: int = -1) -> str:
         return '<h1 class="vh">Inbox</h1>'
     if n == 0:
         return ('<h1 class="vh">Inbox</h1>'
-                '<p class="quiet" style="margin:2px 0 0">Nobody is waiting on you.</p>')
+                '<p class="quiet sum">Nobody is waiting on you.</p>')
     who = "1 person is" if n == 1 else f"{n} people are"
     # AND WHAT THE BOX HAS READY FOR THEM (owner, 2026-09-29, his target composition): "4 people are
     # waiting on a reply · 6 drafts ready to send". Said only when there is at least one.
     ready = ("" if drafts < 1 else
              f' · <b>{"1 draft" if drafts == 1 else f"{drafts} drafts"}</b> ready to send')
-    return (f'<h1 class="vh">Inbox</h1><p class="quiet" style="margin:2px 0 0">'
+    return (f'<h1 class="vh">Inbox</h1><p class="quiet sum">'
             f'<b class="warn">{who}</b> waiting on a reply{ready}.</p>')
 
 
@@ -2154,6 +2176,35 @@ def _find(q: str, channel: str, waiting: bool = False, from_ad: bool = False) ->
             'autocapitalize="none" spellcheck="false" enterkeyhint="search" '
             'aria-label="Search every conversation">'
             '<button type="submit">Search</button></form>')
+
+
+def _bar_find(q: str, channel: str, waiting: bool = False, from_ad: bool = False) -> str:
+    """THE MESSAGES PAGE'S OWN HEADER: the search, in the bar, the way Gmail does it.
+
+    Owner, 2026-10-05, on the messages page at 390px: "we need to figure out a better header and a way that we can
+    hide that terrible looking search box that takes up so much space. You can see that Gmail save a ton of space by
+    integrating the search into the upper area and then the first message is way higher on the screen. We should do
+    that for just the messages page" and "Our inbox should have a different header than the rest".
+
+    So on a mobile the bar's title gives way to one search pill beside the menu, and the card that sat under the
+    summary is gone: the first conversation moves up by the card's height. Every other screen keeps its title. The
+    bar is mobile-only, so a desktop keeps `_find` in the page (wrapped in `.find-wide`, which shows only there).
+
+    The same GET form as `_find`, filters riding as hidden fields; no Search button, because the keyboard's own
+    Search key submits it (`enterkeyhint`), and Gmail's pill has none either. A screen reader still gets a button.
+    """
+    keep = (f'<input type="hidden" name="channel" value="{_esc(channel)}">' if channel else "")
+    keep += '<input type="hidden" name="waiting" value="1">' if waiting else ""
+    keep += '<input type="hidden" name="from_ad" value="1">' if from_ad else ""
+    return ('<form class="barfind" method="get" action="/inbox/inbox" role="search">'
+            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="1.9" stroke-linecap="round" aria-hidden="true">'
+            '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.2 4.2"/></svg>'
+            f'{keep}<input type="search" name="q" id="qb" value="{_esc(q)}" '
+            'placeholder="Search messages" autocomplete="off" '
+            'autocapitalize="none" spellcheck="false" enterkeyhint="search" '
+            'aria-label="Search every conversation">'
+            '<button type="submit" class="vh">Search</button></form>')
 
 
 PAGE = 50            # what the store is asked for, and what a page holds
@@ -2445,7 +2496,7 @@ def r_inbox():
         # the filter that emptied the screen, and a control that disappears exactly when it is
         # needed is the same bug as one that was never there.
         _n = _counts(space)
-        top = (_head(_n["waiting"]) + _find(q, channel, waiting, from_ad)
+        top = (_head(_n["waiting"]) + f'<div class="find-wide">{_find(q, channel, waiting, from_ad)}</div>'
                + _pills(_n, waiting, from_ad, q=q, channel=channel, space=space))
         rail = ""
         if page > 1:
@@ -2513,7 +2564,9 @@ def r_inbox():
         # WIDE ON THE EMPTIES TOO. Every branch above still draws the chip row, so a reader who
         # filtered to Instagram and found nothing must keep the rail that got them there —
         # otherwise the layout moves under them at the exact moment they need to change filter.
-        return _shell(_stopped_note() + body + _panels(), wide=True), 200
+        # THE BAR SEARCHES WHERE THE PAGE WOULD HAVE: only the branches above that drew `top`.
+        return _shell(_stopped_note() + body + _panels(), wide=True,
+                      bar=_bar_find(q, channel, waiting, from_ad) if body.startswith(top) else ""), 200
 
     # WHICH ROWS HAVE A REPLY READY — one query for the page, not one per row.
     try:
@@ -2581,7 +2634,8 @@ def r_inbox():
     # either side alone silently deletes a shipped feature.
     counts = _counts(space)
     return _shell(_stopped_note()
-                  + f'{_head(counts["waiting"], _drafts_ready(space))}{_find(q, channel, waiting, from_ad)}'
+                  + f'{_head(counts["waiting"], _drafts_ready(space))}'
+                  f'<div class="find-wide">{_find(q, channel, waiting, from_ad)}</div>'
                   f'{_pills(counts, waiting, from_ad, q=q, channel=channel, space=space)}'
                   f'{_hits(q, channel, len(convs), page=page, more=more)}'
                   f'<div class="card">{"".join(rows)}</div>'
@@ -2591,7 +2645,7 @@ def r_inbox():
                   # the owner set. The four empty states above render none of this.
                   + _NOTIFY_OFFER
                   + f'<script>{_push_client_js()}</script><script>{_NOTIFY_JS}</script>',
-                  wide=True), 200
+                  wide=True, bar=_bar_find(q, channel, waiting, from_ad)), 200
 
 
 def _panels() -> str:

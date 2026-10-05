@@ -118,6 +118,11 @@ def _check_setting(name: str, how: str, value) -> dict:
             site, _host = app._site(str(value or ""))
             if not site:
                 raise Refused("Give the website's address, like https://example.com.")
+            from core import business_context               # the business's website, kept in core (#1957 C5)
+            try:
+                site = business_context.clean_website(site)
+            except ValueError as e:
+                raise Refused(str(e)) from e
             return {"setting": SCALARS[name], "change": "set to", "value": site}
         if name == "weekly_cap":
             if how != "set":
@@ -376,18 +381,15 @@ def _run(detail: dict) -> dict:
             if name == "site_url":
                 from . import app
                 site, host = app._site(checked["value"])
-                box_settings.put(settings.MACHINE, "site_url", site, set_by=SET_BY)
-                box_settings.put(settings.MACHINE, "host", host, set_by=SET_BY)
+                settings.store("site_url", site, by=SET_BY)
+                settings.store("host", host, by=SET_BY)
             elif name == "weekly_cap":
-                box_settings.put(settings.MACHINE, name, checked["value"], set_by=SET_BY)
+                settings.store(name, checked["value"], by=SET_BY)
             else:
                 now = _list_now(name)
                 item = checked["value"]
                 new = now + [item] if how == "add" else [x for x in now if x.lower() != item.lower()]
-                if new:
-                    box_settings.put(settings.MACHINE, name, new, set_by=SET_BY)
-                else:
-                    box_settings.clear(settings.MACHINE, name)
+                settings.store(name, new, by=SET_BY)
             return {"ok": True, "text": f"{checked['setting']}: {checked['change']} {checked['value']}. "
                                         "The AEO Machine uses it from its next article."}
     except (Refused, plan.Rejected) as e:

@@ -66,8 +66,45 @@ def get() -> dict:
     Never raises: `box_settings.get` is built not to, because a settings store that throws takes
     down the thing it was meant to configure.
     """
-    return {key: box_settings.get(MACHINE, key, default=default)
-            for key, default in DEFAULTS.items()}
+    s = {key: box_settings.get(MACHINE, key, default=default)
+         for key, default in DEFAULTS.items()}
+    # THE WEBSITE AND COMPETITORS ARE THE BUSINESS'S (#1957 C5; owner, 2026-10-04: "Add-on machines should draw
+    # from it instead of gathering their own"). They are read from core's business context, which falls back to
+    # this machine's old keys while it has nothing of its own, so a box that never saved there reads exactly what
+    # it read before. A store that can't be read leaves the old keys' values: never an empty website.
+    try:
+        from core import business_context
+        ctx = business_context.get()
+        s["site_url"] = ctx.get("website") or ""
+        s["competitors"] = list(ctx.get("competitors") or [])
+    except Exception:                                   # noqa: BLE001 — settings never raise
+        pass
+    return s
+
+
+# The two settings the business context keeps, and its name for each.
+SHARED = {"site_url": "website", "competitors": "competitors"}
+
+
+def store(name: str, value, *, by: str) -> None:
+    """The one writer for this machine's settings. EMPTY MEANS "BACK TO THE DEFAULT": the row is cleared rather
+    than pinning "" over a default that may change (core/box_settings.py `clear`).
+
+    The website and competitors go to the business context (core), never a copy here. Emptied, this machine's old
+    key is cleared too, or the context would read the old value back through it. Raises ValueError with a sentence
+    when the context refuses a value."""
+    if name not in DEFAULTS:
+        raise RuntimeError(f"{name} is not one of settings.py's keys")
+    if name in SHARED:
+        from core import business_context
+        business_context.put(SHARED[name], value or ([] if name == "competitors" else ""), by=by)
+        if value in ("", [], None):
+            box_settings.clear(MACHINE, name)
+        return
+    if value in ("", [], None):
+        box_settings.clear(MACHINE, name)
+    else:
+        box_settings.put(MACHINE, name, value, set_by=by)
 
 
 # How a list may arrive when it was saved as one string (a textarea, an older save, a hand-set

@@ -148,6 +148,14 @@ line-height:1.28;letter-spacing:-.005em;color:var(--ink);text-wrap:balance}
 .mr-sec h2{margin:0 0 2px;font-size:calc(13 * var(--px, 1px));font-weight:600;letter-spacing:.14em;
 text-transform:uppercase;color:var(--ink-3)}
 .mr-sec ol{list-style:none;margin:0;padding:0}
+.mr-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.mr-h h2{margin:0}
+.mr-hide{margin:0}
+.mr-hide button{min-height:48px;min-width:48px;margin:-15px 0;padding:0 2px 0 12px;border:0;background:none;color:var(--ink-3);
+font:inherit;font-size:calc(14 * var(--px, 1px));cursor:pointer}
+.mr-hide button:hover,.mr-hide button:focus-visible{color:var(--ink)}
+.mr-hid{margin:30px 0 0;color:var(--ink-3);font-size:calc(15 * var(--px, 1px))}
+.mr-hid a{color:var(--link);font-weight:600}
 .mr-sec li{display:grid;grid-template-columns:34px minmax(0,1fr);padding:14px 0;border-bottom:1px solid var(--hairline)}
 .mr-sec li:last-child{border-bottom:0}
 .mr-n{font-size:calc(14 * var(--px, 1px));color:var(--ink-3);padding-top:2px;font-variant-numeric:tabular-nums}
@@ -569,7 +577,7 @@ def body(v: dict, *, action: str = "/app/review", heading: str = "Morning Review
 _LOCAL = re.compile(r"^/(?![/\\])[^\s\\]*$")
 
 
-def _brief_items(heading: str, items: list, *, moving: bool = False) -> str:
+def _brief_items(heading: str, items: list, *, moving: bool = False, control: str = "") -> str:
     """One numbered list, or nothing at all when it is empty: no heading over an empty list (owner,
     2026-09-29: "If a line doesn't have data, it should not be displayed")."""
     rows = []
@@ -593,20 +601,44 @@ def _brief_items(heading: str, items: list, *, moving: bool = False) -> str:
                     + (f'<span class="mr-m">{_esc(machine)}</span>' if machine else "") + '</div></li>')
     if not rows:
         return ""
-    return f'<section class="mr-sec"><h2>{_esc(heading)}</h2><ol>{"".join(rows)}</ol></section>'
+    head = (f'<div class="mr-h"><h2>{_esc(heading)}</h2>{control}</div>' if control else f'<h2>{_esc(heading)}</h2>')
+    return f'<section class="mr-sec">{head}<ol>{"".join(rows)}</ol></section>'
 
 
-def brief_html(b: dict | None, *, live: bool, first: str = "") -> str:
+def _hide_button(key: str, back: str, *, show: bool = False) -> str:
+    """One section's own switch, for the person looking. A plain POST form, so it works before any script."""
+    return ('<form class="mr-hide" method="post" action="/app/review/hide">'
+            f'<input type="hidden" name="section" value="{_esc(key)}">'
+            f'<input type="hidden" name="back" value="{_esc(back)}">'
+            + ('<input type="hidden" name="show" value="1">' if show else "")
+            + f'<button type="submit">{"Show again" if show else "Hide"}</button></form>')
+
+
+def brief_html(b: dict | None, *, live: bool, first: str = "", hidden=frozenset(), show_all: bool = False,
+               back: str = "") -> str:
     """The light page: the day's quote, a morning drawn small, the good news, then what is worth his time,
-    what is already moving and ideas to try. Exactly the words of core/review_brief.py's contract."""
+    what is already moving and ideas to try. Exactly the words of core/review_brief.py's contract.
+
+    THE SECTIONS ARE THE EMAIL'S (`review_email.SECTIONS`), one list for both, so a section can never be on one
+    and missing from the other. `back` is set when someone is signed in: each section then carries its own Hide,
+    and what they hid stays off until "See everything" (one look) or "Show again" (for good)."""
     if not b:
         return ""
-    lists = (_brief_items("What your box learned about you", b.get("learned"))
-             + _brief_items("Your goals, and how your box helps", b.get("aims"))
-             + _brief_items("What's coming", b.get("coming"))
-             + _brief_items("Worth your time today", b.get("worth"))
-             + _brief_items("Already moving", b.get("moving"), moving=True)
-             + _brief_items("Ideas to try", b.get("ideas")))
+    from core import review_email
+    lists, gone = "", 0
+    for key, heading in review_email.SECTIONS:
+        items = b.get(key) or []
+        if key in hidden and not show_all:
+            gone += bool(items)
+            continue
+        control = _hide_button(key, back, show=key in hidden) if back else ""
+        lists += _brief_items(heading, items, moving=key == "moving", control=control)
+    foot = ""
+    if back and hidden and not show_all:
+        noun = "section" if len(hidden) == 1 else "sections"
+        foot = (f'<p class="mr-hid">You hid {len(hidden)} {noun}'
+                + (f", and {gone} had something today" if gone else "")
+                + f'. <a href="{_esc(back)}?all=1">See everything</a></p>')
     good = str(b.get("good_news") or "").strip()
     # `first` IS DAY ONE'S SENTENCE, from report.view: no report yet, and when the first one comes.
     quiet = "" if lists else (
@@ -620,7 +652,7 @@ def brief_html(b: dict | None, *, live: bool, first: str = "") -> str:
             + (f'<p class="mr-quote">&ldquo;{_esc(quote)}&rdquo;</p>' if quote else "")
             + _SCENE + (f'<p class="mr-good">{_esc(good)}</p>' if good else "")
             + _numbers_html(b.get("numbers"))
-            + '</section>' + lists + quiet + sign + '</div>')
+            + '</section>' + lists + quiet + sign + foot + '</div>')
 
 
 def _numbers_html(nums) -> str:
@@ -658,7 +690,8 @@ def _stored_brief(day: str) -> bool:
         return False
 
 
-def render(day: str, now: datetime | None = None, *, live: bool | None = None) -> tuple[str, int]:
+def render(day: str, now: datetime | None = None, *, live: bool | None = None, viewer: str | None = None,
+           show_all: bool = False) -> tuple[str, int]:
     """The page for one day, in the dash chrome. ONE read — `report.view` — which has already
     decided live/final/stale, built the picker and counted what needs him."""
     v = report.view(day, now)
@@ -667,7 +700,11 @@ def render(day: str, now: datetime | None = None, *, live: bool | None = None) -
     # needs him now), so drawing one showed today's list under that day's date (OSDev1's review of #1782). A
     # day with no stored brief says so plainly, above its numbers; with no numbers either, it is the 404.
     b = _brief_for(day, live, now) if (live or _stored_brief(day)) else None
-    page = brief_html(b, live=live, first="" if v["exists"] or v["days"][1:] else str(v.get("empty_line") or ""))
+    from core import review_brief as _rb
+    page = brief_html(b, live=live, first="" if v["exists"] or v["days"][1:] else str(v.get("empty_line") or ""),
+                      hidden=_rb.hidden_for(viewer), show_all=show_all,
+                      back=("/app/review" if live and day == report.today().isoformat() else f"/app/review/{day}")
+                      if viewer else "")
     if not page:                                 # no brief to draw: the numbers page, as it was
         page, status = body(v, show_money=_dash.privileged(), box=True)
         if not live and v["exists"]:
@@ -766,7 +803,7 @@ def review_live():
     day = (request.args.get("day") or "").strip()
     if day:
         return redirect(f"/app/review/{day}")
-    body, status = render(report.today().isoformat())
+    body, status = render(report.today().isoformat(), viewer=_viewer(), show_all=request.args.get("all") == "1")
     return body, status
 
 
@@ -776,8 +813,37 @@ def review_day(day: str):
     if refused is not None:
         return refused
     # TODAY'S OWN ADDRESS IS THE LIVE PAGE (the day picker offers today first): its brief is this morning's.
-    body, status = render(day, live=True if day == report.today().isoformat() else None)
+    body, status = render(day, live=True if day == report.today().isoformat() else None, viewer=_viewer(),
+                          show_all=request.args.get("all") == "1")
     return body, status
+
+
+def _viewer() -> str | None:
+    """Who is looking, when someone signed in is: their choices are theirs. A token sees everything, unchanged."""
+    try:
+        u = _dash.session_user(request)
+        return str(u["id"]) if u and u.get("id") else None
+    except Exception:                            # noqa: BLE001 — no session table is nobody
+        return None
+
+
+_BACK = re.compile(r"^/app/review(/\d{4}-\d{2}-\d{2})?$")
+
+
+@blueprint.post("/app/review/hide")
+def review_hide():
+    """Hide or show one section of the Morning Review, for the person signed in (#1953 step 1.6)."""
+    refused = _admit()
+    if refused is not None:
+        return refused
+    who = _viewer()
+    if not who:
+        return "Sign in to choose what your Morning Review shows.", 403
+    from core import review_brief as _rb
+    if not _rb.set_hidden(who, (request.form.get("section") or "").strip(), request.form.get("show") != "1"):
+        return "That section doesn't exist.", 400
+    back = (request.form.get("back") or "").strip()
+    return redirect(back if _BACK.match(back) else "/app/review", code=303)
 
 
 @blueprint.get("/dash/review")

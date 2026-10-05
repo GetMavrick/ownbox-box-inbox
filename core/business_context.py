@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import html as _html
 import json
+import os
 import re
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -456,8 +457,146 @@ def scan_if_needed() -> dict:
     return {"status": "found" if out.get("ok") else "none", "why": out.get("why", "")}
 
 
+# ── C3: the full scan ─────────────────────────────────────────────────────────────────────────────────────────────
+# Once a website is known (typed, confirmed, or the AEO Machine's), the box reads it: the home page and up to five
+# pages likeliest to hold facts (core/site_reader.py, no model), then ONE reasoning call that answers with sentence
+# numbers only. Each profile line is a sentence from the business's own site, word for word, with its page. A field
+# the site doesn't state stays empty. The profile is stored here and written to my/knowledge/business-profile.md,
+# which every call that is not isolated already carries (core/brain.py, _with_knowledge): the Morning Review's ideas,
+# the AEO writer and the Inbox's drafter among them. Plans ("What's coming") are never in it: they are the owner's,
+# and the Inbox drafter writes to customers.
+PROFILE_FILE = "business-profile.md"
+FULL_SCAN_TRIES = 3
+PROFILE_PER_FIELD = 6
+PROFILE_FIELDS = (                                       # (field, heading, what the model looks for)
+    ("sells", "What you sell", "what it sells: products, services, treatments, classes, packages"),
+    ("prices", "What it costs", "what something costs"),
+    ("customers", "Who it's for", "who its customers are"),
+    ("area", "Where", "where it is, or the area it serves"),
+    ("hours", "When you're open", "when it is open"),
+    ("different", "What makes you different", "what makes it different: experience, credentials, guarantees, "
+                                                "policies"),
+)
+SCAN_SYSTEM = (
+    "You read numbered sentences from a business's own website and say which sentences state each of these about "
+    "the business: " + "; ".join(f"{k} ({what})" for k, _, what in PROFILE_FIELDS) + ". Skip slogans, opinions, "
+    "testimonials, calls to action, cookie and legal notices, and anything about other companies. Answer with JSON "
+    "only: {" + ", ".join(f'"{k}": [sentence numbers]' for k, _, _ in PROFILE_FIELDS) + f"}}, at most "
+    f"{PROFILE_PER_FIELD} per field, most useful first, an empty list when the site doesn't say. Never write a "
+    "sentence of your own.")
+
+
+def _picks(raw: str, numbered: list) -> list[dict]:
+    """The model's answer -> profile lines. Anything that isn't a valid sentence number is dropped, never used as
+    text, so a line can only ever be a sentence from the site."""
+    try:
+        got = json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+    except (ValueError, AttributeError, TypeError):
+        return []
+    if not isinstance(got, dict):
+        return []
+    out, used = [], set()
+    for field, _, _ in PROFILE_FIELDS:
+        n = 0
+        for p in got.get(field) or []:
+            try:
+                i = int(p)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= i <= len(numbered) and (field, i) not in used and n < PROFILE_PER_FIELD:
+                used.add((field, i))
+                n += 1
+                out.append({"line": numbered[i - 1][0], "source": numbered[i - 1][1], "field": field})
+    return out
+
+
+def profile_text(profile: list[dict], site: str, day: str) -> str:
+    """The profile as my/knowledge/business-profile.md: a heading per field, each line with its page."""
+    parts = ["# Your business, from your own website", "",
+             f"Read from {site} on {day}. Every line below is a sentence from the business's own site, word for "
+             "word, with the page it came from."]
+    for field, heading, _ in PROFILE_FIELDS:
+        lines = [x for x in profile if x.get("field") == field]
+        if lines:
+            parts += ["", f"## {heading}"] + [f"- {x['line']} ({x['source']})" for x in lines]
+    return "\n".join(parts)
+
+
+def full_scan(site: str | None = None, *, think=None, fetch=None) -> dict:
+    """C3. Read the business's website and keep what it says, quoted. -> {"ok", "why", "lines", "wait"?, "final"?}.
+    `wait` means nothing was tried (no AI yet): no try is spent. `final` means the site was read and says nothing
+    the box could quote: trying again won't change that. `think` and `fetch` are for tests. Never raises."""
+    try:
+        site = str(site or website() or "")
+        if not site:
+            return {"ok": False, "why": "There is no website yet.", "lines": 0, "wait": True}
+        if think is None:
+            if os.environ.get("AIOS_HERMETIC_TEST"):
+                return {"ok": False, "why": "No AI in a test.", "lines": 0, "wait": True}
+            from core import brain
+            ready, why = brain.can_think()
+            if not ready:
+                return {"ok": False, "why": f"The box can't think yet: {why}", "lines": 0, "wait": True}
+            think = brain.think
+        from core import site_reader
+        got = site_reader.numbered(site, fetch=fetch)
+        numbered = got["sentences"]
+        if got["status"] == "no_answer":
+            return {"ok": False, "why": f"Your website, {site}, didn't answer. The box tries again later.", "lines": 0}
+        if not numbered:
+            return {"ok": False, "final": True, "lines": 0,
+                    "why": "Your website has no sentences the box could read. It may be built only with images or "
+                           "scripts."}
+        listing = "\n".join(f"{i}. {s}" for i, (s, _) in enumerate(numbered, 1))
+        raw = think(task="business.full_scan", system=SCAN_SYSTEM, max_tokens=500, timeout=120, isolated=True,
+                    prompt=f"Website: {site}\n\nSentences, numbered:\n{listing}\n\nWhich numbers state each?",
+                    job_id=f"business-scan:{bare_host(site)}")
+        profile = put("profile", _picks(raw, numbered), by="full scan")
+        from core import brain
+        if not profile:                                  # nothing old stays behind as if the site still said it
+            brain.write_knowledge(PROFILE_FILE, f"The box read {site} on {_now()[:10]} and found nothing it could "
+                                                "quote about the business.", made_from="your own website")
+            return {"ok": False, "final": True, "lines": 0,
+                    "why": "The box read your website and found no sentence about the business it could quote."}
+        brain.write_knowledge(PROFILE_FILE, profile_text(profile, site, _now()[:10]), made_from="your own website")
+        log.info("business.full_scanned", site=bare_host(site), pages=len(got["pages"]), lines=len(profile))
+        return {"ok": True, "why": "", "lines": len(profile)}
+    except Exception as e:                               # noqa: BLE001 — a scan that fails says so, never raises
+        log.warning("business.full_scan_failed", error=f"{type(e).__name__}: {e}"[:200])
+        return {"ok": False, "why": "The box couldn't read the website just now.", "lines": 0}
+
+
+def full_scan_if_needed() -> dict:
+    """The worker's periodic: read a website once it is known, and again only when it changes. At most
+    FULL_SCAN_TRIES tries per website; a try counts only when the box could think."""
+    site = website()
+    if not site:
+        return {"status": "no_website"}
+    last = box_settings.get(NS, "_full_scan", default={}) or {}
+    same = isinstance(last, dict) and last.get("site") == site
+    if same and last.get("status") == "done":
+        return {"status": "done"}
+    tries = int(last.get("tries") or 0) if same else 0
+    if tries >= FULL_SCAN_TRIES:
+        return {"status": "gave_up"}
+    out = full_scan(site)
+    if out.get("wait"):
+        return {"status": "waiting", "why": out.get("why", "")}
+    status = "done" if out.get("ok") or out.get("final") else "none"
+    box_settings.put(NS, "_full_scan", {"site": site, "tries": tries + 1, "status": status, "at": _now(),
+                                        "lines": out.get("lines", 0), "why": out.get("why", "")}, set_by="full scan")
+    return {"status": status, "why": out.get("why", "")}
+
+
+def full_scan_state() -> dict:
+    """For the screen: {"site", "status", "at", "lines", "why"} of the last full scan, or {}."""
+    last = box_settings.get(NS, "_full_scan", default={}) or {}
+    return last if isinstance(last, dict) and last.get("site") == website() else {}
+
+
 try:
     from core.worker import register_periodic
     register_periodic(scan_if_needed, interval_s=1800, name="business_light_scan")
+    register_periodic(full_scan_if_needed, interval_s=1800, name="business_full_scan")
 except Exception as e:  # noqa: BLE001 — importable without a worker (dispatch, tests, scripts)
     log.debug("business.no_worker", error=type(e).__name__)

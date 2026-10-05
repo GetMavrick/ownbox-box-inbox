@@ -103,7 +103,7 @@ calls = []
 def think_ok(task, prompt, **kw):
     calls.append((task, kw.get("timeout")))
     return json.dumps({"good_news": "Four reels went out yesterday, 4 in one day.",
-                       "ideas": [{"title": "Reply to the 2 people waiting", "why": "Both wrote yesterday."},
+                       "ideas": [{"title": "Share yesterday's 4 reels in your stories", "why": "You made 4."},
                                  {"title": "Double down: aim for 8 reels this week", "why": "You made 4."},
                                  {"title": "Give them a call back", "why": "2 people waiting."}]})
 
@@ -113,13 +113,13 @@ ok("one AI call, on the review task, with a bounded wait", calls == [("review", 
 ok("a grounded good-news sentence is kept", b["good_news"] == "Four reels went out yesterday, 4 in one day.",
    b["good_news"])
 titles = [i["title"] for i in b["ideas"]]
-ok("an idea naming a number from the facts is kept", "Reply to the 2 people waiting" in titles, titles)
+ok("an idea naming a number from the facts is kept", "Share yesterday's 4 reels in your stories" in titles, titles)
 ok("an idea with an INVENTED number (8) is dropped", not any("8" in t for t in titles), titles)
 ok("an idea using a reserved word is dropped", not any("call" in t.lower() for t in titles), titles)
 ok("ideas_from says the AI wrote them", b["ideas_from"] == "ai")
 
 b = review_brief.build(ABOUT, NOW, think=think_ok)
-ok("an idea suggested this week is not suggested again", "Reply to the 2 people waiting" not in
+ok("an idea suggested this week is not suggested again", "Share yesterday's 4 reels in your stories" not in
    [i["title"] for i in b["ideas"]], b["ideas"])
 
 b = review_brief.build(ABOUT, NOW, think=lambda *a, **k: json.dumps({"good_news": "You earned $9,999 yesterday."}))
@@ -142,7 +142,7 @@ ok("the page reads the stored brief", review_brief.for_page(ABOUT, NOW) == revie
 
 # ── 4. the brief's shape (the contract the app page reads) ───────────────────────────────────────────────────
 KEYS = {"about", "date_label", "quote", "good_news", "worth", "moving", "ideas", "ideas_from", "empty", "link",
-        "built_at", "numbers", "welcome", "learned", "aims", "coming"}
+        "built_at", "numbers", "welcome", "learned", "aims", "coming", "first"}
 b = review_brief.get(ABOUT)
 ok("the brief carries exactly the documented keys", set(b) == KEYS, set(b) ^ KEYS)
 ok("every item is {title, why, href, machine}",

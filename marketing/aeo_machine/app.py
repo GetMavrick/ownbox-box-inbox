@@ -292,13 +292,15 @@ def _save(form, *, user_id: str) -> None:
 
     # EMPTY MEANS "BACK TO THE DEFAULT", so an empty field clears the box's row rather than pinning
     # "" over a default that may change (core/box_settings.py `clear`).
+    # The website and competitors are checked by the business context first, so a value it refuses writes nothing.
+    try:
+        from core import business_context
+        if writes["site_url"]:
+            writes["site_url"] = business_context.clean_website(writes["site_url"])
+    except ValueError as e:
+        raise _Refused(str(e)) from e
     for name, value in writes.items():
-        if name not in settings.DEFAULTS:
-            raise RuntimeError(f"{name} is not one of settings.py's keys")
-        if value in ("", []):
-            box_settings.clear(settings.MACHINE, name)
-        else:
-            box_settings.put(settings.MACHINE, name, value, set_by=user_id)
+        settings.store(name, value, by=user_id)
     log.info("aeo.settings_saved", user=user_id)
 
 

@@ -20,107 +20,23 @@ from __future__ import annotations
 
 import json as _json
 import re
-from html.parser import HTMLParser
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
-from core import net
+from core import site_reader
 from core.logging import get_logger
+# The reader moved to core for the business's full scan (#1957 C3); these names stay so nothing that reads them moves.
+from core.site_reader import MAX_PAGES, PAGE_BYTES, MAX_SENTENCES, read, sentences  # noqa: F401
+from core.site_reader import pages_to_read as _pages_to_read  # noqa: F401
 
 log = get_logger(__name__)
 
-MAX_PAGES = 6                 # the home page and the five most likely to hold facts
-PAGE_BYTES = 1_000_000
-MAX_SENTENCES = 220           # what one prompt carries
 MAX_FACTS = 20
-MIN_WORDS, MAX_WORDS = 5, 45
-# Pages that usually hold facts, best first: what it sells, what it costs, who it is, how it works.
-LIKELY = ("pricing", "price", "services", "service", "treatments", "menu", "about", "faq", "how-it-works",
-          "team", "locations", "location", "contact", "hours", "plans", "products")
-_SKIP_TAGS = {"script", "style", "noscript", "svg", "template", "head", "iframe", "nav"}   # a menu is links, not facts
-_BLOCK = {"p", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6", "br", "section", "article", "td", "th", "tr",
-          "dd", "dt", "blockquote", "header", "footer", "main", "summary", "details", "figcaption"}
 _NUMBER = re.compile(r"\$?\d[\d,]*(?:\.\d+)?")
-_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9$\"“])")
-
 SYSTEM = ("You pick sentences from a business's own website that state concrete facts about the business: what it "
           "offers, what things cost, who it is for, where and when it is open, how it works, its policies, its "
           "credentials and experience. Skip opinions, slogans, testimonials, calls to action, cookie and legal "
           "notices, and anything about other companies. Answer with JSON only: {\"picks\": [sentence numbers]}, "
           f"at most {MAX_FACTS}, most useful first. Never write a sentence of your own.")
-
-
-class _Text(HTMLParser):
-    """The words a person reads on the page, one block per line, and the page's links."""
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.parts, self.links, self._skip = [], [], 0
-
-    def handle_starttag(self, tag, attrs):
-        if tag in _SKIP_TAGS:
-            self._skip += 1
-        elif tag in _BLOCK:
-            self.parts.append("\n")
-        if tag == "a":
-            href = dict(attrs).get("href")
-            if href:
-                self.links.append(href)
-
-    def handle_endtag(self, tag):
-        if tag in _SKIP_TAGS and self._skip:
-            self._skip -= 1
-        elif tag in _BLOCK:
-            self.parts.append("\n")
-
-    def handle_data(self, data):
-        if not self._skip:
-            self.parts.append(data)
-
-
-def read(html: str) -> tuple[str, list[str]]:
-    """(the page's readable text, its links). Never raises on a strange page."""
-    p = _Text()
-    try:
-        p.feed(str(html or ""))
-        p.close()
-    except Exception:                                         # noqa: BLE001 — half a page is still a page
-        pass
-    lines = [" ".join(line.split()) for line in "".join(p.parts).split("\n")]
-    return "\n".join(line for line in lines if line), p.links
-
-
-def sentences(text: str) -> list[str]:
-    """Each readable sentence, 5 to 45 words, in page order, each once."""
-    out, seen = [], set()
-    for line in str(text or "").split("\n"):
-        for s in _SPLIT.split(line):
-            s = s.strip()
-            n = len(s.split())
-            if MIN_WORDS <= n <= MAX_WORDS and s.lower() not in seen:
-                seen.add(s.lower())
-                out.append(s)
-    return out
-
-
-def _pages_to_read(site: str, home_links: list[str]) -> list[str]:
-    """The home page, then up to five pages on the same site, the likeliest to hold facts first."""
-    host = (urlsplit(site).hostname or "").lower().removeprefix("www.")
-    found = []
-    for href in home_links:
-        u = urljoin(site.rstrip("/") + "/", href.split("#")[0])
-        parts = urlsplit(u)
-        if parts.scheme not in ("http", "https") or (parts.hostname or "").lower().removeprefix("www.") != host:
-            continue
-        clean = f"{parts.scheme}://{parts.hostname}{parts.path.rstrip('/') or '/'}"
-        if clean not in found and clean.rstrip("/") != site.rstrip("/"):
-            found.append(clean)
-
-    def rank(u: str) -> tuple:
-        path = urlsplit(u).path.lower()
-        hit = next((i for i, w in enumerate(LIKELY) if w in path), len(LIKELY))
-        return (hit, path.count("/"), path)
-
-    return [site] + sorted(found, key=rank)[:MAX_PAGES - 1]
 
 
 def numbers_in(facts: list[str]) -> list[str]:
@@ -144,23 +60,13 @@ def draft(site_url: str, *, think=None, fetch=None) -> dict:
     """{"facts": [{"text", "page"}], "numbers": [...], "pages": [...]} or {"facts": [], "why": a sentence}.
 
     `think` and `fetch` are for tests; the box uses brain.think and net.fetch_public."""
-    fetch = fetch or (lambda u: net.fetch_public(u, max_bytes=PAGE_BYTES))
     site = str(site_url or "").strip()
     if not site.startswith(("https://", "http://")):
         return {"facts": [], "why": "There is no website address on AEO Settings yet."}
-    home = fetch(site)
-    if not home:
+    got = site_reader.numbered(site, fetch=fetch)
+    pages, numbered = got["pages"], got["sentences"]          # numbered: (sentence, page)
+    if got["status"] == "no_answer":
         return {"facts": [], "why": f"Your website, {site}, didn't answer, so nothing was drafted. Try again later."}
-    text, links = read(home)
-    pages, numbered = [], []                                   # numbered: (sentence, page)
-    for url in _pages_to_read(site, links):
-        page_text = text if url == site else read(fetch(url) or "")[0]
-        got = sentences(page_text)
-        if got:
-            pages.append(url)
-        for s in got:
-            if len(numbered) < MAX_SENTENCES and all(s.lower() != x.lower() for x, _ in numbered):
-                numbered.append((s, url))
     if not numbered:
         return {"facts": [], "why": "Your website has no sentences the box could read. It may be built only with "
                                     "images or scripts. Add your facts on AEO Settings instead."}

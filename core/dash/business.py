@@ -19,6 +19,7 @@ one card pointing here. It can be dismissed, and dismissed stays dismissed (the 
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit
 
 from flask import redirect, request
 
@@ -147,6 +148,32 @@ def _form(ctx: dict, errors: dict) -> str:
         + '</div><button type="submit">Save</button></form>')
 
 
+def _page(url: str) -> str:
+    """The page a line came from, as a person reads it: "pricing", or "home page"."""
+    path = urlsplit(str(url or "")).path.strip("/")
+    return path.rsplit("/", 1)[-1].replace("-", " ") or "home page"
+
+
+def _profile_card(ctx: dict) -> str:
+    """C3: what the business's own website says, each line quoted with the page it came from. '' until the box has
+    read the website (core/business_context.py, full_scan)."""
+    prof = [p for p in (ctx.get("profile") or []) if str(p.get("source") or "").startswith(("https://", "http://"))]
+    if not prof:
+        return ""
+    groups = []
+    for field, heading, _ in bc.PROFILE_FIELDS:
+        lines = [p for p in prof if p.get("field") == field]
+        if lines:
+            groups.append(f"<h3>{_esc(heading)}</h3>" + "".join(
+                f'<p>{_esc(p["line"])} <a href="{_esc(p["source"])}" target="_blank" rel="noopener nofollow">'
+                f'{_esc(_page(p["source"]))}</a></p>' for p in lines))
+    at = str(bc.full_scan_state().get("at") or "")[:10]
+    return ('<div class="card bz-read"><h2>What your website says</h2>'
+            f'<p class="bz-hint">Read from your website{" on " + _esc(at) if at else ""}. Each line is quoted from '
+            'your own site, with the page it came from. The box uses them when it writes for you.</p>'
+            + "".join(groups) + "</div>")
+
+
 def _read_only(ctx: dict) -> str:
     rows = []
     for key, label in (("website", "Website"), ("name", "Name"), ("industry", "Industry"), ("area", "Where"),
@@ -217,7 +244,8 @@ def box_business_screen():
     saved = ('<div class="card"><h2>Saved.</h2><p>Your next Morning Review starts from it.</p></div>'
              if request.args.get("saved") and not errors else "")
     body = f"<style>{_CSS}</style>" + saved + (
-        _suggestion_card(ctx) + _form(ctx, errors) if owner else _read_only(ctx)) + _back()
+        _suggestion_card(ctx) + _profile_card(ctx) + _form(ctx, errors) if owner
+        else _read_only(ctx) + _profile_card(ctx)) + _back()
     return chrome(DOOR, title=_TITLE, lede=_LEDE, body=body), (200 if not errors else 400)
 
 

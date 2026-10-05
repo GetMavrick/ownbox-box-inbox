@@ -614,7 +614,7 @@ def knowledge_context() -> str:
     return "\n\n".join(parts)
 
 
-def write_knowledge(name: str, text: str) -> bool:
+def write_knowledge(name: str, text: str, *, made_from: str = "your own sent mail") -> bool:
     """Write one generated file into my/knowledge/. `core` owns that folder, so `core` writes it.
 
     NAMED, AND ONLY ITS OWN FILE. Everything else in there is the buyer's — what he typed about
@@ -624,7 +624,7 @@ def write_knowledge(name: str, text: str) -> bool:
     try:
         KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
         (KNOWLEDGE_DIR / name).write_text(
-            "<!-- Written by your box from your own sent mail. Edit freely: this file is\n"
+            f"<!-- Written by your box from {made_from}. Edit freely: this file is\n"
             "     rewritten when the box learns again, so put anything you want kept in a\n"
             "     file of your own beside it. -->\n\n" + str(text).strip() + "\n")
         return True
