@@ -23,6 +23,7 @@ written for them: what happened, and where that is not obvious, what to do about
 from __future__ import annotations
 
 import json
+import re
 import os
 import pathlib
 import subprocess
@@ -671,9 +672,28 @@ def _work(row: dict, *, run_agent=None, sleep=time.sleep) -> dict:
             return fail(entry["reason"] + ".", source=cw.source, attempts=attempts, usage=usage,
                         failed=failed, steps=steps, outputs=outputs,
                         tools_used=_tools_used(seat_id))
-    said = " ".join((result.get("text") or "").split())[:400] or "It finished its shift."
+    said = plain_summary(result.get("text") or "") or "It finished its shift."
     return _receipt(row, "DONE", said, source=cw.source, started=started, attempts=attempts,
                     usage=usage, steps=steps, tools_used=_tools_used(seat_id), outputs=outputs)
+
+
+SUMMARY_MAX = 400
+_LINK = re.compile(r"\[([^\]\n]{1,200})\]\((https?://[^)\s]{1,500})\)")
+_MARKS = re.compile(r"(\*\*|__|`)")
+
+
+def plain_summary(text: str, limit: int = SUMMARY_MAX) -> str:
+    """A coworker's own account of its shift, as the owner's email reads it (owner, 2026-10-06, on a shift email that
+    showed `[October 5 report](https://…)` and `**…**` as typed and stopped mid-word at "is miss"): Markdown links read
+    as their words with the address after, emphasis marks go, and a long account ends at a whole word with "…"."""
+    t = " ".join(str(text or "").split())
+    t = _LINK.sub(lambda m: f"{m.group(1)} ({m.group(2)})", t)
+    t = _MARKS.sub("", t)
+    if len(t) <= limit:
+        return t
+    cut = t[: limit - 1]
+    cut = cut[: cut.rfind(" ")] if " " in cut else cut
+    return cut.rstrip(" ,;:-") + "…"
 
 
 def _tools_used(seat_id: str) -> list:

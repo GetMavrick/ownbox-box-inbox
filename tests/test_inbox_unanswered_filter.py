@@ -305,10 +305,10 @@ def test_a_box_that_runs_no_ads_is_offered_no_ad_filter():
     _talk("a", "Dana", [("in", "sink backing up")])
     app, c = _c()
     html_ = c.get("/inbox/inbox").get_data(as_text=True)
-    # "Leads" SINCE 2026-09-18, the owner's word. The filter is unchanged — still `from_ad`,
+    # "Prospects" SINCE 2026-10-06, the owner's word ("Leads" before). The filter is unchanged — still `from_ad`,
     # still the poller's ad id — so these assertions still guard the same behaviour and only the
     # label they look for moved.
-    ok("no ad pill is drawn", ">Leads<" not in html_)
+    ok("no ad pill is drawn", ">Prospects<" not in html_)
     ok("...but the filter row is still there for Unanswered", 'class="chips pills"' in html_)
     # STANDING IN IT ANYWAY, by a hand-typed URL: it must still say something true and offer a
     # way out, not render a bare empty list.
@@ -389,7 +389,7 @@ def test_the_two_filters_compose_rather_than_replacing_each_other():
     ok("the Unanswered pill can turn itself off while keeping the ad filter",
        'href="/inbox/inbox?from_ad=1">Unanswered' in pills, pills)
     ok("...and the ad pill likewise, keeping Unanswered",
-       'href="/inbox/inbox?waiting=1">Leads' in pills, pills)
+       'href="/inbox/inbox?waiting=1">Prospects' in pills, pills)
     ok("...and both read as pressed, not as one radio choice",
        pills.count('aria-pressed="true"') == 2, pills)
     ok("...with All offering to clear both", 'href="/inbox/inbox">All' in pills, pills)

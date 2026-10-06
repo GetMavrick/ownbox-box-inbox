@@ -89,8 +89,8 @@ ok("the day's quote leads, on its band", '<section class="mr-band"><p class="mr-
    'a bright start.&rdquo;</p>' in part, part[:300])
 ok("...with the morning it is read under the title", "Thursday · October 1, 2026" in page)
 ok("the good news follows the quote", part.index("mr-quote") < part.index("found seven new companies"))
-ok("then Worth your time today, Already moving and Ideas to try, in that order",
-   0 < part.index("Worth your time today") < part.index("Already moving") < part.index("Ideas to try"))
+ok("then Worth your time today, Already moving and Advice for today, in that order",
+   0 < part.index("Worth your time today") < part.index("Already moving") < part.index("Advice for today"))
 ok("each list is numbered from 01", part.count('<span class="mr-n">01</span>') == 3
    and '<span class="mr-n">02</span>' in part)
 ok("a title links where there is somewhere to go", '<a class="mr-t" href="/inbox/inbox">21 people would love a reply</a>'
@@ -98,7 +98,7 @@ ok("a title links where there is somewhere to go", '<a class="mr-t" href="/inbox
 ok("...and is plain words where there is not", '<span class="mr-t">Two posts may need a quick look</span>' in part)
 ok("what a machine did reads machine first", '<span class="mr-t">Lead Machine</span><p class="mr-w">7 companies found</p>'
    in part)
-ok("the AI's ideas say where they came from", "The ideas come from its AI" in part)
+ok("the AI's ideas say where they came from", "The advice comes from its AI" in part)
 # THE ONLY BUTTON IS EACH SECTION'S QUIET "Hide" (#1953 step 1.6): a grey word with no fill and no border, because hiding
 # changes a stored choice and so is a form. Anything else that looks like a button is the "huge buttons" he retired.
 _quiet = re.sub(r'<form class="mr-hide".*?</form>', "", part, flags=re.S)
@@ -109,8 +109,8 @@ print("\ntest_nothing_empty_is_drawn")
 wipe()
 store_brief(Y, moving=[], ideas=[], ideas_from="")
 part = brief_part(owner.get("/app/review").get_data(as_text=True))
-ok("a list with nothing in it has no heading", "Already moving" not in part and "Ideas to try" not in part)
-ok("...and no AI credit without AI ideas", "The ideas come from its AI" not in part)
+ok("a list with nothing in it has no heading", "Already moving" not in part and "Advice for today" not in part)
+ok("...and no AI credit without AI ideas", "The advice comes from its AI" not in part)
 wipe()
 store_brief(Y, worth=[], moving=[], ideas=[], ideas_from="", good_news="", empty=True)
 row = ("INSERT INTO daily_reports (day, machine, report_json, written_at, final) VALUES (?, 'lead_machine', ?, ?, 1)")

@@ -150,7 +150,7 @@ def listed(query: str) -> set:
 
 ok("UNANSWERED LISTS WHO IS WAITING, and only them",
    "ig-priya" in listed("waiting=1") and "fb-tom" not in listed("waiting=1"), listed("waiting=1"))
-ok("LEADS LISTS WHO CAME FROM AN AD, and only them", listed("from_ad=1") == {"fb-tom"}, listed("from_ad=1"))
+ok("PROSPECTS LISTS WHO CAME FROM AN AD, and only them", listed("from_ad=1") == {"fb-tom"}, listed("from_ad=1"))
 ok("...and with neither, the list is everyone it was", {"ig-priya", "fb-tom"} <= listed("sortOrder=desc"),
    listed("sortOrder=desc"))
 
@@ -202,13 +202,40 @@ ok("...and it takes no other address: a thread's messages are still its messages
    and "data" not in (r.get_json(silent=True) or {}), r.get_data(as_text=True)[:200])
 ok("...and the page asks for it whenever its list doesn't hold the one in the address",
    "ownbox-conversation" in built_all)
-ok("INSIDE A CONVERSATION ON A MOBILE, OUR PILLS STEP ASIDE with the summary line", "html.ib-thread-open .pills" in inbox)
+ok("INSIDE A CONVERSATION ON A MOBILE, OUR PILLS STEP ASIDE with the summary line, the offer and the cards below",
+   "html.ib-thread-open :is(.sum,.pills,#ownbox-notify,.ib-below){display:none}" in inbox)
 ok("THEIR TOASTS (Moved to Done, Undo) TAKE THE BOX'S COLOURS, so a dark box shows a dark one",
    "[data-sonner-toaster]{--normal-bg:var(--card);--normal-text:var(--ink);" in inbox)
 p6 = (ROOT / "web" / "inbox-ui" / "patches" / "0006-email-icon.patch").read_text(encoding="utf-8")
 ok("AN EMAIL WEARS AN ENVELOPE, NOT THE LETTER E: one patch to their platform badge",
    p6.startswith("Ownbox:") and set(re.findall(r"^\+\+\+ b/(\S+)", p6, re.M)) == {"src/components/platform-icon.tsx"}
    and '"aria-label":"Email"' in built_all.replace(" ", ""), p6[:160])
+
+print("\nwhat a walk of their screens found (the parity walk)")
+ok("THE GEAR GOES TO THE INBOX'S SETTINGS, not the box's System Settings",
+   'settingsHref:"/inbox/settings"' in built_all)
+ok("...THEIR IN-TAB NOTIFICATIONS ARE OFF where the box offers its own", "browserNotifications:!1" in built_all)
+p7 = (ROOT / "web" / "inbox-ui" / "patches" / "0007-the-box-platforms.patch").read_text(encoding="utf-8")
+ok("THEIR PLATFORM MENU OFFERS THE BOX'S PLATFORMS, email among them, and their unread sort says unread",
+   p7.startswith("Ownbox:") and "'Unread first'" in p7 and "'email'" in p7 and '"Unread first"' in built_all, p7[:120])
+ok("A SEND THAT MAY HAVE LANDED IS NEVER HANDED BACK TO BE SENT AGAIN (their composer, on a 409)",
+   "status===409" in built_all.replace(" ", ""))
+
+print("\na row's actions without a swipe (a screen reader, a keyboard)")
+ok("EACH ROW HAS ITS ACTIONS AS REAL BUTTONS NAMED FOR THE PERSON, for a screen reader on any screen",
+   '"ib-acts"' in built_all and "Actions for " in built_all and "Label for " in built_all)
+_flat_inbox = page(owner, "/inbox/inbox")[1].replace(" ", "")
+ok("...drawn nowhere until a keyboard reaches them, then where the mouse's bar sits",
+   "#ib-inbox.ib-acts{position:absolute;width:1px;height:1px;" in _flat_inbox
+   and "#ib-inbox.ib-acts:focus-within{width:auto;height:auto;" in _flat_inbox)
+
+print("\nwhat sits below the inbox is reachable")
+_css_flat = (app_ui.STATIC / "inbox-ui.css").read_text(encoding="utf-8").replace(" ", "")
+ok("THEIR PAGE LOCK IS GONE: the page scrolls to other machines' cards below the inbox (it never could)",
+   "html,body{height:100%;overflow:hidden}" not in _css_flat and "html,body{overflow:hidden" not in _css_flat)
+status, _below = page(owner, "/inbox/inbox")
+ok("...and those cards start below the screen, not peeking under the list from the room kept for the bottom bar",
+   'querySelector(".ib-below");if(b)b.style.marginTop=pb?pb+"px":""' in _below)
 
 print("\nthe AI draft card, above their composer")
 built = " ".join(f.read_text(encoding="utf-8") for f in app_ui.STATIC.glob("*.js"))
@@ -260,6 +287,10 @@ ok("...through one patch to their stylesheet, with their page-wide rules moved i
 ok("THEIR DARK FOLLOWS THE BOX'S: the page mirrors data-theme into their .dark class",
    'classList.toggle("dark",root.getAttribute("data-theme")==="dark")' in lst
    and '"class","data-theme"' in lst)
+
+print("\nthe composer in dark")
+ok("THEIR COMPOSER'S FIELD DRAWS NO BOX OF ITS OWN IN DARK, inside the composer's",
+   "html.dark #ib-inbox textarea{background-color:transparent}" in page(owner, "/inbox/inbox")[1])
 
 print("\ntheir built files")
 r = owner.get("/inbox/ui/thread.js")

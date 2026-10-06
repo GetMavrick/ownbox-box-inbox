@@ -343,7 +343,7 @@ def test_the_send_window_is_asked_about_this_threads_own_channel():
         ok("...sent from the IG account on the row", INBOX.sent[-1]["account_id"] == "acc-ig")
         ok("...and the owner is told which channel it was",
            any("Instagram" in m for m in SLACK) and not any(
-               "New Messenger ad lead" in m for m in SLACK[-3:]))
+               "New Messenger prospect" in m for m in SLACK[-3:]))
 
         # THE ROW OUTRANKS THE PAYLOAD. A requeue of a job written by an older poller must
         # not be able to re-label a thread the human is looking at.

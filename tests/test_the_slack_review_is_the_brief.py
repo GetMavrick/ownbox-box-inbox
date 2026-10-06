@@ -5,7 +5,7 @@ with "!!" markers, and repeated every standing item every morning. The owner's r
 optimistic ... if they're stale information in there that they can't instantly change then we don't continue to
 harass and annoy them every day."* So core/report.render reads review_brief.ensure, the brief the email reads:
 
-  1. the date, the day's quote, the good news, then Worth your time today, Already moving and Ideas to try;
+  1. the date, the day's quote, the good news, then Worth your time today, Already moving and Advice for today;
   2. every item the email lists, in the email's words, and nothing of the old shape: no "!!", no "Needs you",
      no "Watch", no "Yesterday," header;
   3. a standing count is said once: the next morning, unchanged, it is not in the message again;

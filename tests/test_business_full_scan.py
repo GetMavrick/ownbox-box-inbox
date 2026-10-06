@@ -144,10 +144,12 @@ m = app.test_client()
 m.set_cookie(dash.COOKIE, dash.new_session(state.add_user("sam@glow-medspa.example", name="Sam", role="member")["id"]))
 page = o.get(screen.DOOR).get_data(as_text=True)
 ok("the owner sees what the website says, each line quoted with its page",
-   "What your website says" in page and "Botox is $12 a unit, with a 20 unit minimum." in page
+   "What your box knows about your business" in page and "Botox is $12 a unit, with a 20 unit minimum." in page
    and f'href="{SITE}/pricing"' in page and ">pricing</a>" in page, page[:300])
 ok("...grouped under what it is about", page.index("What it costs") < page.index("Botox is $12 a unit"))
-ok("a member sees it too, and can't change it", "What your website says" in m.get(screen.DOOR).get_data(as_text=True))
+mp = m.get(screen.DOOR).get_data(as_text=True)
+ok("a member sees it too, and can't change it",
+   "What your box knows about your business" in mp and "Not right" not in mp and "Not right" in page)
 bc.put("profile", [{"line": "<script>alert(1)</script> We open at 9.", "source": SITE + "/", "field": "hours"},
                    {"line": "Click here.", "source": "javascript:alert(1)", "field": "sells"}], by="test")
 page = o.get(screen.DOOR).get_data(as_text=True)

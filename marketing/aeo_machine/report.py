@@ -108,7 +108,7 @@ def report(day) -> dict:
     if published:
         n = len(published)
         out["headline"] = {"value": n, "label": "article published" if n == 1 else "articles published",
-                           "better": "more"}
+                           "better": "more", "week": "sum"}
         out["happened"] = [{"text": _published_line(r)} for r in published]
     if top:
         out.setdefault("happened", []).append({"text": top, "href": ARTICLES})

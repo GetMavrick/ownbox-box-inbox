@@ -111,8 +111,10 @@ ok("a customer on gmail.com is kept though the owner signs in with gmail.com", "
 ok("a customer on a domain a settings placeholder mentions is kept", "z-example" in kept, sorted(kept))
 
 first = cv_report.report(date.today(), SP).get("answer_first") or []
-ok("named: the ad first, then first-time writers newest first; the returning customer waits behind them",
-   [f["text"] for f in first] == ["Marcus Cole", "Dana Whitfield", "Sam Lee"], [f["text"] for f in first])
+# SPEED TO LEAD (owner, 2026-10-06): Dana asked to book two days ago; Marcus came from an ad ten days ago and asked a
+# price; Sam asked for a quote five days ago; Priya, an answered customer, has a question with nothing to win.
+ok("named by speed to lead: a fresh booking, the ad lead, the quote; the returning customer waits behind them",
+   [f["text"] for f in first] == ["Dana Whitfield", "Marcus Cole", "Sam Lee"], [f["text"] for f in first])
 ok("none of the three shapes from 10-05 is named",
    not {"Brian MacDonald", "Ownbox Team", "Growth Partners", "Capital Bridge", "Stripe"} & {f["text"] for f in first})
 

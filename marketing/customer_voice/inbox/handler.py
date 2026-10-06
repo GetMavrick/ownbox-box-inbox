@@ -229,7 +229,8 @@ def handle(job: dict) -> dict:
                       status="ok", zernio_message_id=sent["message_id"])
     store.record_message(space=space_name, zcid=zcid, zmid=sent["message_id"],
                          direction="out", sent_by="ai", body=text)
-    _notify(job, f":mega: *New {chan} ad lead*{ad_bit} — they said "
+    # A PROSPECT, NOT A LEAD (owner 2026-10-06): someone who came from an ad; a Lead is what a person labels them.
+    _notify(job, f":mega: *New {chan} prospect*{ad_bit or ' from an ad'} — they said "
                  f"“{inbound_text[:140]}” · opener auto-sent. Thread is yours "
                  "when you want it.")
     log.info("inbox.opener_sent", space=space_name, channel=platform,

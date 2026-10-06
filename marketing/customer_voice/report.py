@@ -132,7 +132,55 @@ def _iso(s: str) -> str:
 
 
 ANSWER_FIRST = 3
-SAID_CHARS = 60
+SAID_CHARS = 60                  # the words in `why`, the one line Slack-free text surfaces carry
+SAID_CARD = 140                  # the words on the review's card for that person
+
+# WHAT THEY WANT, READ FROM THEIR OWN WORDS (owner, 2026-10-06: "use some intelligence and inference to make that a good
+# section ... speed to lead is where the money is at"). Plain patterns on the message the box already holds, no model:
+# the review must never hand a customer's words to an AI (core/review_advisor.py), and a reason the owner can see is a
+# reason the owner can check. Each is (the words on the card, the words in a sentence, its weight, the pattern).
+_WANTS = (
+    ("Needs help soon", "needs help soon", 4,
+     re.compile(r"\b(urgent|asap|a\.s\.a\.p|emergency|right away|as soon as|leak(?:ing|s)?|flood(?:ed|ing)?|burst|"
+                r"no (?:heat|hot water|power|ac|a/c|air)|not working|stopped working|broke(?:n)?)\b", re.I)),
+    ("Wants to book", "wants to book", 3,
+     re.compile(r"\b(book(?:ing)?|appointments?|appt|schedule|availab(?:le|ility)|openings?|slots?|reserve|"
+                r"consult(?:ation)?|sign(?:ing)? up|join|membership|trial|fit me in|come (?:in|out|by)|"
+                r"do you have (?:any(?:thing)?|time|room|space)|open (?:on |this |next )?"
+                r"(?:mon|tue|wed|thu|fri|sat|sun)\w*)\b", re.I)),
+    ("Asking about price", "asking about price", 3,
+     re.compile(r"(\b(price[sd]?|pricing|cost[s]?|how much|rates?|fees?|quote|estimate|deal|special|discount|"
+                r"package|promo(?:tion)?)\b|\$\s?\d|\d+\s?% off)", re.I)),
+)
+_RESCHEDULE = re.compile(r"\b(re-?schedule|move my|change my|cancel)\b", re.I)
+
+
+def wants(said: str) -> list[tuple[str, str, int]]:
+    """What a message asks for, as (card words, sentence words, weight), strongest first. Moving or cancelling a
+    booking is an existing customer's errand, said as such, never "wants to book"."""
+    said = str(said or "")
+    out = []
+    for card, phrase, weight, pat in _WANTS:
+        if pat.search(said):
+            if card == "Wants to book" and _RESCHEDULE.search(said):
+                card, phrase, weight = "About their booking", "about their booking", 2
+            out.append((card, phrase, weight))
+    return sorted(out, key=lambda w: -w[2])
+
+
+def _fresh(hours: float) -> int:
+    """SPEED TO LEAD: a person who wrote an hour ago is the easiest one to win; after a week most have gone elsewhere
+    (the Morning Review research, 2026-10-06: a reply within the hour made a lead about 7x likelier to qualify, HBR 2011)."""
+    return 3 if hours <= 1 else 2 if hours <= 24 else 1 if hours <= 72 else 0 if hours <= 168 else -2
+
+
+def _hours(iso: str) -> float:
+    try:
+        then = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        then = then if then.tzinfo else then.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - then).total_seconds() / 3600)
+    except (TypeError, ValueError):
+        return 1e9
 
 
 # MAIL FROM PROVIDERS ANYONE CAN USE: their domain is never "the box's own", or a gmail.com mailbox would hide every
@@ -208,6 +256,11 @@ def real_people(space: str, rows: list[dict]) -> list[dict]:
         judged = drafts.judged_not_for_a_person(space)
     except Exception:                            # noqa: BLE001
         judged = set()
+    try:                                         # A REPLY THE BOX ALREADY WROTE, still waiting to be sent
+        ready = {str(d.get("zcid") or "") for d in drafts.waiting(space, limit=1000)
+                 if str(d.get("body") or "") != drafts.NO_REPLY_BODY}
+    except Exception:                            # noqa: BLE001
+        ready = set()
     ids = [str(r.get("zernio_conversation_id") or "") for r in rows]
     facts: dict = {}
     try:
@@ -220,7 +273,12 @@ def real_people(space: str, rows: list[dict]) -> list[dict]:
                         "     AND m.zernio_conversation_id = k.zernio_conversation_id AND m.direction = 'in' "
                         "     ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS sender, "
                         "  EXISTS(SELECT 1 FROM inbox_messages m WHERE m.space = k.space "
-                        "     AND m.zernio_conversation_id = k.zernio_conversation_id AND m.direction = 'out') AS answered "
+                        "     AND m.zernio_conversation_id = k.zernio_conversation_id AND m.direction = 'out') AS answered, "
+                        "  (SELECT COUNT(*) FROM inbox_messages m WHERE m.space = k.space "
+                        "     AND m.zernio_conversation_id = k.zernio_conversation_id AND m.direction = 'in' "
+                        "     AND m.created_at > COALESCE((SELECT MAX(o.created_at) FROM inbox_messages o "
+                        "         WHERE o.space = k.space AND o.zernio_conversation_id = k.zernio_conversation_id "
+                        "           AND o.direction = 'out'), '')) AS unanswered "
                         "  FROM inbox_conversations k WHERE k.space = ? AND k.zernio_conversation_id IN (%s)"
                         % ",".join("?" * len(part)), (space, *part)).fetchall():
                     facts[f["z"]] = dict(f)
@@ -247,35 +305,131 @@ def real_people(space: str, rows: list[dict]) -> list[dict]:
                     continue
             except Exception:                    # noqa: BLE001
                 pass
-        out.append({**r, "first_time": not f.get("answered")})
+        out.append({**r, "first_time": not f.get("answered"), "unanswered": int(f.get("unanswered") or 0),
+                    "ready": z in ready})
     return out
+
+
+def _ranked(r: dict) -> tuple[int, list[tuple[str, str]]]:
+    """(how much answering this person first is worth, the reasons, strongest first, as (card, sentence) words)."""
+    reasons = [(c, p, w) for c, p, w in wants(r.get("preview"))]
+    if r.get("ad_meta_id"):
+        reasons.append(("From your ad", "from your ad", 3))
+    if r.get("first_time"):
+        reasons.append(("New", "first message", 2))
+    n = int(r.get("unanswered") or 0)
+    if n >= 2:
+        times = "twice" if n == 2 else f"{n} times"
+        reasons.append((f"Wrote {times}", f"wrote {times}", 1))
+    reasons.sort(key=lambda x: -x[2])
+    score = sum(w for _, _, w in reasons) + _fresh(_hours(r.get("last_inbound_at")))
+    return score, [(c, p) for c, p, _ in reasons]
 
 
 def answer_first(rows: list[dict], cut: str) -> list[dict]:
-    """WHO TO ANSWER FIRST, BY NAME (#1953 step 1.5): three people from the last 30 days, each with the first words of
-    what they asked and a link to the thread.
+    """WHO TO ANSWER FIRST, BY NAME: the three people most worth a reply this morning, from the last 30 days, each with
+    why, how long they have waited, what they asked, and a link to the thread.
 
-    THE ORDER (OSDev1, 2026-10-05): anyone who came from an ad, then people writing for the first time (`first_time`
-    from `real_people`: nobody has answered them yet), then the rest, each newest first. Oldest first was the order
-    until 10-05, and on a real mailbox it surfaced month-old junk ahead of this morning's customer.
+    THE ORDER IS SPEED TO LEAD (owner, 2026-10-06: "use some intelligence and inference to make that a good section
+    ... speed to lead is where the money is at. So put like two or three people on that list."). Each person scores on
+    what their own words ask for (`wants`: help soon, a booking, a price), an ad that brought them, writing for the
+    first time, writing again while unanswered, and how fresh it is (`_fresh`: an hour-old message is the easiest
+    one to win; a week-old one has mostly gone elsewhere). Highest first, newest first on a tie. Until 10-06 the order
+    was ad, then first-time writers, then the rest (OSDev1, 10-05), which put a "thanks!" ahead of a booking.
 
-    "72 waiting" is a number; "Dana has waited 3 days about Saturday" is a reply sent before breakfast. Read from
-    rows already on this box. It goes to the review page and the owner's email, never to Slack (core/report.py), where
-    more than the owner can read a customer's words."""
+    "72 waiting" is a number; "Dana wants to book, from your ad, 2h ago" is a reply sent before breakfast. Read from
+    rows already on this box, and no model reads their words. It goes to the review page and the owner's email, never
+    to Slack (core/report.py), where more than the owner can read a customer's words."""
     from urllib.parse import quote
+    from .inbox import channels
     keep = [r for r in rows if str(r.get("last_inbound_at") or "") and _iso(r["last_inbound_at"]) >= cut]
     keep.sort(key=lambda r: _iso(r["last_inbound_at"]), reverse=True)
-    keep.sort(key=lambda r: (not r.get("ad_meta_id"), not r.get("first_time")))
+    scored = [(_ranked(r), r) for r in keep]
+    scored.sort(key=lambda x: -x[0][0])                  # stable: newest first among equals
     out = []
-    for r in keep[:ANSWER_FIRST]:
+    for (_, reasons), r in scored[:ANSWER_FIRST]:
         said = " ".join(str(r.get("preview") or "").split())
-        if len(said) > SAID_CHARS:
-            said = said[:SAID_CHARS - 1].rsplit(" ", 1)[0] + "…"
-        bits = [f"Waiting {_waited(r['last_inbound_at'])}"] + (["from your ad"] if r.get("ad_meta_id") else [])
+        card = said if len(said) <= SAID_CARD else said[:SAID_CARD - 1].rsplit(" ", 1)[0] + "…"
+        short = said if len(said) <= SAID_CHARS else said[:SAID_CHARS - 1].rsplit(" ", 1)[0] + "…"
+        waited = _waited(r["last_inbound_at"])
+        bits = [f"Waiting {waited}"] + [p for _, p in reasons]
+        platform = str(r.get("platform") or "")
         out.append({"text": str(r.get("participant") or "").strip() or "Someone",
-                    "why": " · ".join(bits) + (f": “{said}”" if said else ""),
-                    "href": "/inbox/inbox/" + quote(str(r.get("zernio_conversation_id") or ""), safe="")})
+                    "why": " · ".join(bits) + (f": “{short}”" if short else ""),
+                    "href": "/inbox/inbox/" + quote(str(r.get("zernio_conversation_id") or ""), safe=""),
+                    # THE CARD'S PARTS, for the review page and the owner's email to draw on their own.
+                    "said": card, "waited": waited, "reasons": [c for c, _ in reasons][:3],
+                    "ready": bool(r.get("ready")), "channel": channels.name(platform, fallback="") if platform else "",
+                    "of": len(keep)})
     return out
+
+
+# THE NUMBERS THAT MATTER (Morning Review V2 step 2, docs/PLAN_MORNING_REVIEW_ADVISOR.md Input B): how fast replies
+# went out, where new conversations came from, and when people write. Arithmetic on the box's own rows, no model, each
+# a figure the page draws alone and the review's AI is handed as a fact.
+PACE_DAYS = 7
+BUSY_DAYS = 30
+BUSY_MIN = 20                    # fewer messages than this in a month says nothing about a busiest day or hour
+_DAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def _span(seconds: float) -> str:
+    """A wait, as a person says it: "4m", "2h 5m", "1d 3h"."""
+    m = int(round(seconds / 60))
+    if m < 60:
+        return f"{max(m, 1)}m"
+    h, m = divmod(m, 60)
+    if h < 24:
+        return f"{h}h {m}m" if m else f"{h}h"
+    d, h = divmod(h, 24)
+    return f"{d}d {h}h" if h else f"{d}d"
+
+
+def _median(xs: list[float]) -> float:
+    xs = sorted(xs)
+    n = len(xs)
+    return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+
+
+def _hour(h: int) -> str:
+    return "12am" if h == 0 else f"{h}am" if h < 12 else "12pm" if h == 12 else f"{h - 12}pm"
+
+
+def pace_figures(space: str, day: date) -> dict:
+    """The day's reply speed, the week's, where the week's new conversations came from, and the month's busiest day
+    and hour of the week, as report figures. Empty when there is nothing to say. Never raises."""
+    from core.report import tz
+    figures: dict = {}
+    lo, hi = window(day)
+    week_lo = window(day - timedelta(days=PACE_DAYS - 1))[0]
+    day_s = inbox_store.reply_seconds(space, lo, hi)
+    if day_s:
+        figures["reply_time_day"] = {"value": _span(_median(day_s)), "label": "typical time to answer that day"}
+    week_s = inbox_store.reply_seconds(space, week_lo, hi)
+    if len(week_s) >= 3:
+        figures["reply_time_week"] = {"value": _span(_median(week_s)), "label": "typical time to answer, last 7 days"}
+    new = inbox_store.new_conversations(space, week_lo, hi)
+    if new["all"]:
+        figures["new_week"] = {"value": new["all"], "label": "new conversations, last 7 days"}
+    if new["from_ads"]:
+        figures["from_ads_week"] = {"value": new["from_ads"], "label": "of them from your ads"}
+    stamps = inbox_store.arrivals(space, window(day - timedelta(days=BUSY_DAYS - 1))[0])
+    if len(stamps) >= BUSY_MIN:
+        days, hours, zone = {}, {}, tz()
+        for s in stamps:
+            try:
+                t = datetime.fromisoformat(str(s).replace("Z", "+00:00")).astimezone(zone)
+            except ValueError:
+                continue
+            days[t.weekday()] = days.get(t.weekday(), 0) + 1
+            hours[t.hour] = hours.get(t.hour, 0) + 1
+        if days:
+            d = max(days, key=lambda k: (days[k], -k))
+            figures["busiest_day"] = {"value": _DAYS[d], "label": "busiest day for messages, last 30 days"}
+        if hours:
+            h = max(hours, key=lambda k: (hours[k], -k))
+            figures["busiest_hour"] = {"value": _hour(h), "label": "busiest hour for messages, last 30 days"}
+    return figures
 
 
 def _waited(iso: str) -> str:
@@ -438,6 +592,10 @@ def report(day: date, space: str | None = None) -> dict:
         if counts["drafts"]:
             happened.append({"text": "replies written for you", "value": counts["drafts"]})
         figures["inbox_waiting"] = {"value": waiting, "label": "waiting on you"}
+        try:
+            figures.update(pace_figures(inbox_space, day))
+        except Exception:                        # noqa: BLE001 — a figure, never the report
+            pass
         if unread:
             figures["inbox_unread"] = {"value": unread, "label": "not opened yet"}
         if counts["inbound"]:
@@ -518,7 +676,7 @@ def report(day: date, space: str | None = None) -> dict:
         headline, label = (waiting, "waiting on you") if counts["inbound"] or waiting else (None, "")
 
     return {"title": TITLE,
-            "headline": {"value": headline, "label": label, "better": "less"},   # waiting: fewer is better
+            "headline": {"value": headline, "label": label, "better": "less", "week": "last"},   # waiting: fewer is better
             "needs_you": needs_you, "happened": happened, "watch": watch,
             "figures": figures, "notes": [], "answer_first": first}
 

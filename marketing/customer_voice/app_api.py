@@ -8,8 +8,9 @@ the same shapes, and are answered HERE:
   * FROM OUR STORE, NEVER A ZERNIO CALL PER POLL (OSDev1's condition 4). Their list polls every 10 seconds and an open
     thread every 5; a box forwarding each of those to Zernio would spend its rate limit on a screen being open. The
     poller already mirrors every conversation and message into our tables, so a read here touches only the box's disk.
-  * THROUGH OUR SEND PATH. A send is `reply.send_reply`: the same ledger, approvals, STOP and opt-out refusal, hourly
-    caps and indeterminate handling as the thread page's own Send. Email answers here too; their screens never had it.
+  * THROUGH OUR SEND PATH. A send is `reply.send_reply`: the same ledger, approvals, STOP and opt-out refusal, spend
+    cap and indeterminate handling as the thread page's own Send. (The hourly cap is for the box's own sends, never
+    a person's: test_send_window_says_it_first.) Email answers here too; their screens never had it.
   * NEVER RAW HTML (OSDev1's condition 5). A message carries its plain text only; `body_html` is never read here.
   * NO ZERNIO KEY in anything returned (OSDev1's condition 3).
   * BEHIND THE INBOX'S SIGN-IN: these routes sit on the app's blueprint, so its `_gate` admits them or nobody.
@@ -83,8 +84,19 @@ def _conversation(k: dict, ready: dict | None = None) -> dict:
                               "disposition": k.get("disposition") or None,
                               # THE DRAFT CARD'S DATA (step 1.3): the reply waiting here, or None. Send and Edit are the
                               # send route below; Discard is `…/draft/discard` with this id.
-                              "draft": (ready or {}).get(str(k.get("zernio_conversation_id")))}},
+                              "draft": (ready or {}).get(str(k.get("zernio_conversation_id"))),
+                              # THE OLD LIST'S ROW TAGS, by the old list's own rule (app._tag_list): Opted out, Handled
+                              # by…, the reply window, From <ad>. Most constraining first, at most three.
+                              "tags": _row_tags(k)}},
     }
+
+
+def _row_tags(k: dict) -> list:
+    try:
+        from .app import _tag_list
+        return [{"text": str(text), "kind": str(kind)} for text, kind in _tag_list(k)]
+    except Exception:                            # noqa: BLE001 — a row without tags is still a row
+        return []
 
 
 def _subject(raw_headers) -> str:
@@ -162,6 +174,20 @@ def _conv_or_404(zcid: str):
     return conv, None
 
 
+def _said(zcid: str, q: str) -> str | None:
+    """The newest message in one conversation that has `q` in it, as the search matched it (case aside, ASCII as LIKE).
+    instr() rather than LIKE: nothing a person types is a wildcard, so there is nothing to escape."""
+    from core import state
+    try:
+        with state.connect() as c:
+            row = c.execute("SELECT body FROM inbox_messages WHERE space = ? AND zernio_conversation_id = ? "
+                            "AND instr(lower(COALESCE(body, '')), lower(?)) > 0 "
+                            "ORDER BY created_at DESC, id DESC LIMIT 1", (_space(), zcid, q)).fetchone()
+    except Exception:                            # noqa: BLE001 — the newest message stands in
+        return None
+    return str(row["body"]) if row else None
+
+
 @blueprint.get("/inbox/api/conversations")
 def api_conversations():
     """Their list: `{data, pagination: {hasMore, nextCursor}, meta: {failedAccounts}}`, newest first, from our store."""
@@ -175,11 +201,21 @@ def api_conversations():
     if view is None or (disp and disp not in store.DISPOSITIONS):
         return jsonify({"error": "status is active, archived, deleted or junk; disposition is one of "
                                  + ", ".join(store.DISPOSITIONS), "code": "invalid_field_value"}), 400
-    # THE BOX'S PILLS ABOVE THEIR LIST (#1990 1.4): Unanswered (?waiting=1) and Leads (?from_ad=1), the same store
+    # THE BOX'S PILLS ABOVE THEIR LIST (#1990 1.4): Unanswered (?waiting=1) and Prospects (?from_ad=1), the same store
     # filters the old list's pills use, so the count in the header and the filtered list agree.
     waiting, from_ad = (request.args.get(k) == "1" for k in ("waiting", "from_ad"))
-    rows = store.list_conversations(_space(), limit=n + 1, offset=off, platform=key, view=view, disposition=disp,
-                                    waiting=waiting, from_ad=from_ad)
+    q = (request.args.get("q") or "").strip()[:120]
+    if q:
+        # THE SEARCH IN THE BAR (#1977): what people WROTE, the box's own search, not only the loaded rows' names.
+        # Their list filters what it is given by name and last message, so each hit carries the message that
+        # matched as its last message, and a hit found in an old message is not filtered away on screen.
+        rows = store.search_conversations(_space(), q, limit=n + 1, offset=off, platform=key, waiting=waiting,
+                                          from_ad=from_ad)
+        for r in rows:
+            r["preview"] = _said(str(r["zernio_conversation_id"]), q) or r.get("preview")
+    else:
+        rows = store.list_conversations(_space(), limit=n + 1, offset=off, platform=key, view=view,
+                                        disposition=disp, waiting=waiting, from_ad=from_ad)
     ready = {str(d["zcid"]): {"id": str(d["id"]), "body": str(d.get("body") or "")} for d in _waiting()}
     if request.args.get("sortOrder") == "asc":
         rows = rows[::-1]
@@ -258,11 +294,24 @@ def api_send(zcid: str):
         out = _reply.send_reply(space=_space(), zcid=zcid, text=text, user_id=u["id"], attachment=attachment,
                                 nonce=str(request.headers.get("Idempotency-Key") or uuid.uuid4()))
     except _reply.ReplyRefused as e:
-        return jsonify({"error": str(e), "code": "refused"}), 422
+        # `reason` is the send path's own word for why (opted_out, attachment_type, ...), beside the code the screens
+        # already read.
+        return jsonify({"error": str(e), "code": "refused", "reason": getattr(e, "code", None) or "refused"}), 422
     except _reply.ReplyIndeterminate:
         # INVARIANT 4: it may have landed, so it is never sent again and never called a failure.
         return jsonify({"error": "This may or may not have arrived. Check the conversation before sending it again; "
                                  "the box will not resend it.", "code": "indeterminate"}), 409
+    except Exception as e:                       # noqa: BLE001 — a reply is never worth a 500 (the old reply box's rule)
+        # A SPEND CAP THAT IS SPENT, or anything else the send path raised before anything went: the old reply box's
+        # words, never a 500 (the parity checklist).
+        log.error("inbox.api_send_failed", conversation=zcid, error=f"{type(e).__name__}: {e}"[:160])
+        return jsonify({"error": "That did not send. Nothing was charged and nothing was delivered.",
+                        "code": "failed"}), 503
+    # A SEND THAT STARTED FROM A SAVED REPLY COUNTS TOWARD ITS PLACE (most used first), as the old reply box counts it:
+    # once, when it went, never for a repeat the ledger absorbed. `used` never raises.
+    if not (out or {}).get("duplicate") and body.get("snippet"):
+        from .inbox import snippets
+        snippets.used(_space(), str(body.get("snippet")))
     return jsonify({"success": True, "messageId": str((out or {}).get("message_id") or "")})
 
 

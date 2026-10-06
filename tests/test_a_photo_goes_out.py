@@ -121,6 +121,13 @@ print("\ntest_only_what_their_composer_sends")
 n = len(POSTS)
 r = send("ig-1", b"<script>alert(1)</script>", name="cat.jpg")
 ok("a file that only says it is a photo is refused, in words", r.status_code == 422 and len(POSTS) == n, r.get_json())
+for label, brand in (("an iPhone photo (HEIC)", b"heic"), ("a HEIF photo (mif1)", b"mif1"),
+                     ("a QuickTime movie", b"qt  ")):
+    r = send("ig-1", b"\x00\x00\x00\x18ftyp" + brand + b"\x00" * 64, name="IMG_0043.mp4")
+    ok(f"{label} is refused, never sent labelled MP4", r.status_code == 422 and len(POSTS) == n, r.get_json())
+r = send("ig-1", b"\x00\x00\x00\x18ftypisom" + b"\x00" * 64, name="clip.mp4", key="isom-1")
+ok("...while an MP4 of the common isom brand still goes", r.status_code == 200 and len(POSTS) == n + 1, r.get_json())
+n = len(POSTS)
 r = send("ig-1", b"%PDF-1.7" + b"\x00" * 50, name="quote.pdf")
 ok("a PDF is refused (their composer sends photos and MP4 only)", r.status_code == 422 and len(POSTS) == n, r.get_json())
 big = b"\xff\xd8\xff" + b"\x00" * (reply.MAX_ATTACHMENT + 10)

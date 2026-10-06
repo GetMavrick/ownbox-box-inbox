@@ -89,7 +89,8 @@ old = plan.add("Old", "An article from yesterday?")
 plan.mark(old, "published", slug="old", url="https://northwind.example/articles/old", title="Old one")
 stamp(old, published_at=IN_YESTERDAY)
 r = report.report(TODAY)
-ok("the headline counts the day's articles", r.get("headline") == {"value": 2, "label": "articles published", "better": "more"},
+ok("the headline counts the day's articles", r.get("headline") == {"value": 2, "label": "articles published", "better": "more",
+                                                       "week": "sum"},
    r.get("headline"))
 lines = [x["text"] for x in r.get("happened", [])]
 ok("each article by its title, with the search it answers",

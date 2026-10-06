@@ -41,7 +41,7 @@ from core import brief  # noqa: E402
 # begun (an exported Lead box in UTC, CI at 00:15 UTC, 2026-10-03) moved "6 hours ago" into yesterday, and main went red.
 _NOON = datetime.now(report.tz()).replace(hour=12, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 brief._now = lambda: _NOON
-from core.config import settings  # noqa: E402
+from core.config import get_config, settings  # noqa: E402
 from core.connector import seats, tools  # noqa: E402
 
 settings.dashboard_base_url = "https://box.example"
@@ -126,7 +126,10 @@ def good_ai(task, prompt, **kw):
                       {"tool": "core.send_everything", "why": "Not a real tool."}]})
 
 
-ok("the brief's AI task is configured on the cheap model", brain._model_for("brief") == brain._model_for("review"))
+# THE CHEAP MODEL, NAMED: the Morning Review's advice moved to Sonnet (owner, 2026-10-05, decision 1 of
+# docs/PLAN_MORNING_REVIEW_ADVISOR.md); today's brief stays on the smallest one.
+ok("the brief's AI task is configured on the cheap model",
+   brain._model_for("brief") == get_config()["model_ids"]["haiku"], brain._model_for("brief"))
 r = brief.refresh(think=good_ai)
 b = brief.get()
 ok("the box's AI writes it when the numbers are new", r["status"] == "ai" and b["from"] == "ai", (r, b.get("from")))

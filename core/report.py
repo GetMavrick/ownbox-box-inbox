@@ -233,7 +233,11 @@ def _normalize(machine: str, title: str, rep) -> dict:
         # when the machine has not said. Only a "more" headline is ever called a personal best (review_brief._best).
         "headline": _agree({"value": _plain(head.get("value", 0)), "label": str(head.get("label") or "")[:80],
                             "delta": _plain(head.get("delta")),
-                            "better": head.get("better") if head.get("better") in ("more", "less") else None},
+                            "better": head.get("better") if head.get("better") in ("more", "less") else None,
+                            # `week`: how seven days of this headline add up. "sum" when each day counts its own
+                            # (emails sent that day), "last" when the number is already a running total (visits this
+                            # week, people waiting). None leaves it out of the Monday "Your week" (review_brief).
+                            "week": head.get("week") if head.get("week") in ("sum", "last") else None},
                            text_key="label"),
         "needs_you": _bounded(rep.get("needs_you"), "waiting"),
         "happened": [_agree(x) for x in _bounded(rep.get("happened"), "outcomes")],
@@ -814,7 +818,7 @@ def _names_a_plan(item: dict, planned: list[str]) -> bool:
 def slack_text(b: dict) -> str:
     """The stored brief as a Slack message: the same words as the email and the app page (core/review_email.py,
     core/dash/review.py), short. The date, the day's quote, the good news, then Worth your time today, Already
-    moving and Ideas to try, numbered, each item on one line. No buttons, no markers, no zeros."""
+    moving and Advice for today, numbered, each item on one line. No buttons, no markers, no zeros."""
     from core import review_email
     link = str(b.get("link") or "")
     base = link.split("/app/review")[0]
@@ -846,9 +850,12 @@ def slack_text(b: dict) -> str:
             if href.startswith(("https://", "http://")) and not re.search(r"[\s<>|]", href):
                 title = f"<{href}|{title}>"
             why = _slack_escape(it.get("why"))
+            if it.get("today"):                    # Advice for today: the step, which is what a person does
+                why = "Today: " + _slack_escape(it["today"])
             lines.append(f"{n:02d}  {title}" + (f" — {why}" if why else ""))
     if b.get("ideas_from") == "ai" and b.get("ideas"):
-        lines += ["", "_The ideas come from your box's AI, based only on yesterday's numbers._"]
+        lines += ["", "_The advice comes from your box's AI, based only on what your box measured and your own "
+                  "website._"]
     whole = link.startswith(("https://", "http://")) and not re.search(r"[\s<>|]", link)
     lines += ["", f"<{link}|Open the full review>" if whole else "The full review is in your box's app."]
     return "\n".join(lines).rstrip()

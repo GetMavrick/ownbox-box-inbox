@@ -76,9 +76,12 @@ seen = []
 
 def think(task, prompt, **kw):
     seen.append({"prompt": json.loads(prompt), "system": kw.get("system") or ""})
-    return json.dumps({"good_news": "Messages came in for the third day running, 12 yesterday.", "ideas": [
-        {"title": "Keep Friday's pace: 11 then 12", "why": "Your week climbed from 3."},
-        {"title": "Aim for 28 messages", "why": "An invented goal."}]})
+    # THE ADVISOR'S SHAPE (V2 step 3): a step on a screen this box has.
+    return json.dumps({"good_news": "Messages came in for the third day running, 12 yesterday.", "advice": [
+        {"title": "Keep Friday's pace: 11 then 12", "saw": "Your week climbed from 3.", "because": None,
+         "today": "Answer today's first.", "screen": 1},
+        {"title": "Aim for 28 messages", "saw": "An invented goal.", "because": None, "today": "Push.",
+         "screen": 1}]})
 
 
 print("test_the_ai_sees_the_week")

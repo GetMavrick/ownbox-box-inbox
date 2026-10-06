@@ -213,7 +213,7 @@ _WAITING = (f"k.opted_out = 0 AND COALESCE(k.automated, 0) = 0 AND {_NEWEST_IS_I
 #
 # TRIMMED, NOT JUST NOT-NULL. A vendor that sends an empty string for an ad id is not an ad, and
 # the difference between NULL and "" is exactly the kind of thing that puts every conversation in
-# the box behind a filter labelled "from an ad".
+# the box behind a filter labelled "Prospects" (people who came from an ad).
 _FROM_AD = "TRIM(COALESCE(k.ad_meta_id, '')) <> ''"
 
 
@@ -1068,6 +1068,79 @@ def inbox_counts(space: str) -> dict:
     # would render as a filter it cannot use.
     return {"waiting": int((row["waiting"] if row else 0) or 0),
             "from_ad": int((row["from_ad"] if row else 0) or 0)}
+
+
+# WHEN A MESSAGE WAS SENT, ON THE SENDER'S CLOCK where the platform gave one, else when the box stored it: a mailbox
+# polled late must not make a reply look slow or move a message to the hour it was fetched.
+_SENT_AT = "COALESCE(s.sent_at, m.created_at)"
+# NOT A MACHINE'S THREAD: a newsletter or a notification has no person waiting on an answer, so it says nothing about how
+# fast the business answers people or when people write.
+_A_PERSONS_THREAD = ("NOT EXISTS (SELECT 1 FROM inbox_conversations k WHERE k.space = m.space "
+                     " AND k.zernio_conversation_id = m.zernio_conversation_id AND COALESCE(k.automated, 0) > 0)")
+
+
+def reply_seconds(space: str, lo: str, hi: str) -> list[float]:
+    """HOW LONG PEOPLE WAITED FOR AN ANSWER (Morning Review V2 step 2, "how fast replies went out"): for every reply
+    sent in [lo, hi), the seconds since the first of the messages it answered. A thread's messages are walked in
+    order, so three messages and one reply is one wait, measured from the first. Never raises."""
+    from datetime import datetime
+    try:
+        with state.connect() as c:
+            rows = c.execute(
+                f"SELECT m.zernio_conversation_id AS z, m.direction AS d, {_SENT_AT} AS t FROM inbox_messages m "
+                "  LEFT JOIN inbox_message_sent s ON s.message_id = m.id "
+                f" WHERE m.space = ? AND {_A_PERSONS_THREAD} AND m.zernio_conversation_id IN ("
+                "   SELECT zernio_conversation_id FROM inbox_messages WHERE space = ? AND direction = 'out' "
+                "      AND created_at >= ? AND created_at < ?) "
+                " ORDER BY m.zernio_conversation_id, t, m.id", (space, space, lo, hi)).fetchall()
+    except Exception:                                    # noqa: BLE001 — a figure, never the report
+        return []
+
+    def at(s):
+        try:
+            d = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+            return d if d.tzinfo else None
+        except ValueError:
+            return None
+    lo_t, hi_t = at(lo), at(hi)
+    out, thread, since = [], None, None
+    for r in rows:
+        if r["z"] != thread:
+            thread, since = r["z"], None
+        t = at(r["t"])
+        if t is None:
+            continue
+        if r["d"] == "in":
+            since = since or t
+        elif r["d"] == "out":
+            if since is not None and lo_t <= t < hi_t:
+                out.append(max(0.0, (t - since).total_seconds()))
+            since = None
+    return out
+
+
+def arrivals(space: str, since: str) -> list[str]:
+    """When people wrote since `since`: one sent-time per message from a person, oldest first. Never raises."""
+    try:
+        with state.connect() as c:
+            return [r["t"] for r in c.execute(
+                f"SELECT {_SENT_AT} AS t FROM inbox_messages m LEFT JOIN inbox_message_sent s ON s.message_id = m.id "
+                f" WHERE m.space = ? AND m.direction = 'in' AND {_A_PERSONS_THREAD} AND {_SENT_AT} >= ? ORDER BY t",
+                (space, since)).fetchall()]
+    except Exception:                                    # noqa: BLE001
+        return []
+
+
+def new_conversations(space: str, lo: str, hi: str) -> dict:
+    """{"all", "from_ads"}: conversations a person started in [lo, hi), and how many came from an ad. Never raises."""
+    try:
+        with state.connect() as c:
+            r = c.execute("SELECT COUNT(*) AS n, SUM(CASE WHEN COALESCE(ad_meta_id, '') != '' THEN 1 ELSE 0 END) AS a "
+                          "  FROM inbox_conversations WHERE space = ? AND created_at >= ? AND created_at < ? "
+                          "   AND COALESCE(automated, 0) = 0", (space, lo, hi)).fetchone()
+        return {"all": int(r["n"] or 0), "from_ads": int(r["a"] or 0)}
+    except Exception:                                    # noqa: BLE001
+        return {"all": 0, "from_ads": 0}
 
 
 def day_counts(space: str, lo: str, hi: str) -> dict:

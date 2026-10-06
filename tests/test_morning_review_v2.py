@@ -100,14 +100,18 @@ calls = []
 
 def think_ok(task, prompt, **kw):
     calls.append((task, kw.get("timeout")))
+    # THE ADVISOR'S SHAPE (V2 step 3): a step on a screen this box has (1 is always one: Approvals at the least).
     return json.dumps({"good_news": "Four reels went out yesterday, 4 in one day.",
-                       "ideas": [{"title": "Share yesterday's 4 reels in your stories", "why": "You made 4."},
-                                 {"title": "Double down: aim for 8 reels this week", "why": "You made 4."},
-                                 {"title": "Give them a call back", "why": "2 people waiting."}]})
+                       "advice": [{"title": "Share yesterday's 4 reels in your stories", "saw": "You made 4.",
+                                   "because": None, "today": "Pick the best of the 4.", "screen": 1},
+                                  {"title": "Double down: aim for 8 reels this week", "saw": "You made 4.",
+                                   "because": None, "today": "Plan them.", "screen": 1},
+                                  {"title": "Give them a call back", "saw": "2 people waiting.", "because": None,
+                                   "today": "Start with the oldest.", "screen": 1}]})
 
 
 b = review_brief.build(ABOUT, NOW, think=think_ok)
-ok("one AI call, on the review task, with a bounded wait", calls == [("review", 60)], calls)
+ok("one AI call, on the review task, with a bounded wait", calls == [("review", 90)], calls)
 ok("a grounded good-news sentence is kept", b["good_news"] == "Four reels went out yesterday, 4 in one day.",
    b["good_news"])
 titles = [i["title"] for i in b["ideas"]]
@@ -122,7 +126,7 @@ ok("an idea suggested this week is not suggested again", "Share yesterday's 4 re
 
 b = review_brief.build(ABOUT, NOW, think=lambda *a, **k: json.dumps({"good_news": "You earned $9,999 yesterday."}))
 ok("an invented money figure in good news falls back to the plain true line",
-   b["good_news"] == "Yesterday, Reels: 4 reels published.", b["good_news"])
+   b["good_news"] == "Yesterday: 4 reels published.", b["good_news"])
 b = review_brief.build(ABOUT, NOW, think=lambda *a, **k: (_ for _ in ()).throw(TimeoutError()))
 ok("an AI that times out still gives an on-time review", b["good_news"] and b["ideas"] == [], b)
 
@@ -140,11 +144,12 @@ ok("the page reads the stored brief", review_brief.for_page(ABOUT, NOW) == revie
 
 # ── 4. the brief's shape (the contract the app page reads) ───────────────────────────────────────────────────
 KEYS = {"about", "date_label", "quote", "good_news", "worth", "moving", "ideas", "ideas_from", "empty", "link",
-        "built_at", "numbers", "welcome", "learned", "aims", "coming", "first", "best"}
+        "built_at", "numbers", "welcome", "learned", "aims", "coming", "first", "best", "your_week"}
 b = review_brief.get(ABOUT)
 ok("the brief carries exactly the documented keys", set(b) == KEYS, set(b) ^ KEYS)
 ok("every item is {title, why, href, machine}",
-   all(set(i) == {"title", "why", "href", "machine"} for i in b["worth"] + b["moving"] + b["ideas"]))
+   all(set(i) == {"title", "why", "href", "machine"} for i in b["worth"] + b["moving"])
+   and all({"title", "why", "href", "machine", "saw", "because", "today", "where"} == set(i) for i in b["ideas"]))
 ok("the date label is the morning it is read", b["date_label"] == "Thursday · October 1, 2026", b["date_label"])
 ok("no zero is ever a line", not any(i["title"].startswith("0 ") for i in b["worth"] + b["moving"]))
 

@@ -105,6 +105,14 @@ def report(day: date) -> dict:
         sites += 1
         prev = _people(site, end - timedelta(days=1))
         before = None if (before is None or prev is None) else before + prev
+    # WHERE PEOPLE CAME FROM (Morning Review V2 step 2): the week's visits from search, AI answers and social, each a
+    # figure the page draws alone and the review's AI is handed. Only the ones that sent someone.
+    figures = {}
+    for key, label in (("search", "visits from search this week"), ("ai", "visits from AI answers this week"),
+                       ("social", "visits from social sites this week")):
+        n = sum(int((w.get("by_source") or {}).get(key) or 0) for w in weeks)
+        if n:
+            figures[f"from_{key}"] = {"value": n, "label": label, "href": "/settings/sources"}
     sent = _sent_by_ai(weeks)
     if sent:
         happened.insert(0, {"text": sent, "href": "/settings/sources"})   # first, so the brief carries it too
@@ -114,7 +122,9 @@ def report(day: date) -> dict:
                  + (f" across {sites} sites" if sites > 1 else ""))
         out = {"title": TITLE, "happened": happened,
                "headline": {"value": total, "label": label, "delta": (total - before) if before is not None else None,
-                            "better": "more"}}
+                            "better": "more", "week": "last"}}
+        if figures:
+            out["figures"] = figures
     err = settings.sync_state().get("error") or ""
     if err:
         out.setdefault("title", TITLE)

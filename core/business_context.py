@@ -477,13 +477,29 @@ PROFILE_FIELDS = (                                       # (field, heading, what
     ("different", "What makes you different", "what makes it different: experience, credentials, guarantees, "
                                                 "policies"),
 )
+# WHICH INDUSTRY, BY THE SAME METHOD (Morning Review V2 step 1, docs/PLAN_MORNING_REVIEW_ADVISOR.md Input A): one word
+# from the fixed list and the number of the sentence that shows it. It only ever becomes a question on the screen.
+SCAN_INDUSTRIES = tuple(i for i in INDUSTRIES if i != "other")
 SCAN_SYSTEM = (
     "You read numbered sentences from a business's own website and say which sentences state each of these about "
     "the business: " + "; ".join(f"{k} ({what})" for k, _, what in PROFILE_FIELDS) + ". Skip slogans, opinions, "
-    "testimonials, calls to action, cookie and legal notices, and anything about other companies. Answer with JSON "
-    "only: {" + ", ".join(f'"{k}": [sentence numbers]' for k, _, _ in PROFILE_FIELDS) + f"}}, at most "
-    f"{PROFILE_PER_FIELD} per field, most useful first, an empty list when the site doesn't say. Never write a "
-    "sentence of your own.")
+    "testimonials, calls to action, cookie and legal notices, and anything about other companies. Also say which "
+    "one of these the business is: " + ", ".join(SCAN_INDUSTRIES) + ", with the number of the sentence that shows "
+    "it. Answer with JSON only: {" + ", ".join(f'"{k}": [sentence numbers]' for k, _, _ in PROFILE_FIELDS)
+    + ', "industry": {"pick": "one of the list", "because": sentence number} or null}, at most '
+    f"{PROFILE_PER_FIELD} per field, most useful first, an empty list when the site doesn't say, and null for the "
+    "industry when no sentence shows it. Never write a sentence of your own.")
+
+# REBUILT ONCE A WEEK (V2 step 1: "rebuilt once a week, never daily"), so a new price or a new service reaches the
+# review; a re-read that fails keeps last week's lines.
+REBUILD_DAYS = 7
+# WHAT THE OWNER SAID IS WRONG ("the box drafts them and you fix what's wrong"): a struck line goes at once and no
+# later read brings it back. Kept as the line's words, folded, so a re-read of the same sentence is recognised.
+STRUCK = "_struck"
+STRUCK_MAX = 500
+# THE INDUSTRY THE SITE SHOWS, as a question: {"industry", "line", "source"}, and the picks a person said no to.
+INDUSTRY_HINT = "_industry_hint"
+INDUSTRY_NO = "_industry_no"
 
 
 def _picks(raw: str, numbered: list) -> list[dict]:
@@ -508,6 +524,114 @@ def _picks(raw: str, numbered: list) -> list[dict]:
                 n += 1
                 out.append({"line": numbered[i - 1][0], "source": numbered[i - 1][1], "field": field})
     return out
+
+
+def _fold(line: str) -> str:
+    return " ".join(str(line or "").lower().split())
+
+
+def _struck_rows() -> list[dict]:
+    """[{"fold", "line", "source", "field"}], oldest first: what was struck, whole, so it can be put back."""
+    try:
+        rows = box_settings.get(NS, STRUCK, default=[]) or []
+    except Exception:                                    # noqa: BLE001
+        return []
+    return [r if isinstance(r, dict) else {"fold": str(r)} for r in rows]
+
+
+def struck() -> set:
+    """The lines the owner said are wrong, folded. Never raises."""
+    return {str(r.get("fold") or "") for r in _struck_rows()} - {""}
+
+
+def last_struck() -> dict:
+    """The line struck most recently, for the screen's "Put it back"; {} when none."""
+    rows = _struck_rows()
+    return rows[-1] if rows and rows[-1].get("line") else {}
+
+
+def _write_profile_file(profile: list[dict]) -> None:
+    try:
+        from core import brain
+        site = website()
+        brain.write_knowledge(PROFILE_FILE, profile_text(profile, site, _now()[:10]) if profile else
+                              f"The owner removed every line the box read from {site}.", made_from="your own website")
+    except Exception as e:                               # noqa: BLE001 — the screen is right either way
+        log.warning("business.profile_file_failed", error=type(e).__name__)
+
+
+def strike(line: str, *, by: str) -> bool:
+    """The owner says a profile line is wrong: it leaves the profile and the knowledge file now, and no later read of
+    the site brings it back. -> whether a line went."""
+    f = _fold(line)
+    prof = get().get("profile") or []
+    gone = [p for p in prof if _fold(p.get("line")) == f]
+    keep = [p for p in prof if _fold(p.get("line")) != f]
+    if not f or not gone:
+        return False
+    rows = [r for r in _struck_rows() if r.get("fold") != f] + [{"fold": f, **{k: gone[0].get(k) for k in
+                                                                                ("line", "source", "field")}}]
+    box_settings.put(NS, STRUCK, rows[-STRUCK_MAX:], set_by=str(by)[:80])
+    put("profile", keep, by=by)
+    _write_profile_file(keep)
+    log.info("business.line_struck", by=str(by)[:40])
+    return True
+
+
+def unstrike(line: str, *, by: str) -> bool:
+    """"Put it back": a struck line returns to the profile now, where it was, and later reads keep it. -> whether one
+    came back."""
+    f = _fold(line)
+    rows = _struck_rows()
+    back = next((r for r in rows if r.get("fold") == f and r.get("line") and r.get("source")), None)
+    if not back:
+        return False
+    box_settings.put(NS, STRUCK, [r for r in rows if r.get("fold") != f], set_by=str(by)[:80])
+    prof = get().get("profile") or []
+    if f not in {_fold(p.get("line")) for p in prof}:
+        prof = put("profile", prof + [{k: back[k] for k in ("line", "source", "field")}], by=by)
+    _write_profile_file(prof)
+    log.info("business.line_put_back", by=str(by)[:40])
+    return True
+
+
+def _industry_pick(raw: str, numbered: list) -> dict:
+    """The model's industry -> {"industry", "line", "source"}, or {} when it is not one of the list or its sentence
+    number is not a sentence."""
+    try:
+        got = json.loads(raw[raw.index("{"):raw.rindex("}") + 1]).get("industry")
+        pick, i = str(got.get("pick") or "").strip().lower(), int(got.get("because"))
+    except (ValueError, AttributeError, TypeError):
+        return {}
+    if pick not in SCAN_INDUSTRIES or not 1 <= i <= len(numbered):
+        return {}
+    return {"industry": pick, "line": numbered[i - 1][0], "source": numbered[i - 1][1]}
+
+
+def industry_hint() -> dict:
+    """The industry the site shows, while the owner has none set and has not said no to it; else {}."""
+    try:
+        h = box_settings.get(NS, INDUSTRY_HINT, default={}) or {}
+        no = set(box_settings.get(NS, INDUSTRY_NO, default=[]) or [])
+    except Exception:                                    # noqa: BLE001
+        return {}
+    if not isinstance(h, dict) or not h.get("industry") or get().get("industry") or h["industry"] in no:
+        return {}
+    return h
+
+
+def answer_industry(yes: bool, *, by: str) -> str:
+    """A person's answer to "Is this a <industry> business?". Yes fills the industry (only if still empty); no means
+    that pick is never asked again. -> the industry now stored, or ""."""
+    h = industry_hint()
+    if not h:
+        return get().get("industry") or ""
+    box_settings.put(NS, INDUSTRY_HINT, {}, set_by=str(by)[:80])
+    if yes:
+        return put("industry", h["industry"], by=by)
+    no = set(box_settings.get(NS, INDUSTRY_NO, default=[]) or [])
+    box_settings.put(NS, INDUSTRY_NO, sorted(no | {h["industry"]}), set_by=str(by)[:80])
+    return ""
 
 
 def profile_text(profile: list[dict], site: str, day: str) -> str:
@@ -551,7 +675,11 @@ def full_scan(site: str | None = None, *, think=None, fetch=None) -> dict:
         raw = think(task="business.full_scan", system=SCAN_SYSTEM, max_tokens=500, timeout=120, isolated=True,
                     prompt=f"Website: {site}\n\nSentences, numbered:\n{listing}\n\nWhich numbers state each?",
                     job_id=f"business-scan:{bare_host(site)}")
-        profile = put("profile", _picks(raw, numbered), by="full scan")
+        gone = struck()
+        profile = put("profile", [p for p in _picks(raw, numbered) if _fold(p["line"]) not in gone], by="full scan")
+        hint = _industry_pick(raw, numbered)
+        if hint and not get().get("industry"):
+            box_settings.put(NS, INDUSTRY_HINT, hint, set_by="full scan")
         from core import brain
         if not profile:                                  # nothing old stays behind as if the site still said it
             brain.write_knowledge(PROFILE_FILE, f"The box read {site} on {_now()[:10]} and found nothing it could "
@@ -574,9 +702,12 @@ def full_scan_if_needed() -> dict:
         return {"status": "no_website"}
     last = box_settings.get(NS, "_full_scan", default={}) or {}
     same = isinstance(last, dict) and last.get("site") == site
-    if same and last.get("status") == "done":
+    # A NEW WEEK IS A NEW READ (REBUILD_DAYS), with its own tries: a site that changed is read again, and one that
+    # could not be read last week is tried again this week.
+    week_old = same and _days_old(last.get("at")) >= REBUILD_DAYS
+    if same and last.get("status") == "done" and not week_old:
         return {"status": "done"}
-    tries = int(last.get("tries") or 0) if same else 0
+    tries = int(last.get("tries") or 0) if same and not week_old else 0
     if tries >= FULL_SCAN_TRIES:
         return {"status": "gave_up"}
     out = full_scan(site)
@@ -586,6 +717,16 @@ def full_scan_if_needed() -> dict:
     box_settings.put(NS, "_full_scan", {"site": site, "tries": tries + 1, "status": status, "at": _now(),
                                         "lines": out.get("lines", 0), "why": out.get("why", "")}, set_by="full scan")
     return {"status": status, "why": out.get("why", "")}
+
+
+def _days_old(at) -> float:
+    """How many days ago an ISO stamp was; a missing or unreadable stamp is old."""
+    try:
+        t = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+        t = t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - t).total_seconds() / 86400
+    except (TypeError, ValueError):
+        return float("inf")
 
 
 def full_scan_state() -> dict:

@@ -73,9 +73,27 @@ def ui_saved_replies(zcid: str):
     except Exception:                            # noqa: BLE001 — a list that can't be read costs the list only
         rows = []
     me = (dash.session_user(request) or {}).get("name") or ""
+    from .app import _is_owner
     return jsonify({"replies": [{"id": str(r["id"]), "name": str(r["title"]),
                                  "words": snippets.fill(r["body"], participant=conv.get("participant"), my_name=me)}
-                                for r in rows]})
+                                for r in rows],
+                    # NONE SAVED YET: the owner is shown where to save some, as the old reply box shows him.
+                    "canAdd": bool(_is_owner())})
+
+
+@blueprint.get("/inbox/api/signature")
+def ui_signature():
+    """THE EMAIL SIGNATURE, SAID BEFORE SEND (the parity checklist; the old reply box's `_signed_note`). The send path
+    adds it (inbox/signature.py), never the composer, so this only reads it: the words, or null when there is none."""
+    from flask import jsonify
+
+    from .app import _space
+    from .inbox import signature
+    try:
+        sig = signature.get(_space())
+    except Exception:                            # noqa: BLE001 — a note that can't be read is not drawn
+        sig = None
+    return jsonify({"signature": sig or None})
 
 
 @blueprint.get("/inbox/api/conversations/<path:zcid>")
@@ -112,8 +130,17 @@ def view_of(arg: str | None) -> str:
     return arg if arg in {k for k, _ in VIEWS} else ""
 
 
+def has_conversations(space: str) -> bool:
+    """Is there anyone in this inbox at all? The notification offer waits for someone to be told about (#1966)."""
+    from .inbox import store
+    try:
+        return bool(store.list_conversations(space, limit=1))
+    except Exception:                            # noqa: BLE001 — an unreadable store offers nothing
+        return False
+
+
 def pills(space: str, counts: dict, waiting: bool, from_ad: bool, view: str) -> str:
-    """OUR FILTERS ABOVE THEIR LIST: the inbox's own (All, Unanswered, Leads: app._pills, unchanged), then Done, Trash
+    """OUR FILTERS ABOVE THEIR LIST: the inbox's own (All, Unanswered, Prospects: app._pills, unchanged), then Done, Trash
     and Junk. Each list shows only when it holds something or is the one on screen, the rule _pills keeps: a pill that
     cannot change the screen is not drawn. In Done, Trash or Junk nothing waits, so All is the way back."""
     from .app import _pills
@@ -149,12 +176,34 @@ def inbox_body() -> str:
             # THE FRAME STOPS RESERVING A SCREEN OF ITS OWN: its layout box is a full screen tall below a header, which
             # left a page that scrolls by the header's height, and a focus scrolled it. The inbox sizes itself.
             '<style>#ib-inbox{min-height:320px;display:flex;flex-direction:column}.lay{min-height:0}'
+            # ONE SEARCH AT EVERY WIDTH (owner, #1977): on a phone the bar's, so theirs in the list is not drawn; on a
+            # desktop, where the box's bar hides, theirs (which asks the box, patch 0004).
+            '@media (max-width:820px){#ib-inbox .ib-list-search{display:none}}'
+            # A ROW'S ACTIONS FOR A SCREEN READER OR A KEYBOARD (list-actions.tsx): drawn nowhere until a keyboard
+            # reaches them, then where the mouse's bar sits.
+            '#ib-inbox .ib-acts{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;'
+            'clip:rect(0,0,0,0);white-space:nowrap;border:0}'
+            '#ib-inbox .ib-acts:focus-within{width:auto;height:auto;margin:0;overflow:visible;clip:auto;right:8px;'
+            'top:50%;transform:translateY(-50%);display:flex;gap:4px;align-items:center;padding:4px;'
+            'border:1px solid var(--chat-border);border-radius:10px;background:var(--chat-surface)}'
+            '#ib-inbox .ib-acts button{display:flex;align-items:center;gap:4px;padding:0 10px;border-radius:8px;'
+            'font-size:13px;color:var(--ink)}'
+            '#ib-inbox .ib-acts select{border-radius:8px;padding:0 8px;background:transparent;color:var(--ink)}'
             # THEIR TOASTS (Moved to Done, Undo) IN THE BOX'S COLOURS, light and dark: theirs are always light.
             '#ib-inbox [data-sonner-toaster]{--normal-bg:var(--card);--normal-text:var(--ink);'
             '--normal-border:var(--card-edge)}'
             # INSIDE A CONVERSATION, ON A MOBILE, THE COMPOSER TAKES THE BOTTOM: the bottom bar and its room step aside.
-            '@media (max-width:899px){html.ib-thread-open nav.tabs{display:none}'
-            'html.ib-thread-open body{padding-bottom:0}html.ib-thread-open .sum,html.ib-thread-open .pills{display:none}}</style>'
+            # 48px TARGETS AND 16px FIELDS ON A MOBILE (the owner's ruling, every inbox screen): their controls are
+            # 32px and their small type, so a thumb gets the size the old screens give it, and a field never zooms.
+            '@media (max-width:899px){#ib-inbox :is(button,[role=button],[role=combobox],select,textarea,'
+            'input:not([type=hidden],[type=checkbox],[type=radio])){min-height:48px}'
+            '#ib-inbox :is(button,[role=button]){min-width:48px}'
+            '#ib-inbox :is(input,textarea,select){font-size:max(16px,1em)}'
+            'html.ib-thread-open nav.tabs{display:none}'
+            'html.ib-thread-open body{padding-bottom:0}html.ib-thread-open :is(.sum,.pills,#ownbox-notify,.ib-below)'
+            '{display:none}}'
+            # THEIR COMPOSER'S FIELD IS THE COMPOSER, in dark too: its own dark tint drew a second box inside it.
+            'html.dark #ib-inbox textarea{background-color:transparent}</style>'
             '<div id="ib-inbox"></div>'
             # THE INBOX FILLS WHAT THE FRAME LEAVES: below the header, above the bottom bar's room, measured, never
             # assumed (a notch, a larger text size), again on a resize and when a conversation opens or closes.
@@ -164,7 +213,14 @@ def inbox_body() -> str:
             'function dark(){root.classList.toggle("dark",root.getAttribute("data-theme")==="dark");}'
             'function fit(){var top=el.getBoundingClientRect().top+window.scrollY;'
             'var pb=parseFloat(getComputedStyle(document.body).paddingBottom)||0;'
-            'el.style.height="calc(100dvh - "+(top+pb)+"px)";}dark();fit();addEventListener("resize",fit);'
+            'el.style.height="calc(100dvh - "+(top+pb)+"px)";'
+            # OTHER MACHINES' CARDS START BELOW THE SCREEN, not in the room kept above the bottom bar, where their top
+            # edge showed under the list: below the conversations, reached by scrolling (core/panels.py).
+            'var b=document.querySelector(".ib-below");if(b)b.style.marginTop=pb?pb+"px":"";}'
+            'dark();fit();addEventListener("resize",fit);'
+            # ...AND AGAIN WHEN ANYTHING ABOVE IT CHANGES SIZE: the notification offer appears once the page asks.
+            'if(window.ResizeObserver){var ro=new ResizeObserver(fit),s=el.previousElementSibling;'
+            'while(s){ro.observe(s);s=s.previousElementSibling;}}'
             'new MutationObserver(function(){dark();fit();}).observe(root,'
             '{attributes:true,attributeFilter:["class","data-theme"]});'
             '})();</script>'

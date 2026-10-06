@@ -551,5 +551,54 @@ except Exception as e:                                   # noqa: BLE001
        "mailbox" not in str(e).lower() and "mail app" not in str(e),
        f"it took the mail path instead: {str(e)[:90]}")
 
+
+# ── once it went, the person is told it went (OSDev1, #2010's review) ─────────────────────────────────
+print("\ntest_a_reply_that_went_is_never_reported_unsent")
+# EVERY CALLER TURNS A RAISE INTO "that did not send, nothing was delivered", so bookkeeping that fails AFTER the
+# vendor took the message must not raise: the person would be told a delivered reply never went, and send it again.
+INBOX.send_impl = lambda cid, aid, text, tag: {"message_id": f"out-{len(INBOX.sent)}"}
+_real_record, _real_resolve = store.record_message, store.resolve_send
+
+
+def _locked(*a, **kw):
+    raise RuntimeError("database is locked")
+
+
+def _resolve_locked_when_sent(*a, **kw):
+    if kw.get("status") in ("ok", "indeterminate"):
+        raise RuntimeError("database is locked")
+    return _real_resolve(*a, **kw)
+
+
+for label, patch in (("the thread could not be written", ("record_message", _locked)),
+                     ("the ledger could not be written", ("resolve_send", _resolve_locked_when_sent))):
+    _conv("c-went-" + patch[0])
+    setattr(store, *patch)
+    try:
+        n = len(INBOX.sent)
+        out = reply.send_reply(space=SPACE, zcid="c-went-" + patch[0], text="See you at 2:00!", user_id=U,
+                               nonce="n-went-" + patch[0])
+        ok(f"{label} after it went: the reply is reported SENT, once", out.get("status") == "ok"
+           and out.get("message_id") and len(INBOX.sent) == n + 1, out)
+    except Exception as e:                                       # noqa: BLE001 — the regression, named
+        ok(f"{label} after it went: the reply is reported SENT, once", False, f"raised {type(e).__name__}: {e}")
+    finally:
+        store.record_message, store.resolve_send = _real_record, _real_resolve
+
+_conv("c-maybe")
+INBOX.send_impl = _boom
+store.resolve_send = _resolve_locked_when_sent
+try:
+    reply.send_reply(space=SPACE, zcid="c-maybe", text="are you there", user_id=U, nonce="n-maybe")
+    ok("a timeout whose ledger write fails is still 'may have landed', never 'did not send'", False, "returned")
+except reply.ReplyIndeterminate:
+    ok("a timeout whose ledger write fails is still 'may have landed', never 'did not send'", True)
+except Exception as e:                                           # noqa: BLE001 — the regression, named
+    ok("a timeout whose ledger write fails is still 'may have landed', never 'did not send'", False,
+       f"raised {type(e).__name__}")
+finally:
+    store.resolve_send = _real_resolve
+    INBOX.send_impl = lambda cid, aid, text, tag: {"message_id": f"out-{len(INBOX.sent)}"}
+
 print(("FAILED " + str(_failed)) if _failed else "all ok")
 sys.exit(1 if _failed else 0)

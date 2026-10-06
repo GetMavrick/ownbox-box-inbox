@@ -538,7 +538,12 @@ models:
   brain:         sonnet   # the run-the-business channel deserves the better model
   agent:         sonnet   # tool-using loop: strict JSON + multi-step reasoning need Sonnet
   coworker:      sonnet   # a coworker's shift (brain.run_agent): a tool-using loop, same reason as agent
-  review:        haiku    # the Morning Review's good-news line and ideas, once a day (core/review_brief.py)
+  review:        sonnet   # the Morning Review's good news and its Advice for today, once a day
+                          # (core/review_advisor.py): owner, 2026-10-05, decision 1 of
+                          # docs/PLAN_MORNING_REVIEW_ADVISOR.md, "Sonnet for the one daily advice call"
+  business.full_scan: sonnet  # the weekly read of the business's own website (core/business_context.py): owner,
+                              # 2026-10-05, decision 1 of docs/PLAN_MORNING_REVIEW_ADVISOR.md, "Sonnet for the one
+                              # daily advice call and the weekly profile"
   brief:         haiku    # today's brief, ranked by the box's AI, at most 4 a day (core/brief.py)
   ask:           haiku    # a question asked of the box (core/ask.py): the smallest model that answers well,
                           # because it draws on the buyer's own AI limit (OSDev1, 2026-10-02)

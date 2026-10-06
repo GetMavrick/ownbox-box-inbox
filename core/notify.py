@@ -292,9 +292,14 @@ def send_notice(key: str, subject: str, text_body: str, html_body: str | None = 
         return {"sent": 0, "skipped": "error", "detail": str(e)[:160]}
 
 
+SENDER = "Your Ownbox"
+
+
 def _sender_name() -> str:
     from core.config import get_config
-    return str((get_config().get("brand") or {}).get("name") or "Your box").strip() or "Your box"
+    # "YOUR OWNBOX", NEVER "YOUR BOX" (owner, 2026-10-06: "It's always your Ownbox. We want to brand that term."):
+    # the name in the From line of every email the box sends without a brand name of its own.
+    return str((get_config().get("brand") or {}).get("name") or SENDER).strip() or SENDER
 
 
 def _plain_html(text_body: str) -> str:

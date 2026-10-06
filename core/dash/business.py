@@ -47,6 +47,12 @@ _CSS = (
     ".bz-hint{color:var(--ink-2);margin:4px 0 0;font-size:calc(15 * var(--px, 1px))}"
     ".bz-err{color:var(--danger)}"
     ".bz-read p{margin:6px 0}"
+    # A QUOTED LINE AND ITS "Not right": the line takes the width, the button sits beside it at 48px on a phone.
+    ".bz-line{display:flex;align-items:flex-start;gap:8px;margin:6px 0}"
+    ".bz-line p{flex:1 1 auto;margin:0}"
+    ".bz-line form{margin:0;flex:none}"
+    ".bz-line button{min-height:48px;min-width:48px;margin:-12px 0;padding:0 4px 0 12px;border:0;background:none;"
+    "color:var(--ink-2);font-size:calc(15 * var(--px, 1px));cursor:pointer}"
     "@media (min-width:720px){.bz-chips{flex-direction:row;flex-wrap:wrap}"
     ".bz-chips label{min-height:40px;border-radius:999px}.bz-plan{flex-direction:row}}"
 )
@@ -154,9 +160,11 @@ def _page(url: str) -> str:
     return path.rsplit("/", 1)[-1].replace("-", " ") or "home page"
 
 
-def _profile_card(ctx: dict) -> str:
-    """C3: what the business's own website says, each line quoted with the page it came from. '' until the box has
-    read the website (core/business_context.py, full_scan)."""
+def _profile_card(ctx: dict, owner: bool = False) -> str:
+    """WHAT YOUR BOX KNOWS ABOUT YOUR BUSINESS (Morning Review V2 step 1; owner, 2026-10-05, decision 2: "one screen,
+    every line with its source"). Each line quoted from the business's own website with the page it came from, read
+    again every week; the owner strikes what is wrong ("the box drafts them and you fix what's wrong") and it stays
+    gone. '' until the box has read the website (core/business_context.py, full_scan)."""
     prof = [p for p in (ctx.get("profile") or []) if str(p.get("source") or "").startswith(("https://", "http://"))]
     if not prof:
         return ""
@@ -165,13 +173,36 @@ def _profile_card(ctx: dict) -> str:
         lines = [p for p in prof if p.get("field") == field]
         if lines:
             groups.append(f"<h3>{_esc(heading)}</h3>" + "".join(
+                '<div class="bz-line">'
                 f'<p>{_esc(p["line"])} <a href="{_esc(p["source"])}" target="_blank" rel="noopener nofollow">'
-                f'{_esc(_page(p["source"]))}</a></p>' for p in lines))
+                f'{_esc(_page(p["source"]))}</a></p>'
+                + (f'<form method="post" action="{DOOR}"><input type="hidden" name="action" value="strike">'
+                   f'<input type="hidden" name="line" value="{_esc(p["line"])}">'
+                   '<button type="submit">Not right</button></form>' if owner else "")
+                + '</div>' for p in lines))
     at = str(bc.full_scan_state().get("at") or "")[:10]
-    return ('<div class="card bz-read"><h2>What your website says</h2>'
-            f'<p class="bz-hint">Read from your website{" on " + _esc(at) if at else ""}. Each line is quoted from '
-            'your own site, with the page it came from. The box uses them when it writes for you.</p>'
+    return ('<div class="card bz-read"><h2>What your box knows about your business</h2>'
+            f'<p class="bz-hint">Read from your website{" on " + _esc(at) if at else ""}, and again every week. Each '
+            'line is quoted from your own site, with the page it came from. Your box uses them when it writes for '
+            'you and in your Morning Review.'
+            + (' Tap Not right on anything wrong and it is gone for good.' if owner else "") + '</p>'
             + "".join(groups) + "</div>")
+
+
+def _industry_card() -> str:
+    """The industry the site shows, as a question, while none is set: yes fills it, no is never asked again."""
+    h = bc.industry_hint()
+    if not h:
+        return ""
+    return ('<div class="card"><h2>Is this ' + _esc(("an " if h["industry"][:1] in "aeiou" else "a ") + h["industry"])
+            + ' business?</h2>'
+            f'<p>Your website says: &ldquo;{_esc(h["line"])}&rdquo; '
+            f'<a href="{_esc(h["source"])}" target="_blank" rel="noopener nofollow">{_esc(_page(h["source"]))}</a></p>'
+            '<p class="bz-hint">Your box uses it to fit your Morning Review to your kind of business.</p>'
+            f'<form method="post" action="{DOOR}"><input type="hidden" name="action" value="industry_yes">'
+            '<button type="submit">Yes, that\'s right</button></form>'
+            f'<form method="post" action="{DOOR}"><input type="hidden" name="action" value="industry_no">'
+            '<button type="submit" class="ghost">No</button></form></div>')
 
 
 def _read_only(ctx: dict) -> str:
@@ -232,6 +263,15 @@ def box_business_screen():
         if action == "reject":
             bc.reject_suggested(by=str(_who().get("id") or "owner"))
             return redirect(DOOR, code=303)
+        if action == "strike":
+            gone = bc.strike(request.form.get("line") or "", by=str(_who().get("id") or "owner"))
+            return redirect(DOOR + ("?struck=1" if gone else ""), code=303)
+        if action == "unstrike":
+            bc.unstrike(request.form.get("line") or "", by=str(_who().get("id") or "owner"))
+            return redirect(DOOR, code=303)
+        if action in ("industry_yes", "industry_no"):
+            bc.answer_industry(action == "industry_yes", by=str(_who().get("id") or "owner"))
+            return redirect(DOOR + ("?saved=1" if action == "industry_yes" else ""), code=303)
         if action == "dismiss":
             box_settings.put(CARD_NS, CARD_KEY, True, set_by=str(_who().get("id") or "") or None)
             return redirect("/dashboard", code=303)
@@ -243,8 +283,17 @@ def box_business_screen():
         ctx.update({f: v for f, v in _answers(request.form)})
     saved = ('<div class="card"><h2>Saved.</h2><p>Your next Morning Review starts from it.</p></div>'
              if request.args.get("saved") and not errors else "")
+    # NOT RIGHT CAN BE UNDONE: the line just struck, with "Put it back", so a slip of the thumb costs nothing.
+    last = bc.last_struck() if owner and request.args.get("struck") else {}
+    if last:
+        saved += ('<div class="card"><h2>Removed.</h2>'
+                  f'<p>&ldquo;{_esc(last["line"])}&rdquo; is off your profile, and the weekly read will leave it '
+                  'out.</p>'
+                  f'<form method="post" action="{DOOR}"><input type="hidden" name="action" value="unstrike">'
+                  f'<input type="hidden" name="line" value="{_esc(last["line"])}">'
+                  '<button type="submit" class="ghost">Put it back</button></form></div>')
     body = f"<style>{_CSS}</style>" + saved + (
-        _suggestion_card(ctx) + _profile_card(ctx) + _form(ctx, errors) if owner
+        _suggestion_card(ctx) + _industry_card() + _profile_card(ctx, owner=True) + _form(ctx, errors) if owner
         else _read_only(ctx) + _profile_card(ctx)) + _back()
     return chrome(DOOR, title=_TITLE, lede=_LEDE, body=body), (200 if not errors else 400)
 

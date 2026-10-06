@@ -81,14 +81,19 @@ ok("stored once: the page reads the same numbers", review_brief.get(ABOUT)["numb
 
 print("\nWith no AI, the good news\n")
 g = b["good_news"]
-ok("names up to three machines, one phrase each", g == "Yesterday, Unified Inbox: 15 messages came in; Lead Machine: "
-   "23 companies found; Website: www.example-medspa.com: 163 visits from people this week.", g)
+ok("one phrase from each machine, in a sentence, never a machine's name (owner, 2026-10-06: polish)",
+   g == "Yesterday: 15 messages came in and 23 companies found.", g)
 ok("...never Already moving item 01 word for word", g != f"Yesterday, {b['moving'][0]['machine']}: {b['moving'][0]['title']}.")
 ok("a site's name keeps its own case", any(m["title"].startswith("www.example-medspa.com") for m in b["moving"]),
    [m["title"] for m in b["moving"]])
-ok("one machine alone still reads as it always did",
+ok("one machine alone reads the same way",
    review_brief._plain_good_news([{"machine": "Reels", "title": "4 reels published"}])
-   == "Yesterday, Reels: 4 reels published.")
+   == "Yesterday: 4 reels published.")
+ok("...a site's line alone still says something true",
+   review_brief._plain_good_news([{"machine": "Website", "title": "www.example-medspa.com: 163 visits"}])
+   == "Yesterday, www.example-medspa.com: 163 visits.")
+ok("...and a name with capitals inside keeps them",
+   review_brief._plain_good_news([{"machine": "W", "title": "PageSpeed score: 87"}]) == "Yesterday: PageSpeed score: 87.")
 
 print("\nThe same numbers on every surface\n")
 html, _ = page.render(ABOUT.isoformat(), NOW)

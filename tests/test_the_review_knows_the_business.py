@@ -83,12 +83,15 @@ seen = []
 
 def think(task, prompt, **kw):
     seen.append({"task": task, "prompt": json.loads(prompt), "kw": kw})
-    return json.dumps({"good_news": "12 messages came in yesterday.", "ideas": [
-        {"title": "Reply to the 4 people waiting", "why": "They wrote yesterday."},
-        {"title": "Answer the 4 people waiting on a reply", "why": "Quick wins."},
-        {"title": "Offer a $189 Hydrafacial rebook to regulars", "why": "Repeat customers are your first goal."},
-        {"title": "Ask Saturday regulars for a review", "why": "Better reviews is a goal, and 12 wrote in."},
-        {"title": "Run a $49 flash sale", "why": "Nobody said $49."}]})
+    # THE ADVISOR'S SHAPE (V2 step 3): each piece cites profile line 1 and a screen this box has.
+    def a(title, saw):
+        return {"title": title, "saw": saw, "because": 1, "today": "Start this morning.", "screen": 1}
+    return json.dumps({"good_news": "12 messages came in yesterday.", "advice": [
+        a("Reply to the 4 people waiting", "They wrote yesterday."),
+        a("Answer the 4 people waiting on a reply", "Quick wins."),
+        a("Offer a $189 Hydrafacial rebook to regulars", "Repeat customers are your first goal."),
+        a("Ask Saturday regulars for a review", "Better reviews is a goal, and 12 wrote in."),
+        a("Run a $49 flash sale", "Nobody said $49.")]})
 
 
 print("test_the_ai_is_told_who_the_business_is")
@@ -107,7 +110,7 @@ ok("the call is not isolated, so my/knowledge/ (sent mail, the site's profile) r
    not seen[0]["kw"].get("isolated"), seen[0]["kw"])
 sysp = seen[0]["kw"].get("system") or ""
 ok("the prompt says to fit the business and never restate the to-do list",
-   "every idea must fit that business" in sysp and "never repeat or rephrase" in sysp, sysp[-500:])
+   "every piece of advice must fit that business" in sysp and "never repeat or rephrase" in sysp, sysp[-500:])
 
 print("\ntest_it_never_restates_the_to_do_list")
 titles = [i["title"] for i in b["ideas"]]

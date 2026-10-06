@@ -1,14 +1,13 @@
 """The Morning Review names who to answer first (#1953 Phase 1, step 1.5).
 
 "72 waiting" is a number; "Dana, waiting 3d: 'Do you have Saturday openings?'" is a reply sent before breakfast. The
-Inbox Machine's own reporter names three people from the last 30 days: anyone who came from an ad first, then people
-writing for the first time, newest first (OSDev1, 2026-10-05), with the first words of what they asked and a link to
-the conversation. Who is left out (the box itself, pitches, robots) is tests/test_who_to_answer_first_is_a_person.py. Core names no machine: any reporter may
+Inbox Machine's own reporter names three people from the last 30 days, by speed to lead (owner, 2026-10-06; until then
+ads first, then first-time writers, OSDev1 10-05), with the first words of what they asked and a link to the
+conversation. How the three are chosen, and the cards they are drawn on, is tests/test_who_to_answer_first_is_ranked.py. Who is left out (the box itself, pitches, robots) is tests/test_who_to_answer_first_is_a_person.py. Core names no machine: any reporter may
 carry `answer_first`, and the review shows it.
 
 WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
-  * the order is not ads first, then first-time writers, newest first; a thread older than 30 days is named; more
-    than three are;
+  * the order is not speed to lead; a thread older than 30 days is named; more than three are;
   * what they asked is not cut short, or the link does not open their conversation;
   * the names are missing from the page or either email;
   * a customer's name or words reach Slack (OSDev1: page and owner email only, never Slack);
@@ -81,13 +80,15 @@ for z, who, h, ad, said in PEOPLE:
 print("test_the_inbox_names_who_to_answer_first")
 rep = cv_report.report(date.today(), SP)
 first = rep.get("answer_first") or []
-ok("three people, the ad first, then first-time writers newest first; a month-old thread is never named",
-   [f["text"] for f in first] == ["Marcus Cole", "Priya Raman", "Dana Whitfield"], first)
-ok("each says how long, that it came from an ad, and the first words of what they asked",
-   first[0]["why"].startswith("Waiting 5h · from your ad: “Saw your spring package")
-   and first[0]["why"].endswith("…”") and first[2]["why"] == "Waiting 2d: “Do you have any Saturday "
-   "openings for a facial?”", [f["why"] for f in first])
-ok("each links to its conversation", first[2]["href"] == "/inbox/inbox/z-dana", first)
+# SPEED TO LEAD (owner, 2026-10-06): the ad lead asking a price, then the first-time writer who wants to book, then
+# the returning customer asking about the 20% off two hours ago; Priya moving her own booking waits behind them.
+ok("three people, by speed to lead; a month-old thread is never named",
+   [f["text"] for f in first] == ["Marcus Cole", "Dana Whitfield", "Len Okafor"], first)
+ok("each says how long, why them, and the first words of what they asked",
+   first[0]["why"].startswith("Waiting 5h · asking about price · from your ad · first message: “Saw your spring")
+   and first[0]["why"].endswith("…”") and first[1]["why"] == "Waiting 2d · wants to book · first message: “Do you "
+   "have any Saturday openings for a facial?”", [f["why"] for f in first])
+ok("each links to its conversation", first[1]["href"] == "/inbox/inbox/z-dana", first)
 ok("an id with odd characters is escaped in its link",
    cv_report.answer_first([{"participant": "R", "zernio_conversation_id": "z/odd id",
                             "last_inbound_at": now.isoformat()}], "")[0]["href"] == "/inbox/inbox/z%2Fodd%20id")
@@ -103,8 +104,8 @@ with state.connect() as c:
               (T.isoformat(), "customer_voice", json.dumps(report._normalize("customer_voice", "Unified Inbox", rep)),
                state._now()))
 b = review_brief.ensure(ABOUT, NOW)
-ok("the brief carries the three, in order", [f["title"] for f in b["first"]] == ["Marcus Cole", "Priya Raman",
-                                                                                "Dana Whitfield"], b.get("first"))
+ok("the brief carries the three, in order", [f["title"] for f in b["first"]] == ["Marcus Cole", "Dana Whitfield",
+                                                                                "Len Okafor"], b.get("first"))
 html, _ = page.render(ABOUT.isoformat(), NOW)
 e = review_email.build(ABOUT, NOW)
 mail, text = review_email.html(e), review_email.text(e)
@@ -112,8 +113,10 @@ ok("on the page, with the link", "Who to answer first" in html and "Dana Whitfie
    and "/inbox/inbox/z-dana" in html, html[-2000:])
 ok("in both emails", "WHO TO ANSWER FIRST" in text and "Marcus Cole" in text
    and "Who to answer first" in mail and "z-dana" in mail, text)
-ok("right after what is worth their time", "WORTH YOUR TIME" in text
-   and text.index("WORTH YOUR TIME") < text.index("WHO TO ANSWER FIRST"), text[:600])
+ok("right below the quote, before anything else (owner, 2026-10-06)", "WHO TO ANSWER FIRST" in text
+   and text.index(b["quote"]) < text.index("WHO TO ANSWER FIRST")
+   and all(text.index("WHO TO ANSWER FIRST") < text.index(h) for h in ("WORTH YOUR TIME", "ALREADY MOVING")
+           if h in text), text[:600])
 
 print("\ntest_never_on_slack")
 slack = report.render(ABOUT, NOW)

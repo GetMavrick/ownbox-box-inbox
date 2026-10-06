@@ -176,7 +176,7 @@ def main():
     ok("opener sent with account_id + template",
        res["status"] == "opened" and sent_calls[-1]["account_id"] == "acc-mm"
        and sent_calls[-1]["text"] == "Custom opener!")
-    ok("owner notified of the new ad lead", any("New Messenger ad lead" in m for m in SLACK))
+    ok("owner notified of the new prospect from an ad", any("New Messenger prospect" in m for m in SLACK))
     ok("second run is already_opened (claim holds), no resend",
        handler.handle(dict(job))["status"] == "already_opened" and len(sent_calls) == 1)
     with state.connect() as c:

@@ -21,6 +21,8 @@ THE CONTRACT (what `get` and `build` return; WebDev2's page draws exactly this):
       "quote":      "A new month, a clean slate, a bright start.",
       "good_news":  "…" | "",                one optimistic sentence on yesterday; "" when there is none
       "best":       "…" | "",                a personal best (step 1.4): "New personal best: …"; "" when none fell
+      "your_week":  [item …],                Mondays only (V2 step 2): seven days against the seven before, the biggest
+                                             change first; [] on every other morning
       "worth":      [item …],                worth your time today: decisions only he can make, new or changed
       "first":      [item …],                who to answer first, by name: up to three, from a reporter's answer_first
       "moving":     [item …],                what the machines did, one per machine, only what happened
@@ -65,7 +67,7 @@ IDEAS_SEEN = "review_ideas"     # {normalised idea title: "YYYY-MM-DD"}
 FORGET_DAYS = 14
 IDEA_DAYS = 7
 MAX_WORTH, MAX_MOVING, MAX_IDEAS = 5, 5, 3
-AI_TASK = "review"              # config models: -> haiku
+AI_TASK = "review"              # config models: -> sonnet (Morning Review V2 decision 1)
 
 _NUM = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
@@ -127,23 +129,29 @@ def _numbers(rows: list[dict]) -> list[dict]:
         label = str((r.get("headline") or {}).get("label") or "").strip()
         if v is None or not label or not v:
             continue
+        if label.endswith(" today"):                  # the brief is about yesterday: "15 messages", not "today"
+            label = label[:-len(" today")]
         out.append({"machine": str(r.get("title") or r.get("machine") or ""), "value": v, "label": label})
     return out[:MAX_NUMBERS]
 
 
 def _plain_good_news(moving: list[dict]) -> str:
     """The good-news line with no AI: true, grounded, never a zero, and never the same words as "Already moving"
-    item 01. One machine reads as it always did; several read across the box, one phrase each."""
-    if not moving:
-        return ""
-    if len(moving) == 1:
-        return f"Yesterday, {moving[0]['machine']}: {moving[0]['title']}."
+    item 01. One phrase from each of up to three machines, in a sentence a person says ("Yesterday: 15 messages came
+    in, 15 companies found and 1 article published."), never the machines' names (polish, owner 2026-10-06)."""
     bits = []
-    for m in moving[:3]:
-        first = str(m["title"]).split(", ", 1)[0].strip()
-        if first:
-            bits.append(f"{m['machine']}: {first}")
-    return "Yesterday, " + "; ".join(bits) + "." if bits else ""
+    for m in (moving or [])[:3]:
+        first = str(m.get("title") or "").split(", ", 1)[0].strip()
+        word = first.split(" ", 1)[0]
+        if first and "." not in word:                        # a site's line ("example.com: 163 visits") stays put
+            bits.append(first[:1].lower() + first[1:] if word[1:].islower() else first)   # never "pageSpeed"
+    if not bits:
+        line = str(((moving or [{}])[0]).get("title") or "").split(", ", 1)[0].strip()
+        return f"Yesterday, {line}." if line else ""
+    said = bits[0] if len(bits) == 1 else ", ".join(bits[:-1]) + " and " + bits[-1]
+    return f"Yesterday: {said}."
+
+
 _LEAD_NUM = re.compile(r"\s*(\d[\d,]*(?:\.\d+)?)")
 
 
@@ -204,7 +212,7 @@ def _candidates(rows: list[dict]) -> list[dict]:
             out.append({"key": _key(machine, text, it.get("key")), "v": _value(it, text),
                         "person": bool(it.get("person")),
                         "item": {"title": text, "why": str(it.get("why") or ""), "href": str(it.get("href") or ""),
-                                 "machine": title}})
+                                 "machine": title, "person": bool(it.get("person"))}})
     return out
 
 
@@ -534,45 +542,14 @@ def _welcome_ai(ctx: dict, installed: list[dict], facts: dict, think=None) -> tu
 
 
 def _ai(facts: dict, recent_ideas: list[str], think=None, business: dict | None = None) -> tuple[str, list[dict]]:
-    """("good news", [ideas]) from one cheap call, or ("", []) when there is no AI or its answer fails a check."""
-    if not (facts["what_happened_yesterday"] or facts["worth_their_time_today"]):
-        return "", []
-    payload = {"facts": facts, "already_suggested": recent_ideas[:20]}
-    if business:
-        payload["business"] = business
-    prompt = json.dumps(payload, ensure_ascii=False)
-    try:
-        if think is None:
-            # A TEST NEVER SPENDS (the AIOS_HERMETIC_TEST convention, as core/slack.py and core/checkin.py): the
-            # suite passes `think` when it wants the AI path.
-            if os.environ.get("AIOS_HERMETIC_TEST"):
-                return "", []
-            from core import brain
-            ready, why = brain.can_think()
-            if not ready:
-                log.info("review_brief.no_ai", why=why[:120])
-                return "", []
-            think = brain.think
-        # A BOUNDED WAIT: this runs in the worker's send tick, and a review a minute late with no ideas beats one
-        # that holds every other periodic.
-        raw = think(AI_TASK, prompt, system=_SYSTEM, max_tokens=600, timeout=60)
-        got = json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
-    except Exception as e:                                   # noqa: BLE001 — no AI is a plain review, on time
-        log.info("review_brief.ai_skipped", why=type(e).__name__)
-        return "", []
-    # THE OWNER'S OWN NUMBERS ARE FACTS TOO: a price he typed on Your Business may be quoted back to him.
-    facts_text = json.dumps({"facts": facts, "business": business or {}}, ensure_ascii=False)
-    good = str(got.get("good_news") or "").strip()[:240]
-    if not _grounded(good, facts_text):
-        good = ""
-    ideas = []
-    for i in got.get("ideas") or []:
-        if not isinstance(i, dict):
-            continue
-        t, w = str(i.get("title") or "").strip()[:80], str(i.get("why") or "").strip()[:300]
-        if t and _grounded(t + " " + w, facts_text):
-            ideas.append({"title": t, "why": w, "href": "", "machine": ""})
-    return good, ideas                       # capped by the caller, after restatements go (1.3)
+    """("good news", [advice]) from the advisor (core/review_advisor.py, Morning Review V2 step 3): one call, three
+    parts per piece, the why a line of the business's own website and the step a screen this box has. ("", []) when
+    there is no AI or nothing passes its checks: the plain review, on time."""
+    from core import review_advisor
+    quotes = [str(q) for q in ((business or {}).get("about") or {}).get("profile") or [] if str(q).strip()]
+    screens = _installed() + [{"title": "Approvals", "href": "/approvals"}]
+    return review_advisor.advise(facts, business=business, quotes=quotes, screens=screens, recent=recent_ideas,
+                                 think=think)
 
 
 def _norm_idea(t: str) -> str:
@@ -623,6 +600,48 @@ def _best(rows_y: list[dict], about: date) -> str:
     return f"New personal best: {num} {label}, the most in {BEST_DAYS} days ({title})." if label else ""
 
 
+# YOUR WEEK, ON MONDAYS (Morning Review V2 step 2; plan §4: "On Mondays, your week: seven days against the seven
+# before, and the one biggest change"). Arithmetic on report.history, no AI. A machine is in it only when its headline
+# says how a week adds up (headline.week) and both weeks have most of their days stored.
+WEEK_MIN_DAYS = 4
+
+
+def _your_week(rows_y: list[dict], about: date) -> list[dict]:
+    """[{"title": "161 emails sent", "why": "126 the week before, up 28%", "machine": "Lead Machine"}, ...], the
+    biggest change first. The week is the seven days ending `about` (Sunday, read on Monday). Never raises."""
+    try:
+        hist = report.history(about, back=2 * WEEK_DAYS)
+    except Exception:                                    # noqa: BLE001
+        return []
+    cut = (about - timedelta(days=WEEK_DAYS - 1)).isoformat()
+    out = []
+    for r in rows_y:
+        head = r.get("headline") or {}
+        how, label = head.get("week"), str(head.get("label") or "").strip()
+        if how not in ("sum", "last") or not label or r.get("error"):
+            continue
+        pts = [p for p in hist.get(r.get("machine")) or [] if report.has_value(p.get("value"))]
+        now_w = [p["value"] for p in pts if p["day"] >= cut]
+        then_w = [p["value"] for p in pts if p["day"] < cut]
+        if len(now_w) < WEEK_MIN_DAYS or len(then_w) < WEEK_MIN_DAYS:
+            continue
+        a, b = (sum(now_w), sum(then_w)) if how == "sum" else (now_w[-1], then_w[-1])
+        if not a and not b:
+            continue
+        pct = round((a - b) * 100 / b) if b else None
+        move = ("the same" if a == b else f"up {pct}%" if pct is not None and pct > 0 else
+                f"down {-pct}%" if pct is not None else "up from none")
+        num = (lambda v: f"{v:,.0f}" if float(v).is_integer() else f"{v:,.1f}")
+        out.append((abs(pct) if pct is not None else (1e9 if a else 0),
+                    {"title": f"{num(a)} {label}", "why": f"{num(b)} the week before, {move}", "href": "",
+                     "machine": str(r.get("title") or r.get("machine") or "")}))
+    out.sort(key=lambda x: -x[0])
+    items = [i for _, i in out]
+    if items and len(items) > 1 and out[0][0] > 0:
+        items[0] = {**items[0], "why": items[0]["why"] + ", the biggest change"}
+    return items
+
+
 def _compose(about: date, now: datetime | None, *, think=None, ai: bool = True) -> tuple[dict, dict, dict]:
     """(brief, what was seen, the idea log after it). Pure apart from the reads and the one AI call: the caller
     decides whether anything is remembered."""
@@ -637,10 +656,13 @@ def _compose(about: date, now: datetime | None, *, think=None, ai: bool = True) 
     worth, seen_after = _worth(rows_t, about, seen, meters)
     moving = _moving(rows_y)
     week = _week(rows_y, about)                                           # the last 7 days (1.2)
-    # WHO TO ANSWER FIRST, BY NAME (#1953 step 1.5): as today's reporters name them, three at most.
-    first = [{"title": str(x.get("text") or "")[:80], "why": str(x.get("why") or "")[:160],
-              "href": str(x.get("href") or ""), "machine": str(r.get("title") or "")}
-             for r in rows_t for x in (r.get("answer_first") or []) if str(x.get("text") or "").strip()][:3]
+    # WHO TO ANSWER FIRST, BY NAME (#1953 step 1.5): as today's reporters rank them, three at most, each with the
+    # parts its card draws (owner, 2026-10-06: right below the quote, "speed to lead is where the money is at").
+    first = [_person(x, r) for r in rows_t for x in (r.get("answer_first") or []) if str(x.get("text") or "").strip()][:3]
+    if first:                                 # SAID ONCE: "4 people waiting" is this section's own line now
+        worth = [w for w in worth if not w.pop("person", False)]
+    for w in worth:
+        w.pop("person", None)
     idea_log = {k: v for k, v in (box_settings.get(NS, IDEAS_SEEN, default={}) or {}).items()
                 if _days_since(v, about) < IDEA_DAYS}
     good, ideas = ("", [])
@@ -671,13 +693,18 @@ def _compose(about: date, now: datetime | None, *, think=None, ai: bool = True) 
     except Exception:                            # noqa: BLE001 — a cheerful line is never the review's failure
         best = ""
     m = _morning(about, now)
+    try:
+        your_week = _your_week(rows_y, about) if m.weekday() == 0 else []
+    except Exception:                            # noqa: BLE001 — a Monday block is never the review's failure
+        your_week = []
     brief = {
         "about": about.isoformat(), "date_label": _label(m), "quote": _quote(m),
         "good_news": good, "best": best, "worth": worth, "first": first, "moving": moving, "ideas": ideas,
+        "your_week": your_week,
         "numbers": _numbers(rows_y),
         "welcome": welcome, "learned": learned, "aims": aims, "coming": coming,
         "ideas_from": "ai" if ideas else "",
-        "empty": not (worth or first or moving or ideas or learned or aims or coming or best),
+        "empty": not (worth or first or moving or ideas or learned or aims or coming or best or your_week),
         "link": report.page_url(about), "built_at": state._now(),
     }
     for i in ideas:
@@ -719,6 +746,19 @@ def set_hidden(user_id, key: str, hide: bool) -> bool:
     now = (now | {key}) if hide else (now - {key})
     box_settings.put(NS, HIDDEN, sorted(now), user_id=str(user_id), set_by=str(user_id))
     return True
+
+
+def _person(x: dict, row: dict) -> dict:
+    """One person to answer, as the brief stores it: the list item every surface reads, and the card's parts."""
+    try:
+        of = max(0, int(x.get("of") or 0))
+    except (TypeError, ValueError):
+        of = 0
+    return {"title": str(x.get("text") or "")[:80], "why": str(x.get("why") or "")[:200],
+            "href": str(x.get("href") or ""), "machine": str(row.get("title") or ""),
+            "said": str(x.get("said") or "")[:160], "waited": str(x.get("waited") or "")[:12],
+            "reasons": [str(c)[:40] for c in (x.get("reasons") or []) if str(c).strip()][:3],
+            "ready": bool(x.get("ready")), "channel": str(x.get("channel") or "")[:30], "of": of}
 
 
 def _remember(seen_after: dict, idea_log: dict) -> None:

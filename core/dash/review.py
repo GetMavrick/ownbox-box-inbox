@@ -145,6 +145,7 @@ line-height:1.28;letter-spacing:-.005em;color:var(--ink);text-wrap:balance}
 .mr-scene .sun{color:var(--link)}
 .mr-good{margin:12px 0 0;color:var(--ink-2);font-size:calc(17 * var(--px, 1px));line-height:1.55}
 .mr-best{display:flex;align-items:flex-start;gap:8px;margin:10px 0 0}
+.mr-go{padding:14px 0;margin:-14px 0;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 .mr-best p{flex:1 1 auto;margin:0;color:var(--ink);font-size:calc(16 * var(--px, 1px));line-height:1.5}
 .mr-sec{margin-top:30px}
 .mr-sec h2{margin:0 0 2px;font-size:calc(13 * var(--px, 1px));font-weight:600;letter-spacing:.14em;
@@ -192,6 +193,37 @@ _BRIEF_CSS_SRC += """
 .mr-num i{display:block;margin-top:2px;font-style:normal;color:var(--ink-3);font-size:calc(12 * var(--px, 1px));letter-spacing:.08em;text-transform:uppercase}
 .mr-nums-h{margin:0 0 -6px;width:100%;color:var(--ink-3);font-size:calc(12 * var(--px, 1px));letter-spacing:.14em;text-transform:uppercase;font-weight:600}
 .mr-m{display:block;margin-top:4px;color:var(--ink-3);font-size:calc(13 * var(--px, 1px))}
+"""
+# WHO TO ANSWER FIRST, AS CARDS (owner, 2026-10-06: right below the quote; "speed to lead is where the money is at").
+# A phone first: each person is one card, their words in the middle, and one full-width 48px button to their thread at
+# the bottom, where a thumb is. The button narrows to its label only once the screen is wide.
+_BRIEF_CSS_SRC += """
+.mr-lede{margin:6px 0 14px;color:var(--ink-2);font-size:calc(16 * var(--px, 1px));line-height:1.5}
+.mr-people{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.mr-sec .mr-people li{display:block;padding:18px 18px 16px;border:1px solid var(--card-edge);border-radius:var(--r-sm,16px);
+background:var(--card)}
+.mr-sec .mr-people li:last-child{border-bottom:1px solid var(--card-edge)}
+.mr-p-top{display:flex;align-items:baseline;gap:12px}
+.mr-p-name{font-weight:600;color:var(--ink);font-size:calc(18 * var(--px, 1px));line-height:1.3;min-width:0;
+overflow-wrap:anywhere}
+.mr-p-meta{margin:2px 0 0;color:var(--ink-3);font-size:calc(14 * var(--px, 1px))}
+.mr-tags{list-style:none;display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0;padding:0}
+.mr-sec .mr-tags li{display:inline-block;padding:3px 10px;border:0;border-radius:var(--r-pill,999px);background:var(--wash);
+color:var(--ink-2);font-size:calc(13 * var(--px, 1px));font-weight:600;line-height:1.5}
+.mr-p-said{margin:12px 0 0;color:var(--ink);font-size:calc(17 * var(--px, 1px));line-height:1.5;overflow-wrap:anywhere}
+.mr-p-go{display:flex;align-items:center;justify-content:center;min-height:var(--tap,48px);margin:14px 0 0;
+padding:0 18px;border:1px solid var(--card-edge);border-radius:12px;background:var(--wash);color:var(--ink);
+font-weight:600;font-size:calc(16 * var(--px, 1px));text-decoration:none;text-align:center}
+.mr-p-go:focus-visible{outline:2px solid var(--link);outline-offset:2px}
+.mr-p-go.is-ready{color:var(--link)}
+.mr-day{margin-top:26px;padding:20px 22px;background:var(--card);border:1px solid var(--card-edge);
+border-radius:var(--r-md,22px)}
+.mr-day .mr-good{margin-top:0;color:var(--ink)}
+.mr-day .mr-nums{margin-top:16px}
+@media (min-width:720px){
+  .mr-p-go{display:inline-flex}
+  .mr-p-go:hover{border-color:var(--line)}
+}
 """
 BRIEF_CSS = re.sub(r"\s*/\*.*?\*/", "", _BRIEF_CSS_SRC, flags=re.S)
 
@@ -593,8 +625,17 @@ def _brief_items(heading: str, items: list, *, moving: bool = False, control: st
         href = str(it.get("href") or "")
         # A LINK ONLY EVER STAYS ON THIS BOX: a path, never "//elsewhere" or "/\\elsewhere" (both leave the site
         # in a browser) and never a scheme. Anything else is drawn as words.
-        head = (f'<a class="mr-t" href="{_esc(href)}">{_esc(title)}</a>' if _LOCAL.match(href) else
+        from core import review_advisor
+        advice = review_advisor.parts(it)
+        head = (f'<a class="mr-t" href="{_esc(href)}">{_esc(title)}</a>' if _LOCAL.match(href) and not advice else
                 f'<span class="mr-t">{_esc(title)}</span>')
+        if advice:                                   # Advice for today: three labelled parts, the step linked
+            why = ""
+            head += "".join(
+                f'<p class="mr-w"><b>{_esc(k)}:</b> '
+                + (f'<a class="mr-go" href="{_esc(href)}">{_esc(v)}</a>' if k == "Today" and _LOCAL.match(href)
+                   else _esc(v))
+                + '</p>' for k, v in advice)
         # WHICH MACHINE, under the item, as the email has always shown it (owner, 2026-10-04: the box and the
         # email equally). Not under "Already moving", where the machine IS the title.
         machine = "" if moving else str(it.get("machine") or "").strip()
@@ -616,10 +657,45 @@ def _hide_button(key: str, back: str, *, show: bool = False) -> str:
             + f'<button type="submit">{"Show again" if show else "Hide"}</button></form>')
 
 
+def _people(items: list, control: str = "") -> str:
+    """WHO TO ANSWER FIRST, one card per person: who, how long, why them, their words, and one button to the thread.
+    A brief stored before the cards (no `reasons` or `said`) still draws, from its `why`."""
+    cards = []
+    for it in items or []:
+        name = str(it.get("title") or "").strip()
+        if not name:
+            continue
+        href = str(it.get("href") or "")
+        waited = str(it.get("waited") or "").strip()
+        said = str(it.get("said") or "").strip()
+        tags = [str(t).strip() for t in (it.get("reasons") or []) if str(t).strip()]
+        channel = str(it.get("channel") or "").strip()
+        meta = " · ".join(x for x in (channel, f"waiting {waited}" if waited else "") if x)
+        body = (f'<p class="mr-p-said">&ldquo;{_esc(said)}&rdquo;</p>' if said else
+                f'<p class="mr-w">{_esc(it.get("why") or "")}</p>' if str(it.get("why") or "").strip() else "")
+        who = name.split()[0] if name != "Someone" else ""
+        label = "See the reply ready to send" if it.get("ready") else (f"Reply to {who}" if who else "Reply")
+        go = (f'<a class="mr-p-go{" is-ready" if it.get("ready") else ""}" href="{_esc(href)}">{_esc(label)}</a>'
+              if _LOCAL.match(href) else "")
+        cards.append('<li><div class="mr-p-top">'
+                     f'<span class="mr-p-name">{_esc(name)}</span>' + '</div>'
+                     + (f'<p class="mr-p-meta">{_esc(meta)}</p>' if meta else "")
+                     + ('<ul class="mr-tags">' + "".join(f"<li>{_esc(t)}</li>" for t in tags) + "</ul>" if tags else "")
+                     + body + go + '</li>')
+    if not cards:
+        return ""
+    from core import review_email
+    lede = review_email.first_lede(items)
+    head = f'<div class="mr-h"><h2>Who to answer first</h2>{control}</div>' if control else "<h2>Who to answer first</h2>"
+    return (f'<section class="mr-sec mr-first">{head}' + (f'<p class="mr-lede">{_esc(lede)}</p>' if lede else "")
+            + f'<ol class="mr-people">{"".join(cards)}</ol></section>')
+
+
 def brief_html(b: dict | None, *, live: bool, first: str = "", hidden=frozenset(), show_all: bool = False,
                back: str = "") -> str:
-    """The light page: the day's quote, a morning drawn small, the good news, then what is worth his time,
-    what is already moving and ideas to try. Exactly the words of core/review_brief.py's contract.
+    """The light page, in the owner's order (2026-10-06): the day's quote, who to answer first, then yesterday (the
+    good news, a personal best, the numbers), then what is worth his time, what is already moving, the advice and,
+    on Mondays, the week. Exactly the words of core/review_brief.py's contract.
 
     THE SECTIONS ARE THE EMAIL'S (`review_email.SECTIONS`), one list for both, so a section can never be on one
     and missing from the other. `back` is set when someone is signed in: each section then carries its own Hide,
@@ -627,35 +703,40 @@ def brief_html(b: dict | None, *, live: bool, first: str = "", hidden=frozenset(
     if not b:
         return ""
     from core import review_email
-    lists, gone = "", 0
+    good = str(b.get("good_news") or "").strip()
+    day = (good and f'<p class="mr-good">{_esc(good)}</p>') + _best_html(b.get("best"), hidden, show_all, back) \
+        + _numbers_html(b.get("numbers"))
+    day = f'<section class="mr-day">{day}</section>' if day else ""
+    lists, gone, drawn = "", 0, False
     for key, heading in review_email.SECTIONS:
         items = b.get(key) or []
         if key in hidden and not show_all:
             gone += bool(items)
-            continue
-        control = _hide_button(key, back, show=key in hidden) if back else ""
-        lists += _brief_items(heading, items, moving=key == "moving", control=control)
+        else:
+            control = _hide_button(key, back, show=key in hidden) if back else ""
+            lists += (_people(items, control) if key == "first" else
+                      _brief_items(heading, items, moving=key == "moving", control=control))
+        if key == "first":                           # yesterday follows the people, whether or not there were any
+            lists, drawn = lists + day, True
+    if not drawn:
+        lists = day + lists
     foot = ""
     if back and hidden and not show_all:
         noun = "section" if len(hidden) == 1 else "sections"
         foot = (f'<p class="mr-hid">You hid {len(hidden)} {noun}'
                 + (f", and {gone} had something today" if gone else "")
                 + f'. <a href="{_esc(back)}?all=1">See everything</a></p>')
-    good = str(b.get("good_news") or "").strip()
     # `first` IS DAY ONE'S SENTENCE, from report.view: no report yet, and when the first one comes.
     quiet = "" if lists else (
         f'<p class="mr-quiet">{_esc(first)}</p>' if first else
         '<p class="mr-quiet">A calm start. Nothing new needs you this morning.</p>' if live else
         '<p class="mr-quiet">A quiet day. Nothing new needed you.</p>')
-    sign = ('<p class="mr-sign">From your box. The ideas come from its AI, based only on yesterday&rsquo;s '
-            'numbers.</p>' if b.get("ideas_from") == "ai" and b.get("ideas") else "")
+    sign = ('<p class="mr-sign">From your box. The advice comes from its AI, based only on what your box '
+            'measured and your own website.</p>' if b.get("ideas_from") == "ai" and b.get("ideas") else "")
     quote = str(b.get("quote") or "").strip()
     return (f'<style>{BRIEF_CSS}</style><div class="mr"><section class="mr-band">'
             + (f'<p class="mr-quote">&ldquo;{_esc(quote)}&rdquo;</p>' if quote else "")
-            + _SCENE + (f'<p class="mr-good">{_esc(good)}</p>' if good else "")
-            + _best_html(b.get("best"), hidden, show_all, back)
-            + _numbers_html(b.get("numbers"))
-            + '</section>' + lists + quiet + sign + foot + '</div>')
+            + _SCENE + '</section>' + lists + quiet + sign + foot + '</div>')
 
 
 def _best_html(best, hidden, show_all: bool, back: str) -> str:

@@ -89,6 +89,11 @@ def idem_for(space: str, zcid: str, user_id: str, nonce: str) -> str:
 MAX_ATTACHMENT = 25 * 1024 * 1024
 _SNIFF = (("image/jpeg", 0, b"\xff\xd8\xff"), ("image/png", 0, b"\x89PNG\r\n\x1a\n"),
           ("image/gif", 0, b"GIF8"), ("video/mp4", 4, b"ftyp"))
+# AN MP4 IS AN `ftyp` BOX WITH AN MP4 BRAND. The same box opens an iPhone photo (HEIC, brand heic/mif1) and a QuickTime
+# movie (brand "qt  "), and those went out labelled MP4. The major brand (bytes 8-12) says which; HEIF files can list
+# an iso brand among their compatible ones, so the major brand alone decides.
+_MP4_BRANDS = {b"isom", b"iso2", b"iso3", b"iso4", b"iso5", b"iso6", b"mp41", b"mp42", b"avc1", b"M4V ", b"mmp4",
+               b"dash"}
 _EXT = {"image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "video/mp4": "mp4"}
 
 
@@ -100,11 +105,34 @@ def checked_attachment(name: str, content: bytes) -> dict:
     if len(content) > MAX_ATTACHMENT:
         raise ReplyRefused("files must be under 25 MB", code="attachment_too_large")
     mime = next((m for m, at, sig in _SNIFF if content[at:at + len(sig)] == sig), None)
+    if mime == "video/mp4" and content[8:12] not in _MP4_BRANDS:
+        mime = None
     if not mime:
         raise ReplyRefused("a photo (JPEG, PNG or GIF) or an MP4 video can be sent", code="attachment_type")
     stem = "".join(ch for ch in str(name or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1].rsplit(".", 1)[0]
                    if ch.isalnum() or ch in " -_")[:80].strip() or ("video" if mime == "video/mp4" else "photo")
     return {"name": f"{stem}.{_EXT[mime]}", "content": content, "mime": mime}
+
+
+# ONCE A MESSAGE MAY HAVE GONE, NOTHING HERE RAISES. Every caller turns an exception into "that did not send, nothing
+# was delivered" (the reply box, the new screens' send route), so a ledger write or a mirror that fails AFTER the vendor
+# took the message would tell a person a delivered reply never went, and they would send it again. These two log
+# instead: a ledger row left `sending` is the watchdog's to find, and the next poll mirrors the message anyway.
+def _settle(*, space: str, idem_key: str, status: str, **kw) -> None:
+    """Resolve a ledger row after the vendor call (sent, or may have landed). Never raises."""
+    try:
+        store.resolve_send(space=space, idem_key=idem_key, status=status, **kw)
+    except Exception as e:                # noqa: BLE001 — the message's fate is already decided
+        log.error("inbox.ledger_unresolved", extra={"space": space, "status": status, "error": type(e).__name__})
+
+
+def _mirror(*, space: str, zcid: str, mid, sent_by: str, body: str) -> None:
+    """Put a message that went into the thread. Never raises: the poll mirrors it anyway."""
+    try:
+        store.record_message(space=space, zcid=zcid, zmid=mid, direction="out", sent_by=sent_by, body=body)
+    except Exception as e:                # noqa: BLE001 — bookkeeping never undoes a sent reply
+        log.warning("inbox.sent_mirror_failed", extra={"space": space, "conversation": zcid,
+                                                       "error": type(e).__name__})
 
 
 def _deliver(*, space: str, zcid: str, conv: dict, account_id: str, text: str, idem: str,
@@ -169,7 +197,7 @@ def _deliver(*, space: str, zcid: str, conv: dict, account_id: str, text: str, i
         # INVARIANT 4, ON THE MAIL PATH. A timeout or a disconnect after DATA tells us nothing
         # about whether the message was queued, so it is recorded as "may have landed" and
         # nothing here ever resends it.
-        store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
+        _settle(space=space, idem_key=idem, status="indeterminate", error=str(e))
         log.error("inbox.reply_indeterminate", extra={"space": space, "conversation": zcid,
                                                       "error": str(e)[:160]})
         raise ReplyIndeterminate(str(e)) from e
@@ -194,7 +222,7 @@ def _deliver(*, space: str, zcid: str, conv: dict, account_id: str, text: str, i
     except zernio.ZernioError as e:
         if e.indeterminate:              # always set by ZernioError.__init__, as handler.py:169 reads it
             # MAY HAVE LANDED. Record it, tell the caller, and never resend on our own.
-            store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
+            _settle(space=space, idem_key=idem, status="indeterminate", error=str(e))
             log.error("inbox.reply_indeterminate", extra={"space": space, "conversation": zcid,
                                                           "error": str(e)[:160]})
             raise ReplyIndeterminate(str(e)) from e
@@ -204,13 +232,13 @@ def _deliver(*, space: str, zcid: str, conv: dict, account_id: str, text: str, i
         # A non-ZernioError escaping the gateway (a bug, a socket the SDK did not wrap) tells us
         # nothing about whether the vendor took the message. The row must not be left `sending`
         # for the watchdog to find hours later when we can say the honest thing right now.
-        store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
+        _settle(space=space, idem_key=idem, status="indeterminate", error=str(e))
         log.error("inbox.reply_unexpected", extra={"space": space, "conversation": zcid,
                                                    "error": str(e)[:160]})
         raise ReplyIndeterminate(str(e)) from e
 
     mid = sent.get("message_id")
-    store.resolve_send(space=space, idem_key=idem, status="ok", zernio_message_id=mid)
+    _settle(space=space, idem_key=idem, status="ok", zernio_message_id=mid)
     return mid
 
 
@@ -363,8 +391,7 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
                    attachment=attachment)
     # `sent_by='human'` is the honesty of the screen: the thread says who said every line, and
     # "the machine" and "you" must never be swapped. §3.3 records WHICH human on the ledger.
-    store.record_message(space=space, zcid=zcid, zmid=mid, direction="out",
-                         sent_by="human", body=text)
+    _mirror(space=space, zcid=zcid, mid=mid, sent_by="human", body=text)
     if attachment:
         # THE THREAD SHOWS THE FILE AT ONCE, by name and kind; its link arrives with the next poll, which mirrors
         # Zernio's copy of this message over this one. Never raises: the file has already gone.
@@ -540,7 +567,7 @@ def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str
         raise ReplyRefused("a person has replied on this conversation, so the machine stopped", code="taken_over")
     mid = _deliver(space=space, zcid=zcid, conv=conv, account_id=account_id, text=text, idem=idem,
                    buttons=wire_buttons, quick_replies=wire_quick)
-    store.record_message(space=space, zcid=zcid, zmid=mid, direction="out", sent_by="ai", body=text)
+    _mirror(space=space, zcid=zcid, mid=mid, sent_by="ai", body=text)
     log.info("inbox.machine_sent", extra={"space": space, "conversation": zcid, "machine": machine,
                                           "message_id": mid})
     return {"status": "ok", "message_id": mid, "idem_key": idem, "duplicate": False}
@@ -647,15 +674,15 @@ def reply_to_comment(*, space: str, machine: str, comment: dict, text: str, key:
                                                              quick_replies=wire_quick or None)
     except zernio.ZernioError as e:
         if e.indeterminate:
-            store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
+            _settle(space=space, idem_key=idem, status="indeterminate", error=str(e))
             raise ReplyIndeterminate(str(e)) from e
         store.resolve_send(space=space, idem_key=idem, status="failed", error=str(e))
         raise ReplyRefused(str(e)) from e
     except Exception as e:                # noqa: BLE001 — an unexpected raise mid-call is UNKNOWN
-        store.resolve_send(space=space, idem_key=idem, status="indeterminate", error=str(e))
+        _settle(space=space, idem_key=idem, status="indeterminate", error=str(e))
         raise ReplyIndeterminate(str(e)) from e
     mid = (sent or {}).get("message_id")
-    store.resolve_send(space=space, idem_key=idem, status="ok", zernio_message_id=mid)
+    _settle(space=space, idem_key=idem, status="ok", zernio_message_id=mid)
     log.info("inbox.machine_comment_reply", extra={"space": space, "comment": cid, "machine": machine,
                                                    "message_id": mid})
     return {"status": "ok", "message_id": mid, "idem_key": idem, "duplicate": False}

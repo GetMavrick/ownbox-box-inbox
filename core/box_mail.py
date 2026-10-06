@@ -425,7 +425,7 @@ def send_test(user_id: str) -> tuple[bool, str]:
              "<p>This is the test you asked for. If you are reading it, your box can send "
              "email.</p>",
              idem_key=f"mail-test:{user_id}:{int(_time.time())}",
-             sender_name="Your box", note="mail_test")
+             sender_name="Your Ownbox", note="mail_test")
     except VendorError as e:
         return False, _say(e)
     except RetryableError as e:

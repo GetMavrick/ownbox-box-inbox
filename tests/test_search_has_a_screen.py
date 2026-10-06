@@ -160,9 +160,10 @@ ok("a bare % asks for a percent sign, not for every conversation in the box",
 
 # ── the owner's word for the second pill ──────────────────────────────────────────────────────
 print("\ntest_the_second_pill_says_what_he_calls_it")
-# OWNER, 2026-09-18, ASKED DIRECTLY: "Leads". The filter did not change — still `from_ad`, still
-# the poller's ad id — so this is one word a buyer reads, and it is asserted where it renders.
-ok("the app ships his word", 'pill("Leads"' in _SRC)
+# OWNER, 2026-10-06: "people who came from an ad would be known as a prospect" ("Leads" from 09-18 until
+# the list could label a conversation Lead). The filter did not change — still `from_ad`, still the
+# poller's ad id — so this is one word a buyer reads, and it is asserted where it renders.
+ok("the app ships his word", 'pill("Prospects"' in _SRC)
 # THE CALL, NOT THE WORD — again. The route's docstring deliberately RECORDS the case for
 # "From an ad" and that it lost, because a decision with its reasoning kept beside it is worth
 # more than a bare string. Banning the phrase from the file would have deleted that history to

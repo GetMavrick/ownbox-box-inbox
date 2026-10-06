@@ -628,6 +628,9 @@ a.row:active{background:var(--hair);border-radius:10px}
 .chip.on{color:var(--accent-ink);background:var(--accent)}
 .chip.on .n{color:var(--accent-ink);opacity:.75}
 .chip .n{color:var(--dimmer);font-size:calc(13 * var(--px, 1px));font-variant-numeric:tabular-nums}
+/* A FILTER PILL IS A 48px TARGET ON A PHONE (owner, 2026-10-06: "yes", every box, both inbox screens), as every
+   other control a thumb presses here. A logo chip is its own 44px disc. */
+@media (max-width:820px){.chip:not(.mkchip){min-height:48px;padding:0 16px}}
 /* THE TWO ROWS ARE NOT THE SAME KIND OF CHOICE, and stacking two identical rows reads as one
    control that wrapped. The filter row asks WHAT STATE; the channel row asks WHERE FROM. So the
    filter row sits tighter to the header it qualifies, and the channel row keeps its own space. */
@@ -2112,7 +2115,7 @@ def _head(n: int, drafts: int = -1) -> str:
 
 def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: str = "",
            space: str = "") -> str:
-    """All / Unanswered / Leads — and each one only when it can change the screen.
+    """All / Unanswered / Prospects — and each one only when it can change the screen.
 
     A FILTER THAT CANNOT CHANGE THE SCREEN IS NOT SHIPPED HERE, which is the same rule `_chips`
     applies to a box with one channel. With nothing waiting, Unanswered leads to an empty list a
@@ -2123,13 +2126,13 @@ def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: 
     EACH IS STILL DRAWN WHILE ITS OWN FILTER IS ON AND ITS COUNT HAS FALLEN TO ZERO — answering
     the last one must not delete the way back to All under his thumb.
 
-    "LEADS" — OWNER, 2026-09-18, ASKED DIRECTLY AND ANSWERED IN ONE WORD. This read "From an ad"
-    and this paragraph used to argue for it: everyone in the inbox is arguably a lead, while the
-    thing the filter actually knows is narrower — these people clicked something he PAID for.
-    That case is recorded because it is a real one, and it LOST. The decision is his and it is
-    made, so the argument is history rather than a live objection sitting next to the code.
-    Nothing about the filter changed: it is still `from_ad`, still the poller's `ad_meta_id`, and
-    still a fact the box already had. Only the word a buyer reads is different.
+    "PROSPECTS" — OWNER, 2026-10-06: "people who came from an ad would be known as a prospect. And
+    then a slightly higher level is when they become a lead." This read "From an ad", then "Leads"
+    (his word, 2026-09-18). It changed once the list could label a conversation Lead (#2001): one
+    screen offering a Leads pill and a Lead label for two different things. A Lead is now what a
+    person decides from the list; a Prospect is what the box knows, someone who clicked an ad he
+    PAID for. Nothing about the filter changed: it is still `from_ad`, still the poller's
+    `ad_meta_id`, and still a fact the box already had. Only the word a buyer reads is different.
     """
     show_wait = counts.get("waiting", 0) > 0 or waiting
     show_ad = counts.get("from_ad", 0) > 0 or from_ad
@@ -2156,7 +2159,7 @@ def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: 
     if show_wait:
         out.append(pill("Unanswered", waiting, waiting=not waiting, from_ad=from_ad))
     if show_ad:
-        out.append(pill("Leads", from_ad, waiting=waiting, from_ad=not from_ad))
+        out.append(pill("Prospects", from_ad, waiting=waiting, from_ad=not from_ad))
     return f'<div class="chips pills">{"".join(out)}{logos}</div>'
 
 
@@ -2447,16 +2450,23 @@ def r_inbox():
     if _ui.on():
         # OUR SUMMARY LINE ABOVE THEIR LIST (#1990 1.4; owner 2026-09-29: "4 people are waiting on a reply · 6 drafts
         # ready to send"), the same sentence the old list leads with.
-        # AND OUR FILTERS, All / Unanswered / Leads and Done / Trash / Junk, each only when it can change the screen
+        # AND OUR FILTERS, All / Unanswered / Prospects and Done / Trash / Junk, each only when it can change the screen
         # (app_ui.pills); their list reads the choice from the address (patch 0004) and the box filters
         # (store.list_conversations). Their platform menu stands in for our channel chips.
         _sp = _space()
         _c = _counts(_sp)
+        _q = (request.args.get("q") or "").strip()[:120]
         _wait = (request.args.get("waiting") or "") in ("1", "true", "yes", "on")
         _ad = (request.args.get("from_ad") or "") in ("1", "true", "yes", "on")
         _pick = _ui.pills(_sp, _c, _wait, _ad, _ui.view_of(request.args.get("status")))
-        return _shell(_head(_c["waiting"], _drafts_ready(_sp)) + _pick + _ui.inbox_body(),
-                      here="/inbox/inbox", wide=True, theirs=True), 200
+        # THE OWNER'S RULINGS THE OLD LIST CARRIES, CARRIED HERE TOO (#1995 change 2, the parity checklist): the
+        # stopped note first (#1357), the search in the bar (#1977), the notification offer once there is anyone to
+        # be told about (#1966), and other machines' cards below the conversations (core/panels.py).
+        _offer = (_NOTIFY_OFFER + f'<script>{_push_client_js()}</script><script>{_NOTIFY_JS}</script>'
+                  if _ui.has_conversations(_sp) else "")
+        return _shell(_stopped_note() + _head(_c["waiting"], _drafts_ready(_sp)) + _pick + _offer
+                      + _ui.inbox_body() + (f'<div class="ib-below">{_below}</div>' if (_below := _panels()) else ""),
+                      here="/inbox/inbox", wide=True, theirs=True, bar=_bar_find(_q, "", _wait, _ad)), 200
     space = _space()
     # THE CHIP THE READER IS ON. Passed to the store as a bound predicate, never interpolated;
     # an unknown value simply matches no rows, which is the honest answer to a hand-typed URL.

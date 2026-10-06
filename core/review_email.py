@@ -22,13 +22,17 @@ SENDER_NAME = "Morning Review"
 
 # The mockup's palette (docs/mockups/morning-review-v2.html), inline because mail clients drop <style>.
 _INK, _SOFT, _GREY, _HAIR, _BG, _WASH = "#2e2c27", "#6b6a63", "#b4b3a8", "#e4e3dc", "#fcfcfb", "#f9f9f7"
+_WASH2, _ACCENT = "#f1f0eb", "#b5401a"           # a tag's and a button's fill; a ready reply, in the box's link colour
 _SERIF = "'Iowan Old Style','Palatino Linotype',Georgia,serif"
 _SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
 # THE WELCOME SECTIONS LEAD, AND ARE EMPTY ON EVERY OTHER MORNING (#1957 C4), so an ordinary review is unchanged.
-SECTIONS = (("learned", "What your box learned about you"), ("aims", "Your goals, and how your box helps"),
-            ("coming", "What's coming"), ("worth", "Worth your time today"),
-            ("first", "Who to answer first"), ("moving", "Already moving"),
-            ("ideas", "Ideas to try"))
+# WHO TO ANSWER FIRST LEADS, right below the quote (owner, 2026-10-06: "Let's keep the daily quote at the top ... move
+# who to answer first right below the quote"); yesterday's good news, a personal best and the numbers follow it, with no
+# heading of their own: the good news already opens "Yesterday".
+SECTIONS = (("first", "Who to answer first"), ("learned", "What your box learned about you"),
+            ("aims", "Your goals, and how your box helps"), ("coming", "What's coming"),
+            ("worth", "Worth your time today"), ("moving", "Already moving"),
+            ("ideas", "Advice for today"), ("your_week", "Your week"))
 # ONE-LINE PARTS, each hideable like a section, drawn under the good news rather than as a numbered list.
 LINES = (("best", "Personal best"),)
 
@@ -49,29 +53,84 @@ def _hidden_line(e: dict) -> str:
     return f"You hid {n} {'section' if n == 1 else 'sections'} of your Morning Review." if n else ""
 
 
-def text(e: dict) -> str:
-    lines = [e["date_label"], "", e["quote"], ""]
+_WORDS = {1: "one", 2: "two", 3: "three"}
+
+
+def first_lede(items: list) -> str:
+    """The line under "Who to answer first": how many are waiting, and why to start here. "" with nobody."""
+    n = len([it for it in items or [] if str(it.get("title") or "").strip()])
+    if not n:
+        return ""
+    of = max([n] + [int(it.get("of") or 0) for it in items if isinstance(it.get("of"), int)])
+    if of > n:
+        return f"{of} people are waiting on a reply. Start with these {_WORDS.get(n, n)}: fast replies win customers."
+    if n == 1:
+        return "One person is waiting on a reply. Fast replies win customers."
+    return f"{_WORDS.get(n, n).capitalize()} people are waiting on a reply. Fast replies win customers."
+
+
+def _person_meta(it: dict) -> str:
+    waited = str(it.get("waited") or "").strip()
+    return " · ".join(x for x in (str(it.get("channel") or "").strip(), f"waiting {waited}" if waited else "") if x)
+
+
+def _person_go(it: dict) -> str:
+    name = str(it.get("title") or "").strip()
+    who = name.split()[0] if name and name != "Someone" else ""
+    return "See the reply ready to send" if it.get("ready") else (f"Reply to {who}" if who else "Reply")
+
+
+def _yesterday_text(e: dict) -> list[str]:
+    out = []
     if e.get("good_news"):
-        lines += [e["good_news"], ""]
+        out.append(e["good_news"])
     if e.get("best") and "best" not in (e.get("hidden") or ()):
-        lines += [e["best"], ""]
+        out.append(e["best"])
     if numbers_line(e):
-        lines += [numbers_line(e), ""]
+        out.append(numbers_line(e))
+    return (out + [""]) if out else []
+
+
+def text(e: dict) -> str:
+    """The plain email, in the page's order: the quote, who to answer first, yesterday, then the rest."""
+    lines = [e["date_label"], "", e["quote"], ""]
+    base = e["link"].split("/app/review")[0]
+    drawn = False
     for key, heading in SECTIONS:
         items = e.get(key) or []
-        if not items or key in (e.get("hidden") or ()):
-            continue
-        lines.append(heading.upper())
-        for n, it in enumerate(items, 1):
-            title, why, machine = it["title"], it.get("why"), it.get("machine")
-            if key == "moving" and machine:          # what a machine did reads machine first, as on the page
-                title, why, machine = machine, title, ""
-            lines.append(f"  {n:02d}  {title}")
-            if why:
-                lines.append(f"      {why}")
-            if machine:
-                lines.append(f"      {machine}")
-        lines.append("")
+        if items and key not in (e.get("hidden") or ()):
+            lines.append(heading.upper())
+            if key == "first" and first_lede(items):
+                lines.append(first_lede(items))
+            for n, it in enumerate(items, 1):
+                title, why, machine = it["title"], it.get("why"), it.get("machine")
+                if key == "first" and (it.get("said") or it.get("reasons")):
+                    meta = _person_meta(it)
+                    lines.append(f"  {n:02d}  {title}" + (f" · {meta}" if meta else ""))
+                    if it.get("reasons"):
+                        lines.append("      " + " · ".join(it["reasons"]))
+                    if it.get("said"):
+                        lines.append(f"      “{it['said']}”")
+                    if it.get("href"):
+                        lines.append(f"      {_person_go(it)}: {_href(it['href'], base)}")
+                    continue
+                if key == "moving" and machine:          # what a machine did reads machine first, as on the page
+                    title, why, machine = machine, title, ""
+                lines.append(f"  {n:02d}  {title}")
+                from core import review_advisor
+                advice = review_advisor.parts(it)
+                if advice:                                # Advice for today: its three parts, labelled
+                    lines += [f"      {k}: {v}" for k, v in advice]
+                elif why:
+                    lines.append(f"      {why}")
+                if machine and key != "first":
+                    lines.append(f"      {machine}")
+            lines.append("")
+        if key == "first":
+            lines += _yesterday_text(e)
+            drawn = True
+    if not drawn:
+        lines += _yesterday_text(e)
     lines.append(f"The full review: {e['link']}")
     if _hidden_line(e):
         lines.append(f"{_hidden_line(e)} See everything: {e['link']}?all=1")
@@ -116,47 +175,107 @@ def _href(h: str, base: str) -> str:
     return h if h.startswith("http") else base.rstrip("/") + "/" + h.lstrip("/")
 
 
-def html(e: dict) -> str:
+_LABEL = (f'margin:30px 0 4px;font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;'
+          f'color:{_SOFT}')
+
+
+def _people_html(items: list, base: str) -> str:
+    """Who to answer first, one light card per person, the button full width: most people read this on a phone, and
+    most mail clients ignore a media query. No black buttons (owner, 2026-10-01)."""
     esc = _html.escape
-    base = e["link"].split("/app/review")[0]
-    out = [f'<div style="background:{_BG};color:{_INK};font-family:{_SANS};font-size:16px;line-height:1.6">'
-           f'<div style="background:{_WASH};border-bottom:1px solid {_HAIR};padding:28px 20px 24px">'
-           f'<div style="max-width:600px;margin:0 auto">'
-           f'<div style="font-size:13px;letter-spacing:.05em;color:{_SOFT}">{esc(e["date_label"])}</div>'
-           f'<div style="font-family:{_SERIF};font-size:27px;line-height:1.25;margin:12px 0 0">{esc(e["quote"])}</div>'
-           f'<div style="border-top:1px solid {_SOFT};margin:22px 0 0;width:100%"></div>']
+    out = []
+    for it in items:
+        name = str(it.get("title") or "").strip()
+        if not name:
+            continue
+        href = _href(it.get("href") or "", base)
+        meta = _person_meta(it)
+        tags = "".join(f'<span style="display:inline-block;margin:6px 6px 0 0;padding:2px 10px;border-radius:999px;'
+                       f'background:{_WASH2};color:{_INK};font-size:13px;font-weight:600">{esc(str(t))}</span>'
+                       for t in (it.get("reasons") or []))
+        said = str(it.get("said") or "").strip()
+        body = (f'<div style="color:{_INK};font-size:16px;margin-top:10px">&ldquo;{esc(said)}&rdquo;</div>' if said else
+                f'<div style="color:{_SOFT};margin-top:6px">{esc(str(it.get("why") or ""))}</div>' if it.get("why") else "")
+        go = (f'<a href="{esc(href, quote=True)}" style="display:block;margin-top:14px;padding:13px 16px;'
+              f'border:1px solid {_HAIR};border-radius:12px;background:{_WASH2};text-align:center;font-weight:600;'
+              f'color:{_ACCENT if it.get("ready") else _INK};text-decoration:none">{esc(_person_go(it))}</a>'
+              if href else "")
+        out.append(f'<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;'
+                   f'margin:0 0 12px;border:1px solid {_HAIR};border-radius:14px;background:#ffffff"><tr>'
+                   '<td style="padding:16px 16px 16px">'
+                   '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">'
+                   f'<tr><td style="font-weight:600;font-size:17px;color:{_INK}">{esc(name)}</td></tr></table>'
+                   + (f'<div style="color:{_SOFT};font-size:14px;margin-top:2px">{esc(meta)}</div>' if meta else "")
+                   + (f'<div>{tags}</div>' if tags else "") + body + go + '</td></tr></table>')
+    if not out:
+        return ""
+    lede = first_lede(items)
+    return (f'<p style="{_LABEL}">Who to answer first</p>'
+            + (f'<p style="color:{_SOFT};margin:6px 0 14px">{esc(lede)}</p>' if lede else "") + "".join(out))
+
+
+def _yesterday_html(e: dict) -> str:
+    esc = _html.escape
+    out = []
     if e.get("good_news"):
-        out.append(f'<p style="color:{_SOFT};margin:14px 0 0">{esc(e["good_news"])}</p>')
+        out.append(f'<p style="color:{_INK};margin:8px 0 0">{esc(e["good_news"])}</p>')
     if e.get("best") and "best" not in (e.get("hidden") or ()):
         out.append(f'<p style="color:{_INK};margin:10px 0 0">{esc(e["best"])}</p>')
     out.append(_numbers_html(e))
-    out.append('</div></div><div style="max-width:600px;margin:0 auto;padding:8px 20px 40px">')
+    out = [x for x in out if x]
+    return f'<div style="margin:26px 0 0">{"".join(out)}</div>' if out else ""
+
+
+def html(e: dict) -> str:
+    """The HTML email, in the page's order: the quote on its band, who to answer first, yesterday, then the rest."""
+    esc = _html.escape
+    base = e["link"].split("/app/review")[0]
+    out = [f'<div style="background:{_BG};color:{_INK};font-family:{_SANS};font-size:16px;line-height:1.6">'
+           f'<div style="background:{_WASH};border-bottom:1px solid {_HAIR};padding:28px 20px 26px">'
+           f'<div style="max-width:600px;margin:0 auto">'
+           f'<div style="font-size:13px;letter-spacing:.05em;color:{_SOFT}">{esc(e["date_label"])}</div>'
+           f'<div style="font-family:{_SERIF};font-size:27px;line-height:1.25;margin:12px 0 0">{esc(e["quote"])}</div>'
+           '</div></div><div style="max-width:600px;margin:0 auto;padding:8px 20px 40px">']
+    drawn = False
     for key, heading in SECTIONS:
         items = e.get(key) or []
-        if not items or key in (e.get("hidden") or ()):
-            continue
-        out.append(f'<p style="margin:30px 0 4px;font-size:12px;font-weight:600;letter-spacing:.14em;'
-                   f'text-transform:uppercase;color:{_SOFT}">{esc(heading)}</p>'
-                   '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">')
-        for n, it in enumerate(items, 1):
-            t_title, t_why, t_machine = it["title"], it.get("why"), it.get("machine")
-            if key == "moving" and t_machine:        # what a machine did reads machine first, as on the page
-                t_title, t_why, t_machine = t_machine, t_title, ""
-            title = esc(t_title)
-            href = _href(it.get("href") or "", base)
-            if href:
-                title = (f'<a href="{esc(href, quote=True)}" style="color:{_INK};text-decoration:none;'
-                         f'border-bottom:1px solid {_HAIR}">{title}</a>')
-            why = f'<div style="color:{_SOFT};margin-top:4px">{esc(t_why)}</div>' if t_why else ""
-            who = (f'<div style="color:{_GREY};font-size:13px;margin-top:2px">{esc(t_machine)}</div>'
-                   if t_machine else "")
-            out.append(f'<tr><td style="width:30px;vertical-align:top;padding:14px 0;color:{_GREY};font-size:13px">'
-                       f'{n:02d}</td><td style="padding:14px 0"><div style="font-weight:600">{title}</div>{why}{who}'
-                       '</td></tr>')
-        out.append("</table>")
+        if items and key not in (e.get("hidden") or ()) and key == "first":
+            out.append(_people_html(items, base))
+        elif items and key not in (e.get("hidden") or ()):
+            out.append(f'<p style="{_LABEL}">{esc(heading)}</p>'
+                       '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">')
+            for n, it in enumerate(items, 1):
+                t_title, t_why, t_machine = it["title"], it.get("why"), it.get("machine")
+                if key == "moving" and t_machine:        # what a machine did reads machine first, as on the page
+                    t_title, t_why, t_machine = t_machine, t_title, ""
+                title = esc(t_title)
+                href = _href(it.get("href") or "", base)
+                if href:
+                    title = (f'<a href="{esc(href, quote=True)}" style="color:{_INK};text-decoration:none;'
+                             f'border-bottom:1px solid {_HAIR}">{title}</a>')
+                why = f'<div style="color:{_SOFT};margin-top:4px">{esc(t_why)}</div>' if t_why else ""
+                from core import review_advisor
+                advice = review_advisor.parts(it)
+                if advice:                                # Advice for today: its three parts, the step linked
+                    title = esc(t_title)
+                    why = "".join(
+                        f'<div style="color:{_SOFT};margin-top:4px"><b style="color:{_INK}">{esc(k)}:</b> '
+                        + (f'<a href="{esc(href, quote=True)}" style="color:{_INK}">{esc(v)}</a>'
+                           if k == "Today" and href else esc(v)) + '</div>' for k, v in advice)
+                who = (f'<div style="color:{_GREY};font-size:13px;margin-top:2px">{esc(t_machine)}</div>'
+                       if t_machine else "")
+                out.append(f'<tr><td style="width:30px;vertical-align:top;padding:14px 0;color:{_GREY};font-size:13px">'
+                           f'{n:02d}</td><td style="padding:14px 0"><div style="font-weight:600">{title}</div>{why}{who}'
+                           '</td></tr>')
+            out.append("</table>")
+        if key == "first":
+            out.append(_yesterday_html(e))
+            drawn = True
+    if not drawn:
+        out.insert(1, _yesterday_html(e))
     if e.get("ideas_from") == "ai":
-        out.append(f'<p style="color:{_GREY};font-size:13px;margin:28px 0 0">The ideas come from your box\'s AI, '
-                   'based only on yesterday\'s numbers.</p>')
+        out.append(f'<p style="color:{_GREY};font-size:13px;margin:28px 0 0">The advice comes from your box\'s AI, '
+                   'based only on what your box measured and your own website.</p>')
     out.append(f'<p style="margin:24px 0 0"><a href="{esc(e["link"], quote=True)}" style="color:{_INK}">'
                'Open the full review</a></p>')
     if _hidden_line(e):
