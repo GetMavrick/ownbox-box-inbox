@@ -313,7 +313,7 @@ def test_a_waiting_draft_is_said_on_its_row_and_in_the_count():
     marked = sorted(w for w, v in seen.items() if "Draft waiting" in v[0])
     ok("the drafted row says Draft waiting, and no other row does",
        marked == ([who] if n else []), f"{marked} (store says {n} waiting)")
-    said = re.search(r"· <b>(\d+) drafts?</b> ready to send", after)
+    said = re.search(r'<a href="/inbox/waiting"><b>(\d+) drafts?</b> ready to send</a>', after)
     ok("...and the line above the list counts what the store counts",
        (said and int(said.group(1)) == n) if n else "ready to send" not in after,
        f"said={said.group(0) if said else None} store={n}")

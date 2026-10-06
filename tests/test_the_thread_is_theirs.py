@@ -88,9 +88,8 @@ ok("THE BOX'S LOOK SITS IN A LAYER BETWEEN THEIR RESET AND THEIR UTILITIES, so n
    and lst.index("@layer theme, base, shell") < lst.index("/inbox/ui/inbox-ui.css"))
 ok("INSIDE A CONVERSATION ON A MOBILE THE COMPOSER TAKES THE BOTTOM: the bar steps aside",
    "html.ib-thread-open nav.tabs{display:none}" in lst)
-ok("OUR SUMMARY LINE LEADS THEIR LIST: who is waiting on a reply, in words",
-   re.search(r'<p class="quiet sum">.*waiting on a reply', lst) is not None
-   and lst.index('class="quiet sum"') < lst.index('id="ib-inbox"'), lst[:300])
+ok("ABOVE THEIR LIST, NO WAITING COUNT (owner, 10-06): only the drafts ready to send, when there are any, linked",
+   not any("waiting on" in s for s in re.findall(r'<p class="quiet sum">(.*?)</p>', lst)))
 
 # A NEW MESSAGE ARRIVES, so the conversation is unread again before a link opens it.
 store.upsert_conversation(space=SP, zcid="ig-priya", platform="instagram", participant=NAME,
@@ -257,8 +256,49 @@ ok("...through one small patch to their bubble, which only an email from the box
    p2.startswith("Ownbox:") and p2.count("+++ b/src/") == 1 and "emailOf(msg) ?" in p2
    and "msg.message && (" in p2, p2[:200])
 email = (ROOT / "web" / "inbox-ui" / "ownbox" / "email-text.tsx").read_text(encoding="utf-8")
-ok("...PLAIN TEXT ONLY: the email's own markup never reaches the bubble",
-   "dangerouslySetInnerHTML" not in email and "body_html" not in email and "innerHTML" not in email)
+_inner = re.findall(r"dangerouslySetInnerHTML=\{\{ __html: ([^}]+) \}\}", email)
+ok("...THE SENDER'S MARKUP NEVER REACHES THE PAGE: the only HTML put in it is the box's own render.readable (escaped "
+   "first), never a field of the sender's", _inner and all(x.strip() in ("words", "email.quotedReadable ?? ''")
+                                                         for x in _inner) and "body_html" not in email, _inner)
+ok("...AND A SENDER'S HTML ONLY EVER IN THE OLD THREAD'S SANDBOX: no scripts, no same origin, no referrer",
+   "const FRAME_SANDBOX = 'allow-popups allow-popups-to-escape-sandbox';" in email and "allow-scripts" not in email
+   and "allow-same-origin" not in email and 'referrerPolicy="no-referrer"' in email and "srcDoc={" in email)
+
+print("\nan HTML email, on the owner's box (2026-10-06: 'they all look like garbage')")
+from marketing.customer_voice.inbox import render as _render  # noqa: E402
+_SRC = ('<!doctype html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>LoopCV</title><style>p{color:red}</style>'
+        '</head><body><p>Hi Brian,</p><p>Your weekly report is ready.</p><script>alert(1)</script></body></html>')
+store.upsert_conversation(space=SP, zcid="mail-loop", platform="email", participant="no-reply@loopcv.com",
+                          last_inbound_at="2026-10-06T07:00:00Z", account_id="hello-box")
+store.record_message(space=SP, zcid="mail-loop", zmid="mail-loop-m1", direction="in", sent_by="contact", body=_SRC,
+                     detail={"body_html": _SRC, "body_text": "", "headers": {"Subject": "Your weekly report"}})
+_LONG = "https://www.linkedin.com/comm/jobs/view/4123?trackingId=" + "x" * 300
+store.upsert_conversation(space=SP, zcid="mail-li", platform="email", participant="LinkedIn Job Alerts",
+                          last_inbound_at="2026-10-06T06:50:00Z", account_id="hello-box")
+store.record_message(space=SP, zcid="mail-li", zmid="mail-li-m1", direction="in", sent_by="contact",
+                     body="Apply now: " + _LONG, detail={"body_text": "Apply now: " + _LONG, "headers": {}})
+_loop = (owner.get("/inbox/api/conversations/mail-loop/messages").get_json() or {}).get("messages", [{}])[0]
+_aios = (_loop.get("metadata") or {}).get("aios") or {}
+ok("A MAIL WITH NO TEXT PART READS AS ITS WORDS, never '<!doctype html>'", "<" not in _loop.get("message", "<")
+   and "Your weekly report is ready." in _loop.get("message", "") and "alert(1)" not in _loop.get("message", ""),
+   _loop.get("message", "")[:200])
+ok("...AND IS SHOWN AS THE SENDER WROTE IT, in the old thread's frame: its CSP inside, the sender's own HTML",
+   "Content-Security-Policy" in (_aios.get("frame") or {}).get("doc", "") and "Your weekly report is ready."
+   in (_aios.get("frame") or {}).get("doc", "") and (_aios.get("frame") or {}).get("height", 0) >= 140, _aios)
+_rows = {c["id"]: c for c in (owner.get("/inbox/api/conversations").get_json() or {})["data"]}
+ok("ITS ROW'S LAST LINE IS ITS WORDS, not its source", _rows.get("mail-loop", {}).get("lastMessage", "").startswith(
+   "Hi Brian, Your weekly report is ready."), _rows.get("mail-loop", {}).get("lastMessage"))
+_li = (owner.get("/inbox/api/conversations/mail-li/messages").get_json() or {}).get("messages", [{}])[0]
+_li_html = ((_li.get("metadata") or {}).get("aios") or {}).get("readable", "")
+ok("A WALL OF TRACKING LINKS READS AS SHORT LINKS: the old thread's render.readable, every character kept in the href",
+   f'href="{_LONG}"' in _li_html.replace("&amp;", "&") and "…" in _li_html and _LONG not in _li_html.split(">", 1)[-1],
+   _li_html[:240])
+ok("THE CONVERSATION GETS THE WINDOW ON A DESKTOP, not the old list's 780px column",
+   "@media (min-width:821px){.ib .wrap{max-width:1600px}}" in page(owner, "/inbox/inbox")[1])
+
+ok("AN EMAIL IS A CARD, NOT A CHAT BUBBLE (owner, 10-06, the enterprise layout): a readable column, headed by who wrote it",
+   "max-w-[760px]" in p2 and "const card = Boolean(emailOf(msg));" in p2 and "max-w-[760px]" in built
+   and "msg.senderName || 'You'" in email, "")
 
 print("\nsaved replies in their composer")
 from marketing.customer_voice.inbox import snippets  # noqa: E402

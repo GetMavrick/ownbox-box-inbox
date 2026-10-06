@@ -198,12 +198,26 @@ _HEADING = re.compile(r"(?i)<h[1-6]\b")
 _IMG = re.compile(r"(?i)<img\b")
 
 
+def text_of(body_html: str) -> str:
+    """The words of an HTML part, on one line: scripts, styles and the head dropped, tags stripped, entities decoded.
+    PLAIN TEXT, never markup: for a list's preview and the text under a frame (the new inbox screens, which show a
+    mail that arrived with no text part as `<!doctype html>` otherwise)."""
+    raw = str(body_html or "")
+    text = re.sub(r"(?is)<(script|style|head)[^>]*>.*?</\1>", " ", raw)
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    text = re.sub("[\u00ad\u034f\u200b-\u200f\u2060\ufeff]", "", html.unescape(text))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def looks_like_html(text: str) -> bool:
+    """Is this stored "text" really an HTML source (a mail that arrived with no text part)?"""
+    return bool(re.match(r"(?is)\s*<(!doctype|html|head|body|table|div|meta|style|center|!--|p[\s>])", str(text or "")))
+
+
 def _estimate_px(body_html: str) -> int:
     """A generous guess at the rendered height. See the long note above for why it is a guess."""
     raw = str(body_html or "")
-    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", raw)
-    text = re.sub(r"(?s)<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", html.unescape(text)).strip()
+    text = text_of(raw)
     lines = -(-len(text) // _CHARS_PER_LINE) if text else 0        # ceil
     px = (lines * _PX_PER_LINE
           + len(_BLOCK.findall(raw)) * _PX_PER_BLOCK
@@ -222,6 +236,29 @@ def has_markup(body_html: str) -> bool:
     return bool(re.search(r"(?is)<(p|div|table|ul|ol|h[1-6]|img|a|br|span|td)\b", got))
 
 
+def frame_height(body_html: str) -> int:
+    """The frame's height for this HTML part (the generous estimate above)."""
+    return _estimate_px(body_html)
+
+
+def frame_doc(body_html: str) -> str:
+    """The document `safe_frame` puts in its sandboxed frame's `srcdoc`: the CSP, our base styling, then the sender's
+    HTML. For a screen that builds the frame itself (the new inbox screens set it as a frame's `srcDoc`, which the
+    browser never parses into the page); the frame's `sandbox` and `referrerpolicy` must be `safe_frame`'s."""
+    return ('<!doctype html><html><head><meta charset="utf-8">'
+            f'<meta http-equiv="Content-Security-Policy" content="{_FRAME_CSP}">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            # OUR OWN BASE STYLING, FIRST, so a message that styles nothing still reads like
+            # something a person wrote rather than a 1996 default-serif wall. Anything the sender
+            # sets afterwards wins, which is the right way round — it is their document.
+            '<style>html{-webkit-text-size-adjust:100%}'
+            'body{margin:0;padding:10px 12px;font:16px/1.4 -apple-system,BlinkMacSystemFont,'
+            '"Segoe UI",Roboto,sans-serif;color:#111;background:#fff;word-break:break-word}'
+            'img{max-width:100%;height:auto}table{max-width:100%}'
+            'a{color:#0b57d0}</style></head><body>'
+            + str(body_html) + '</body></html>')
+
+
 def safe_frame(body_html: str, *, label: str = "Message") -> str:
     """The sender's HTML in a sandboxed frame, or "" when there is nothing to frame.
 
@@ -232,18 +269,7 @@ def safe_frame(body_html: str, *, label: str = "Message") -> str:
     """
     if not has_markup(body_html):
         return ""
-    doc = ('<!doctype html><html><head><meta charset="utf-8">'
-           f'<meta http-equiv="Content-Security-Policy" content="{_FRAME_CSP}">'
-           '<meta name="viewport" content="width=device-width,initial-scale=1">'
-           # OUR OWN BASE STYLING, FIRST, so a message that styles nothing still reads like
-           # something a person wrote rather than a 1996 default-serif wall. Anything the sender
-           # sets afterwards wins, which is the right way round — it is their document.
-           '<style>html{-webkit-text-size-adjust:100%}'
-           'body{margin:0;padding:10px 12px;font:16px/1.4 -apple-system,BlinkMacSystemFont,'
-           '"Segoe UI",Roboto,sans-serif;color:#111;background:#fff;word-break:break-word}'
-           'img{max-width:100%;height:auto}table{max-width:100%}'
-           'a{color:#0b57d0}</style></head><body>'
-           + str(body_html) + '</body></html>')
+    doc = frame_doc(body_html)
     return (f'<iframe class="mail" title="{html.escape(str(label), quote=True)}" '
             f'sandbox="{_FRAME_SANDBOX}" referrerpolicy="no-referrer" loading="lazy" '
             f'style="height:{_estimate_px(body_html)}px" '

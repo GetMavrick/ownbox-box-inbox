@@ -7,7 +7,7 @@ One section per ruling, each run twice: the switch off (the old screens, every b
 WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED, on either screen:
   · the search pill leaves the bar (#1977), or search stops reading what people wrote;
   · the Unanswered or ad filter is not offered, or does not filter;
-  · the summary line ("N people are waiting on a reply · M drafts ready to send") is gone;
+  · the line above the list says how many wait on a reply again, or stops linking the drafts ready to send;
   · a draft is not offered above the reply box, or loses Send, Edit or Discard;
   · saved replies, their Undo, or the email signature note go missing;
   · someone who said STOP gets a reply box, or the banner that says so is gone, or a send to them is not refused;
@@ -142,11 +142,13 @@ for name, on in screens():
         ok(f"[{name}] ...and each filters: who is waiting, who came from an ad",
            "Priya Shah" in w and "Tom Becker" not in w and "Tom Becker" in a and "Priya Shah" not in a)
 
-print("\nthe summary line")
+print("\nthe line above the list: the drafts ready, linked (owner, 10-06)")
 for name, _ in screens():
     lst = page("/inbox/inbox")
-    ok(f"[{name}] who is waiting, and the drafts ready, in one sentence above the list",
-       re.search(r'<p class="quiet sum">.*waiting on a reply.*ready to send', lst) is not None, lst[:400])
+    ok(f"[{name}] no waiting count above the list, and the drafts ready to send are a link to them",
+       not any("waiting on" in s for s in re.findall(r'<p class="quiet sum">(.*?)</p>', lst)) and re.search(
+           r'<p class="quiet sum"><a href="/inbox/waiting"><b>\d+ drafts?</b> ready to send</a></p>', lst) is not None,
+       lst[:400])
 
 print("\na draft, with Send, Edit and Discard")
 for name, on in screens():

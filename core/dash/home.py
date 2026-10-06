@@ -516,7 +516,8 @@ def _foot() -> str:
         host = ""
     if not host:
         return ""
-    return f'<div class="railfoot"><b>Your box</b>{_esc(host)}</div>'
+    # "YOUR OWNBOX" (owner, 2026-10-06: "It's always your Ownbox. We want to brand that term.").
+    return f'<div class="railfoot"><b>Your Ownbox</b>{_esc(host)}</div>'
 
 
 def rail_html(path: str, *, who: str = "", email: str = "") -> str:

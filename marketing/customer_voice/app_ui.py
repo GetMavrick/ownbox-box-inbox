@@ -176,6 +176,12 @@ def inbox_body() -> str:
             # THE FRAME STOPS RESERVING A SCREEN OF ITS OWN: its layout box is a full screen tall below a header, which
             # left a page that scrolls by the header's height, and a focus scrolled it. The inbox sizes itself.
             '<style>#ib-inbox{min-height:320px;display:flex;flex-direction:column}.lay{min-height:0}'
+            # THE INBOX TAKES THE WINDOW ON A DESKTOP (owner, 2026-10-06: "widen the message"): the old list's 780px
+            # column held one list; this holds the list and the conversation beside it, so the conversation was
+            # squeezed under 400px. Up to 1600px, so a wide monitor does not stretch a line across a room.
+            '@media (min-width:821px){.ib .wrap{max-width:1600px}}'
+            # AN EMAIL'S LINKS (render.readable's own <a>) look like links.
+            '#ib-inbox .ownbox-mail a,#ib-inbox details a{color:var(--link);text-decoration:underline}'
             # ONE SEARCH AT EVERY WIDTH (owner, #1977): on a phone the bar's, so theirs in the list is not drawn; on a
             # desktop, where the box's bar hides, theirs (which asks the box, patch 0004).
             '@media (max-width:820px){#ib-inbox .ib-list-search{display:none}}'

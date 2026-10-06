@@ -65,6 +65,29 @@ def _not_yet(what: str):
     return jsonify({"error": f"{what} arrive with the next inbox update.", "code": "not_supported"}), 501
 
 
+def _preview(k: dict) -> str:
+    """A row's last line. A mail that arrived with no text part stores its HTML source, so its row read
+    `<!doctype html> <html xmlns=...`: it reads as the words of its newest message instead."""
+    preview = str(k.get("preview") or "")
+    if k.get("platform") != "email":
+        return preview
+    from .inbox import render
+    if not render.looks_like_html(preview):
+        return preview
+    try:
+        from core import state
+        with state.connect() as c:
+            row = c.execute("SELECT d.body_html AS h, m.body AS b FROM inbox_messages m "
+                            "LEFT JOIN inbox_message_detail d ON d.message_id = m.id "
+                            "WHERE m.space = ? AND m.zernio_conversation_id = ? "
+                            "ORDER BY m.created_at DESC, m.id DESC LIMIT 1",
+                            (str(k.get("space") or _space()), str(k.get("zernio_conversation_id")))).fetchone()
+        words = render.text_of((row["h"] or row["b"]) if row else preview)
+    except Exception:                            # noqa: BLE001 — the source's own words, never its tags
+        words = render.text_of(preview)
+    return words[:240]
+
+
 def _conversation(k: dict, ready: dict | None = None) -> dict:
     return {
         "id": k["zernio_conversation_id"],
@@ -73,7 +96,7 @@ def _conversation(k: dict, ready: dict | None = None) -> dict:
         "participantName": str(k.get("participant") or "").strip() or "Someone",
         "participantUsername": None,
         "participantPicture": None,
-        "lastMessage": str(k.get("preview") or ""),
+        "lastMessage": _preview(k),
         "updatedTime": str(k.get("last_inbound_at") or k.get("updated_at") or ""),
         "status": str(k.get("list_status") or "active"),
         "unreadCount": 1 if k.get("unread") else 0,
@@ -139,11 +162,27 @@ def split_quoted(text: str) -> tuple[str, str]:
     return text[:cut].rstrip(), text[cut:].strip()
 
 
-def _message(m: dict, conv: dict) -> dict:
+def _message(m: dict, conv: dict, html_by_id: dict | None = None) -> dict:
     sent_by = str(m.get("sent_by") or "")
     who = m.get("sender_name") if m.get("direction") == "out" else (conv.get("participant") or None)
     text = str(m.get("full_text") or m.get("body") or "")
+    shown = {}
+    if conv.get("platform") == "email":
+        # AN EMAIL, SHOWN THE WAY THE OLD THREAD SHOWS IT (owner, 2026-10-06, on his live box: HTML emails "all look like
+        # garbage"). Written in HTML: the sender's own document in the old thread's sandboxed frame (`frame`, built by
+        # render.frame_doc, drawn with safe_frame's sandbox). Its text: render.readable's (escaped first, long links
+        # shortened, blank runs collapsed), and a mail that arrived with no text part reads as its words, never as
+        # `<!doctype html>`.
+        from .inbox import render
+        raw = str((html_by_id or {}).get(str(m.get("id")), ""))
+        if render.looks_like_html(text):
+            text = render.text_of(raw or text)
+        if render.has_markup(raw):
+            shown["frame"] = {"doc": render.frame_doc(raw), "height": render.frame_height(raw)}
     said, quoted = split_quoted(text) if conv.get("platform") == "email" else (text, "")
+    if conv.get("platform") == "email":
+        shown.update({"readable": render.readable(said if quoted else text),
+                      **({"quotedReadable": render.readable(quoted)} if quoted else {})})
     return {
         "id": str(m.get("zernio_message_id") or m.get("id")),
         "conversationId": conv["zernio_conversation_id"],
@@ -163,7 +202,7 @@ def _message(m: dict, conv: dict) -> dict:
         "metadata": {"aios": {"sentBy": sent_by or None,
                               "subject": _subject(m.get("headers") or m.get("raw_headers")) or None,
                               # EMAIL ONLY, AND ONLY WHEN IT QUOTES: the reply's own words, and the history to fold.
-                              **({"said": said, "quoted": quoted} if quoted else {})}},
+                              **({"said": said, "quoted": quoted} if quoted else {}), **shown}},
     }
 
 
@@ -259,7 +298,9 @@ def api_messages(zcid: str):
     newest_first = store.messages_for(_space(), zcid, limit=200)[::-1]
     page = newest_first[off:off + n]
     more = len(newest_first) > off + n
-    return jsonify({"messages": [_message(m, conv) for m in page],
+    # AN EMAIL WRITTEN IN HTML IS SHOWN IN ITS OWN SANDBOXED FRAME, as the old thread shows it (render.safe_frame).
+    html_by_id = store.html_for(_space(), zcid) if conv.get("platform") == "email" else {}
+    return jsonify({"messages": [_message(m, conv, html_by_id) for m in page],
                     "pagination": {"hasMore": more, "nextCursor": str(off + n) if more else None}})
 
 

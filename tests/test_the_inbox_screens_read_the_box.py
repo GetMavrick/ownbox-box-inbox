@@ -108,7 +108,16 @@ m0 = msgs[0] if msgs else {}
 ok("an email reads as its full plain text, with its subject", m0.get("message")
    == "Can I move my appointment?\n\nThanks, Priya" and m0.get("metadata", {}).get("aios", {}).get("subject")
    == "Moving my booking" and m0.get("direction") == "incoming", m0)
-ok("NEVER RAW HTML: nothing from the HTML body reaches their screen", b"<script" not in r.data and b"<p>" not in r.data)
+# NEVER RAW HTML, EXCEPT IN THE FRAME (owner, 2026-10-06; OSDev1: "reuse render.safe_frame ... a srcdoc-safe rendering
+# through the adapter"). A sender's HTML may ride in ONE place, `metadata.aios.frame.doc`: render.frame_doc's whole
+# document, its CSP first, which their screen only ever sets as a sandboxed frame's srcDoc. Everywhere else, none.
+import copy as _copy  # noqa: E402
+_rest = _copy.deepcopy(msgs)
+_docs = [m.get("metadata", {}).get("aios", {}).pop("frame", {}).get("doc", "") for m in _rest]
+ok("NEVER RAW HTML: nothing from the HTML body reaches their screen outside the sandboxed frame's document",
+   "<script" not in str(_rest) and "<p>" not in str(_rest)
+   and all(d.startswith('<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy"')
+           for d in _docs if d), (_docs[:1], str(_rest)[:300]))
 ok("a key holding '::' opens its thread", o.get("/inbox/api/conversations/acct-m::t_9/messages").status_code == 200)
 ok("an unknown conversation is a 404", o.get("/inbox/api/conversations/nope/messages").status_code == 404)
 

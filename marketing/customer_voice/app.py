@@ -583,6 +583,8 @@ a.row:active{background:var(--hair);border-radius:10px}
 /* ...AND THE SENTENCE UNDER IT IS ONE LINE, NOT A CARD: `.quiet` pads a block 18px above and below, which on this
    screen was 36px of air between the bar and the first conversation for one line of text. */
 .quiet.sum{margin:0;padding:12px 2px 0}
+/* THE DRAFTS READY, A LINK TO THEM (owner, 2026-10-06: "Leave this and link it"). */
+.quiet.sum a{color:var(--href);text-decoration:underline;text-underline-offset:3px}
 .quiet.sum+.find-wide+.pills{margin-top:10px}
 .bar.bar-find{border-bottom-color:transparent}
 .barfind{flex:1;min-width:0;display:flex;align-items:center;gap:10px;min-height:48px;padding:0 16px;
@@ -2086,31 +2088,18 @@ def _drafts_ready(space: str) -> int:
 
 
 def _head(n: int, drafts: int = -1) -> str:
-    """The inbox title, carrying the only number this product exists to produce.
+    """The inbox's one heading (for a screen reader), and the drafts ready to send, as a link to them.
 
-    THE WORD "Inbox" IS FOR A SCREEN READER ONLY since 2026-09-29: the owner chose a header that
-    reads "Unified Inbox" with the summary straight under it, so a visible "Inbox" repeated it. The
-    page keeps its one heading, read aloud, and the sentence under the header does the work.
-
-    THE NUMBER IS A SENTENCE, NOT A BADGE. "3" beside the word Inbox is a notification dot, and a
-    notification dot means "something happened". This number means something DIFFERENT and more
-    useful: three people are waiting on you personally. Said in words it needs no legend.
-
-    AND IT IS SAID ONCE. The filter below is the control; the header is the fact. Printing "3" in
-    both places is the stutter this file removed from the set-up screen an hour ago.
+    THE WAITING COUNT IS GONE (owner, 2026-10-06: "let's get rid of this annoying message at the top of the inbox",
+    the line that read "79 people are waiting on a reply · 26 drafts ready to send"), AND THE DRAFTS STAY, LINKED
+    ("26 drafts ready to send. could be there linked"): the one half of it a person can act on, one tap from Replies
+    to send. Said only when there is at least one. `n` is kept so the callers stay as they were.
     """
-    if n < 0:
+    if drafts < 1:
         return '<h1 class="vh">Inbox</h1>'
-    if n == 0:
-        return ('<h1 class="vh">Inbox</h1>'
-                '<p class="quiet sum">Nobody is waiting on you.</p>')
-    who = "1 person is" if n == 1 else f"{n} people are"
-    # AND WHAT THE BOX HAS READY FOR THEM (owner, 2026-09-29, his target composition): "4 people are
-    # waiting on a reply · 6 drafts ready to send". Said only when there is at least one.
-    ready = ("" if drafts < 1 else
-             f' · <b>{"1 draft" if drafts == 1 else f"{drafts} drafts"}</b> ready to send')
-    return (f'<h1 class="vh">Inbox</h1><p class="quiet sum">'
-            f'<b class="warn">{who}</b> waiting on a reply{ready}.</p>')
+    what = "1 draft" if drafts == 1 else f"{drafts} drafts"
+    return ('<h1 class="vh">Inbox</h1><p class="quiet sum">'
+            f'<a href="/inbox/waiting"><b>{what}</b> ready to send</a></p>')
 
 
 def _pills(counts: dict, waiting: bool, from_ad: bool, *, q: str = "", channel: str = "",

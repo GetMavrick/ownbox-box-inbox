@@ -104,8 +104,9 @@ def test_the_header_count_and_the_filtered_list_are_the_same_predicate():
     ok("the count equals the length of the list it describes", n == len(rows), f"{n} vs {len(rows)}")
     app, c = _c()
     words = _text(c.get("/inbox/inbox").get_data(as_text=True))
-    ok("...and the header says it in words", f"{n} people are" in words, words[:180])
-    ok("...as a sentence, not a bare badge", "waiting on a reply" in words)
+    # THE HEADER NO LONGER SAYS IT (owner, 2026-10-06: "get rid of this annoying message"); the filter carries it.
+    ok("...and the header no longer prints the count", f"{n} people are" not in words and "waiting on a reply"
+       not in words, words[:180])
 
 
 def test_somebody_who_said_STOP_is_not_waiting_for_a_reply():
@@ -227,7 +228,8 @@ def test_an_inbox_with_nothing_waiting_is_told_so_rather_than_shown_a_blank():
     _talk("b", "Priya", [("in", "quote please"), ("out", "sent you one")])
     app, c = _c()
     words = _text(c.get("/inbox/inbox").get_data(as_text=True))
-    ok("the header says he is caught up", "Nobody is waiting on you." in words, words[:200])
+    # THE CAUGHT-UP LINE WENT WITH THE WAITING COUNT (owner, 2026-10-06).
+    ok("the header prints nothing about who is waiting", "Nobody is waiting on you." not in words, words[:200])
     ok("...and does not print a zero at him", "0 people" not in words)
     ok("...and offers no filter that could only empty the screen",
        'class="chips pills"' not in c.get("/inbox/inbox").get_data(as_text=True))
