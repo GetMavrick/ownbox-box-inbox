@@ -140,7 +140,7 @@ ok("the page reads the stored brief", review_brief.for_page(ABOUT, NOW) == revie
 
 # ── 4. the brief's shape (the contract the app page reads) ───────────────────────────────────────────────────
 KEYS = {"about", "date_label", "quote", "good_news", "worth", "moving", "ideas", "ideas_from", "empty", "link",
-        "built_at", "numbers", "welcome", "learned", "aims", "coming", "first"}
+        "built_at", "numbers", "welcome", "learned", "aims", "coming", "first", "best"}
 b = review_brief.get(ABOUT)
 ok("the brief carries exactly the documented keys", set(b) == KEYS, set(b) ^ KEYS)
 ok("every item is {title, why, href, machine}",

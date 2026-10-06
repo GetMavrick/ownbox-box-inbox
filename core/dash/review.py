@@ -144,6 +144,8 @@ line-height:1.28;letter-spacing:-.005em;color:var(--ink);text-wrap:balance}
 .mr-scene{display:block;width:100%;max-width:360px;height:46px;margin:20px 0 2px;color:var(--ink-3)}
 .mr-scene .sun{color:var(--link)}
 .mr-good{margin:12px 0 0;color:var(--ink-2);font-size:calc(17 * var(--px, 1px));line-height:1.55}
+.mr-best{display:flex;align-items:flex-start;gap:8px;margin:10px 0 0}
+.mr-best p{flex:1 1 auto;margin:0;color:var(--ink);font-size:calc(16 * var(--px, 1px));line-height:1.5}
 .mr-sec{margin-top:30px}
 .mr-sec h2{margin:0 0 2px;font-size:calc(13 * var(--px, 1px));font-weight:600;letter-spacing:.14em;
 text-transform:uppercase;color:var(--ink-3)}
@@ -651,8 +653,18 @@ def brief_html(b: dict | None, *, live: bool, first: str = "", hidden=frozenset(
     return (f'<style>{BRIEF_CSS}</style><div class="mr"><section class="mr-band">'
             + (f'<p class="mr-quote">&ldquo;{_esc(quote)}&rdquo;</p>' if quote else "")
             + _SCENE + (f'<p class="mr-good">{_esc(good)}</p>' if good else "")
+            + _best_html(b.get("best"), hidden, show_all, back)
             + _numbers_html(b.get("numbers"))
             + '</section>' + lists + quiet + sign + foot + '</div>')
+
+
+def _best_html(best, hidden, show_all: bool, back: str) -> str:
+    """A personal best (#1953 step 1.4), one line under the good news, with its own Hide like a section's."""
+    best = str(best or "").strip()
+    if not best or ("best" in hidden and not show_all):
+        return ""
+    control = _hide_button("best", back, show="best" in hidden) if back else ""
+    return f'<div class="mr-best"><p>{_esc(best)}</p>{control}</div>'
 
 
 def _numbers_html(nums) -> str:

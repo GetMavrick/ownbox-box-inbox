@@ -175,7 +175,11 @@ def api_conversations():
     if view is None or (disp and disp not in store.DISPOSITIONS):
         return jsonify({"error": "status is active, archived, deleted or junk; disposition is one of "
                                  + ", ".join(store.DISPOSITIONS), "code": "invalid_field_value"}), 400
-    rows = store.list_conversations(_space(), limit=n + 1, offset=off, platform=key, view=view, disposition=disp)
+    # THE BOX'S PILLS ABOVE THEIR LIST (#1990 1.4): Unanswered (?waiting=1) and Leads (?from_ad=1), the same store
+    # filters the old list's pills use, so the count in the header and the filtered list agree.
+    waiting, from_ad = (request.args.get(k) == "1" for k in ("waiting", "from_ad"))
+    rows = store.list_conversations(_space(), limit=n + 1, offset=off, platform=key, view=view, disposition=disp,
+                                    waiting=waiting, from_ad=from_ad)
     ready = {str(d["zcid"]): {"id": str(d["id"]), "body": str(d.get("body") or "")} for d in _waiting()}
     if request.args.get("sortOrder") == "asc":
         rows = rows[::-1]

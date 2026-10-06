@@ -518,7 +518,7 @@ def report(day: date, space: str | None = None) -> dict:
         headline, label = (waiting, "waiting on you") if counts["inbound"] or waiting else (None, "")
 
     return {"title": TITLE,
-            "headline": {"value": headline, "label": label},
+            "headline": {"value": headline, "label": label, "better": "less"},   # waiting: fewer is better
             "needs_you": needs_you, "happened": happened, "watch": watch,
             "figures": figures, "notes": [], "answer_first": first}
 

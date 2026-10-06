@@ -23,6 +23,7 @@ KNOWN = (
     "article_results",           # #1793 Phase 2.4: what each article brought (marketing/aeo_machine/brought.py)
     "aeo_topic_sync",            # #1793 Phase 3: topics read from the buyer's Airtable (marketing/aeo_machine/topic_sync.py)
     "aeo_questions",             # #1793 Phase 2: the common customer questions (marketing/aeo_machine/questions.py)
+    "inbox_screens",             # #1990 Phase 1: Zernio's inbox screens are the Inbox Machine's (marketing/customer_voice/app_ui.py)
 )
 
 

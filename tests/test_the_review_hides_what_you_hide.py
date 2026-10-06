@@ -125,8 +125,8 @@ anon = app.test_client()
 r = anon.post("/app/review/hide", data={"section": "worth"})
 ok("someone not signed in changes nothing", r.status_code in (302, 303, 401, 403, 404)
    and review_brief.hidden_for(OWNER) == set(), r.status_code)
-ok("every section the email has can be hidden, and nothing else",
-   set(review_brief.section_keys()) == {k for k, _ in review_email.SECTIONS})
+ok("every section and one-line part the email has can be hidden, and nothing else",
+   set(review_brief.section_keys()) == {k for k, _ in review_email.SECTIONS + review_email.LINES})
 
 print("\nALL REVIEW-HIDE CHECKS PASS" if not _failed else f"\n{_failed} REVIEW-HIDE CHECK(S) FAILED")
 sys.exit(1 if _failed else 0)

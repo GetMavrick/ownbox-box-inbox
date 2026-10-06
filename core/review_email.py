@@ -29,6 +29,8 @@ SECTIONS = (("learned", "What your box learned about you"), ("aims", "Your goals
             ("coming", "What's coming"), ("worth", "Worth your time today"),
             ("first", "Who to answer first"), ("moving", "Already moving"),
             ("ideas", "Ideas to try"))
+# ONE-LINE PARTS, each hideable like a section, drawn under the good news rather than as a numbered list.
+LINES = (("best", "Personal best"),)
 
 
 def build(day, now=None, *, user_id=None) -> dict:
@@ -51,6 +53,8 @@ def text(e: dict) -> str:
     lines = [e["date_label"], "", e["quote"], ""]
     if e.get("good_news"):
         lines += [e["good_news"], ""]
+    if e.get("best") and "best" not in (e.get("hidden") or ()):
+        lines += [e["best"], ""]
     if numbers_line(e):
         lines += [numbers_line(e), ""]
     for key, heading in SECTIONS:
@@ -123,6 +127,8 @@ def html(e: dict) -> str:
            f'<div style="border-top:1px solid {_SOFT};margin:22px 0 0;width:100%"></div>']
     if e.get("good_news"):
         out.append(f'<p style="color:{_SOFT};margin:14px 0 0">{esc(e["good_news"])}</p>')
+    if e.get("best") and "best" not in (e.get("hidden") or ()):
+        out.append(f'<p style="color:{_INK};margin:10px 0 0">{esc(e["best"])}</p>')
     out.append(_numbers_html(e))
     out.append('</div></div><div style="max-width:600px;margin:0 auto;padding:8px 20px 40px">')
     for key, heading in SECTIONS:

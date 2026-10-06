@@ -194,7 +194,7 @@ try:
     ok("AND THE INBOX LINE SURVIVED IT — `watch = [...]` would have wiped this",
        any(t.startswith("Inbox —") for t in _texts(seg, "watch")), str(_texts(seg, "watch")))
     ok("...and the headline is the number that matters on such a box",
-       seg["headline"] == {"value": 1, "label": "waiting on you"}, str(seg["headline"]))
+       seg["headline"] == {"value": 1, "label": "waiting on you", "better": "less"}, str(seg["headline"]))
     ok("...and he is still told to go and answer it",
        any("waiting on your reply" in t for t in _texts(seg, "needs_you")),
        str(_texts(seg, "needs_you")))

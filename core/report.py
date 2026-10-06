@@ -229,8 +229,12 @@ def _normalize(machine: str, title: str, rep) -> dict:
     return {
         "machine": machine,
         "title": str(rep.get("title") or title)[:80],
+        # `better`: "more" when a higher number is good news, "less" when it is not (a count of people waiting), None
+        # when the machine has not said. Only a "more" headline is ever called a personal best (review_brief._best).
         "headline": _agree({"value": _plain(head.get("value", 0)), "label": str(head.get("label") or "")[:80],
-                            "delta": _plain(head.get("delta"))}, text_key="label"),
+                            "delta": _plain(head.get("delta")),
+                            "better": head.get("better") if head.get("better") in ("more", "less") else None},
+                           text_key="label"),
         "needs_you": _bounded(rep.get("needs_you"), "waiting"),
         "happened": [_agree(x) for x in _bounded(rep.get("happened"), "outcomes")],
         "watch": watch,
@@ -817,6 +821,8 @@ def slack_text(b: dict) -> str:
     lines = [f"*{_slack_escape(b.get('date_label'))}*", f"> _{_slack_escape(b.get('quote'))}_"]
     if b.get("good_news"):
         lines += ["", _slack_escape(b["good_news"])]
+    if b.get("best"):
+        lines += ["", _slack_escape(b["best"])]
     if review_email.numbers_line(b):
         lines += ["", _slack_escape(review_email.numbers_line(b))]
     # PLANS NEVER GO TO SLACK (OSDev1 on #1964): a channel is read by more people than the owner, and a planned offer

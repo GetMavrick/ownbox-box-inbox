@@ -113,7 +113,8 @@ def report(day: date) -> dict:
         label = (f"visit{'s' if total != 1 else ''} from people this week"
                  + (f" across {sites} sites" if sites > 1 else ""))
         out = {"title": TITLE, "happened": happened,
-               "headline": {"value": total, "label": label, "delta": (total - before) if before is not None else None}}
+               "headline": {"value": total, "label": label, "delta": (total - before) if before is not None else None,
+                            "better": "more"}}
     err = settings.sync_state().get("error") or ""
     if err:
         out.setdefault("title", TITLE)

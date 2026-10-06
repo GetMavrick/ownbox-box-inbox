@@ -20,6 +20,7 @@ THE CONTRACT (what `get` and `build` return; WebDev2's page draws exactly this):
       "date_label": "Thursday · October 1, 2026",   the morning it is read, on the buyer's clock
       "quote":      "A new month, a clean slate, a bright start.",
       "good_news":  "…" | "",                one optimistic sentence on yesterday; "" when there is none
+      "best":       "…" | "",                a personal best (step 1.4): "New personal best: …"; "" when none fell
       "worth":      [item …],                worth your time today: decisions only he can make, new or changed
       "first":      [item …],                who to answer first, by name: up to three, from a reporter's answer_first
       "moving":     [item …],                what the machines did, one per machine, only what happened
@@ -591,6 +592,37 @@ def _morning(about: date, now: datetime) -> date:
     return read if about < read <= about + timedelta(days=2) else about + timedelta(days=1)
 
 
+# A PERSONAL BEST (#1953 step 1.4): one cheerful line when a headline beats its own record for the last 30 days.
+# Arithmetic on the stored history (report.history), no AI. A record needs a week behind it, or a new box would break
+# one every morning; it is never a zero; and only a headline whose machine says more is better is ever cheered.
+BEST_DAYS = 30
+BEST_MIN_DAYS = 7
+
+
+def _best(rows_y: list[dict], about: date) -> str:
+    """"New personal best: 23 emails sent, the most in 30 days (Lead Machine)." or "". The biggest jump over its
+    old record wins when several fall on one day."""
+    heads = {r.get("machine"): r for r in rows_y if isinstance(r.get("headline"), dict)}
+    found = []
+    for machine, pts in report.history(about, back=BEST_DAYS).items():
+        r = heads.get(machine)
+        if not r or (r.get("headline") or {}).get("better") != "more" or r.get("error"):
+            continue
+        if not pts or pts[-1]["day"] != about.isoformat():
+            continue
+        now_v, before = pts[-1]["value"], [p["value"] for p in pts[:-1]]
+        if len(before) < BEST_MIN_DAYS or not now_v or now_v <= 0 or now_v <= max(before):
+            continue
+        found.append((now_v / max(max(before), 1), machine, now_v, r))
+    if not found:
+        return ""
+    _, machine, v, r = max(found, key=lambda f: (f[0], f[2]))
+    label = str(r["headline"].get("label") or "").strip()
+    title = str(r.get("title") or machine).strip()
+    num = f"{v:,.0f}" if float(v).is_integer() else f"{v:,.1f}"
+    return f"New personal best: {num} {label}, the most in {BEST_DAYS} days ({title})." if label else ""
+
+
 def _compose(about: date, now: datetime | None, *, think=None, ai: bool = True) -> tuple[dict, dict, dict]:
     """(brief, what was seen, the idea log after it). Pure apart from the reads and the one AI call: the caller
     decides whether anything is remembered."""
@@ -634,13 +666,18 @@ def _compose(about: date, now: datetime | None, *, think=None, ai: bool = True) 
     ideas = [i for i in ideas if not _restates(i, worth)][:MAX_IDEAS]
     if not good and moving:
         good = _plain_good_news(moving)                                     # plain, true, and never a zero
+    try:
+        best = _best(rows_y, about)
+    except Exception:                            # noqa: BLE001 — a cheerful line is never the review's failure
+        best = ""
     m = _morning(about, now)
     brief = {
         "about": about.isoformat(), "date_label": _label(m), "quote": _quote(m),
-        "good_news": good, "worth": worth, "first": first, "moving": moving, "ideas": ideas,
+        "good_news": good, "best": best, "worth": worth, "first": first, "moving": moving, "ideas": ideas,
         "numbers": _numbers(rows_y),
         "welcome": welcome, "learned": learned, "aims": aims, "coming": coming,
-        "ideas_from": "ai" if ideas else "", "empty": not (worth or first or moving or ideas or learned or aims or coming),
+        "ideas_from": "ai" if ideas else "",
+        "empty": not (worth or first or moving or ideas or learned or aims or coming or best),
         "link": report.page_url(about), "built_at": state._now(),
     }
     for i in ideas:
@@ -658,7 +695,7 @@ HIDDEN = "review.hidden"
 
 def section_keys() -> tuple:
     from core import review_email
-    return tuple(k for k, _ in review_email.SECTIONS)
+    return tuple(k for k, _ in review_email.SECTIONS) + tuple(k for k, _ in review_email.LINES)
 
 
 def hidden_for(user_id) -> set:

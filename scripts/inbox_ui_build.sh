@@ -46,14 +46,17 @@ echo "== our tools (our lock)"
 cp -R "$UI/tools" "$WORK/tools"
 (cd "$WORK/tools" && npm ci --no-audit --no-fund --loglevel=error)
 
+echo "== our layer, type-checked against their code"
+cp -R "$UI/ownbox" "$BUILD/ownbox"
+(cd "$BUILD" && npx --no-install tsc --noEmit -p .)
+
 echo "== the screens"
 # THEIR PUBLIC SETTINGS ARE FIXED HERE, as Next.js fixes NEXT_PUBLIC_* at its build. Left alone, a browser meets
 # `process.env` and the thread throws as it opens. WhatsApp calling is off: no box offers WhatsApp yet (#1990 Phase 2).
 # A new NEXT_PUBLIC_ name in their code fails tests/test_inbox_ui_upstream.py until it is decided here.
-cp -R "$UI/ownbox" "$BUILD/ownbox"
 mkdir -p "$DEST"
 (cd "$BUILD" && "$WORK/tools/node_modules/.bin/esbuild" \
-    ownbox/entry/list.tsx ownbox/entry/thread.tsx ownbox/entry/composer.tsx \
+    ownbox/entry/list.tsx ownbox/entry/thread.tsx ownbox/entry/composer.tsx ownbox/entry/inbox.tsx \
     --bundle --splitting --format=esm --outdir="$DEST" --entry-names='[name]' --chunk-names='chunk-[hash]' \
     --minify --target=es2020 --jsx=automatic --charset=utf8 --legal-comments=eof \
     --define:process.env.NODE_ENV='"production"' \

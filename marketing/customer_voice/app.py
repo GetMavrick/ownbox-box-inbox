@@ -1433,7 +1433,23 @@ def _trail(path: str) -> str:
         return ""
 
 
-def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False, bar: str = "") -> str:
+def _shell_css(theirs: bool) -> str:
+    """The box's look for an inbox page. WHERE ZERNIO'S SCREENS SIT IN IT (#1990, app_ui.py), the box's own CSS goes in a
+    cascade layer, `shell`, ordered after their reset and before their utilities. Their stylesheet is layered
+    (Tailwind 4), and a browser lets ANY unlayered rule beat a layered one, so the box's plain `button` or `a` rule
+    flattened their rows and lists. Layered, the box's frame keeps its look and their screens keep theirs."""
+    tags = _look.head_tags()
+    if not theirs:
+        return f"{tags}<style>{CSS}</style>"
+    import re as _re
+    link = _re.search(r'<link rel="stylesheet" href="([^"]+)">', tags)
+    imported = f'@import url("{link.group(1)}") layer(shell);' if link else ""
+    tags = tags.replace(link.group(0), "") if link else tags
+    return (f"{tags}<style>@layer theme, base, shell, components, utilities;{imported}</style>"
+            f"<style>@layer shell{{{CSS}}}</style>")
+
+
+def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False, bar: str = "", theirs: bool = False) -> str:
     brand = dash.brand()
     # HIS CHOICE IS STAMPED ON <html>. No stamp means he has never chosen, and that renders
     # WHITE — the OS is not consulted (owner, 2026-09-16: white screens first and foremost).
@@ -1461,7 +1477,7 @@ def _shell(body: str, *, day: str = "", here: str = "", wide: bool = False, bar:
      `Notification` even exists, and this legacy pair is what older iOS reads for the same thing.
      Both cost one line and the failure they prevent is silent. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>{_esc(brand)} · {APP_TITLE}</title>{_look.head_tags()}<style>{CSS}</style></head>
+<title>{_esc(brand)} · {APP_TITLE}</title>{_shell_css(theirs)}</head>
 <body{' class="ib"' if wide else ''}>
 <input class="navtoggle" type="checkbox" id="navtoggle" aria-controls="railnav">
 <div class="bar{' bar-find' if bar else ''}"><div class="bar-in">{_menu_button()}
@@ -2426,6 +2442,21 @@ _NOTIFY_JS = """(function () {
 @blueprint.get("/inbox/inbox")
 def r_inbox():
     """Who has spoken to this business, most recent first."""
+    # ZERNIO'S LIST, WHERE THIS BOX HAS IT SWITCHED ON (#1990 1.4, app_ui.py). Off, the list below, as it always was.
+    from . import app_ui as _ui
+    if _ui.on():
+        # OUR SUMMARY LINE ABOVE THEIR LIST (#1990 1.4; owner 2026-09-29: "4 people are waiting on a reply · 6 drafts
+        # ready to send"), the same sentence the old list leads with.
+        # AND OUR FILTERS, All / Unanswered / Leads and Done / Trash / Junk, each only when it can change the screen
+        # (app_ui.pills); their list reads the choice from the address (patch 0004) and the box filters
+        # (store.list_conversations). Their platform menu stands in for our channel chips.
+        _sp = _space()
+        _c = _counts(_sp)
+        _wait = (request.args.get("waiting") or "") in ("1", "true", "yes", "on")
+        _ad = (request.args.get("from_ad") or "") in ("1", "true", "yes", "on")
+        _pick = _ui.pills(_sp, _c, _wait, _ad, _ui.view_of(request.args.get("status")))
+        return _shell(_head(_c["waiting"], _drafts_ready(_sp)) + _pick + _ui.inbox_body(),
+                      here="/inbox/inbox", wide=True, theirs=True), 200
     space = _space()
     # THE CHIP THE READER IS ON. Passed to the store as a bound predicate, never interpolated;
     # an unknown value simply matches no rows, which is the honest answer to a hand-typed URL.
@@ -2703,6 +2734,12 @@ def r_thread(zcid):
         log.warning("voice.mark_read_failed", extra={"error": f"{type(e).__name__}: {e}"[:160]})
 
     who = (conv.get("participant") or "").strip() or "Someone"
+    # ZERNIO'S INBOX, WHERE THIS BOX HAS IT SWITCHED ON (#1990 1.3, app_ui.py): a link to a conversation (a
+    # notification, the Morning Review) opens it there, selected, after it has been marked read here. Off, the page
+    # below is the thread, as it always was; the owner keeps it the default until his rulings pass on both.
+    from . import app_ui as _ui
+    if _ui.on():
+        return redirect(_ui.thread_address(conv))
     # THE CHANNEL, IN THE HEADER. Answering an Instagram DM as though it were an email is a
     # category of mistake this screen should make impossible, and the only way it does that is by
     # saying which channel this is before he starts typing.
@@ -5583,3 +5620,4 @@ def r_snippets():
 
 # THE ROUTES ZERNIO'S INBOX SCREENS TALK TO (#1990 step 1.2), on this blueprint so `_gate` admits them or nobody.
 from . import app_api  # noqa: E402,F401
+from . import app_ui  # noqa: E402,F401

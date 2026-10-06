@@ -23,4 +23,4 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-import{l as r}from"./chunk-67TM3ZUE.js";import{jb as o}from"./chunk-3ZXEQRE6.js";function n(m,t){return o(m,r,t)}export{n as mountComposer};
+import{l as r}from"./chunk-VYMGROIZ.js";import{kb as o}from"./chunk-4YHBN525.js";function n(m,t){return o(m,r,t)}export{n as mountComposer};
