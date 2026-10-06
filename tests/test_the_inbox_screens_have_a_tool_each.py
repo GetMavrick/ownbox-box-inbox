@@ -36,6 +36,9 @@ _failed = 0
 # than one action (the Waiting screen sends written replies and throws them away).
 TOOLS = {
     "/inbox/inbox/<path:zcid>/reply": ("inbox.propose_reply",),
+    # Zernio's thread screen sends through the same path as the reply above (#1990 step 1.2).
+    "/inbox/api/conversations/<path:zcid>/messages": ("inbox.propose_reply",),
+    "/inbox/api/conversations/<path:zcid>/draft/discard": ("inbox.propose_discard_draft",),
     "/inbox/waiting": ("inbox.propose_drafts", "inbox.propose_discard_draft"),
     "/inbox/drafts": ("inbox.propose_drafting",),
     "/inbox/signature": ("inbox.propose_signature",),
@@ -53,6 +56,11 @@ BROWSER_ONLY = {
     "/inbox/setup": "the same credentials as the two above, on one screen",
     "/inbox/installed": "a device reporting that the mobile app is installed on it; there is no person's "
                         "action behind it",
+    "/inbox/api/conversations/<path:zcid>/read": "a thread opened on a screen is marked read; a chat reading it "
+                                                 "(inbox.read_conversation) has opened nothing",
+    "/inbox/api/conversations/<path:zcid>/typing": "a screen saying a person is typing; nothing is done",
+    "/inbox/api/conversations/<path:zcid>/messages/<mid>/reactions": "nothing is sent from here yet: their screens "
+                                                                     "offer reactions on WhatsApp and Telegram (Phase 2)",
 }
 
 

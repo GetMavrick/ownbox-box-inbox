@@ -31,6 +31,9 @@ def verify_sdk() -> tuple[bool, str]:
         send_p = inspect.signature(probe.messages.send_inbox_message).parameters
         if "message_tag" not in send_p or "messaging_type" not in send_p:
             return False, "zernio-sdk signature drift: send_inbox_message message-tag pair missing"
+        # A FILE IN A DM rides the SDK's own multipart post (client.py `send(attachment=)`): `_post` must still take files.
+        if "files" not in inspect.signature(Zernio._post).parameters:
+            return False, "zernio-sdk signature drift: _post lacks files (inbox attachments)"
         if "max_retries" not in inspect.signature(Zernio.__init__).parameters:
             return False, "zernio-sdk signature drift: client lacks max_retries"
         # Comment-automation contract (lead-magnet cross-reel capture): create must expose a

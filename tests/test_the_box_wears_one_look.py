@@ -11,9 +11,8 @@ This suite holds what makes `core/dash/static/box.css` the one look rather than 
   2. the token values are the site's, as OSDev0 measured them (docs/BOX_DESIGN_REFERENCE.md);
   3. every text colour it pairs with a ground passes WCAG AA (4.5:1);
   4. it ships the fonts it names, from the box, with their licences, and reaches no other host;
-  5. it keeps the product's vocabulary, since its comments are shipped text;
-  6. it stays light: under 20 KB, and plain CSS a browser reads as-is;
-  7. THE RATCHET: raw colours in the older stylesheets may only go down. Each screen that moves
+  5. it stays light: under 20 KB, and plain CSS a browser reads as-is;
+  6. THE RATCHET: raw colours in the older stylesheets may only go down. Each screen that moves
      onto the tokens lowers its count here; at zero the rule is strict.
 
 Run: python tests/test_the_box_wears_one_look.py
@@ -238,11 +237,7 @@ mods = re.findall(r"(?<![\w-])(\.(?:ok|warn|bad|new))\b", comp)
 ok("...and a modifier never stands alone", all(
     re.search(r"\.ui-[\w-]+" + re.escape(m) + r"\b", comp) for m in set(mods)), str(set(mods)))
 
-print("\ntest_it_keeps_the_vocabulary_and_stays_light")
-RESERVED = (r"(?<!i)phone", r"\bphones\b", r"\bring\b", r"\bdial\b", r"\bvoice\b", r"\bcall\b")
-for pat in RESERVED:
-    found = re.findall(pat, CSS, re.I)
-    ok(f"no {pat!r} in the shipped stylesheet", not found)
+print("\ntest_it_stays_light")
 # THE CAP COUNTS RULES, NOT COMMENTS (owner, 2026-09-29, D-B in docs/SCOPE_MOBILE_APP_REDESIGN.md
 # §15.4). The comments are what let a client's own developer maintain this file after it leaves
 # us, and a cap that counted them taxed exactly that. Rules stay under 20 KB; the whole file,

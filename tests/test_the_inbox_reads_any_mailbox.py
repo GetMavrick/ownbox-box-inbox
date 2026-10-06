@@ -266,13 +266,5 @@ if (ROOT / "marketing" / "customer_voice" / "app.py").is_file():
 else:
     print("  --   no inbox machine ships on this box, so there are no mailbox screens to check here")
 
-print("\n— the vocabulary —")
-RESERVED = re.compile(r"\b(phone|phones|ring|rings|call|calls|called|calling|dial|line|lines|voice|"
-                      r"answer|answers|answered)\b", re.I)
-said = " ".join([providers.MICROSOFT_SAID, y] + [v[2] for v in providers.PRESETS.values()]
-                + [v[0] for v in providers.PRESETS.values()])
-hits = sorted({m.group(0) for m in RESERVED.finditer(said)})
-ok("no reserved noun in anything this adds for a buyer to read", not hits, str(hits))
-
 print("\nALL ANY-MAILBOX CHECKS PASS" if not _failed else f"\n{_failed} FAILED")
 sys.exit(1 if _failed else 0)

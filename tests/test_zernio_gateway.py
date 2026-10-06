@@ -155,6 +155,12 @@ class FakeZernio:
         self.comment_automations = FakeCommentAutomations()
         self.comments = FakeComments()
 
+    # The real SDK's own multipart post (zernio-sdk 1.4.551 BaseClient._post), which the gateway sends a DM's file
+    # through (client.py `send(attachment=)`); verify_sdk checks it still takes `files`.
+    def _post(self, path, data=None, files=None, params=None):
+        CALLS.append(("_post", path, files))
+        return {"data": {"messageId": "f1"}}
+
 
 fake_mod = types.ModuleType("zernio")
 fake_mod.Zernio = FakeZernio

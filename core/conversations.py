@@ -62,6 +62,6 @@ def provide(provider) -> None:
 def provider():
     """The provider, or NoProvider naming what to do about it."""
     if _PROVIDER is None:
-        raise NoProvider("this box has no inbox to hold conversations: install the Unified Inbox first, and "
+        raise NoProvider("this box has no inbox to hold conversations: install the Inbox Machine first, and "
                       "say so in your machine.yaml under needs:")
     return _PROVIDER

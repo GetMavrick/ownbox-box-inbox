@@ -14,7 +14,6 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
     after the first real message, from Messages, never on a settings page.
   · a state reads "registering" forever: re-registering waits on the service worker, which only
     controls /inbox/, so it may only run where that worker is in control, and it times out.
-  · a buyer reads a reserved noun (CLAUDE.md, mobile first).
 
 The browser half was driven in Chromium for every state (computer, not installed, waiting, blocked,
 connected, allowed-but-unregistered, box cannot send); screenshots are in the PR.
@@ -124,9 +123,6 @@ states = set(re.findall(r"say\('([a-z-]+)'", js))
 want = {"connected", "computer", "not-installed", "unsupported", "blocked", "waiting",
         "open-app", "checking", "failed", "box-off"}
 ok("every state the walk needs has its own sentence", want <= states, str(sorted(want - states)))
-_said = " ".join(re.findall(r"'([^']*)'", js))
-_banned = re.findall(r"\b(phone|phones|ring|call|calls|dial|line|voice|answer)\b", _said, re.I)
-ok("no reserved noun in anything a buyer reads", not _banned, str(_banned))
 
 
 print("\ntest_the_script_parses")

@@ -35,7 +35,7 @@ def row(day, machine, title, **parts):
                                          json.dumps({"machine": machine, "title": title, **parts}), state._now()))
 
 
-# ── 1. a short quote for every day of the year, and none of the reserved words ───────────────────────────
+# ── 1. a short quote for every day of the year ───────────────────────────────────────────────────────────
 Q = review_quotes.QUOTES
 ok("twelve months of quotes", sorted(Q) == list(range(1, 13)), sorted(Q))
 ok("one quote per calendar date, Feb 29 included (366)",
@@ -46,8 +46,6 @@ ok("every date of a leap year has a quote", all(isinstance(q, str) and q.strip()
 ok("no two dates share a quote", len(set(every)) == 366, 366 - len(set(every)))
 ok("every quote is short (a headline, not a paragraph)", all(len(q) <= 90 for q in every),
    [q for q in every if len(q) > 90][:3])
-bad = [q for q in every if review_brief._RESERVED.search(q)]
-ok("no quote uses a word reserved for the receptionist machine", not bad, bad[:3])
 ok("October 1 opens the month the mockup shows", review_quotes.quote_for(date(2026, 10, 1)).startswith("A new month"))
 
 # ── 2. the no-repeat rule: a standing count is shown once, and again only when it really grows ──────────────
@@ -115,7 +113,7 @@ ok("a grounded good-news sentence is kept", b["good_news"] == "Four reels went o
 titles = [i["title"] for i in b["ideas"]]
 ok("an idea naming a number from the facts is kept", "Share yesterday's 4 reels in your stories" in titles, titles)
 ok("an idea with an INVENTED number (8) is dropped", not any("8" in t for t in titles), titles)
-ok("an idea using a reserved word is dropped", not any("call" in t.lower() for t in titles), titles)
+ok("an idea is not dropped for its words: 'call' is an ordinary word", "Give them a call back" in titles, titles)
 ok("ideas_from says the AI wrote them", b["ideas_from"] == "ai")
 
 b = review_brief.build(ABOUT, NOW, think=think_ok)
@@ -161,7 +159,6 @@ html = review_email.html(e)
 ok("a morning with something in it is mailed", not e["skip"])
 ok("the subject is the day's quote", e["subject"] == "Your Morning Review: " + review_quotes.quote_for(T), e["subject"])
 ok("no buttons in the email", "<button" not in html.lower())
-ok("no reserved word in the email", not review_brief._RESERVED.search(review_email.text(e)))
 
 # ── 6. OSDev1's review of #1779, item by item ─────────────────────────────────────────────────────────────────
 from datetime import timezone as _tz

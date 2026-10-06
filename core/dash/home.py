@@ -326,16 +326,7 @@ label.consent input{width:22px;height:22px;flex:none;margin:0;accent-color:var(-
 .foot a{color:var(--link)}
 .foot a:hover{color:var(--link)}
 /* AN ADDRESS SOMEBODY HAS TO COPY BY HAND. It was unstyled prose; on a narrow screen it ran off
-   the card. Monospace, a ground it can sit on, and it wraps rather than overflows.
-
-   THE VOCABULARY IN THIS FILE'S COMMENTS IS PRODUCT VOCABULARY, which is worth writing down
-   because nothing about editing a stylesheet suggests it. `CSS` here is inlined into every served
-   page, so these comments are shipped text: a word in one reaches a buyer exactly as a word in a
-   heading does. The receptionist machine now being built gets to keep the nouns that describe
-   what it does, and the thing a buyer installs on a device is the mobile app — the owner's naming
-   ruling of 2026-09-22, relayed by OSDev4 in #1426.
-   `tests/test_core_css_keeps_the_vocabulary.py` measures this rather than trusting this comment,
-   and it caught this very paragraph naming a reserved route while explaining the rule. */
+   the card. Monospace, a ground it can sit on, and it wraps rather than overflows. */
 .addr{font:calc(16 * var(--px, 1px))/1.5 var(--mono);font-variant-ligatures:none;
 background:var(--bg);border:1px solid var(--hairline);border-radius:var(--r-xs);
 padding:10px 12px;margin:10px 0 0;word-break:break-all;user-select:all}
@@ -822,6 +813,10 @@ def _this_machine_card() -> str:
     else:
         word, tone = "Not running", "stale"
     rows = [f'<div class="row"><span class="what">Address</span><span class="mono">{_esc(_host())}</span></div>']
+    # STOPPED SAYS WHERE TO START IT AGAIN: the switch lives in the danger zone now (owner, 2026-10-05), and this card
+    # is where a stopped box is noticed. The owner's alone, like the switch.
+    if pause.is_paused() and _is_owner():
+        rows.insert(0, '<p><a href="/settings/access#stop">Start it again &rarr;</a></p>')
     # LAST BACKUP: the newest nightly copy, as scripts/backup_db.py writes it (aios-backup.timer, 03:00
     # owner time, <db dir>/backups/aios-YYYY-MM-DD.db, seven kept). Litestream also carries the database
     # off the box as it changes; the nightly copy is the one with a time a person can read.
@@ -952,61 +947,17 @@ def _ai_card() -> str:
             + (f'<p><a href="{go}">{press} your AI account &rarr;</a></p>' if go else "") + '</div>')
 
 
-def _stop_card() -> str:
-    """The one control a person reaches for when something is going wrong.
-
-    IT LIVES HERE BECAUSE THE BOX WE SELL HAD NONE (#1332). `core/pause.py` shipped on every box
-    and the only buttons that called it were the lead machine's, so a buyer of the inbox box could
-    not stop their own box from any screen.
-
-    OWNER ONLY, and the button is simply not drawn for anyone else — the route refuses them too
-    (`core/dash` stop_everything), which is the half that matters: hiding a control is a courtesy,
-    and a form can be posted without ever loading the page that would have hidden it.
-
-    ONE BUTTON, BOTH WAYS. Same shape the lead machine's Home has always had: a POST either way,
-    so nothing but a person pressing it can flip the box.
-    """
-    from flask import request as _rq
-    from core.dash import session_user as _who
-    person = _who(_rq)
-    if not person or person.get("role") != "owner":
-        return ""
-    # IT STANDS DOWN ONLY WHILE NOTHING HAS STARTED. On a buyer's first sign-in this was the most
-    # prominent control on the page — a button to stop a box that had not begun, above a line
-    # saying there was nothing to report. `_setup_card` draws in its place.
-    #
-    # THE FIRST VERSION ASKED THE WRONG QUESTION and undid #1341 for a whole class of box: it
-    # stood down whenever set-up was UNFINISHED, so a box with the mailbox connected and two
-    # steps outstanding — receiving mail, worker sweeping, entirely operational — offered its
-    # owner no way to stop it. Not hidden for taste either way: an offer to halt work that has
-    # not started is a control that cannot do what it says, and removing the control from a box
-    # that IS working is worse than the thing it was meant to fix.
-    if _nothing_has_started():
-        return ""
-    paused = pause.is_paused()
-    word = "Start it again" if paused else "Stop everything"
-    sub = ("Nothing is running. Every machine on this box is stopped until you start it again."
-           if paused else
-           "Stops every machine on this box. Your data and your messages stay exactly as they are.")
-    return (f'<div class="card"><h2>{"Your box is stopped" if paused else "Stop everything"}</h2>'
-            f'<p class="sub">{_esc(sub)}</p>'
-            f'<form method="post" action="/dash/{"resume" if paused else "stop"}">'
-            # `danger` ONLY FOR THE HALT. "Start it again" is the ordinary control on a stopped
-            # box and wearing the warning colour would make restarting look like the risk.
-            f'<button class="{"" if paused else "danger"}" type="submit">'
-            f'{_esc(word)}</button></form></div>')
-
-
 def _setup_progress():
     """`(done, total, waiting_titles)` for this box, or None when it cannot say.
 
-    ONE QUESTION, ASKED IN ONE PLACE. `_stop_card` used to decide by calling `_setup_card()` and
-    asking whether it drew anything — which tied "should the stop button show" to "does the set-up
-    card render", two questions whose answers differ (see `_stop_card`, and the box it broke).
+    ONE QUESTION, ASKED IN ONE PLACE. The stop control (now `box_settings._stop_row`) used to decide by
+    calling `_setup_card()` and asking whether it drew anything — which tied "should the stop button
+    show" to "does the set-up card render", two questions whose answers differ (see
+    `box_settings._stop_row`, and the box it broke).
 
     IT IS STILL TWO READS PER RENDER, not one, and saying otherwise would be the kind of comment
-    this file keeps deleting. `_home` asks once through `_setup_card` and once through
-    `_stop_card`; that was also true before the split, so nothing got cheaper — what changed is
+    this file keeps deleting. `_home` asks once through `_setup_card`, and the danger zone once through
+    `box_settings._stop_row`; that was also true before the split, so nothing got cheaper — what changed is
     that the two callers now ask the questions they actually mean. Both are one indexed read of a
     three-row table and neither is worth threading an argument through two signatures the tests
     call directly; if this page ever gets expensive, that is the change to make.
@@ -1225,12 +1176,14 @@ def _home() -> str:
         note = (f'<div class="card"><span class="stale">No report since {_esc(stale)} — '
                 'the numbers below are the last ones written, not this minute\'s.</span></div>'
                 if stale else "")
-        body = note + _needs_card(view) + '<div class="dash-grid">' + _segments(view)
-    # THE BOX'S OWN CARDS JOIN THE GRID whether or not a report exists yet: a box minutes old still
-    # has a machine, a queue and a connection worth seeing.
-    if '<div class="dash-grid">' not in body:
-        body += '<div class="dash-grid">'
-    body += _this_machine_card() + _queue_card() + _mcp_card() + _ai_card() + '</div>'
+        body = note + _needs_card(view)
+    # THE MACHINE'S HEALTH FIRST, THEN WHAT ITS MACHINES DID. Owner, 2026-10-05, re-ordering the cards on his own
+    # screen: "When people go here they want to get some quick easy information about what's going on in the business
+    # ... I want them to quickly see the health of their machine." So: This machine, Your AI, MCP Server (and the
+    # Queue, when anything is in it), then each machine's numbers. The box's own cards are drawn whether or not a
+    # report exists yet: a box minutes old still has a machine, an AI and a connection worth seeing.
+    body += ('<div class="dash-grid">' + _this_machine_card() + _ai_card() + _mcp_card() + _queue_card()
+             + (_segments(view) if view.get("exists") else "") + '</div>')
     # THE WAY IN GOES FIRST, ABOVE THE NUMBERS, and only while there is set-up left to do. A box
     # with nothing connected has no numbers worth reading — "Nothing to report yet" is the whole
     # of what the section above can say — so the first thing on the page should be the thing that
@@ -1242,16 +1195,15 @@ def _home() -> str:
     # TELL YOUR BOX ABOUT YOUR BUSINESS (#1957 C2): after anything waiting and the set-up steps, until the owner has
     # answered or dismissed it.
     body = _approvals.card() + _setup_card() + _business.home_card() + body
-    # BOTH LAST, AND IN THIS ORDER. Stop everything is the control you want findable and never
-    # the one you want your thumb near while reading the morning's numbers on a phone; Managed is
-    # a thing you go looking for on a particular day, so it sits below the numbers and above the
-    # one button on this page that changes what the box is doing.
+    # MANAGED IS LAST: a thing you go looking for on a particular day, so it sits below the numbers. STOP EVERYTHING
+    # IS NOT ON THIS PAGE (owner, 2026-10-05: "move the stop everything message and button into the danger zone on the
+    # system settings > Server page"): it is in the danger zone (box_settings._stop_row), and while the box is stopped
+    # the This machine card says so and links there to start it again.
     # UPGRADE TO PRO SITS UNDER THE NUMBERS, above Managed: a thing the owner chooses on a
     # particular day, like Managed, and never above what the box did today. Its own file draws it.
     from core.dash import upgrade as _upgrade
     body += _upgrade.dashboard_card()
     body += _managed_card()
-    body += _stop_card()
     return chrome("/dashboard", title="Base Machine",
                   lede=f"What your box did — {view.get('label') or 'today'}.",
                   body=body)
@@ -1672,8 +1624,8 @@ def add_machine():
 shell.register_section("dashboard", order=0, machine="core", title="Base Machine",
                        href="/dashboard", home=True, icon=_HOME_ICON)
 
-# APPROVALS SITS RIGHT BELOW BASE MACHINE, ON EVERY PAGE. Owner, 10-04: "Where is the approvals Page? It should be in
-# the dashboard I guess." Its only doors were the Dashboard card, drawn only while something waits, and the push. So
+# APPROVALS SITS IN THE BOX'S OWN GROUP, ON EVERY PAGE, below the Morning Review (owner, 10-05). Owner, 10-04: "Where is
+# the approvals Page? It should be in the dashboard I guess." Its only doors were the Dashboard card, drawn only while something waits, and the push. So
 # it is a row of the box's own, with how many wait beside its name. OWNER-ONLY, like its page (core/dash/approvals.py:
 # approving acts in the owner's apps with the owner's connections), so a member is shown no row.
 _CHECK_ICON = "M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0ZM8.5 12.2l2.4 2.4 4.6-4.9"
@@ -1687,15 +1639,16 @@ def _approvals_waiting() -> int:
 shell.register_section("approvals", order=5, machine="core", title="Approvals", href="/approvals",
                        icon=_CHECK_ICON, owner_only=True, count=_approvals_waiting)
 
-# THE MORNING REVIEW HEADS THE ADD-ON MACHINES. Owner, 2026-09-29: "Add the Morning Review to the
-# menu" (it had no row; the 8 AM message and the email were its only doors), and then: "move
-# morning review down to the top of the list of the add-on machines. That way it's sort of grouped
-# with what it is related to." It is the day's report of every machine below it, so it leads them:
-# the group's gap opens above it, and a negative order keeps it ahead of the machines, which sort
-# by name at 0. OWNER-ONLY because its page publishes what the box spends and refuses anyone else
-# (`review._admit`); a member is shown no row rather than a door that sends them to sign in again.
-shell.register_section("review", order=-1, machine="core", title="Morning Review",
-                       href="/app/review", icon=_SUN_ICON, owner_only=True, group="addons")
+# THE MORNING REVIEW IS SECOND, RIGHT BELOW BASE MACHINE. Owner, 2026-10-05: "In the left side bar, move morning
+# review up to the second item in the list right below base machine", and "It's part of the base machine, so let's
+# keep it there." It had headed the add-on machines since 2026-09-29 ("move morning review down to the top of the
+# list of the add-on machines"); it sits in the box's own group now, between Base Machine (0) and Approvals (5). It
+# was first given a row that day ("Add the Morning Review to the menu": the 8 AM message and the email were its only
+# doors).
+# OWNER-ONLY because its page publishes what the box spends and refuses anyone else (`review._admit`); a member is
+# shown no row rather than a door that sends them to sign in again.
+shell.register_section("review", order=1, machine="core", title="Morning Review",
+                       href="/app/review", icon=_SUN_ICON, owner_only=True)
 
 # ADD A MACHINE CLOSES THE ADD-ON GROUP. Owner, 2026-09-24: the add-on machines are *"unified inbox
 # and then add a machine"* — the machines a box has, then the way to add one more. `order=1000`

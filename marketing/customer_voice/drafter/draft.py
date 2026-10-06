@@ -260,7 +260,7 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
     if text.strip().upper().startswith(NO_REPLY):
         try:
             if store.put(space=space, zcid=zcid, in_reply_to=in_reply_to,
-                         body="(the box judged that this message needs no reply)", rules=rules(platform)):
+                         body=store.NO_REPLY_BODY, rules=rules(platform)):
                 row = store.for_inbound(space, in_reply_to)
                 if row:
                     store.dismiss(space, row["id"])

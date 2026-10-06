@@ -163,36 +163,53 @@ _bs.put(_bs.EMAIL, json.dumps({"host": "imap.gmail.com", "user": "a@b.co", "pass
 _bs.put(_bs.ZERNIO, "z" * 67)
 _bs.put(_bs.ANTHROPIC, "sk-ant-" + "A" * 60)
 
-body = OWNER.get("/dashboard").get_data(as_text=True)
-ok("the owner sees Stop everything on /dashboard", "Stop everything" in body)
+# IN THE DANGER ZONE, NOT ON THE BASE MACHINE PAGE (owner, 2026-10-05: "move the stop everything message and button
+# into the danger zone on the system settings > Server page"). The Base Machine page is for reading what the business
+# did; while the box is stopped, its This machine card says so and links to the switch.
+dash_page = OWNER.get("/dashboard").get_data(as_text=True)
+body = OWNER.get("/settings/access").get_data(as_text=True)
+ok("the owner finds Stop everything in the danger zone, at the foot of Server Access",
+   "Stop everything" in body and 'id="stop"' in body and body.index('id="danger"') < body.index('id="stop"'))
+ok("...and not on the Base Machine page any more", "Stop everything" not in dash_page
+   and 'action="/dash/stop"' not in dash_page)
 ok("...as a POST, so a crawler or a link preview cannot flip the box",
-   'action="/dash/stop"' in body and 'method="post"' in body)
+   'action="/dash/stop"' in body and 'method="post"' in body and 'href="/dash/stop"' not in body)
+ok("...behind the zone's tick: it is required before the button does anything",
+   'name="confirm" value="yes" required' in body.split('id="stop"', 1)[1].split("</details>", 1)[0])
 
-OWNER.post("/dash/stop")
-body = OWNER.get("/dashboard").get_data(as_text=True)
-ok("once stopped, the same place offers to start it again", "Start it again" in body)
+r = OWNER.post("/dash/stop", data={"back": "/settings/access#stop", "confirm": "yes"})
+ok("PRESSED THERE, IT BRINGS THE OWNER BACK THERE", r.status_code in (302, 303)
+   and r.headers.get("Location", "").endswith("/settings/access#stop"), (r.status_code, r.headers.get("Location")))
+body = OWNER.get("/settings/access").get_data(as_text=True)
+ok("once stopped, the same place offers to start it again", "Start it again" in body
+   and 'action="/dash/resume"' in body)
 ok("...and says plainly that nothing is running", "Nothing is running" in body)
+dash_page = OWNER.get("/dashboard").get_data(as_text=True)
+ok("...and the Base Machine page says it is stopped, and links to the switch",
+   "Stopped by you" in dash_page and 'href="/settings/access#stop"' in dash_page)
+r = OWNER.post("/dash/resume", data={"back": "/settings/access#stop"})
+ok("starting again brings the owner back to the zone too",
+   r.headers.get("Location", "").endswith("/settings/access#stop"))
+r = OWNER.post("/dash/stop", data={"back": "https://example.org/x"})
+ok("A BACK ADDRESS OFF THIS BOX IS REFUSED (safe_next): an open redirect is never the price of a button",
+   "example.org" not in r.headers.get("Location", ""), r.headers.get("Location"))
 OWNER.post("/dash/resume")
 
-member_body = stranger.get("/dashboard").get_data(as_text=True)
+member_body = stranger.get("/settings/access").get_data(as_text=True)
 ok("a signed-out visitor is not shown the button at all",
    "Stop everything" not in member_body)
 
-# AND A MEMBER WILL NOT SEE IT EITHER, ONCE THEY CAN REACH THIS PAGE. Today a member is bounced
-# off /dashboard, so asking through the page would prove nothing; OSDev1 has ruled that gate open
-# to members (2026-09-17, OSDev5 building it), and on the day it lands this button must already
-# be right rather than discovered wrong. So the card is asked DIRECTLY, in a member's request
-# context — the one form of this check that is true both before and after that change.
-from core.dash import home as _home_mod  # noqa: E402
+# AND A MEMBER WILL NOT SEE IT EITHER. The danger zone is the owner's alone (box_settings.danger_zone), asked
+# DIRECTLY in each person's request context.
+from core.dash import box_settings as _zone_mod  # noqa: E402
 
-with app.test_request_context("/dashboard", headers={"Cookie": f"{_dash.COOKIE}={_sid}"}):
-    member_card = _home_mod._stop_card()
-with app.test_request_context("/dashboard",
+with app.test_request_context("/settings/access", headers={"Cookie": f"{_dash.COOKIE}={_sid}"}):
+    member_card = _zone_mod.danger_zone()
+with app.test_request_context("/settings/access",
                               headers={"Cookie": f"{_dash.COOKIE}={_owner_sid}"}):
-    owner_card = _home_mod._stop_card()
-ok("the owner's card is drawn", "Stop everything" in owner_card)
-ok("A MEMBER IS DRAWN NOTHING — true today, and still true when /dashboard opens to members",
-   member_card == "", member_card[:120])
+    owner_card = _zone_mod.danger_zone()
+ok("the owner's danger zone carries it", "Stop everything" in owner_card)
+ok("A MEMBER IS DRAWN NOTHING", member_card == "", member_card[:120])
 
 
 # ── 5. one switch, one marker ────────────────────────────────────────────────────────────
@@ -252,7 +269,7 @@ else:
     # have a buyer thinking a reply they typed went nowhere.
     ok("...and names what STILL works, because a human send is not a machine",
        "still reply" in stopped)
-    ok("...and offers the way back", 'href="/dashboard"' in stopped)
+    ok("...and offers the way back, to the switch in the danger zone", 'href="/settings/access#stop"' in stopped)
 
     # THE THREAD IS DELIBERATELY NOT CHANGED. Replying works while stopped, so a note there would
     # be telling someone that the thing they are doing does not work. The confusing state is

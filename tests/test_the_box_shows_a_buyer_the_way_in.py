@@ -14,7 +14,8 @@ Google instructions. It was the best screen in the product and it was reachable 
 WHAT THIS SUITE HOLDS:
   · the card names how much is left, and names WHICH steps, and goes away when it is done
   · it never claims nothing arrives once something is connected
-  · `Stop everything` stands down while the box has not started, and comes back after
+  · `Stop everything` (in the danger zone since 2026-10-05) stands down while the box has not started, and comes
+    back after
   · core finds the set-up screen through the REGISTRY, never by knowing a machine's URL — so a
     box with no set-up screen draws no card rather than a button to a 404
 
@@ -85,6 +86,11 @@ def home() -> str:
     return owner().get("/dashboard").get_data(as_text=True)
 
 
+def zone() -> str:
+    """The danger zone at the foot of Server Access, where Stop everything lives (owner, 2026-10-05)."""
+    return owner().get("/settings/access").get_data(as_text=True)
+
+
 def clear_all():
     for name in (box_secrets.EMAIL, box_secrets.EMAIL_STATUS, box_secrets.ZERNIO,
                  box_secrets.ANTHROPIC):
@@ -145,8 +151,8 @@ ok("...and the channel rows still reach the machine through the registry",
    f'href="{href}#email"' in _card and f'href="{href}#zernio"' in _card, _card[:600])
 # THE CONTROL THAT CANNOT DO WHAT IT SAYS. A button to stop a box that has not started was the
 # most prominent thing on this page.
-ok("Stop everything is NOT offered on a box that has not started",
-   "Stop everything" not in h, "the loudest control is still a stop button")
+ok("Stop everything is NOT offered on a box that has not started, on this page or in the danger zone",
+   "Stop everything" not in h and "Stop everything" not in zone(), "the loudest control is still a stop button")
 
 
 # ── 3. one connected: the count moves, and the false sentence is gone ────────────────
@@ -174,8 +180,8 @@ ok("...and no longer carries a set-up link it does not need",
    f'href="{href}' not in h and '<a href="/settings">Set up your box' not in h)
 # A SET-UP CARD THAT OUTLIVES SET-UP is the banner every product trains its users to ignore, and
 # this is the one screen that must survive that training.
-ok("Stop everything comes back once there is something running to stop",
-   "Stop everything" in h)
+ok("Stop everything comes back once there is something running to stop, in the danger zone (owner, 10-05)",
+   "Stop everything" in zone() and "Stop everything" not in h)
 clear_all()
 
 
@@ -193,10 +199,11 @@ clear_all()
 connect_mailbox()
 h = home()
 ok("a box with one channel connected is still being set up", "Finish setting up your box" in h)
-ok("...and can be STOPPED, because it is running", "Stop everything" in h,
+_z = zone()
+ok("...and can be STOPPED, because it is running", "Stop everything" in _z,
    "the owner cannot stop a box that is receiving mail")
 ok("...and the stop control is still a POST, not a link a crawler can follow",
-   'action="/dash/stop"' in h and 'href="/dash/stop"' not in h)
+   'action="/dash/stop"' in _z and 'href="/dash/stop"' not in _z)
 clear_all()
 
 

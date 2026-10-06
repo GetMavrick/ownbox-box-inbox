@@ -217,6 +217,44 @@ def _body(m) -> str:
 # described above. It has never fired. Keeping the chain is what keeps it that way.
 _SENT_AT_KEYS = ("sentAt", "sent_at", "createdAt", "created_at", "timestamp")
 
+_DELIVERY = frozenset({"sent", "delivered", "read", "failed", "deleted"})
+
+
+def _http(url) -> str:
+    """A link a screen may follow: http(s) only, so a message cannot carry a script or a data URL into the page."""
+    u = str(url or "").strip()
+    return u if u.lower().startswith(("https://", "http://")) else ""
+
+
+def _extras(m) -> dict:
+    """What a Zernio message carries beside its words (#1990 step 1.6): attachments, delivery, reactions, edits.
+    Shapes as Zernio returns them (zernio-dev/unified-inbox src/lib/types.ts). {} when there is nothing."""
+    out = {}
+    atts = []
+    for a in _f(m, "attachments") or []:
+        url = _http(_f(a, "url", "previewUrl"))
+        kind = str(_f(a, "type") or "file")[:20]
+        if url or _f(a, "name"):
+            atts.append({"type": kind, "url": url, "name": str(_f(a, "name") or "")[:200],
+                         "mimeType": str(_f(a, "mimeType") or "")[:100]})
+    if atts:
+        out["attachments"] = atts[:10]
+    status = str(_f(m, "deliveryStatus", "delivery_status") or "").lower()
+    if status in _DELIVERY:
+        out["deliveryStatus"] = status
+        err = _f(m, "deliveryError")
+        if status == "failed" and err:
+            out["deliveryError"] = str(_f(err, "message", "title") or err)[:300]
+    reacts = [{"emoji": str(_f(r, "emoji") or "")[:16], "fromMe": bool(_f(r, "fromMe"))}
+              for r in (_f(m, "reactions") or []) if _f(r, "emoji")]
+    if reacts:
+        out["reactions"] = reacts[:20]
+    if _f(m, "isEdited"):
+        out["isEdited"] = True
+    if _f(m, "isDeleted") or status == "deleted":
+        out["isDeleted"] = True
+    return out
+
 _INBOUND_WORDS = frozenset({"in", "inbound", "incoming", "received"})
 _OUTBOUND_WORDS = frozenset({"out", "outbound", "outgoing", "sent"})
 
@@ -377,6 +415,13 @@ def _mirror_page(space: str, ch, zcid: str, msgs: list) -> int:
             # this can never relabel the machine's own words as the owner's.
             direction=way, sent_by="contact" if way == "in" else "human",
             body=_body(m), sent_at=sent_at)
+        # AND WHAT IT CARRIES BESIDE ITS WORDS, kept current on every read (a tick turns blue later). Never stops a poll.
+        try:
+            ex = _extras(m)
+            if ex and zmid:
+                store.record_extras(zmid, ex)
+        except Exception as e:                       # noqa: BLE001
+            log.warning("inbox.extras_failed", space=space, conversation=zcid, error=type(e).__name__)
         mirrored += 1
     log.info("inbox.page_mirrored", space=space, channel=ch.key,
              conversation=zcid, messages=mirrored, of=len(msgs))
@@ -433,10 +478,13 @@ def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, 
     scanned = enqueued = 0
     picked = channels.chosen()
     for conv in page["conversations"]:
-        zcid = str(_f(conv, "id", "_id", "conversation_id") or "")
-        if not zcid:
+        vid = str(_f(conv, "id", "_id", "conversation_id") or "")
+        if not vid:
             continue
         scanned += 1
+        # THE STORED KEY, NOT ZERNIO'S ID (#1990 step 1.0): an id is unique only within its account, so the key carries
+        # the account (channels.conversation_key). Zernio's own calls below take `vid`.
+        zcid = store.conversation_key(space, ch.key, str(_f(conv, "accountId", "account_id", "account") or ""), vid)
         # WHO THE OTHER PARTY IS, by the platform's own ids, kept on every read: the private reply's STOP check
         # answers from these, for every conversation the box has seen (OSDev1's review of #1789). Never stops a poll.
         try:
@@ -474,7 +522,7 @@ def _sweep_channel(sp: dict, z, ch: channels.Channel, page: dict) -> tuple[int, 
         if wm and activity and wm.get("last_activity") == activity:
             continue                  # unchanged → zero message fetches
         try:
-            msgs = z.inbox.messages(zcid, acctid, limit=_MSG_PAGE)["messages"]
+            msgs = z.inbox.messages(vid, acctid, limit=_MSG_PAGE)["messages"]
         except zernio.ZernioError as e:
             log.warning("inbox.poll_msgs_failed", space=space, channel=ch.key,
                         conversation=zcid, error=str(e)[:120])

@@ -607,6 +607,27 @@ def test_the_owners_cards_are_the_owners():
     seats.revoke(sid)
 
 
+def test_the_machines_health_comes_before_what_its_machines_did():
+    """Owner, 2026-10-05, re-ordering the cards on his own screen: "I want them to quickly see the health of their
+    machine." This machine, Your AI and MCP Server, then each machine's numbers, then Managed; and Stop everything is
+    in the danger zone (Server Access), not here."""
+    _reports(customer_voice={"title": "Inbox Machine", "headline": {"value": 78, "label": "waiting on you"}})
+    from core import box_secrets
+    from core.connector import seats
+    box_secrets.put(box_secrets.ANTHROPIC, "sk-ant-" + "A" * 60)     # the Your AI card draws once an AI is connected
+    sid, _ = seats.mint("Claude", "act")
+    seats.touch(sid)
+    html_ = _page()
+    box_secrets.clear_anthropic()
+    # BY THE CARDS' OWN HEADINGS: the menu and the waiting card name some of these words too.
+    at = {name: html_.find(f'<h2 class="eyebrow">{name}</h2>')
+          for name in ("This machine", "Your AI", "MCP Server", "Inbox Machine")}
+    ok("THIS MACHINE, YOUR AI, MCP SERVER, THEN WHAT THE MACHINES DID", all(v >= 0 for v in at.values())
+       and at["This machine"] < at["Your AI"] < at["MCP Server"] < at["Inbox Machine"], at)
+    ok("...and no Stop everything on this page", "Stop everything" not in html_ and 'action="/dash/stop"' not in html_)
+    seats.revoke(sid)
+
+
 def test_the_suite_is_named_in_ci():
     here = pathlib.Path(__file__).resolve().parents[1]
     if not (here / ".github").is_dir():

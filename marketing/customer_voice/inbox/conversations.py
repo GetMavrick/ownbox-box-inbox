@@ -237,6 +237,11 @@ def _thread_idents(convo) -> set:
     return out
 
 
+def _thread_account(convo) -> str:
+    from core.vendors.zernio import model as zm
+    return str(zm.field(convo, "accountId", "account_id", "account") or "")
+
+
 def _thread_id(convo) -> str | None:
     from core.vendors.zernio import model as zm
     v = zm.field(convo, "field_id", "_id", "id", "conversationId", "conversation_id")
@@ -310,7 +315,9 @@ def fill_participant_ids() -> dict:
             log.warning("inbox.participant_fill_failed", space=name, error=f"{type(e).__name__}: {e}"[:160])
             continue
         for convo in convos:
-            zcid = _thread_id(convo)
+            vid = _thread_id(convo)
+            # The same stored key the poller uses (#1990 step 1.0), so a STOP check finds the thread it read.
+            zcid = vid and store.conversation_key(name, "instagram", _thread_account(convo), vid)
             if zcid:
                 store.remember_participant(name, zcid, _thread_idents(convo))
         box_settings.put(_FILLED_NS, _filled_key(name), True, set_by="inbox")

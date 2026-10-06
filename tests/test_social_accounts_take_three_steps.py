@@ -9,8 +9,7 @@ never needed. It now lives in the note, said once, where it applies.
 WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
   · a fourth step comes back, or any step asks for a payment method up front;
   · the note stops saying when a card IS needed (after two accounts, and for X), so a buyer who
-    hits Zernio's limit is surprised by it;
-  · a buyer reads a reserved noun (CLAUDE.md, mobile first).
+    hits Zernio's limit is surprised by it.
 
 Run: python tests/test_social_accounts_take_three_steps.py
 """
@@ -58,11 +57,6 @@ print("\ntest_the_card_rule_is_cited")
 _src = (ROOT / "core" / "box_secrets.py").read_text()
 ok("the card rule cites Zernio's own page, with its words", "https://docs.zernio.com/" in _src
    and "The first 2 connected accounts are free without a card" in _src)
-
-print("\ntest_the_vocabulary")
-said = " ".join(steps) + " " + note + " " + str(step.get("why") or "")
-banned = re.findall(r"\b(phone|phones|ring|call|calls|dial|line|voice|answer)\b", said, re.I)
-ok("no reserved noun in the step", not banned, str(banned))
 
 print("\ntest_the_key_field_is_labelled")
 # THE PLACEHOLDER IS GONE THE MOMENT THEY PASTE, so the field says what it holds in a label, like

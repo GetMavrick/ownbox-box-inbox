@@ -12,8 +12,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
   · an Airtable table is refused over a field's name (field matching, #1793 §1.3: it is matched instead,
     and tests/test_aeo_field_matching.py proves the matching);
   · the token lands anywhere but the name the publisher reads;
-  · a member, or a GET, changes anything;
-  · a screen uses one of the nouns reserved for the receptionist machine (CLAUDE.md).
+  · a member, or a GET, changes anything.
 
 NO NETWORK. `sources.net` is replaced with a scripted stand-in that records every request.
 
@@ -24,7 +23,6 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import re
 import sys
 import tempfile
 
@@ -331,16 +329,6 @@ for path in ("/aeo/sources/sanity", "/aeo/sources/airtable"):
        "<form" not in page and "Only the owner" in page and SAN_TOKEN not in page and AIR_KEY not in page)
 owner.get("/aeo/sources/sanity?project_id=zzzz9999&token=" + "sk" + "G" * 40)
 ok("a GET changes nothing", settings.get()["project_id"] == "abc123xy")
-
-print("\ntest_the_words_a_buyer_reads")
-_RESERVED = re.compile(r"\b(phones?|rings?|calls?|dial|lines?|voice)\b", re.I)
-for path in ("/aeo/sources", "/aeo/sources/sanity", "/aeo/sources/airtable"):
-    for who in (owner, member):
-        text = re.sub(r"<[^>]+>", " ", main_of(who.get(path).get_data(as_text=True)))
-        ok(f"{path} uses none of the reserved nouns", not _RESERVED.search(text),
-           str(_RESERVED.findall(text)))
-for sentence in (v for k, v in vars(sources).items() if k.isupper() and isinstance(v, str)):
-    ok(f"sources' sentence has no reserved noun: {sentence[:40]}", not _RESERVED.search(sentence))
 
 print("\n— and this file cannot silently fall out of CI —")
 if (ROOT / ".github").is_dir():                  # a buyer's box has no repository

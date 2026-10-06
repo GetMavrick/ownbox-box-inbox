@@ -28,13 +28,6 @@ two ENDPOINTS are core's now (`core.push.CLIENT_JS` fetches them from wherever i
 asking waits for a root-scoped worker, which is a separate change with its own blast radius.
 """
 
-# NO WORD HERE MAY COLLIDE WITH A VOICE PRODUCT. Owner, 2026-09-22: *"It's a mobile app with
-# notifications"*, and *"don't use any terms that will collide with a voice/phone product"* — the
-# AI receptionist machine is coming to `/voice`, and a buyer who reads "your phone" on a settings
-# screen will reasonably think it is about calls. So: **mobile app**, **install**, **notify** /
-# **notification**. Never phone (except naming the device in install steps — "On iPhone"), never
-# ring, call, dial, line, voice or answer. `tests/test_no_voice_words_on_the_app.py` enforces it.
-
 import html as _html
 import json
 import os
@@ -1623,9 +1616,44 @@ def danger_zone(move_note: str = "", checkin_note: str = "") -> str:
     if not _is_owner():
         return ""
     return ('<section class="danger" id="danger"><h2>Danger zone</h2>'
-            '<p class="sub">Only the owner of this box sees these. Each one makes it harder for us '
-            'to support you.</p>'
-            f'<div class="dz">{_checkin_row(checkin_note)}{_move_row(move_note)}</div></section>')
+            '<p class="sub">Only the owner of this box sees these. Each one turns something off, and the last '
+            'two make it harder for us to support you.</p>'
+            f'<div class="dz">{_stop_row()}{_checkin_row(checkin_note)}{_move_row(move_note)}</div></section>')
+
+
+# STOP EVERYTHING LIVES HERE. Owner, 2026-10-05: "move the stop everything message and button into the danger zone on
+# the system settings > Server page." It was the last card on the Base Machine page (#1332: the box we sold had no
+# way to stop itself until then), and the page is now for reading what the business did. While the box is stopped,
+# the This machine card on that page says so and links here.
+STOP_BACK = "/settings/access#stop"
+
+
+def _stop_row() -> str:
+    """Stop everything, a row of the danger zone. Stopping takes the row opened, the warning read, a tick and a second
+    press, like the zone's other switches; starting again is safe, so it is one press. The routes are core's
+    (`core/dash` /dash/stop and /dash/resume, owner-only there too) and bring the owner back here.
+
+    IT STANDS DOWN ONLY WHILE NOTHING HAS STARTED: an offer to halt work that has not begun is a control that cannot
+    do what it says (`home._nothing_has_started`, whose history says why that is the right question)."""
+    from core import pause
+    from core.dash import home
+    back = f'<input type="hidden" name="back" value="{STOP_BACK}">'
+    if pause.is_paused():
+        return _dz_plain("stop", "Your box is stopped",
+                         "Nothing is running. Every machine on this box is stopped until you start it again.",
+                         f'<form method="post" action="/dash/resume">{back}'
+                         '<button type="submit">Start it again</button></form>')
+    if home._nothing_has_started():
+        return ""
+    inside = (_warn("Every machine on this box stops, and nothing runs on its own until you start it again here. "
+                    "Your data and your messages stay exactly as they are.")
+              + f'<form method="post" action="/dash/stop">{back}'
+              '<label class="consent"><input type="checkbox" name="confirm" value="yes" required> '
+              'Stop every machine on this box</label>'
+              '<button type="submit" class="danger">Stop everything</button></form>')
+    return _dz_row("stop", "Stop everything",
+                   "Stops every machine on this box. Your data and your messages stay exactly as they are.",
+                   "Stop everything", inside)
 
 
 def _dz_row(key: str, title: str, said: str, button: str, inside: str, note: str = "") -> str:

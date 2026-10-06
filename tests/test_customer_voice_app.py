@@ -457,7 +457,7 @@ def test_the_worker_can_never_push_silently():
     from marketing.customer_voice import app as _app
     js = _app.SW_JS
     ok("the push handler shows a notification", "showNotification" in js)
-    ok("...and has a fallback title for an unreadable payload", "|| 'Unified Inbox'" in js)
+    ok("...and has a fallback title for an unreadable payload", "|| 'Inbox Machine'" in js)
     ok("...and a fallback body", "|| 'Something new came in.'" in js)
     ok("...with the parse wrapped so a bad payload cannot skip the notification",
        "try {" in js and "catch" in js)

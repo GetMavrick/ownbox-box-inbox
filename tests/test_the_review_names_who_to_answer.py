@@ -1,12 +1,14 @@
 """The Morning Review names who to answer first (#1953 Phase 1, step 1.5).
 
 "72 waiting" is a number; "Dana, waiting 3d: 'Do you have Saturday openings?'" is a reply sent before breakfast. The
-Inbox Machine's own reporter names the three longest-waiting people from the last 30 days, anyone who came from an ad
-first, with the first words of what they asked and a link to the conversation. Core names no machine: any reporter may
+Inbox Machine's own reporter names three people from the last 30 days: anyone who came from an ad first, then people
+writing for the first time, newest first (OSDev1, 2026-10-05), with the first words of what they asked and a link to
+the conversation. Who is left out (the box itself, pitches, robots) is tests/test_who_to_answer_first_is_a_person.py. Core names no machine: any reporter may
 carry `answer_first`, and the review shows it.
 
 WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
-  * the order is not ads first, then longest waiting; a thread older than 30 days is named; more than three are;
+  * the order is not ads first, then first-time writers, newest first; a thread older than 30 days is named; more
+    than three are;
   * what they asked is not cut short, or the link does not open their conversation;
   * the names are missing from the page or either email;
   * a customer's name or words reach Slack (OSDev1: page and owner email only, never Slack);
@@ -70,17 +72,22 @@ for z, who, h, ad, said in PEOPLE:
         c.execute("INSERT INTO inbox_messages (id, space, zernio_conversation_id, zernio_message_id, direction, "
                   "sent_by, body, created_at) VALUES (?,?,?,?,?,?,?,?)",
                   (f"id-{z}", SP, z, f"m-{z}", "in", "x@example.com", said, at))
+        if z in ("z-len", "z/odd id"):           # answered once before, so not writing for the first time
+            c.execute("INSERT INTO inbox_messages (id, space, zernio_conversation_id, zernio_message_id, direction, "
+                      "sent_by, body, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                      (f"out-{z}", SP, z, f"o-{z}", "out", "human", "Thanks!",
+                       (now - timedelta(days=20)).isoformat()))
 
 print("test_the_inbox_names_who_to_answer_first")
 rep = cv_report.report(date.today(), SP)
 first = rep.get("answer_first") or []
-ok("three people, the ad first, then the longest waiting; a month-old thread is never named",
-   [f["text"] for f in first] == ["Marcus Cole", "Dana Whitfield", "Priya Raman"], first)
+ok("three people, the ad first, then first-time writers newest first; a month-old thread is never named",
+   [f["text"] for f in first] == ["Marcus Cole", "Priya Raman", "Dana Whitfield"], first)
 ok("each says how long, that it came from an ad, and the first words of what they asked",
    first[0]["why"].startswith("Waiting 5h · from your ad: “Saw your spring package")
-   and first[0]["why"].endswith("…”") and first[1]["why"] == "Waiting 2d: “Do you have any Saturday "
+   and first[0]["why"].endswith("…”") and first[2]["why"] == "Waiting 2d: “Do you have any Saturday "
    "openings for a facial?”", [f["why"] for f in first])
-ok("each links to its conversation", first[1]["href"] == "/inbox/inbox/z-dana", first)
+ok("each links to its conversation", first[2]["href"] == "/inbox/inbox/z-dana", first)
 ok("an id with odd characters is escaped in its link",
    cv_report.answer_first([{"participant": "R", "zernio_conversation_id": "z/odd id",
                             "last_inbound_at": now.isoformat()}], "")[0]["href"] == "/inbox/inbox/z%2Fodd%20id")
@@ -96,8 +103,8 @@ with state.connect() as c:
               (T.isoformat(), "customer_voice", json.dumps(report._normalize("customer_voice", "Unified Inbox", rep)),
                state._now()))
 b = review_brief.ensure(ABOUT, NOW)
-ok("the brief carries the three, in order", [f["title"] for f in b["first"]] == ["Marcus Cole", "Dana Whitfield",
-                                                                                "Priya Raman"], b.get("first"))
+ok("the brief carries the three, in order", [f["title"] for f in b["first"]] == ["Marcus Cole", "Priya Raman",
+                                                                                "Dana Whitfield"], b.get("first"))
 html, _ = page.render(ABOUT.isoformat(), NOW)
 e = review_email.build(ABOUT, NOW)
 mail, text = review_email.html(e), review_email.text(e)

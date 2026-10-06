@@ -328,7 +328,7 @@ ok("the payload carries the caller's title and sentence", got["title"] == "Morni
 raw.clear()
 push.send({"endpoint": "https://push.example/1", "p256dh": "x", "auth": "y"}, waiting=3)
 ok("...and the inbox's own notice is exactly what it was", _json.loads(raw["b"]) ==
-   {"title": "Unified Inbox", "body": "3 waiting for a reply", "navigate": "/inbox/inbox"})
+   {"title": "Inbox Machine", "body": "3 waiting for a reply", "navigate": "/inbox/inbox"})
 push.encrypt, net.post_public, push._vapid_header = _enc, _post, _vap
 
 # THE SERVICE WORKER IS THE INBOX MACHINE'S, and a Lead box ships without it (test_recipe_ships runs
@@ -419,19 +419,6 @@ text = visible(owner.get("/settings/email").get_data(as_text=True))
 ok("on the operator's box the screen shows the service it came with and offers no forms",
    "service it was set up with" in text and "Resend API key" not in text and "Stop sending" not in text)
 settings.resend_api_key = settings.gtm_from_email = ""
-
-print("\n— the vocabulary —")
-RESERVED = re.compile(r"\b(phone|phones|ring|rings|call|calls|called|calling|dial|line|lines|voice|"
-                      r"answer|answers|answered)\b", re.I)
-screens = [visible(owner.get("/settings/email").get_data(as_text=True))]
-box_mail.put_own({"kind": "smtp", "from": "hello@acme.co", "host": "smtp.acme.co", "port": "587",
-                  "user": "u", "password": "p"}, user_id=OWNER)
-screens.append(visible(owner.get("/settings/email").get_data(as_text=True)))
-from core.dash import box_email  # noqa: E402
-
-screens += [box_email._note(True, "x", "Email is off"), visible(box_email._smtp_form())]
-hits = sorted({m.group(0) for s in screens for m in RESERVED.finditer(s)})
-ok("no reserved noun anywhere a buyer reads on this screen", not hits, str(hits))
 
 print("\nALL REVIEW-REACHES-THE-OWNER CHECKS PASS" if not _failed else f"\n{_failed} FAILED")
 sys.exit(1 if _failed else 0)

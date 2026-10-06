@@ -17,8 +17,6 @@ So this suite reads the page the way that person would:
   5. THE FIRST-CONTACT QUESTION IS ANSWERABLE: the box's own host key fingerprint is printed, so
      "are you sure you want to continue connecting?" is a comparison, not a guess.
   6. THE LOOKUPS ARE BOUNDED. A resolver that hangs costs two seconds, not a spinning screen.
-  7. THE SCREEN KEEPS THE VOCABULARY. The receptionist machine owns phone, ring, call, dial, line,
-     voice and answer (owner, 2026-09-22); this screen used "line" twice before this change.
 
 Run: python tests/test_the_access_page_says_where.py
 """
@@ -195,7 +193,6 @@ from core import state  # noqa: E402
 
 state.init_db()
 from core import dash  # noqa: E402
-from core.dash import box_settings as S  # noqa: E402
 from core.dispatch import app  # noqa: E402
 
 
@@ -290,24 +287,6 @@ member = client_for(state.add_user("sam@acme.co", name="Sam", role="member")["id
 ok("a member still gets no address and no command — the page is the owner's",
    member.get("/settings/access").status_code == 403
    and "ssh root@" not in member.get("/settings/access").get_data(as_text=True))
-
-# ── the vocabulary, whole word, in what a buyer reads ────────────────────────────────────────────
-print("\n— the vocabulary —")
-RESERVED = re.compile(r"\b(phone|phones|ring|rings|call|calls|called|calling|dial|line|lines|voice|"
-                      r"answer|answers|answered)\b", re.I)
-(_TMP / "ssh_host_ed25519_key.pub").write_text(f"ssh-ed25519 {HOST_ED} root@acme\n")
-screens = []
-for ips, box_ip, keys in (([BOX_IP], BOX_IP, ""), ([ELSEWHERE], BOX_IP, ""), ([], BOX_IP, "k"),
-                          ([], "", ""), ([BOX_IP], "", "k")):
-    world(ips, box_ip)
-    A.write(f"ssh-ed25519 {USER_ED} me@laptop\n" if keys else "")
-    screens.append(visible(owner.get("/settings/access").get_data(as_text=True)))
-os.environ["DASHBOARD_BASE_URL"] = ""
-world([], "")
-screens.append(visible(S._connect_card(A.where_to_connect("", "http://localhost"), False, "")))
-hits = sorted({m.group(0) for s in screens for m in RESERVED.finditer(s)})
-# "CALLED OUT" above is this suite's own label, never rendered; everything checked here is rendered.
-ok("no reserved noun appears anywhere a buyer reads on this screen, in any branch", not hits, str(hits))
 
 A._resolve, A._own_public_ip = _real_resolve, _real_own_ip
 print("\nALL WHERE-TO-CONNECT CHECKS PASS" if not _failed else f"\n{_failed} FAILED")

@@ -203,32 +203,27 @@ print(f"       (connecting the box opened {len(new_screens)} more screens: "
 # ── 2b. what a buyer reads on every one of those screens ─────────────────────────────────
 print("\ntest_every_screen_reads_as_words")
 # FOUND BY LOOKING, 2026-09-24: the inbox's install page told every buyer "that is the
-# phone\\u2019s rule" — an escape printed as six characters, around a noun reserved for the
-# receptionist machine (CLAUDE.md, mobile first). Neither shows in a diff of a Python string, and
-# no suite read the page as a person does. This one now reads every page the two walks reached.
+# phone\\u2019s rule" — an escape printed as six characters. It does not show in a diff of a
+# Python string, and no suite read the page as a person does. This one now reads every page the
+# two walks reached.
 def _words(html_: str) -> str:
     html_ = re.sub(r"(?is)<(style|script)\b.*?</\1>", " ", html_)
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html_))
 
 
 _ESCAPE = re.compile(r"\\u[0-9a-fA-F]{4}|\\x[0-9a-fA-F]{2}")
-_RESERVED = re.compile(r"\b(phone|phones|ring|call|calls|dial|line|voice)\b", re.I)
-_esc_on, _noun_on = {}, {}
+_esc_on = {}
 for _p, _h in sorted(READ.items()):
     _t = _words(_h)
     if _ESCAPE.search(_t):
         _esc_on[_p] = _ESCAPE.search(_t).group(0)
-    _m = _RESERVED.search(_t)
-    if _m:
-        _noun_on[_p] = _t[max(0, _m.start() - 40):_m.end() + 20]
 ok(f"no screen prints an escape sequence as text ({len(READ)} read)", not _esc_on, str(_esc_on))
-ok("no screen uses a noun reserved for the receptionist machine", not _noun_on, str(_noun_on))
 
 # A PROMISE THE BOX BREAKS IN THE DEMO'S OWN TAP. Found by looking, 2026-09-24: inbox Settings and
 # the mailbox page said "It never sends", while Send on an email thread goes out through the
 # buyer's own mailbox (marketing/customer_voice/inbox/reply.py -> email_channel.send). What holds
 # is narrower: it sends only what the buyer sends. The words "this mobile" went the same way, a
-# noun swapped for a reserved one that no longer read as English; the screens say "this device".
+# noun swapped for one that no longer read as English; the screens say "this device".
 _PROMISE = re.compile(r"\bnever sends\b|\bonly reads\b|\bthis mobile\b", re.I)
 _promise_on = {}
 for _p, _h in sorted(READ.items()):
@@ -405,30 +400,10 @@ ok("...and every named door is still a route", all(d in _routes for d in DOORS),
 ok("...and no named door has since been given a link (then it is not a door; take it off the list)",
    not (set(DOORS) & _reached), str(sorted(set(DOORS) & _reached)))
 ok("...and the count is real: the app has screens to check", _screens >= 20, str(_screens))
+ok("...and the walks read the inbox too", any(p.startswith("/inbox") for p in READ))
 
 
-# ── 6. no screen carries a reserved noun, including in what it inlines ────────────────────
-print("\ntest_no_screen_a_buyer_opens_carries_a_reserved_noun")
-
-# Owner, 2026-09-22 (CLAUDE.md, "Mobile first"): phone, ring, dial, voice and call are reserved for
-# the receptionist machine, and banned in anything a buyer reads — CSS comments included, because a
-# screen's stylesheet is inlined into its HTML. test_core_css_keeps_the_vocabulary reads core's
-# stylesheet; nothing read the inbox's, which carried 18 of them in comments on every inbox page
-# (found 2026-09-29, WebDev2). So this reads what a buyer actually receives: the HTML of every
-# screen the four walks opened. Scripts are left out, since code is not read; `iPhone` and a path
-# like /settings/phone (an old address kept for bookmarks) are not the noun.
-_RESERVED = re.compile(r"(?<![\w/-])(?<!i)(phone|phones|ring|dial|voice|call)(?![\w-])", re.I)
-_said: dict[str, set] = {}
-for _p, _html in READ.items():
-    _text = re.sub(r"(?is)<script\b.*?</script>", " ", _html)
-    for _m in _RESERVED.finditer(_text):
-        _said.setdefault(re.sub(r"\s+", " ", _text[max(0, _m.start() - 40):_m.end() + 30]), set()).add(_p)
-ok(f"no screen a buyer opens says a reserved noun ({len(READ)} screens read)",
-   not _said, "; ".join(f"{sorted(ps)[0]}: …{ctx}…" for ctx, ps in sorted(_said.items())[:4]))
-ok("...and the read is real: the walks read the inbox too", any(p.startswith("/inbox") for p in READ))
-
-
-# ── 7. every screen of a machine installs as that machine ─────────────────────────────────
+# ── 6. every screen of a machine installs as that machine ─────────────────────────────────
 print("\ntest_every_screen_of_a_machine_installs_as_that_machine")
 
 # Owner, 2026-09-29: "We want every screen of the unified inbox to bookmark the same way", "we don't
@@ -440,7 +415,7 @@ print("\ntest_every_screen_of_a_machine_installs_as_that_machine")
 # the AEO Machine's menu, and wears the AEO Machine for that reason.
 def _expected_app(path: str) -> tuple[str, str]:
     if path.startswith("/inbox"):
-        return "Unified Inbox", "/inbox/manifest.webmanifest"
+        return "Inbox Machine", "/inbox/manifest.webmanifest"
     if path.startswith(("/aeo", "/settings/aeo/")):
         return "AEO Machine", "/aeo/manifest.webmanifest"
     return dash.brand(), "/ui/manifest.webmanifest"   # the client's name (owner, 2026-09-29)
@@ -463,7 +438,7 @@ for _p, _html in READ.items():
 ok("every screen installs as its machine, and a machine's tabs all read its name",
    not _wrong, "; ".join(sorted(_wrong)[:4]))
 ok("...and the walks reached screens of all three apps",
-   {"Unified Inbox", "AEO Machine", dash.brand()} <= set(_by_app), str(sorted(_by_app)))
+   {"Inbox Machine", "AEO Machine", dash.brand()} <= set(_by_app), str(sorted(_by_app)))
 _aeo_m = owner().get("/aeo/manifest.webmanifest")
 _aeo = json.loads(_aeo_m.get_data(as_text=True)) if _aeo_m.status_code == 200 else {}
 ok("the AEO Machine's manifest is public and names it", _aeo_m.status_code == 200
@@ -475,7 +450,7 @@ ok("...and it opens inside its own scope, on a screen that answers",
    f"{_aeo.get('start_url')} in {_aeo.get('scope')}")
 
 
-# ── 8. the way back: a link for a thumb, the trail for a pointer ─────────────────────────
+# ── 7. the way back: a link for a thumb, the trail for a pointer ─────────────────────────
 print("\ntest_the_way_back_is_one_link_on_a_mobile")
 
 # Owner, 2026-09-29: on a mobile, one link back to the parent, as iOS does; on a desktop the trail
@@ -522,7 +497,7 @@ ok("no trail anywhere says Overview",
    not any(re.search(r'class="crumb"[^>]*>[^<]*(<b>)?Overview', h) for h in READ.values()))
 
 
-# ── 9. every header: the client's icon as the menu, then the app's name ─────────────────────
+# ── 8. every header: the client's icon as the menu, then the app's name ─────────────────────
 print("\ntest_every_header_is_menu_icon_then_name")
 # AND THE ICON IS THE MENU BUTTON (owner, 2026-09-29, option B of three mocks: "go with B, build
 # it"): the client's icon sits inside the control that opens the drawer, badged with three lines.

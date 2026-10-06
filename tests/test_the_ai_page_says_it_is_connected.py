@@ -10,8 +10,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
   · the ways to connect stop folding under "Use a different account" there, or the fold loses them;
   · the fold closes over a buyer who is mid-change: a sign-in running, a refusal just shown, or a
     model picked from the list;
-  · a box with nothing connected gets the fold, hiding the only thing it needs;
-  · a buyer reads a reserved noun (CLAUDE.md, mobile first).
+  · a box with nothing connected gets the fold, hiding the only thing it needs.
 
 Run: python tests/test_the_ai_page_says_it_is_connected.py
 """
@@ -118,13 +117,6 @@ try:
     m = app.test_client()
     m.set_cookie(dash.COOKIE, dash.new_session(member))
     ok("a member gets the owner's page refused, as before", m.get("/settings/ai").status_code == 403)
-
-    print("\ntest_the_vocabulary")
-    clear()
-    box_secrets.put(box_secrets.CLAUDE_OAUTH, "sk-ant-oat01-" + "b" * 95)
-    said = text(page()[1])
-    banned = re.findall(r"\b(phone|phones|ring|call|calls|dial|line|voice)\b", said, re.I)
-    ok("no reserved noun on the connected page", not banned, str(sorted(set(banned))))
 finally:
     claude_login.pending_url = _real_url
     clear()

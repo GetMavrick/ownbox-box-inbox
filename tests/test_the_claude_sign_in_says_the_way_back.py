@@ -9,8 +9,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
   · the page before Connect stops saying that Claude opens in a new tab and a code comes back;
   · the page during the sign-in stops saying the box waits, where to paste, or how to get back from
     the browser to the installed app;
-  · a reload mid-sign-in stops showing the same link (the place the buyer is coming back to);
-  · a buyer reads a reserved noun (CLAUDE.md, mobile first).
+  · a reload mid-sign-in stops showing the same link (the place the buyer is coming back to).
 
 Run: python tests/test_the_claude_sign_in_says_the_way_back.py
 """
@@ -81,10 +80,6 @@ ok("it says to copy the code, come back and paste it", "Copy it, come back to th
 ok("it says how to get back from the browser to the installed app",
    "switch back to the app: it keeps your place" in during)
 ok("the field to paste into is right there", 'name="code"' in raw)
-
-print("\ntest_the_vocabulary")
-_banned = re.findall(r"\b(phone|phones|ring|call|calls|dial|line|voice|answer)\b", before + " " + during, re.I)
-ok("no reserved noun on either state of the page", not _banned, str(sorted(set(_banned))))
 
 print("\n— and this file cannot silently fall out of CI —")
 _wf = ROOT / ".github/workflows/tests.yml"

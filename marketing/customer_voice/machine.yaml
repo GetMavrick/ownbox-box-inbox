@@ -3,7 +3,7 @@
 # and which tiers include it. Nothing else in the box names this machine.
 addon: 1
 slug: inbox                        # feature machine:inbox, the name plans and orders already use
-name: Unified Inbox
+name: Inbox Machine
 modules:                           # the prefixes that ARE this machine; the plan gates all of them
   - marketing.customer_voice       # the inbox, its app, and its rails
 worker:
@@ -13,7 +13,7 @@ web:
   - marketing.customer_voice.app   # /inbox/*: login-only, no public tier (what a named customer said has no safe redacted form)
 tiers: [pro]                       # Pro includes it; Base gets it through a plan's add:
 product:
-  name: Unified Inbox
+  name: Inbox Machine
 # Its menu rows are registered by marketing/customer_voice/app.py. Its `customer_voice:` and `inbox:`
 # config sections still live in config/aios.config.yaml for now (a manifest's config: sits beneath
 # the tracked file, so moving them later changes nothing a box reads).

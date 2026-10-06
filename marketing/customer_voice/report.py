@@ -8,6 +8,7 @@ FOUR STATES, RENDERED (docs/PLAN_CUSTOMER_VOICE.md §1.10). A rail he does not o
 entirely; one he owns but has not connected says so and is `connect`, never `fail`. Getting that
 backwards is how a dashboard turns an activation step into a support ticket.
 """
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from core import state
@@ -22,7 +23,7 @@ MACHINE = "customer_voice"
 # OWNER, 2026-09-13: "There is no such thing as Customer Voice. It is either Unified Inbox or Ownbox."
 # The buyer-facing name. The package and box type keep their internal name; this string is what
 # the morning page, the phone app and the box docs show.
-TITLE = "Unified Inbox"
+TITLE = "Inbox Machine"
 
 # What each rail is called on the page, and what it says when it is owned but not yet connected.
 # The connect line NAMES THE ACCOUNT, because "not connected" is not an instruction anybody can
@@ -134,16 +135,137 @@ ANSWER_FIRST = 3
 SAID_CHARS = 60
 
 
+# MAIL FROM PROVIDERS ANYONE CAN USE: their domain is never "the box's own", or a gmail.com mailbox would hide every
+# customer who writes from gmail.com.
+_FREE_MAIL = frozenset({"gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "outlook.com", "hotmail.com",
+                        "live.com", "msn.com", "icloud.com", "me.com", "mac.com", "aol.com", "proton.me",
+                        "protonmail.com", "gmx.com", "zoho.com", "fastmail.com"})
+_ADDRESS = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
+_SENDER_KEY = re.compile(r"from|reply_to|sender|operator|email", re.I)
+
+
+def own_senders() -> tuple[set, set]:
+    """The box's own addresses, and the domains it sends from (OSDev1, 2026-10-05: "Skip the box's own addresses and
+    domains"): the mailbox it reads, its people's sign-ins, and every address its settings send or reply as. The
+    onboarding notice that headed the owner's own list on 10-05 came from a sending subdomain the mailbox check never
+    knew. Never raises."""
+    import os
+    addrs: set = set()
+
+    def walk(node, key=""):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, str(k))
+        elif isinstance(node, list):
+            for v in node:
+                walk(v, key)
+        elif isinstance(node, str) and _SENDER_KEY.search(key):
+            addrs.update(a.lower() for a in _ADDRESS.findall(node))
+    try:
+        from .drafter import who_wrote
+        addrs |= who_wrote.our_addresses()
+    except Exception:                            # noqa: BLE001
+        pass
+    try:
+        with state.connect() as c:
+            addrs |= {str(r[0]).strip().lower() for r in c.execute("SELECT email FROM users").fetchall() if r[0]}
+    except Exception:                            # noqa: BLE001
+        pass
+    try:
+        from core.config import get_config
+        walk(get_config())
+    except Exception:                            # noqa: BLE001
+        pass
+    walk({k: v for k, v in os.environ.items()})
+    # A placeholder in a settings file (you@example.com) must never make every example address "ours".
+    domains = {d for d in (a.rsplit("@", 1)[1] for a in addrs if "@" in a)
+               if d not in _FREE_MAIL and not d.startswith("example.") and d != "example"}
+    return addrs, domains
+
+
+def _is_ours(sender: str, addrs: set, domains: set) -> bool:
+    found = _ADDRESS.findall(str(sender or ""))
+    if not found:
+        return False
+    addr = found[-1].lower()
+    dom = addr.rsplit("@", 1)[1]
+    return addr in addrs or any(dom == d or dom.endswith("." + d) for d in domains)
+
+
+def real_people(space: str, rows: list[dict]) -> list[dict]:
+    """The waiting rows that are a person who wants an answer from this business (OSDev1, 2026-10-05, after 10-05.2's
+    three names were the owner's own onboarding notice, a cold sales pitch and a funding pitch). Leaves out:
+      * the box itself: its own addresses and the domains it sends from (`own_senders`);
+      * a sender never judged (`automated` NULL) that the shared classifier marks a machine on its address alone;
+      * what the box already judged needs no person: a cold pitch, or a newest message judged to need no reply.
+    Marks the rest `first_time` when nobody has ever answered on the thread. Never raises; a failed check keeps a row,
+    because hiding a customer is the expensive mistake."""
+    if not rows:
+        return []
+    addrs, domains = own_senders()
+    try:
+        from .drafter import store as drafts
+        judged = drafts.judged_not_for_a_person(space)
+    except Exception:                            # noqa: BLE001
+        judged = set()
+    ids = [str(r.get("zernio_conversation_id") or "") for r in rows]
+    facts: dict = {}
+    try:
+        with state.connect() as c:
+            for i in range(0, len(ids), 400):
+                part = ids[i:i + 400]
+                for f in c.execute(
+                        "SELECT k.zernio_conversation_id AS z, "
+                        "  (SELECT m.sent_by FROM inbox_messages m WHERE m.space = k.space "
+                        "     AND m.zernio_conversation_id = k.zernio_conversation_id AND m.direction = 'in' "
+                        "     ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS sender, "
+                        "  EXISTS(SELECT 1 FROM inbox_messages m WHERE m.space = k.space "
+                        "     AND m.zernio_conversation_id = k.zernio_conversation_id AND m.direction = 'out') AS answered "
+                        "  FROM inbox_conversations k WHERE k.space = ? AND k.zernio_conversation_id IN (%s)"
+                        % ",".join("?" * len(part)), (space, *part)).fetchall():
+                    facts[f["z"]] = dict(f)
+    except Exception:                            # noqa: BLE001
+        facts = {}
+    try:
+        from .drafter import who_wrote
+    except Exception:                            # noqa: BLE001
+        who_wrote = None
+    out = []
+    for r in rows:
+        z = str(r.get("zernio_conversation_id") or "")
+        f = facts.get(z, {})
+        found = _ADDRESS.findall(str(f.get("sender") or ""))
+        sender = found[-1].lower() if found else str(f.get("sender") or "")   # the classifier reads a bare address
+        email = str(r.get("platform") or "") == "email"
+        if z in judged:
+            continue
+        if email and _is_ours(sender, addrs, domains):
+            continue
+        if email and r.get("automated") is None and who_wrote is not None:
+            try:
+                if who_wrote.level(sender, {}, ours=addrs, strict=False):
+                    continue
+            except Exception:                    # noqa: BLE001
+                pass
+        out.append({**r, "first_time": not f.get("answered")})
+    return out
+
+
 def answer_first(rows: list[dict], cut: str) -> list[dict]:
-    """WHO TO ANSWER FIRST, BY NAME (#1953 step 1.5): the three longest-waiting people from the last 30 days, anyone
-    who came from an ad ahead of the rest, each with the first words of what they asked and a link to the thread.
+    """WHO TO ANSWER FIRST, BY NAME (#1953 step 1.5): three people from the last 30 days, each with the first words of
+    what they asked and a link to the thread.
+
+    THE ORDER (OSDev1, 2026-10-05): anyone who came from an ad, then people writing for the first time (`first_time`
+    from `real_people`: nobody has answered them yet), then the rest, each newest first. Oldest first was the order
+    until 10-05, and on a real mailbox it surfaced month-old junk ahead of this morning's customer.
 
     "72 waiting" is a number; "Dana has waited 3 days about Saturday" is a reply sent before breakfast. Read from
     rows already on this box. It goes to the review page and the owner's email, never to Slack (core/report.py), where
     more than the owner can read a customer's words."""
     from urllib.parse import quote
     keep = [r for r in rows if str(r.get("last_inbound_at") or "") and _iso(r["last_inbound_at"]) >= cut]
-    keep.sort(key=lambda r: (not r.get("ad_meta_id"), _iso(r["last_inbound_at"])))
+    keep.sort(key=lambda r: _iso(r["last_inbound_at"]), reverse=True)
+    keep.sort(key=lambda r: (not r.get("ad_meta_id"), not r.get("first_time")))
     out = []
     for r in keep[:ANSWER_FIRST]:
         said = " ".join(str(r.get("preview") or "").split())
@@ -358,7 +480,7 @@ def report(day: date, space: str | None = None) -> dict:
             cut = (datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS)).isoformat()
             stamps = sorted(s for s in (str(r.get("last_inbound_at") or "") for r in rows) if s and _iso(s) >= cut)
             age = _waited(stamps[0]) if stamps else ""
-            first = answer_first(rows, cut)
+            first = answer_first(real_people(inbox_space, rows), cut)
         except Exception:                        # noqa: BLE001 — a figure, never the report
             age, first = "", []
         if age:

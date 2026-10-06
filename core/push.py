@@ -375,7 +375,7 @@ def _vapid_header(endpoint: str, *, subject: str) -> dict[str, str]:
 
 def send(subscription: dict, *, waiting: int | None = None, navigate: str = "/inbox/inbox",
          subject: str = "mailto:support@ownbox.io", timeout: int = 10,
-         resolve=None, title: str = "Unified Inbox", body: str | None = None) -> tuple[bool, str]:
+         resolve=None, title: str = "Inbox Machine", body: str | None = None) -> tuple[bool, str]:
     """Notify one device. Returns (delivered, detail); a gone subscription is forgotten here.
 
     THROUGH `core.net`, NOT `requests`, AND THAT IS A SECURITY BOUNDARY. The endpoint is DATA: the

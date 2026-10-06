@@ -13,8 +13,7 @@ are our box's *setting*; the guard is the *product*. So `never_words`, `never_ph
 `competitors` and `allowed_numbers` all arrive as arguments, there is no module-level list to
 copy, and a box that supplies nothing refuses nothing but unsourced numbers.
 
-Ownbox's own list — the receptionist vocabulary the owner reserved on 2026-09-22 — is therefore
-DATA, entered on the box's AEO settings screen, not code in here.
+A box's own list is therefore DATA, entered on the box's AEO settings screen, not code in here.
 
 NOTHING HERE REASONS. Deterministic work uses no Claude (`CLAUDE.md` non-negotiable 3): this is
 regex and set membership, it runs on every draft, and it costs nothing.

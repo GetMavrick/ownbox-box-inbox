@@ -89,8 +89,22 @@ for script in SCRIPTS:
     except UnicodeDecodeError as e:
         text = ""
         ok("the wall is still valid UTF-8", False, str(e))
-    ok("the script says it succeeded", r.returncode == 0 and "✓" in r.stdout,
-       f"rc={r.returncode} {r.stdout[-300:]}")
+    # UNIVERSAL: either stream. The buyer's foundation copy still talks on stdout, and changing
+    # what ships to every box is a separate decision from fixing ours.
+    said = r.stdout + r.stderr
+    ok("the script says it succeeded", r.returncode == 0 and "✓" in said,
+       f"rc={r.returncode} {said[-300:]}")
+    if script == POST and OURS:
+        # OURS ONLY — and `OURS`, not just `script == POST`, because inside an exported box POST
+        # IS the buyer's foundation copy under our own path (see the note on OURS above; this is
+        # what CI caught on the first run of this change). The reason the check exists: on
+        # 2026-10-01 and again on 2026-10-05 an operator message landed INSIDE DEVSTATE.md,
+        # because every message went to stdout and
+        # something redirected it into the file. Neither leaked line starts with `[`, so the prune
+        # below can never remove them and every session carries them forever. Diagnostics are for
+        # the operator: if stdout is empty, a redirect into the wall can write nothing at all.
+        ok("...and ours says it on stderr, so a redirect into the wall writes nothing",
+           r.stdout == "", repr(r.stdout[:200]))
     line = next((l for l in text.split("\n") if l.startswith("[OSDev9]")), "")
     ok("the post is in the file byte for byte", line.endswith(": " + MSG), repr(line[-120:]))
     ok("...under the header, above the older post",
@@ -109,10 +123,10 @@ d = wall(git=True)
 r = post(d, MSG)
 written = next((l for l in (d / "DEVSTATE.md").read_text(encoding="utf-8", errors="replace").split("\n")
                 if l.startswith("[OSDev9]")), "")
-out = r.stdout.split("\n")
+out = r.stderr.split("\n")
 at = next((i for i, l in enumerate(out) if "devstate-land.sh" in l), None)
 ok("an uncommitted post prints the command that lands it", at is not None and at + 1 < len(out),
-   r.stdout[-400:])
+   r.stderr[-400:])
 if at is not None and at + 1 < len(out):
     # PASTE IT INTO BASH, which is what a person does, and see what the lander would receive.
     arg = subprocess.run(["bash", "-c", "printf %s " + out[at + 1].strip()],
@@ -125,7 +139,7 @@ d = wall(git=False)
 (d / "DEVSTATE.md").write_text("# AIOS DEV STATE\n\nno header here\n", encoding="utf-8")
 r = post(d, "[OSDev9→ALL] FYI: plain.")
 ok("a missing header is reported as a missing header",
-   r.returncode == 1 and "header missing" in r.stdout, r.stdout[-200:])
+   r.returncode == 1 and "header missing" in r.stderr, r.stderr[-200:])
 live = "\n".join(l for l in POST.read_text().split("\n") if not l.lstrip().startswith("#"))
 ok("the text never passes through awk -v, which decodes escapes",
    not re.search(r"awk\s+-v\s+entry=", live))

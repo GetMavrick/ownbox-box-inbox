@@ -269,20 +269,5 @@ ok("THE PAGE NEVER REPEATS WHAT A LINK TELLS IT TO SAY", "compromised" not in sp
 anon = app.test_client().post("/settings/updates/put-back", data={"confirm": "yes"})
 ok("a stranger is sent to sign in", anon.status_code in (302, 303))
 
-print("\n— the vocabulary —")
-RESERVED = re.compile(r"\b(phone|phones|ring|rings|call|calls|called|calling|dial|line|lines|voice|"
-                      r"answer|answers|answered)\b", re.I)
-(BOX / "app.py").write_text("print('edited once more')\n")
-screens = [visible(owner.get("/settings/updates").get_data(as_text=True)),
-           visible(member.get("/settings/updates").get_data(as_text=True))]
-for d in ({"status": "all_refused", "refused": [{"reason": "collision", "detail": "a"}]},
-          {"status": "install_failed", "tag": "t"},
-          {"status": "all_refused", "refused": [{"reason": "dirty_tree", "detail": ""}]}):
-    write_log(**d)
-    screens.append(box_updates.state()["said"])
-screens.append(box_updates.put_back(by="owner")["said"])
-hits = sorted({m.group(0) for s in screens for m in RESERVED.finditer(s)})
-ok("no reserved noun in anything this screen can say", not hits, str(hits))
-
 print("\nALL WHAT-YOU-CHANGED CHECKS PASS" if not _failed else f"\n{_failed} FAILED")
 sys.exit(1 if _failed else 0)

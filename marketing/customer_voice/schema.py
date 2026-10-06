@@ -223,6 +223,37 @@ CREATE TABLE IF NOT EXISTS inbox_draft_rules (
 -- restrictive CSP and remote images blocked until asked for, because a remote image is a read
 -- receipt and sender CSS can restyle the page around it. That is its own change. This table
 -- exists so that when it lands, the mail is already here.
+-- WHAT A PERSON DID WITH A CONVERSATION FROM THE LIST (owner 2026-10-06: "slide a message to change the disposition
+-- archive or Delete"). Done takes it out of the inbox until they write again; Delete puts it in Trash for good (owner,
+-- 2026-10-06), until a person restores it; a disposition says what the conversation is, and Junk keeps it out of the
+-- inbox too. Nothing here is ever removed and nothing is sent: the platform and the mailbox keep their copy. A new
+-- table, so no migration runs.
+CREATE TABLE IF NOT EXISTS inbox_conversation_marks (
+  space        TEXT NOT NULL,
+  zernio_conversation_id TEXT NOT NULL,
+  disposition  TEXT,                    -- NULL | lead | booked | customer | junk (store.DISPOSITIONS)
+  archived_at  TEXT,                    -- Done: out of the inbox until a message from them is newer
+  deleted_at   TEXT,                    -- in Trash for good, until restored; never a row DELETE
+  set_by       TEXT,                    -- the user who last changed it
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (space, zernio_conversation_id)
+);
+
+-- WHAT A MESSAGE CARRIES BESIDE ITS WORDS (#1990 Phase 1, step 1.6): its photos and files, whether it was delivered
+-- or read, the emoji people reacted with, whether it was edited or deleted. Read off Zernio's own message on every
+-- mirror and kept current (an UPSERT, since a tick turns blue and a reaction arrives after the message did). A new
+-- table rather than new columns, so no migration runs. Links are kept only when they are http(s).
+CREATE TABLE IF NOT EXISTS inbox_message_extras (
+  message_id      TEXT PRIMARY KEY,   -- inbox_messages.id, one to one
+  attachments     TEXT,               -- JSON [{type, url, name, mimeType}]
+  delivery_status TEXT,               -- sent | delivered | read | failed | deleted, as the platform said
+  delivery_error  TEXT,               -- the platform's own words when it failed
+  reactions       TEXT,               -- JSON [{emoji, fromMe}]
+  edited          INTEGER NOT NULL DEFAULT 0,
+  deleted         INTEGER NOT NULL DEFAULT 0,
+  updated_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS inbox_message_detail (
   message_id  TEXT PRIMARY KEY,       -- inbox_messages.id, one to one
   body_html   TEXT,                   -- the text/html part VERBATIM. Never rendered unsanitised.

@@ -103,14 +103,6 @@ def ink_pills(page: str) -> list:
     return out
 
 
-_RESERVED = re.compile(r"\b(phones?|rings?|calls?|dial|lines?|voice)\b", re.I)
-
-
-def reserved(page: str) -> list:
-    text = re.sub(r"<style>.*?</style>", "", main(page), flags=re.S)
-    return sorted(set(m.lower() for m in _RESERVED.findall(text)))
-
-
 OWNER_EMAIL = "owner@studio.example"
 with state.connect() as c:
     c.execute("UPDATE users SET email = ? WHERE id = ?", (OWNER_EMAIL, state.owner_user()["id"]))
@@ -130,7 +122,6 @@ ok("the dashboard's one ink pill is Upgrade your box to Pro now",
    ink_pills(page) == ["Upgrade your box to Pro now"], str(ink_pills(page)))
 ok("...with the downtime under it", "Your box will be offline for about 3 minutes." in page)
 ok("...and it opens the sheet", 'href="/dashboard/upgrade">Upgrade your box to Pro now' in page)
-ok("none of the reserved nouns", reserved(page) == [], str(reserved(page)))
 page = member.get("/dashboard").get_data(as_text=True)
 ok("a member sees no button", "Upgrade your box to Pro" not in page)
 r = member.get("/dashboard/upgrade")
@@ -153,7 +144,6 @@ ok("the restart, in plain words, with the same downtime",
    "Your box restarts once, for about 3 minutes, right after you pay." in page)
 ok("no link yet: it says so, and there is nothing to press",
    "The payment page isn't open yet." in page and ink_pills(page) == [], str(ink_pills(page)))
-ok("none of the reserved nouns", reserved(page) == [], str(reserved(page)))
 
 print("\ntest_it_reaches_the_checkout_with_this_box_named")
 upgrade.UPGRADE_LINK = "https://buy.stripe.com/test_upgrade123"

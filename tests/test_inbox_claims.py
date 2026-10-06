@@ -375,7 +375,7 @@ try:
     m.claim("x", title="T")
     ok("a box with no inbox says so", False)
 except conversations.NoProvider as e:
-    ok("A BOX WITH NO INBOX SAYS SO, in a sentence a builder can act on", "Unified Inbox" in str(e))
+    ok("A BOX WITH NO INBOX SAYS SO, in a sentence a builder can act on", "Inbox Machine" in str(e))
 conversations._PROVIDER = _real
 ok("THE DRAFTER'S COPY OF THE CLAIM PREDICATE IS THE INBOX'S, character for character",
    drafts._UNCLAIMED == claims.UNCLAIMED, drafts._UNCLAIMED)

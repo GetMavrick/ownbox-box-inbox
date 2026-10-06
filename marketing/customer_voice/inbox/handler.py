@@ -209,7 +209,7 @@ def handle(job: dict) -> dict:
         # isolation backstop internally: the target account must belong to THIS Space's
         # Zernio Profile (no-op in two-key mode), else it raises determinate → the claim
         # is released and the worker retries (never a cross-tenant DM).
-        sent = zernio.client(sp).inbox.send(zcid, account_id, text)
+        sent = zernio.client(sp).inbox.send(channels.vendor_id(zcid), account_id, text)
     except zernio.ZernioError as e:
         if e.indeterminate:
             # May have landed: KEEP the claim, record it, tell the owner — never resend.

@@ -66,10 +66,6 @@ IDEA_DAYS = 7
 MAX_WORTH, MAX_MOVING, MAX_IDEAS = 5, 5, 3
 AI_TASK = "review"              # config models: -> haiku
 
-# THE WORDS RESERVED FOR THE RECEPTIONIST MACHINE (CLAUDE.md, owner 2026-09-22) never reach a buyer from here,
-# whoever wrote them. An AI line carrying one is dropped.
-_RESERVED = re.compile(r"\b(phone|phones|ring|rings|ringing|call|calls|calling|called|dial|dialing|line|lines|"
-                       r"voice|voices|engine)\b", re.I)
 _NUM = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
 
@@ -316,9 +312,7 @@ def _facts(rows_y: list[dict], rows_t: list[dict], worth: list[dict], moving: li
 
 
 def _grounded(text: str, facts_text: str) -> bool:
-    """Every number in an AI line must appear in the facts it was given, and no reserved word may appear."""
-    if _RESERVED.search(text):
-        return False
+    """Every number in an AI line must appear in the facts it was given."""
     have = {n.replace(",", "") for n in _NUM.findall(facts_text)}
     return all(n.replace(",", "") in have for n in _NUM.findall(text))
 

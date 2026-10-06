@@ -12,7 +12,7 @@ Held here:
   3. Connect fills the form from the list, never from what is typed in the address bar;
   4. a connected app or source is a row, and leaves the ideas;
   5. a department's own source not yet set up is a built-in idea, not a "not connected" row;
-  6. Instantly is in neither, and no idea uses a word the box keeps for the receptionist.
+  6. Instantly is in neither.
 """
 from __future__ import annotations
 
@@ -86,8 +86,6 @@ ok("each with a sentence of what it does for the business", all(len(i[4]) > 40 f
 ok("Search Console is the box's own, set up on its own screen", re.search(
     r'Google Search Console<span class=tag>Built in</span>.*?href="/settings/aeo/google">Set up<', p, re.S) is not None)
 ok("then the form to connect any other app", p.index("Ideas for what to connect") < p.index("Connect any app"))
-bad = re.compile(r"\b(phone|phones|ring|call|calls|dial|line|lines|voice|engine)\b", re.I)
-ok("no word the box keeps for the receptionist", not bad.search(text(p)), bad.findall(text(p)))
 ok("INSTANTLY IS NOT AN IDEA", "Instantly" not in p and "instantly" not in p.lower().split("</nav>", 1)[-1])
 
 print("\ntest_every_idea_is_the_vendors_own_server")

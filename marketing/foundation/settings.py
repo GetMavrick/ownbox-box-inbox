@@ -27,8 +27,7 @@ _PROJECT = re.compile(r"^[0-9]{1,12}$")
 DEFAULT_CONVERSIONS: tuple[tuple[str, str], ...] = (
     ("Checkout click", "event = '$autocapture' and (elements_chain_href like '%buy.stripe.com%' "
                        "or elements_chain_href like '%checkout.stripe.com%')"),
-    # "Booking click", not the CRO script's "Book a call": "call" is a word the box keeps for the AI receptionist
-    # (core/review_brief._RESERVED), and a conversion's name is printed on the Morning Review. Same condition.
+    # "Booking click": the CRO script's "Book a call", same condition.
     ("Booking click", "event = '$autocapture' and elements_chain_href like '%calendar.app.google%'"),
     ("Contact form sent", "event = '$autocapture' and properties.$event_type = 'submit' "
                           "and properties.$pathname like '/contact%'"),

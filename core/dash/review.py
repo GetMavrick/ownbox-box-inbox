@@ -11,7 +11,7 @@ Three rules that keep it honest:
     (§2.2b). Stale-and-labelled is survivable; stale-and-confident is not.
   · The picker IS the table. Live (today) first, then every stored day newest-first. No day
     can be offered that has nothing behind it, and a deep link to a day with no row says so.
-  · Segments sit in a FIXED order — Unified Inbox, Content, Lead — whatever is installed. A
+  · Segments sit in a FIXED order — Inbox Machine, Content, Lead — whatever is installed. A
     machine with no row renders nothing (owner: "that section is just blank for now"); a rail
     the client owns but has not connected renders its `connect` line, never a failure (§2.4).
 
@@ -34,7 +34,7 @@ from core.logging import get_logger
 
 log = get_logger(__name__)
 
-TITLES = {"customer_voice": "Unified Inbox", "content_machine": "Content", "lead_machine": "Lead"}
+TITLES = {"customer_voice": "Inbox Machine", "content_machine": "Content", "lead_machine": "Lead"}
 
 # THE NOTES BELOW STAY IN THE SOURCE AND NEVER SHIP. The page is a buyer's screen, and the walk
 # (tests/test_a_buyer_can_walk_every_screen.py) reads every byte a buyer is served for the words

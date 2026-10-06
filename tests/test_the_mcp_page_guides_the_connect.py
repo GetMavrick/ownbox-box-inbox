@@ -14,8 +14,7 @@ Held here:
      found, says in plain words what the key is and costs, and is made right there, named ChatGPT;
   4. Connect Claude the same way, with its own fixes;
   5. the key page: shown once, Copy key and Copy address, where it goes in ChatGPT, and the same plain words;
-  6. our own words never say "API key", never name OpenAI or Anthropic, and use no word the box keeps for the
-     receptionist.
+  6. our own words never say "API key", and never name OpenAI or Anthropic.
 Run: python tests/test_the_mcp_page_guides_the_connect.py
 """
 from __future__ import annotations
@@ -129,12 +128,10 @@ ok("...where it goes in ChatGPT, in its words", "<b>Access token / API key</b> (
 ok("...and the same plain words about the key", box_settings.KEY_WORDS in html.unescape(kh))
 
 print("\ntest_our_own_words")
-bad = re.compile(r"\b(phone|phones|ring|call|calls|dial|line|lines|voice|engine)\b", re.I)
 for name, h in (("the page", page), ("the key page", kh)):
     t = text(h)
     ok(f"{name}: never 'API key' in our own words", "api key" not in ours(t).lower(), re.findall(r".{40}API key.{20}", t))
     ok(f"{name}: no OpenAI or Anthropic", not re.search(r"OpenAI|Anthropic", t), re.findall(r".{30}(?:OpenAI|Anthropic)", t))
-    ok(f"{name}: no word the box keeps for the receptionist", not bad.search(t), bad.findall(t))
 ok("the name field's example names no AI (owner 10-03)", 'placeholder="My AI app"' in page
    and not re.search(r'placeholder="[^"]*(?:Grok|Claude|ChatGPT|Gemini)', page))
 ids = re.findall(r'id="(seat-label[^"]*)"', page)

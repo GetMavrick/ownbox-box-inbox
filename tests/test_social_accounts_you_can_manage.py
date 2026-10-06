@@ -14,7 +14,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
   · iMessage is offered as if it could connect;
   · Switch workspace accepts a workspace from outside the account; Replace key keeps the old workspace or picks;
   · a member can change any of it;
-  · a buyer sentence uses a noun reserved for the receptionist machine, or says "API key".
+  · a buyer sentence says "API key".
 Run: python tests/test_social_accounts_you_can_manage.py
 """
 from __future__ import annotations
@@ -218,8 +218,6 @@ def words(html: str) -> str:
 
 
 said = words(page()) + words(page(url="/inbox/connect/instagram/change")) + words(rk)
-RESERVED = re.compile(r"\b(phone|ring|dial|voice|call|line|engine)s?\b", re.I)
-ok("no noun reserved for the receptionist machine", not RESERVED.search(said), RESERVED.findall(said))
 ok("never 'API key'", "API key" not in said)
 
 print()

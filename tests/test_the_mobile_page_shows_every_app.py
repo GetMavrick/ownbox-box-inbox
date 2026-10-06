@@ -111,14 +111,15 @@ try:
 except ImportError:
     HAS_AEO = False
 want = ([BASE] + (["AEO Machine"] if HAS_AEO else [])
-        + (["Unified Inbox"] if HAS_INBOX else []))
+        + (["Inbox Machine"] if HAS_INBOX else []))
 ok(f"one tile per app the box serves: {want}", names == want, str(names))
 for href, src, name in tiles:
     ok(f"{name}: its icon is a real image", owner.get(src).data[:4] == b"\x89PNG", src)
     ok(f"{name}: its link opens something", owner.get(href).status_code in (200, 302, 303), href)
+_core_settings = open(os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "core", "dash", "box_settings.py"), encoding="utf-8").read()
 ok("the tiles are read from the box's routes, not written down in core",
-   "Unified Inbox" not in open(os.path.join(os.path.dirname(os.path.dirname(
-       os.path.abspath(__file__))), "core", "dash", "box_settings.py"), encoding="utf-8").read())
+   "Unified Inbox" not in _core_settings and "Inbox Machine" not in _core_settings)
 
 
 print("\ntest_the_owner_can_give_the_box_its_own_icon")

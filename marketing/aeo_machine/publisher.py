@@ -310,8 +310,8 @@ def address_refusals(slug: str, *, lists=None) -> list:
 def _box_lists() -> dict:
     """The box's own never-use words, competitors and fact list, from its settings.
 
-    These are ENTERED ON THE SETTINGS SCREEN, not shipped in code — OSDev1's ruling on #1552: our
-    receptionist vocabulary is Ownbox's *setting*, and a plumber's box must be able to publish the
+    These are ENTERED ON THE SETTINGS SCREEN, not shipped in code — OSDev1's ruling on #1552: a
+    box's never-use words are its own *setting*, and a plumber's box must be able to publish the
     word "plumbing". A box that has filled nothing in refuses nothing but unsourced numbers.
     """
     return settings.lists()

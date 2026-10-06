@@ -23,7 +23,7 @@ from core import cost_guard, state
 from core.logging import get_logger
 from core.vendors import zernio
 
-from . import email_channel, store, window
+from . import channels, email_channel, store, window
 
 log = get_logger(__name__)
 
@@ -84,8 +84,32 @@ def idem_for(space: str, zcid: str, user_id: str, nonce: str) -> str:
     return f"reply:{space}:{zcid}:{user_id}:{nonce}"
 
 
+# ONE PHOTO OR VIDEO WITH A REPLY (#1990 step 1.6c), held to what Zernio's own composer sends: JPEG, PNG, GIF or MP4,
+# under 25 MB. The type is read from the file's first bytes, never from the name or the browser's word for it.
+MAX_ATTACHMENT = 25 * 1024 * 1024
+_SNIFF = (("image/jpeg", 0, b"\xff\xd8\xff"), ("image/png", 0, b"\x89PNG\r\n\x1a\n"),
+          ("image/gif", 0, b"GIF8"), ("video/mp4", 4, b"ftyp"))
+_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "video/mp4": "mp4"}
+
+
+def checked_attachment(name: str, content: bytes) -> dict:
+    """The file as the gateway sends it ({"name", "content", "mime"}), or ReplyRefused saying what is wrong with it."""
+    content = bytes(content or b"")
+    if not content:
+        raise ReplyRefused("the file is empty", code="attachment_empty")
+    if len(content) > MAX_ATTACHMENT:
+        raise ReplyRefused("files must be under 25 MB", code="attachment_too_large")
+    mime = next((m for m, at, sig in _SNIFF if content[at:at + len(sig)] == sig), None)
+    if not mime:
+        raise ReplyRefused("a photo (JPEG, PNG or GIF) or an MP4 video can be sent", code="attachment_type")
+    stem = "".join(ch for ch in str(name or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1].rsplit(".", 1)[0]
+                   if ch.isalnum() or ch in " -_")[:80].strip() or ("video" if mime == "video/mp4" else "photo")
+    return {"name": f"{stem}.{_EXT[mime]}", "content": content, "mime": mime}
+
+
 def _deliver(*, space: str, zcid: str, conv: dict, account_id: str, text: str, idem: str,
-             buttons: list | None = None, quick_replies: list | None = None) -> str:
+             buttons: list | None = None, quick_replies: list | None = None,
+             attachment: dict | None = None) -> str:
     """Send `text` on a ledger row the caller has ALREADY CLAIMED, and resolve that row. -> the message id.
 
     Shared by a person's reply (`send_reply`) and a machine's (`send_for_machine`), so both get the same
@@ -138,7 +162,9 @@ def _deliver(*, space: str, zcid: str, conv: dict, account_id: str, text: str, i
                 extra["buttons"] = buttons
             if quick_replies:
                 extra["quick_replies"] = quick_replies
-            sent = zernio.client(sp).inbox.send(zcid, account_id, text, **extra)
+            if attachment:
+                extra["attachment"] = attachment
+            sent = zernio.client(sp).inbox.send(channels.vendor_id(zcid), account_id, text, **extra)
     except email_channel.EmailSendIndeterminate as e:
         # INVARIANT 4, ON THE MAIL PATH. A timeout or a disconnect after DATA tells us nothing
         # about whether the message was queued, so it is recorded as "may have landed" and
@@ -189,7 +215,7 @@ def _deliver(*, space: str, zcid: str, conv: dict, account_id: str, text: str, i
 
 
 def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
-               account_id: str | None = None) -> dict:
+               account_id: str | None = None, attachment: dict | None = None) -> dict:
     """Send one human-typed reply. Returns {"status", "message_id"|None, "idem_key"}.
 
     The order below is §6's, and each step is a rule this repo has already paid for:
@@ -207,9 +233,14 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
        abandoned claim, and so is any unexpected raise out of the gateway.
     7. MIRROR into `inbox_messages` as `sent_by='human'` so the thread reads correctly without
        waiting for the next poll.
+
+    `attachment` is one photo or video from `checked_attachment`, on a channel in `channels.ATTACHMENTS`; with one,
+    the words are optional.
     """
     text = str(text or "").strip()
-    if not text:
+    if attachment is not None:
+        attachment = checked_attachment(attachment.get("name") or "", attachment.get("content") or b"")
+    if not text and not attachment:
         raise ReplyRefused("a reply needs words")
     # WHICH PERSON, REQUIRED. No caller may send as "the owner" by omission: since migration 47
     # every session belongs to a real row, so a missing user means the caller could not say who
@@ -268,6 +299,9 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
     why = window.no_send_lane_why(str(conv.get("platform") or ""))
     if why:
         raise ReplyRefused(why)
+    if attachment and conv.get("platform") not in channels.ATTACHMENTS:
+        raise ReplyRefused(f"{channels.label(conv.get('platform'))} replies here are words only",
+                           code="attachment_channel")
 
     # THE BUYER'S SIGNATURE ENDS EVERY EMAIL REPLY (signature.py; owner, 2026-10-02). Added HERE, the one door every
     # send comes through, so the mail that leaves and the thread's own copy of it say the same thing. Never twice.
@@ -325,18 +359,28 @@ def send_reply(*, space: str, zcid: str, text: str, user_id: str, nonce: str,
     # person meant to take it over. Never raises.
     from marketing.customer_voice import claims as _claims
     _claims.take_over(space, zcid)
-    mid = _deliver(space=space, zcid=zcid, conv=conv, account_id=account_id, text=text, idem=idem)
+    mid = _deliver(space=space, zcid=zcid, conv=conv, account_id=account_id, text=text, idem=idem,
+                   attachment=attachment)
     # `sent_by='human'` is the honesty of the screen: the thread says who said every line, and
     # "the machine" and "you" must never be swapped. §3.3 records WHICH human on the ledger.
     store.record_message(space=space, zcid=zcid, zmid=mid, direction="out",
                          sent_by="human", body=text)
+    if attachment:
+        # THE THREAD SHOWS THE FILE AT ONCE, by name and kind; its link arrives with the next poll, which mirrors
+        # Zernio's copy of this message over this one. Never raises: the file has already gone.
+        try:
+            store.record_extras(mid, {"attachments": [{"type": attachment["mime"].split("/")[0], "url": "",
+                                                       "name": attachment["name"], "mimeType": attachment["mime"]}]})
+        except Exception as e:            # noqa: BLE001 — bookkeeping never undoes a sent reply
+            log.warning("inbox.attachment_mirror_failed", extra={"conversation": zcid, "error": type(e).__name__})
     # WHAT THEY SENT, NEXT TO WHAT THE BOX DRAFTED — the one moment both exist. Guarded HERE as
     # well as inside `learn`: the reply has already left, and its success is not hostage to
     # bookkeeping — not to a raising learn, not to a failed import, not to a future edit that
     # drops the inner guard. The suite replaces `learn` with a raise to prove this line.
     try:
         from marketing.customer_voice.drafter import store as _drafts
-        _drafts.learn(space, zcid, text)
+        if text:
+            _drafts.learn(space, zcid, text)
     except Exception as e:                # noqa: BLE001 — bookkeeping never undoes a sent reply
         log.warning("inbox.learn_failed", extra={"space": space, "conversation": zcid,
                                                  "error": type(e).__name__})

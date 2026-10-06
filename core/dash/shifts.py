@@ -69,8 +69,7 @@ _OUTCOME = {"DONE": ("ok", "Done"), "FAILED": ("bad", "Failed"), "MISSED": ("war
             "queued": ("ink", "Waiting"), "starting": ("ink", "Starting"),
             "running": ("ink", "Running")}
 
-# ONE SMALL BLOCK FOR THE RUN LIST, written without the reserved nouns (see the vocabulary test):
-# `font` shorthand instead of the two-word height property, `var(--faint)` for the quiet dot.
+# ONE SMALL BLOCK FOR THE RUN LIST.
 _CSS = """<style>
 .sh-list{padding:4px 16px}
 .sh{display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;padding:10px 0;

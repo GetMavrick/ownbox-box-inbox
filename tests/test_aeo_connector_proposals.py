@@ -12,8 +12,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
   · the owner approves words other than the ones that run (shown arguments != run arguments);
   · a proposal the screens would refuse is accepted (duplicate topic, a weekly number out of range, a
     website that isn't one), or one that was fine a week ago runs although it no longer is;
-  · a connection or a key can be changed by a proposal;
-  · a title the owner reads uses a reserved noun.
+  · a connection or a key can be changed by a proposal.
 
 Run: python tests/test_aeo_connector_proposals.py
 """
@@ -21,7 +20,6 @@ from __future__ import annotations
 
 import os
 import pathlib
-import re
 import sys
 import tempfile
 
@@ -177,15 +175,6 @@ print("\ntest_status_counts_what_waits")
 ask("aeo.propose_setting", {"name": "facts", "value": "Licensed and insured since 2009."})
 st = registry.call("aeo.status", {}, READ)[0]["result"]
 ok("status counts suggestions waiting for the owner's OK", st["suggestions_waiting_for_ok"] == 1, st)
-
-print("\ntest_the_words_the_owner_reads")
-RESERVED = re.compile(r"\b(phone|phones|ring|call|calls|dial|line|voice)\b", re.I)
-words = [reg[n]["title"] for n in NAMES] + [a["title"] for a in approvals.recent(50) + approvals.waiting()]
-ok("no reserved noun in a title the owner reads", not [w for w in words if RESERVED.search(w)],
-   [w for w in words if RESERVED.search(w)])
-said = [proposals._run({"do": "add_topic", "arguments": {"topic": "Zz", "question": "(none)", "write now": "yes"}})
-        ["text"]]
-ok("nor in what an approval reports back", not RESERVED.search(" ".join(said)), said)
 
 print("\n— and this file cannot silently fall out of CI —")
 if (ROOT / ".github").is_dir():

@@ -56,6 +56,37 @@ COMMENTS = "comments"
 NOT_INBOX_LIST = (IMAP, COMMENTS)
 
 
+# CONVERSATION KEYS (#1990 Phase 1, step 1.0). A Zernio conversation id is unique only within the account that owns
+# it: Zernio's own inbox says so (`zernio-dev/unified-inbox`, src/lib/merge.ts, "two accounts can both have a thread id
+# '123'"). Every table here keys a conversation by (space, zernio_conversation_id), so two connected accounts sharing an
+# id would read as one person. The stored key is therefore "<account>::<id>" for every channel, EXCEPT the two that
+# were stored bare before this existed (Instagram, Messenger), which keep their bare id so no row moves; a second
+# account bringing the same bare id is caught at ingest and given its own key (store.conversation_key). The key is
+# opaque everywhere; `vendor_id` turns it back into what Zernio's calls take.
+KEY_SEP = "::"
+BARE_KEYS = frozenset({"messenger", "instagram"})
+# WHERE A PERSON CAN SEND A PHOTO OR VIDEO (#1990 step 1.6c): the channels we carry that Zernio's own capability table
+# (`unified-inbox` src/lib/capabilities.ts, supportsAttachments) lets attach. Email is not among them: the box's mail
+# path sends text.
+ATTACHMENTS = frozenset({"messenger", "instagram"})
+
+
+def conversation_key(platform_key: str, account_id: str, vendor_conversation_id: str, *, clash: bool = False) -> str:
+    """The stored key for one platform conversation. "" for no id."""
+    vid, acct = str(vendor_conversation_id or ""), str(account_id or "")
+    if not vid:
+        return ""
+    if not acct or (platform_key in BARE_KEYS and not clash):
+        return vid
+    return f"{acct}{KEY_SEP}{vid}"
+
+
+def vendor_id(key: str) -> str:
+    """The id Zernio's calls take, from a stored key (a bare key is already one)."""
+    key = str(key or "")
+    return key.split(KEY_SEP, 1)[1] if KEY_SEP in key else key
+
+
 class Channel(NamedTuple):
     vendor: str          # Zernio's `platform=` token
     key: str             # stored in inbox_conversations.platform; keys window._RULES

@@ -315,7 +315,7 @@ def test_the_messages_page_searches_from_its_header():
     page = c.get("/inbox/inbox?channel=messenger").get_data(as_text=True)
     bar = page.split('<div class="bar', 1)[1].split("</div></div>", 1)[0] if '<div class="bar' in page else ""
     ok("the messages page's bar is a search, not a title",
-       'class="barfind"' in bar and 'role="search"' in bar and "Unified Inbox</span>" not in bar, bar[:300])
+       'class="barfind"' in bar and 'role="search"' in bar and "Inbox Machine</span>" not in bar, bar[:300])
     ok("...that keeps the filter he is in", 'name="channel" value="messenger"' in bar, bar[:400])
     ok("...and finds what people wrote, the same as the page's own search",
        "Dana Whitfield" in c.get("/inbox/inbox?q=emergency").get_data(as_text=True))
@@ -327,7 +327,7 @@ def test_the_messages_page_searches_from_its_header():
        "min-height:48px" in css.split(".barfind{", 1)[1].split("}", 1)[0]
        and "max(16px" in css.split(".barfind input{", 1)[1].split("}", 1)[0])
     other = c.get("/inbox/settings").get_data(as_text=True)
-    ok("every other screen keeps its title", "Unified Inbox</span>" in other and 'class="barfind"' not in other)
+    ok("every other screen keeps its title", "Inbox Machine</span>" in other and 'class="barfind"' not in other)
 
 
 if __name__ == "__main__":

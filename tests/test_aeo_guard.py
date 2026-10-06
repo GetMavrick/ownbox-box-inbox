@@ -33,22 +33,22 @@ def rules(text, **kw):
     return {r.rule for r in guard.check(text, **kw)}
 
 
-# Ownbox's own settings, as they will be ENTERED ON THE SETTINGS SCREEN rather than shipped in
-# code. They live in this test because this test is Ownbox's box; the module knows none of them.
+# One box's settings, as a buyer would ENTER THEM ON THE SETTINGS SCREEN rather than ship them in
+# code. They are sample data that lives only in this test; the module knows none of them.
 OURS = dict(
     never_words=("phone", "ring", "call", "dial", "line", "voice"),
     never_phrases=("voice search", "plumbing", "Customer Voice"),
 )
 
 print("-- planted failure, one per rule --")
-ok("the receptionist's words are refused when the box lists them",
+ok("the words on the box's own list are refused",
    rules("Never miss a call again", **OURS) == {"never_word"})
 for word in ("phone", "ring", "call", "dial", "line", "voice"):
     ok(f"   ...{word}", "never_word" in rules(f"Our {word} is open", **OURS))
 ok("'voice search' — the AEO industry's own term, the likeliest violation of all",
    "never_phrase" in rules("Optimise for voice search", **OURS))
 ok("a phrase on the box's list", "never_phrase" in rules("This is the plumbing behind it.", **OURS))
-ok("a product name that collides with the reserved words",
+ok("a product name the box listed as a phrase",
    "never_phrase" in rules("Customer Voice watches your reviews.", **OURS))
 ok("a competitor the box named", "competitor" in rules("Better than Acme CRM.", competitors=("Acme CRM",)))
 
@@ -86,7 +86,7 @@ ok("a number that is not on the box's fact list",
    "unsourced_number" in rules("It costs $500.", allowed_numbers=("499",)))
 
 print("\n-- nothing of ours leaks into a stranger's box (OSDev1, #1552) --")
-ok("a box that supplied no lists publishes the sentence OUR box forbids outright",
+ok("a box that supplied no lists publishes a sentence the sample lists above refuse",
    guard.check("Call our plumbing line for a quote") == [])
 ok("...and a phone-repair shop can write about phones",
    guard.check("We fix phones, and we answer the phone.") == [])

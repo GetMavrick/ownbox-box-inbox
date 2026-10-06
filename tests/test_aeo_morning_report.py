@@ -10,8 +10,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
     the search it answers; one published another day is counted;
   · an article that is waiting on the owner (refused or failed) is not in "needs you", or has no
     way to the Articles screen; one he has since retried still is;
-  · the title the writer gave an article is not kept on its row, so the review cannot name it;
-  · a line uses one of the nouns reserved for the receptionist machine (CLAUDE.md).
+  · the title the writer gave an article is not kept on its row, so the review cannot name it.
 
 Run: python tests/test_aeo_morning_report.py
 """
@@ -20,7 +19,6 @@ from __future__ import annotations
 import datetime as dt
 import os
 import pathlib
-import re
 import sys
 import tempfile
 
@@ -147,11 +145,6 @@ out = core_report.snapshot(TODAY)
 row = core_report.read(TODAY, "aeo_machine")
 ok("the worker's snapshot stores the AEO section", out and "aeo_machine" in out["written"]
    and row and row[0]["title"] == "AEO Machine", out)
-
-print("\ntest_the_words_an_owner_reads")
-_RESERVED = re.compile(r"\b(phones?|rings?|calls?|dial|lines?|voice)\b", re.I)
-words = " ".join(x["text"] for x in r.get("happened", []) + r.get("needs_you", [])) + r["headline"]["label"]
-ok("no reserved noun in any line", not _RESERVED.search(words), _RESERVED.findall(words))
 
 print("\n— and this file cannot silently fall out of CI —")
 if (ROOT / ".github").is_dir():                  # a buyer's box has no repository

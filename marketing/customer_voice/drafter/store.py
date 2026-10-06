@@ -351,6 +351,29 @@ def lessons(space: str, *, limit: int = 4) -> list[dict]:
 
 
 # ── cold pitches turned around (draft.py `PITCH_BACK`) ─────────────────────────────────────────────────────────────
+# THE RECORD OF "NO REPLY NEEDED" (draft.py, NO_REPLY): a draft row with this body, dismissed as it is written.
+NO_REPLY_BODY = "(the box judged that this message needs no reply)"
+
+
+def judged_not_for_a_person(space: str) -> set:
+    """Conversations the box already judged need no person's answer: its newest message from them was judged to need
+    no reply, or any of theirs was a cold pitch (inbox_pitch_backs). For the Morning Review's "Who to answer first"
+    (OSDev1, 2026-10-05: "anything the inbox already treats as a pitch"). Never raises."""
+    try:
+        with state.connect() as c:
+            rows = c.execute(
+                "SELECT d.zernio_conversation_id FROM inbox_drafts d WHERE d.space = ? AND d.body = ? "
+                "   AND d.in_reply_to = (SELECT m.zernio_message_id FROM inbox_messages m WHERE m.space = d.space "
+                "        AND m.zernio_conversation_id = d.zernio_conversation_id AND m.direction = 'in' "
+                "        ORDER BY m.created_at DESC, m.id DESC LIMIT 1) "
+                "UNION SELECT m.zernio_conversation_id FROM inbox_pitch_backs p JOIN inbox_messages m "
+                "   ON m.space = p.space AND m.zernio_message_id = p.in_reply_to WHERE p.space = ?",
+                (space, NO_REPLY_BODY, space)).fetchall()
+        return {r[0] for r in rows}
+    except Exception:                                    # noqa: BLE001 — a filter, never the review
+        return set()
+
+
 def mark_pitch_back(space: str, in_reply_to: str) -> None:
     """Note that the draft answering `in_reply_to` turns a cold pitch around. Never raises."""
     try:

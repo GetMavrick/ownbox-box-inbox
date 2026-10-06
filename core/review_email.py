@@ -75,7 +75,7 @@ def text(e: dict) -> str:
 
 
 def numbers_line(e: dict) -> str:
-    """By the numbers, in one line: "15 waiting on you (Unified Inbox) · 23 emails sent (Lead Machine)".
+    """By the numbers, in one line: "15 waiting on you (Inbox Machine) · 23 emails sent (Lead Machine)".
     The same figures the page draws on its band; "" when the brief carries none."""
     bits = []
     for n in e.get("numbers") or []:

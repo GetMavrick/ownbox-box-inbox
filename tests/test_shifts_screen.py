@@ -8,7 +8,7 @@ its permission sheet (piece 5's sheet).
   · reading the box and reaching the web together needs the owner's tick (§4.3), and a changed
     grant asks again;
   · Try it now queues a trial run; the runner runs it; the screen shows the outcome and its reason;
-  · one ink pill per screen, and none of the reserved nouns in what a buyer reads.
+  · one ink pill per screen.
 
 Run: python tests/test_shifts_screen.py
 """
@@ -97,15 +97,6 @@ def ink_pills(page: str) -> list:
             out.append(re.sub(r"\s+", " ", b.group(2)).strip())
     out += [re.sub(r"<[^>]+>", "", a) for a in re.findall(r'<a class="btn"[^>]*>(.*?)</a>', m)]
     return out
-
-
-# SHIPPED TEXT ONLY: the page minus the box's shared stylesheet, which its own test measures.
-_RESERVED = re.compile(r"\b(phones?|rings?|calls?|dial|lines?|voice)\b", re.I)
-
-
-def reserved(page: str) -> list:
-    text = re.sub(r"<style>.*?</style>", "", main(page), flags=re.S)
-    return sorted(set(m.lower() for m in _RESERVED.findall(text)))
 
 
 owner = app.test_client()
@@ -236,7 +227,6 @@ ok("the risk sentence is on the form, with its tick", html.escape(hire.RISK) in 
 ok("one ink pill, and it is Save", ink_pills(page) == ["Save"], str(ink_pills(page)))
 ok("field text is 16px (no zoom on focus) and times are styled as fields",
    "input[type=time]" in page)
-ok("none of the reserved nouns", reserved(page) == [], str(reserved(page)))
 
 print("\ntest_plain_words_before_anything_is_saved")
 r = owner.post("/settings/shifts/new", data={"title": "", "job": "", "days0": "Mon-Fri", "start0": ""})
@@ -304,7 +294,6 @@ ok("switching off is a ghost, removing is a danger folded away",
 ok("what it may do is its permission sheet", "Read your conversations" in page
    and "Send, publish or pay for anything" in page)
 ok("no runs yet says what a run will be", "No runs yet" in page)
-ok("none of the reserved nouns", reserved(page) == [], str(reserved(page)))
 page = owner.get("/settings/shifts").get_data(as_text=True)
 ok("the list shows it, on, with its times", "Trial follow-up" in page and ">On<" in page
    and "Weekdays at 07:30; Sat at 09:00" in page

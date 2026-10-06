@@ -146,7 +146,7 @@ def build(*, seat: dict) -> dict:
 
 
 _BOX_WORDS = {"base": "This is the Base Machine.", "lead": "This box runs the Lead Machine.",
-              "content": "This box runs the Content Machine.", "customer_voice": "This box runs the Unified Inbox."}
+              "content": "This box runs the Content Machine.", "customer_voice": "This box runs the Inbox Machine."}
 
 
 def _needs_nothing(t: dict) -> bool:

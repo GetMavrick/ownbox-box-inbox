@@ -9,6 +9,8 @@ the profile-membership isolation backstop.
 Resource facades are added here as departments need them (inbox, accounts, posts
 today; analytics/ads/contacts next — each on the same contract).
 """
+from urllib.parse import quote
+
 from core.logging import get_logger
 
 from . import isolation, model, transport
@@ -64,7 +66,8 @@ class _InboxResource:
                 "next_cursor": model.cursor(r)}
 
     def send(self, conversation_id: str, account_id: str, text: str, *,
-             tag: str | None = None, quick_replies=None, buttons=None) -> dict:
+             tag: str | None = None, quick_replies=None, buttons=None,
+             attachment: dict | None = None) -> dict:
         """Send ONE message → {"message_id"}. MUTATING + irreversible. Fail-closed
         on a missing key or account_id; the account must be a member of the Space's
         profile (isolation backstop); the tag becomes the messaging_type+message_tag
@@ -73,7 +76,11 @@ class _InboxResource:
 
         `quick_replies` (tap → sends the title back as an inbound message) and `buttons`
         (e.g. a URL button) are passed straight through to send_inbox_message — the funnel's
-        DM buttons. Callers build the wire shape via marketing.content_machine.leadmagnet.buttons."""
+        DM buttons. Callers build the wire shape via marketing.content_machine.leadmagnet.buttons.
+
+        `attachment` ({"name", "content": bytes, "mime"}) sends one file with the text. It goes as the multipart form
+        Zernio's own inbox app forwards (`unified-inbox` `forwardMultipart`: accountId, message, attachment), through the
+        SDK's `_post(files=…)`, because the typed `send_inbox_message` takes only a link. The caller checks the file."""
         s = self._s
         if not s.key:
             raise ZernioError("send refused: no per-Space Zernio key resolved "
@@ -83,6 +90,15 @@ class _InboxResource:
         isolation.assert_member(account_id, profile_id=s.profile_id, api_key=s.key)
 
         def c():
+            if attachment:
+                parts = [("accountId", (None, account_id)),
+                         ("attachment", (attachment["name"], attachment["content"], attachment["mime"]))]
+                if text:
+                    parts.append(("message", (None, text)))
+                if tag:
+                    parts += [("messagingType", (None, _MESSAGING_TYPE_TAGGED)), ("messageTag", (None, tag))]
+                return transport.raw_client(s.key, max_retries=1)._post(
+                    f"/v1/inbox/conversations/{quote(str(conversation_id), safe='')}/messages", files=parts)
             kw = {"message": text}
             if tag:
                 kw["messaging_type"] = _MESSAGING_TYPE_TAGGED

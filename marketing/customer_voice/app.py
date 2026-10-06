@@ -1174,7 +1174,7 @@ shell.register_section(
     # Inbox not Inbox."* It is the product's name and the dashboard card already used it, so the
     # rail was the one surface still calling it something shorter than it is called everywhere
     # else. `Messages` below is the SCREEN inside it and keeps its own name.
-    "inbox", order=10, machine="customer_voice", title="Unified Inbox",
+    "inbox", order=10, machine="customer_voice", title="Inbox Machine",
     href="/inbox/", icon=_TAB_ICON["/inbox/inbox"],
     items=[
         {"key": "messages", "label": "Messages", "href": "/inbox/inbox",
@@ -1334,7 +1334,7 @@ def _tabbar(here: str) -> str:
 # THE APP'S ONE NAME. Every inbox screen installs as this and titles its tab with it (owner,
 # 2026-09-29: "We want every screen of the unified inbox to bookmark the same way"). The manifest's
 # short_name and the iOS title tag both read it, so the two cannot drift.
-APP_TITLE = "Unified Inbox"
+APP_TITLE = "Inbox Machine"
 
 THEME_COOKIE = "aios_voice_theme"
 # THE BAR BEHIND THE CLOCK IS THE PAGE'S GROUND. Light was the grey-blue of the inbox
@@ -2326,7 +2326,7 @@ def _stopped_note() -> str:
         return ""
     return ('<div class="quiet" style="margin-bottom:12px">Your box is stopped, so no new '
             'messages are arriving. You can still reply to the ones here. '
-            '<a href="/dashboard" style="color:var(--href)">Start it again</a>.</div>')
+            '<a href="/settings/access#stop" style="color:var(--href)">Start it again</a>.</div>')
 
 
 # ── THE ASK: the one thing that was never wired, and without it none of push exists ─────────────
@@ -3547,7 +3547,7 @@ self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim(
 self.addEventListener('push', function (event) {
   var d = {};
   try { d = event.data ? event.data.json() : {}; } catch (err) { d = {}; }
-  var title = d.title || 'Unified Inbox';
+  var title = d.title || 'Inbox Machine';
   var body = d.body || 'Something new came in.';
   event.waitUntil(self.registration.showNotification(title, {
     body: body,
@@ -5579,3 +5579,7 @@ def r_snippets():
                      f'time{"" if int(r["uses"]) == 1 else "s"}</div>{form(r)}</div>' for r in rows)
     mine = ('<h2 style="margin-top:22px">Your saved replies</h2>' + listed) if rows else ""
     return _shell(head + add + mine + _back_link(), here="/inbox/snippets"), 200
+
+
+# THE ROUTES ZERNIO'S INBOX SCREENS TALK TO (#1990 step 1.2), on this blueprint so `_gate` admits them or nobody.
+from . import app_api  # noqa: E402,F401

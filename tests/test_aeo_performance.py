@@ -12,8 +12,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
   · the numbers are not limited to this website's host when AEO Settings names it;
   · a PostHog that is down breaks the Performance page instead of costing it its numbers;
   · PostHog is asked again on every page open (the numbers are cached);
-  · a member, or a GET, changes anything;
-  · a screen uses one of the nouns reserved for the receptionist machine (CLAUDE.md).
+  · a member, or a GET, changes anything.
 
 NO NETWORK. `posthog.net` is replaced with a scripted stand-in that records every request.
 
@@ -306,17 +305,6 @@ ok("PostHog down: performance() says why and never raises",
 use(Net(answers={"countIf(timestamp >= now()": "nope"}))
 ok("an answer that cannot be read: says so", posthog.performance().get("why") == posthog.UNREADABLE)
 ok("no credential is ever in what performance() returns", KEY not in repr(posthog.performance()))
-
-print("\ntest_the_words_a_buyer_reads")
-_RESERVED = re.compile(r"\b(phones?|rings?|calls?|dial|lines?|voice)\b", re.I)
-use(Net(answers=WEEK))
-for path in ("/aeo/sources", "/aeo/sources/posthog", "/aeo/performance"):
-    for who in (owner, member):
-        text = re.sub(r"<[^>]+>", " ", main_of(who.get(path).get_data(as_text=True)))
-        ok(f"{path} uses none of the reserved nouns", not _RESERVED.search(text),
-           str(_RESERVED.findall(text)))
-for sentence in (v for k, v in vars(posthog).items() if k.isupper() and isinstance(v, str)):
-    ok(f"posthog's sentence has no reserved noun: {sentence[:40]}", not _RESERVED.search(sentence))
 
 print("\n— and this file cannot silently fall out of CI —")
 if (ROOT / ".github").is_dir():                  # a buyer's box has no repository

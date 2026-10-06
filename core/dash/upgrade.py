@@ -56,7 +56,7 @@ FEATURE_WORDS = {
     "coworkers": ("Coworkers", "AI coworkers that work on a schedule, stay inside what you let "
                                "them touch, and tell you what they did"),
     "machine:aeo": ("AEO Machine", "Helps your business show up in search and in AI answers"),
-    "machine:inbox": ("Unified Inbox", "Every customer message in one place, with replies drafted "
+    "machine:inbox": ("Inbox Machine", "Every customer message in one place, with replies drafted "
                                        "for you"),
 }
 

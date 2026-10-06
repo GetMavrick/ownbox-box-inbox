@@ -127,7 +127,7 @@ ok("their screens still mount", {"marketing.aeo_machine.app", "marketing.custome
 ok("and each module is listed once", len(base["modules"]) == len(set(base["modules"]))
    and len(base["web"]) == len(set(base["web"])))
 ok("each declares its product name for the provisioner",
-   base["products"] == {"machine:aeo": "AEO Machine", "machine:inbox": "Unified Inbox"}, base["products"])
+   base["products"] == {"machine:aeo": "AEO Machine", "machine:inbox": "Inbox Machine"}, base["products"])
 cfg_text = (ROOT / "config" / "aios.config.yaml").read_text()
 import re  # noqa: E402
 ok("the tracked config no longer lists them", not re.search(r"^machine_features:", cfg_text, re.M)

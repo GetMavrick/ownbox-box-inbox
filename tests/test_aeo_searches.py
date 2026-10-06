@@ -13,7 +13,7 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
   · Google is asked again on every page open, or a failure is asked again at once;
   · Google not connected shows zeros instead of the next step, or a member is offered a door
     they are refused at;
-  · a search is not escaped, or a screen uses a noun reserved for the receptionist machine.
+  · a search is not escaped.
 
 NO NETWORK. The Search Console module's `net` is replaced with a stand-in that records requests.
 
@@ -225,19 +225,6 @@ page = main_of(owner.get("/aeo/sources").get_data(as_text=True))
 ok("Data sources lists Google Analytics as Coming soon, with no door",
    "Google Analytics" in page and "Coming soon." in page
    and not re.search(r"Google Analytics[^<]*</h2>(?:(?!</div>).)*<a ", page, re.S))
-
-print("\ntest_the_words_a_buyer_reads")
-_RESERVED = re.compile(r"\b(phones?|rings?|calls?|dial|lines?|voice)\b", re.I)
-signed_in()
-use(Net(rows=ROWS))
-for who in (owner, member):
-    for path in ("/aeo/performance", "/aeo/sources"):
-        raw = who.get(path).get_data(as_text=True)
-        text = re.sub(r"<[^>]+>", " ", re.sub(r"<(style|script)\b.*?</\1>", " ", main_of(raw), flags=re.S))
-        ok(f"{path} uses none of the reserved nouns", not _RESERVED.search(text),
-           str(_RESERVED.findall(text)))
-for v in (searches.SIGNED_OUT, searches.UNREACHABLE):
-    ok(f"searches' sentence has no reserved noun: {v[:40]}", not _RESERVED.search(v))
 
 print("\n— and this file cannot silently fall out of CI —")
 if (ROOT / ".github").is_dir():                  # a buyer's box has no repository

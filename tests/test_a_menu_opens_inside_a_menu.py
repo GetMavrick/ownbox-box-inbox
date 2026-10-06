@@ -97,8 +97,8 @@ if _inbox.is_file():
     ok("the inbox's Settings is a menu with a row per setting home",
        r.level == 2 and r.title == "Settings" and [i.label for i in r.items] == list(rows.values()),
        str([i.label for i in r.items]))
-    ok("...whose back arrow returns to the Unified Inbox", r.back == "/inbox/" and
-       r.back_label == "Unified Inbox", f"{r.back} {r.back_label}")
+    ok("...whose back arrow returns to the Inbox Machine", r.back == "/inbox/" and
+       r.back_label == "Inbox Machine", f"{r.back} {r.back_label}")
     ok("...and it is not a top-level entry", not any(i.key == "inbox_settings" for i in shell.rail("/").items))
     for path, label in rows.items():
         html_ = c.get(path).get_data(as_text=True)

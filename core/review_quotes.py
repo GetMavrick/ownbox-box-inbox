@@ -5,8 +5,7 @@ everybody. That should be the headline."* Approved with the Morning Review scope
 docs/SCOPE_MORNING_REVIEW_V2.md). Original lines written for Ownbox, so none needs an attribution and none can be
 misquoted. Not a well-known saying reworded either (OSDev1's review of #1779 found five, and a second pass
 found more: "Bloom where you're planted", "You can do hard things"). AND NO SEASONS: the same line goes to a
-box in Sydney, where 1 March is autumn and 21 December is the longest day. Edited here, and nowhere else: tests/test_morning_review_v2.py holds every date to one quote, short,
-and free of the words reserved for the receptionist machine.
+box in Sydney, where 1 March is autumn and 21 December is the longest day. Edited here, and nowhere else: tests/test_morning_review_v2.py holds every date to one quote, and short.
 """
 from __future__ import annotations
 

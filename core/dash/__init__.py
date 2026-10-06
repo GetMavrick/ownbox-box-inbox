@@ -1488,12 +1488,13 @@ def _managed_body() -> str:
 # POST, NEVER GET. A link preview, a crawler or a prefetch issues GETs, and any one of them would
 # otherwise stop a business's box without a human touching anything.
 def _pause_redirect():
-    """Back where they were — through `landing()`, never a path spelled out here.
+    """Back where they were: the page that sent `back` (the danger zone, since 2026-10-05), checked by `safe_next`;
+    else through `landing()`, never a path spelled out here.
 
     The lead machine's version redirected to `/dash/home`, which is that machine's own page and
     does not exist on the box we sell: pressing Stop there would have answered 404. This is the
     same lesson the front door learned today, applied in the one place it would bite next."""
-    return redirect(landing())
+    return redirect(safe_next(request.form.get("back") or "") or landing())
 
 
 @blueprint.post("/dash/stop")

@@ -92,9 +92,8 @@ def _reply_tool() -> str | None:
     return next((n for n in sorted(tools.registry()) if n.endswith(".propose_reply")), None)
 
 
-# HOW AN ID IS NAMED TO THE OWNER. "phone" is reserved for the receptionist machine in anything a buyer reads (owner,
-# 2026-09-22), so a number is "number". Every other kind reads as itself.
-_LABEL = {"phone": "number", "web": "website visit"}
+# HOW AN ID IS NAMED TO THE OWNER. Every kind reads as itself, but a visit.
+_LABEL = {"web": "website visit"}
 
 
 def _render(r: dict) -> str:

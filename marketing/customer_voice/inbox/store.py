@@ -143,6 +143,20 @@ def upsert_conversation(*, space: str, zcid: str, platform: str = "messenger",
     return dict(row)
 
 
+def conversation_key(space: str, platform_key: str, account_id: str, vendor_conversation_id: str) -> str:
+    """The key to store a platform conversation under (channels.conversation_key), with the guard for the two channels
+    that keep bare ids: when the bare id is already a conversation of ANOTHER account, this one gets its own key rather
+    than being merged into a stranger's thread. Logged, because it means Zernio ids do repeat across accounts here."""
+    from . import channels as _ch
+    key = _ch.conversation_key(platform_key, account_id, vendor_conversation_id)
+    if key and platform_key in _ch.BARE_KEYS and account_id and _ch.KEY_SEP not in key:
+        have = get_conversation(space, key)
+        if have and have.get("account_id") and str(have["account_id"]) != str(account_id):
+            log.warning("inbox.conversation_id_clash", space=space, platform=platform_key)
+            return _ch.conversation_key(platform_key, account_id, vendor_conversation_id, clash=True)
+    return key
+
+
 def get_conversation(space: str, zcid: str) -> dict | None:
     with state.connect() as c:
         row = c.execute(
@@ -160,7 +174,37 @@ def get_conversation(space: str, zcid: str) -> dict | None:
 # header, the filter, the morning count and the notice all leave it out, through this one string.
 # A MACHINE IS NOT WAITING ON THE OWNER (plan #1857 H7): "waiting on you" read 120, the oldest 317 days, counting
 # newsletters, bounces and his own mail. `automated` 1 or 2 leaves waiting; NULL (never judged) still counts.
-_WAITING = f"k.opted_out = 0 AND COALESCE(k.automated, 0) = 0 AND {_NEWEST_IS_INBOUND} AND {_UNCLAIMED}"
+# WHAT A PERSON DID WITH IT FROM THE LIST (owner 2026-10-06: "slide a message to change the disposition archive or
+# Delete"; table inbox_conversation_marks). Done lasts UNTIL THEY WRITE AGAIN, so a customer is never lost in an
+# archive: "they wrote again" is an inbound message whose own send time (the mirror time when the platform gave none)
+# is newer than the mark, so an old message mirrored late brings nothing back. DELETE IS GONE FOR GOOD (owner,
+# 2026-10-06, asked whether Delete should come back when they write again or stay gone like Junk: "Yes", gone): it
+# stays in Trash whatever they send, until a person restores it. Junk, a disposition, stays out of the inbox too.
+# Each is a fixed fragment on alias `k`, like the ones above.
+DISPOSITIONS = ("lead", "booked", "customer", "junk")
+
+
+def _mark(col: str) -> str:
+    return ("(SELECT x.%s FROM inbox_conversation_marks x WHERE x.space = k.space "
+            " AND x.zernio_conversation_id = k.zernio_conversation_id)" % col)
+
+
+_LAST_IN = (
+    "(SELECT MAX(COALESCE(s.sent_at, m.created_at)) FROM inbox_messages m "
+    "   LEFT JOIN inbox_message_sent s ON s.message_id = m.id "
+    "  WHERE m.space = k.space AND m.zernio_conversation_id = k.zernio_conversation_id AND m.direction = 'in')")
+_ARCHIVED = f"COALESCE({_mark('archived_at')} > COALESCE({_LAST_IN}, ''), 0)"
+_DELETED = f"COALESCE({_mark('deleted_at')} IS NOT NULL, 0)"
+_JUNK = f"COALESCE({_mark('disposition')} = 'junk', 0)"
+_IN_INBOX = f"(NOT {_DELETED} AND NOT {_ARCHIVED} AND NOT {_JUNK})"
+# THE LIST'S VIEWS. Trash wins over junk (a deleted junk thread is in Trash), and only the inbox hides junk.
+_VIEWS = {"inbox": _IN_INBOX, "archived": f"({_ARCHIVED} AND NOT {_DELETED} AND NOT {_JUNK})",
+          "deleted": _DELETED, "junk": f"({_JUNK} AND NOT {_DELETED})"}
+
+# AND NOT SOMETHING A PERSON ALREADY DEALT WITH. Done, Trash and Junk are a person saying it needs no answer; the
+# count that nags him leaves them out (Done until they write again; Trash and Junk for good).
+_WAITING = (f"k.opted_out = 0 AND COALESCE(k.automated, 0) = 0 AND {_NEWEST_IS_INBOUND} AND {_UNCLAIMED} "
+            f"AND {_IN_INBOX}")
 
 # CAME FROM AN AD HE PAID FOR. `ad_meta_id` and `ad_title` are written by the poller at INSERT for
 # a click-to-message conversation and by nothing else; the row already wears a "From <ad_title>"
@@ -175,7 +219,8 @@ _FROM_AD = "TRIM(COALESCE(k.ad_meta_id, '')) <> ''"
 
 def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
                        platform: str | None = None, waiting: bool = False,
-                       from_ad: bool = False) -> list[dict]:
+                       from_ad: bool = False, view: str | None = None,
+                       disposition: str | None = None) -> list[dict]:
     """The conversations in one Space, newest inbound first — the inbox screen.
 
     THE STORE HAD NO READER A SCREEN COULD USE. `get_conversation` answers about ONE, by id, and
@@ -209,6 +254,13 @@ def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
         where += f" AND {_WAITING}"
     if from_ad:
         where += f" AND {_FROM_AD}"
+    # THE LIST'S VIEWS (inbox, archived, deleted, junk) and a disposition, each a fixed fragment or a bound value.
+    # No view is every conversation, as before: the screens that never offered Done or Delete still show it all.
+    if view:
+        where += f" AND {_VIEWS[view]}"
+    if disposition:
+        where += f" AND {_mark('disposition')} = ?"
+        args.append(str(disposition))
     args += [int(limit), int(offset)]
     with state.connect() as c:
         rows = c.execute(
@@ -226,12 +278,53 @@ def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
             f"       ({_NEWEST_BODY}) AS preview, "
             f"       ({_HAS_INBOUND}) AS has_inbound, "
             f"       ({_UNREAD}) AS unread, "
-            f"       {_HELD_BY} AS held_by "
+            f"       {_HELD_BY} AS held_by, "
+            f"       {_mark('disposition')} AS disposition, "
+            f"       CASE WHEN {_DELETED} THEN 'deleted' WHEN {_ARCHIVED} THEN 'archived' ELSE 'active' END "
+            "           AS list_status "
             "  FROM inbox_conversations k "
             f" WHERE {where} "
             " ORDER BY (k.last_inbound_at IS NULL), k.last_inbound_at DESC, k.id ASC "
             " LIMIT ? OFFSET ?", tuple(args)).fetchall()
     return [dict(r) for r in rows]
+
+
+_KEEP = object()
+
+
+def mark_conversation(space: str, zcid: str, *, status: str | None = None, disposition=_KEEP,
+                      set_by: str | None = None) -> dict:
+    """Done, Delete, back to the inbox, or a disposition, from the list. -> {"status", "disposition"} as now stored.
+
+    `status` is "active" (back in the inbox), "archived" (Done) or "deleted" (Trash); one at a time, so the newest wins.
+    `disposition` is one of DISPOSITIONS or None to clear it; left out, it is kept. Raises ValueError on anything else.
+    Never a row DELETE and never a vendor call: what the platform or the mailbox holds is untouched.
+    """
+    if status not in (None, "active", "archived", "deleted"):
+        raise ValueError("status is active, archived or deleted")
+    if disposition is not _KEEP and disposition is not None and disposition not in DISPOSITIONS:
+        raise ValueError("disposition is one of " + ", ".join(DISPOSITIONS))
+    now = state._now()
+    with state.connect() as c:
+        c.execute("INSERT OR IGNORE INTO inbox_conversation_marks (space, zernio_conversation_id, updated_at) "
+                  "VALUES (?,?,?)", (space, str(zcid), now))
+        if status is not None:
+            c.execute("UPDATE inbox_conversation_marks SET archived_at = ?, deleted_at = ? "
+                      "WHERE space = ? AND zernio_conversation_id = ?",
+                      (now if status == "archived" else None, now if status == "deleted" else None, space, str(zcid)))
+        if disposition is not _KEEP:
+            c.execute("UPDATE inbox_conversation_marks SET disposition = ? "
+                      "WHERE space = ? AND zernio_conversation_id = ?", (disposition, space, str(zcid)))
+        c.execute("UPDATE inbox_conversation_marks SET set_by = ?, updated_at = ? "
+                  "WHERE space = ? AND zernio_conversation_id = ?", (set_by, now, space, str(zcid)))
+        row = c.execute(
+            f"SELECT {_mark('disposition')} AS disposition, CASE WHEN {_DELETED} THEN 'deleted' "
+            f"  WHEN {_ARCHIVED} THEN 'archived' ELSE 'active' END AS status "
+            "  FROM inbox_conversations k WHERE k.space = ? AND k.zernio_conversation_id = ?",
+            (space, str(zcid))).fetchone()
+    log.info("inbox.conversation_marked", space=space, conversation=zcid, status=status,
+             disposition=None if disposition is _KEEP else disposition, user=set_by)
+    return dict(row) if row else {"status": status or "active", "disposition": None}
 
 
 def platforms_present(space: str) -> list[dict]:
@@ -362,13 +455,17 @@ def messages_for(space: str, zcid: str, *, limit: int = 200) -> list[dict]:
             "SELECT m.*, l.user_id AS sender_user_id, u.name AS sender_name, "
             "       u.email AS sender_email, "
             "       d.body_text AS full_text, d.headers AS raw_headers, "
-            "       s.sent_at AS sent_at "
+            "       s.sent_at AS sent_at, "
+            "       x.attachments AS x_attachments, x.delivery_status AS x_delivery_status, "
+            "       x.delivery_error AS x_delivery_error, x.reactions AS x_reactions, "
+            "       x.edited AS x_edited, x.deleted AS x_deleted "
             "  FROM inbox_messages m "
             "  LEFT JOIN inbox_send_ledger l "
             "         ON l.space = m.space AND l.zernio_message_id = m.zernio_message_id "
             "  LEFT JOIN users u ON u.id = l.user_id "
             "  LEFT JOIN inbox_message_detail d ON d.message_id = m.id "
             "  LEFT JOIN inbox_message_sent s ON s.message_id = m.id "
+            "  LEFT JOIN inbox_message_extras x ON x.message_id = m.id "
             " WHERE m.space = ? AND m.zernio_conversation_id = ? "
             " ORDER BY m.created_at ASC, m.id ASC LIMIT ?",
             (space, zcid, int(limit))).fetchall()
@@ -380,8 +477,36 @@ def messages_for(space: str, zcid: str, *, limit: int = 200) -> list[dict]:
         except Exception:                                # noqa: BLE001 — unreadable JSON is none
             got = {}
         row["headers"] = got if isinstance(got, dict) else {}
+        for k in ("x_attachments", "x_reactions"):
+            try:
+                v = json.loads(row.get(k) or "[]")
+            except Exception:                            # noqa: BLE001 — unreadable JSON is none
+                v = []
+            row[k] = v if isinstance(v, list) else []
         out.append(row)
     return out
+
+
+def record_extras(zernio_message_id: str, extras: dict) -> bool:
+    """Keep what a message carries beside its words (inbox_message_extras), current on every mirror. -> written."""
+    if not zernio_message_id or not extras:
+        return False
+    with state.connect() as c:
+        row = c.execute("SELECT id FROM inbox_messages WHERE zernio_message_id = ?",
+                        (str(zernio_message_id),)).fetchone()
+        if not row:
+            return False
+        c.execute(
+            "INSERT INTO inbox_message_extras (message_id, attachments, delivery_status, delivery_error, reactions, "
+            "edited, deleted, updated_at) VALUES (?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(message_id) DO UPDATE SET attachments = excluded.attachments, "
+            "delivery_status = excluded.delivery_status, delivery_error = excluded.delivery_error, "
+            "reactions = excluded.reactions, edited = excluded.edited, deleted = excluded.deleted, "
+            "updated_at = excluded.updated_at",
+            (row["id"], json.dumps(extras.get("attachments") or []), extras.get("deliveryStatus"),
+             extras.get("deliveryError"), json.dumps(extras.get("reactions") or []),
+             1 if extras.get("isEdited") else 0, 1 if extras.get("isDeleted") else 0, state._now()))
+    return True
 
 
 def set_opted_out(space: str, zcid: str) -> None:
