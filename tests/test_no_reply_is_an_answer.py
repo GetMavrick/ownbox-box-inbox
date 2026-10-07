@@ -67,7 +67,10 @@ ok("...and forbids the sentence the owner actually read",
    "wrong address" in S and "sent this by mistake" in S, S[-300:])
 ok("it names the case where nobody needs an answer", "NOBODY NEEDS AN ANSWER" in S)
 ok("...and gives an exact token for it", draft.NO_REPLY in S)
-ok("...and says choosing it is a real answer, not a failure", "costs the business nothing" in S)
+# WHEN IN DOUBT, DRAFT (owner, 2026-10-06: "Please slightly error on the side of drafting too many"): no reply is
+# still an answer, but only when nobody is waiting; tests/test_drafts_lean_to_drafting.py holds the rest.
+ok("...and keeps it for when nobody is waiting: in doubt, it drafts",
+   "Choose 3 only when you are sure no person is waiting" in S and "When in doubt, draft" in S)
 
 
 # ── 2. a decision not to answer ─────────────────────────────────────────────────────────────

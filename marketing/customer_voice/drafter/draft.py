@@ -42,7 +42,8 @@ SYSTEM = (
     # contains, and the third one has to be allowed to produce nothing at all.
     "\nBefore writing, decide which of these it is.\n"
     "1. SOMEONE IS ASKING THE BUSINESS SOMETHING, or replying to it, as its customer or would-be customer. Draft "
-    "the reply.\n"
+    "the reply. The same goes for someone the owner knows (a friend, a colleague, a contact) chatting, making plans "
+    "or answering something the owner said: reply as the owner would, in their own easy tone.\n"
     "2. THE BUSINESS IS THE ONE WHO STARTED IT, OR IS THE CUSTOMER HERE — a job the owner applied for, an order the "
     "business placed, a support ticket or enquiry it opened, a supplier, landlord or service it uses, an answer to "
     "something it sent. The sign is that THEY write to the business as an employer, recruiter, shop, supplier or "
@@ -51,11 +52,16 @@ SYSTEM = (
     "answers the recruiter, the buyer answers the shop. Never write as the business they are dealing with, never "
     "offer the business's own services to them, never sell. Never ask them who they are or suggest they have the "
     "wrong address.\n"
+    # WHEN IN DOUBT, DRAFT (owner, 2026-10-06: "please make sure that all the right emails are getting drafts ...
+    # Please slightly error on the side of drafting too many"). Until then this said a reply nobody needed was worse
+    # than none, and a friend making plans on Instagram was left with no draft. A person reads every draft and throws
+    # one away in a second; a person left waiting is the costlier mistake.
     "3. NOBODY NEEDS AN ANSWER — an announcement, a notice, a receipt, a newsletter, an "
-    "automated report. Reply with exactly NO_REPLY_NEEDED and nothing else.\n"
-    "Choosing 3 is a real answer and costs the business nothing. A reply nobody needed is worse "
-    "than no reply at all, and saying 'you may have sent this by mistake' to a message that was "
-    "not a mistake is the worst of both."
+    "automated report, a message a system sent that no person reads replies to. Reply with exactly NO_REPLY_NEEDED "
+    "and nothing else.\n"
+    "Choose 3 only when you are sure no person is waiting to hear back. When in doubt, draft: a person reads every "
+    "draft and can throw one away in a second, while someone left without a reply may be a customer or a friend "
+    "lost. Never say 'you may have sent this by mistake' to a message that was not a mistake."
 )
 
 # COLD PITCHES, TURNED AROUND (owner, 2026-10-02: "I get tons of cold email and I want to advertise right back to them
@@ -414,6 +420,43 @@ def rewrite_one(*, space: str, row: dict) -> bool:
     return True
 
 
+def recheck_one(*, space: str, row: dict) -> bool:
+    """Ask again, under the rules the box runs now, about a message it once judged needed no reply. One model call.
+    A reply now is a draft that waits like any other; no reply again marks the rules so it is never asked twice."""
+    platform = row.get("platform")
+    inbound = str(row.get("asked") or "").strip()[:_MAX_INBOUND]
+    did = str(row.get("id") or "")
+    if not inbound or not did:
+        return False
+    try:
+        history = store.history_for(space, row["zcid"])
+    except Exception:                            # noqa: BLE001 — ask on the inbound alone
+        history = []
+    now = rules(platform)
+    text = _ask_model(space=space, zcid=row["zcid"], prompt=_prompt(space=space, zcid=row["zcid"], inbound=inbound,
+                                                                     history=history),
+                      platform=platform, job_id=f"recheck:{space}:{did}:{now}")
+    if not text:
+        return False
+    if text.strip().upper().startswith(NO_REPLY):
+        store.mark_rules(space, did, now)
+        log.info("drafter.recheck_no_reply", extra={"space": space, "conversation": row["zcid"]})
+        return True
+    pitched = text.upper().startswith(PITCH_BACK)
+    if pitched:
+        pb = pitch_back()
+        text = _turned_around(text, pb["link"]) if pb["on"] else text[len(PITCH_BACK):].strip()
+        pitched = pitched and pb["on"]
+        if not text:
+            return False
+    if not store.revive(space=space, draft_id=did, body=text, rules=now):
+        return False
+    if pitched:
+        store.mark_pitch_back(space, str(row.get("in_reply_to") or ""))
+    log.info("drafter.rechecked", extra={"space": space, "conversation": row["zcid"], "chars": len(text)})
+    return True
+
+
 def _note_recovered() -> None:
     """Anthropic answered, so whatever it last refused for is over. Only writes on a CHANGE."""
     try:
@@ -521,13 +564,18 @@ def sweep(space: str) -> dict:
     ours = who_wrote.our_addresses()
     pitch_back = _pitch_back_on()
     people, refused = [], {}
-    for row in waiting:
+
+    def refuse(row) -> str:
         reason = who_wrote.why(row.get("sender") or "", row.get("headers"), ours=ours)
         # A COLD PITCH STILL REACHES THE PITCH-BACK (plan #1857 H7, OSDev4's F4 #1852): most cold-email tools add
         # List-Unsubscribe, so while pitch-back is on, a message whose only machine sign is that header is drafted.
         if reason and pitch_back and who_wrote.level(row.get("sender") or "", row.get("headers"),
                                                      ours=ours) == who_wrote.LIST_ONLY:
             reason = ""
+        return reason
+
+    for row in waiting:
+        reason = refuse(row)
         if reason:
             refused[reason] = refused.get(reason, 0) + 1
         else:
@@ -560,8 +608,29 @@ def sweep(space: str) -> dict:
     # THEN THE STALE ONES, with whatever the spend bound has left (owner, 2026-10-04: drafts still waiting are
     # rewritten when the drafter changes). New messages come first: a person waiting on a first draft beats a
     # draft that only needs better words.
-    rewritten = 0
+    # THEN A "NO REPLY NEEDED" MADE UNDER OLDER RULES, asked once more (owner, 2026-10-06: "slightly error on the side
+    # of drafting too many"): someone with no draft at all comes before a draft that only needs better words.
+    rechecked = 0
     left = cap - len(waiting)
+    if left > 0:
+        try:
+            again = store.stale_no_reply(space, email_rules=rules("email"), dms_rules=rules("instagram"),
+                                         limit=left * _SCAN_MULTIPLE, pitch_back=pitch_back)
+        except Exception as e:                   # noqa: BLE001 — a box without the table yet
+            log.warning("drafter.recheck_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:120]})
+            again = []
+        people_again = []
+        for row in again:
+            if refuse(row):                      # a robot is settled for these rules without a model call, so it
+                store.mark_rules(space, row["id"], rules(row.get("platform")))   # never holds the queue
+            else:
+                people_again.append(row)
+        again = people_again[:left]
+        for row in again:
+            if recheck_one(space=space, row=row):
+                rechecked += 1
+        left -= len(again)
+    rewritten = 0
     if left > 0:
         try:
             stale = store.stale_waiting(space, email_rules=rules("email"), dms_rules=rules("instagram"), limit=left)
@@ -577,4 +646,5 @@ def sweep(space: str) -> dict:
                            "oldest": str(waiting[-1].get("inbound_at") or "")[:19],
                            "platforms": ",".join(sorted({str(r.get("platform") or "?")
                                                          for r in waiting}))})
-    return {"status": "ok", "drafted": drafted, "considered": len(waiting), "rewritten": rewritten}
+    return {"status": "ok", "drafted": drafted, "considered": len(waiting), "rechecked": rechecked,
+            "rewritten": rewritten}

@@ -220,7 +220,7 @@ _FROM_AD = "TRIM(COALESCE(k.ad_meta_id, '')) <> ''"
 def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
                        platform: str | None = None, waiting: bool = False,
                        from_ad: bool = False, view: str | None = None,
-                       disposition: str | None = None) -> list[dict]:
+                       disposition: str | None = None, zcid: str | None = None) -> list[dict]:
     """The conversations in one Space, newest inbound first — the inbox screen.
 
     THE STORE HAD NO READER A SCREEN COULD USE. `get_conversation` answers about ONE, by id, and
@@ -245,6 +245,11 @@ def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
     # goes in as a bound parameter like the Space does. A chip row that built SQL from its own
     # label would be the one place on this screen an outsider chooses a fragment of the query.
     where, args = "k.space = ?", [space]
+    # ONE CONVERSATION, WITH EVERYTHING THE LIST KNOWS ABOUT IT (its label, whether it waits, its view): a link to
+    # one the list on screen does not hold (app_ui.ui_conversation).
+    if zcid:
+        where += " AND k.zernio_conversation_id = ?"
+        args.append(str(zcid))
     if platform:
         where += " AND k.platform = ?"
         args.append(str(platform))

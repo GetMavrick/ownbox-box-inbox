@@ -410,6 +410,28 @@ def _same_origin_gate():
     return None
 
 
+# ── NO OTHER SITE'S PAGE MAY FRAME THIS BOX (WebDev2's visitor walk of the owner's box, OSDev1 10-06) ────────────────
+# The siblings are the same site (above), so this box's Lax session cookie rides into an iframe on any of them: a page
+# there could frame the signed-in inbox under a decoy and borrow the owner's click on Send, Done or Delete. That click
+# comes from the framed page itself, so _cross_site sees same-origin and lets it through. Only the box frames the box
+# (an email's frame is a srcdoc the box draws). Nothing frames a box from outside: not sites/, not the AI apps'
+# connector (CORS fetches and a top-level sign-in), not the phone app (a top-level window).
+# A route that sends its own CSP keeps it, with frame-ancestors added, never replaced. HSTS has no includeSubDomains
+# and no preload: each box answers for its own name, and both are easy to add and hard to undo.
+FRAME_ANCESTORS = "frame-ancestors 'self'"
+HSTS = "max-age=31536000"
+
+
+@app.after_request
+def _never_framed(resp):
+    csp = (resp.headers.get("Content-Security-Policy") or "").strip().rstrip(";").strip()
+    if "frame-ancestors" not in csp.lower():
+        resp.headers["Content-Security-Policy"] = f"{csp}; {FRAME_ANCESTORS}" if csp else FRAME_ANCESTORS
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Strict-Transport-Security", HSTS)
+    return resp
+
+
 @app.before_request
 def _auth_gate():
     if request.path.startswith("/deploy"):

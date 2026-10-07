@@ -374,6 +374,62 @@ def judged_not_for_a_person(space: str) -> set:
         return set()
 
 
+# ASKED AGAIN ONCE, WHEN THE RULES CHANGE (owner, 2026-10-06: "I think I've seen some come through that should've had a
+# draft, but they didn't get drafted. Please slightly error on the side of drafting too many"). A "no reply needed"
+# decision made under other rules than the box runs now is put to the drafter again, once: only on the message the
+# conversation still waits on, only from the last RECHECK_DAYS, never a robot, an automation's or an opted-out
+# conversation, and never a draft a PERSON dismissed (only the box's own no-reply mark is ever asked again).
+RECHECK_DAYS = 30
+
+
+def stale_no_reply(space: str, *, email_rules: str, dms_rules: str, limit: int = 3,
+                   pitch_back: bool = False) -> list[dict]:
+    """The box's own "no reply needed" decisions made under other rules than it runs now, newest first. The `limit`
+    is a spend bound: each row is one model call."""
+    from datetime import datetime, timedelta, timezone
+    cut = (datetime.now(timezone.utc) - timedelta(days=RECHECK_DAYS)).isoformat()
+    with state.connect() as c:
+        rows = c.execute(
+            "SELECT d.id, d.zernio_conversation_id AS zcid, d.in_reply_to, k.participant, k.platform, "
+            "       m.body AS asked, m.sent_by AS sender, m.created_at AS asked_at, r.rules "
+            "  FROM inbox_drafts d "
+            "  JOIN inbox_conversations k ON k.space = d.space "
+            "   AND k.zernio_conversation_id = d.zernio_conversation_id "
+            "  JOIN inbox_messages m ON m.space = d.space AND m.zernio_message_id = d.in_reply_to "
+            "  LEFT JOIN inbox_draft_rules r ON r.space = d.space AND r.draft_id = d.id "
+            " WHERE d.space = ? AND d.body = ? AND k.opted_out = 0 AND k.automated IS NOT 1 "
+            "   AND (k.automated IS NOT 2 OR ?) "
+            f"   AND {_UNCLAIMED} "
+            "   AND m.created_at >= ? "
+            "   AND TRIM(COALESCE(m.body, ''), ' ' || char(9) || char(10) || char(13)) <> '' "
+            "   AND (r.rules IS NULL OR r.rules <> CASE WHEN k.platform = 'email' THEN ? ELSE ? END) "
+            "   AND m.created_at = (SELECT MAX(m2.created_at) FROM inbox_messages m2 WHERE m2.space = d.space "
+            "        AND m2.zernio_conversation_id = d.zernio_conversation_id AND m2.direction = 'in') "
+            "   AND NOT EXISTS (SELECT 1 FROM inbox_messages o WHERE o.space = d.space "
+            "        AND o.zernio_conversation_id = d.zernio_conversation_id "
+            "        AND o.direction = 'out' AND o.created_at > m.created_at) "
+            " ORDER BY m.created_at DESC LIMIT ?",
+            (space, NO_REPLY_BODY, 1 if pitch_back else 0, cut, str(email_rules), str(dms_rules),
+             int(limit))).fetchall()
+    return [dict(r) for r in rows]
+
+
+def revive(*, space: str, draft_id: str, body: str, rules: str) -> bool:
+    """A "no reply needed" the drafter now answers: its words go on the same row, which waits again like any draft.
+    Only ever the box's own no-reply mark; a draft a person dismissed is never brought back."""
+    body = str(body or "").strip()
+    if not body:
+        return False
+    now = state._now()
+    with state.connect() as c:
+        cur = c.execute("UPDATE inbox_drafts SET body = ?, created_at = ?, dismissed_at = NULL "
+                        " WHERE space = ? AND id = ? AND body = ?", (body, now, space, str(draft_id), NO_REPLY_BODY))
+        if cur.rowcount > 0:
+            c.execute("INSERT OR REPLACE INTO inbox_draft_rules (space, draft_id, rules, written_at) "
+                      "VALUES (?,?,?,?)", (space, str(draft_id), str(rules), now))
+        return cur.rowcount > 0
+
+
 def mark_pitch_back(space: str, in_reply_to: str) -> None:
     """Note that the draft answering `in_reply_to` turns a cold pitch around. Never raises."""
     try:

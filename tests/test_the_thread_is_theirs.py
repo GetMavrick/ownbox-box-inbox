@@ -300,6 +300,45 @@ ok("AN EMAIL IS A CARD, NOT A CHAT BUBBLE (owner, 10-06, the enterprise layout):
    "max-w-[760px]" in p2 and "const card = Boolean(emailOf(msg));" in p2 and "max-w-[760px]" in built
    and "msg.senderName || 'You'" in email, "")
 
+_div = (ROOT / "web" / "inbox-ui" / "ownbox" / "list-divider.tsx").read_text(encoding="utf-8")
+ok("THE LIST'S WIDTH IS THE PERSON'S: a divider dragged or moved by the arrow keys, remembered, 280 to 560px",
+   'role="separator"' in _div and "ArrowLeft" in _div and "localStorage" in _div and "LIST_MIN = 280" in _div
+   # A CANCELLED DRAG KEEPS THE WIDTH (a cancel's clientX is often 0): never the drop's handler.
+   and "onPointerCancel={onCancel}" in _div and "onPointerCancel={onUp}" not in _div
+   and "md:w-[var(--ib-list-w,24rem)]" in (ROOT / "web" / "inbox-ui" / "patches" / "0005-list-row-slot.patch")
+   .read_text(encoding="utf-8") and "width:var(--ib-list-w,24rem)" in (app_ui.STATIC / "inbox-ui.css").read_text())
+
+_dp = (ROOT / "web" / "inbox-ui" / "ownbox" / "details-panel.tsx").read_text(encoding="utf-8")
+ok("THE PERSON BESIDE THE CONVERSATION on a wide screen: their label (changed there), Prospect, waiting, Done, Delete",
+   "min-[1440px]:flex" in _dp and "actions.act(conversation, { disposition:" in _dp and "Prospect" in _dp
+   and "Waiting on a reply" in _dp and "Came from an ad" in built)
+store.mark_conversation(SP, "ig-priya", disposition="lead")
+_one = (owner.get("/inbox/api/conversations/ig-priya").get_json() or {}).get("data") or {}
+ok("...read from the list's own row, so a link to one shows its label and whether it waits, as the list would",
+   (_one.get("metadata") or {}).get("aios", {}).get("disposition") == "lead", _one.get("metadata"))
+store.mark_conversation(SP, "ig-priya", disposition=None)
+_real_list, _real_log, _logged = store.list_conversations, app_ui.log, []
+
+
+class _Log:
+    def warning(self, event, **kw):
+        _logged.append((event, kw))
+
+
+def _list_fails(*a, **kw):
+    raise RuntimeError(f"no such column near ig-priya {NAME}")
+
+
+store.list_conversations, app_ui.log = _list_fails, _Log()
+try:
+    _res = owner.get("/inbox/api/conversations/ig-priya")
+finally:
+    store.list_conversations, app_ui.log = _real_list, _real_log
+ok("...and when the list's query cannot answer, the stored row still opens it and a warning says so: the error's "
+   "type only, never the conversation or the person", _res.status_code == 200
+   and ((_res.get_json() or {}).get("data") or {}).get("id")
+   and _logged == [("inbox.ui_conversation_unlisted", {"error": "RuntimeError"})], (_res.status_code, _logged))
+
 print("\nsaved replies in their composer")
 from marketing.customer_voice.inbox import snippets  # noqa: E402
 

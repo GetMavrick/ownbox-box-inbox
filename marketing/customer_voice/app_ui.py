@@ -18,8 +18,11 @@ import re
 from flask import Response, abort
 
 from core import labs
+from core.logging import get_logger
 
 from .app import blueprint
+
+log = get_logger(__name__)
 
 LABS = "inbox_screens"
 STATIC = pathlib.Path(__file__).resolve().parent / "static" / "inbox-ui"
@@ -109,7 +112,18 @@ def ui_conversation(zcid: str):
         return missing
     ready = {str(d["zcid"]): {"id": str(d["id"]), "body": str(d.get("body") or "")} for d in app_api._waiting()
              if str(d.get("zcid")) == str(zcid)}
-    return jsonify({"data": app_api._conversation(conv, ready)})
+    # THE LIST'S OWN ROW FOR IT, so its label, whether it waits and its tags are what the list would say (the details
+    # panel reads them); the stored row alone when the list's query cannot answer.
+    from .app import _space
+    from .inbox import store
+    try:
+        listed = store.list_conversations(_space(), limit=1, zcid=str(zcid))
+    except Exception as e:                       # noqa: BLE001 — the stored row still opens the thread
+        # NEVER SILENT (OSDev1, #2026): the panel would read the bare row's "No label / Answered" without a trace. The
+        # exception's type only: its message can carry the query's values, which are the person's.
+        log.warning("inbox.ui_conversation_unlisted", error=type(e).__name__)
+        listed = []
+    return jsonify({"data": app_api._conversation(listed[0] if listed else conv, ready)})
 
 
 def thread_address(conv: dict) -> str:

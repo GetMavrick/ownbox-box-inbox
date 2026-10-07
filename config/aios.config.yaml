@@ -545,6 +545,9 @@ models:
                               # 2026-10-05, decision 1 of docs/PLAN_MORNING_REVIEW_ADVISOR.md, "Sonnet for the one
                               # daily advice call and the weekly profile"
   brief:         haiku    # today's brief, ranked by the box's AI, at most 4 a day (core/brief.py)
+  inbox_draft:   sonnet   # every reply the inbox drafts, and what it learns of the business for them
+                          # (customer_voice/drafter): owner, 2026-10-06, "I wanna make sure that sonnet is used
+                          # to make sure we have good quality". It fell to `default` (haiku) until then.
   ask:           haiku    # a question asked of the box (core/ask.py): the smallest model that answers well,
                           # because it draws on the buyer's own AI limit (OSDev1, 2026-10-02)
   default:       haiku

@@ -8,7 +8,12 @@
 #                    dispatch bearer when DASH_TOKEN is unset — see README.box.md)
 #   /reel/<token>*   PUBLIC view-only capability pages — the unguessable token
 #                    is the whole access grant; approval still needs login
-#   /health          liveness only, no data
+#   /health          public, and names nothing of the owner's: liveness, the running commit and
+#                    release, whether a restart is due, the shift tick's pulse (no coworker
+#                    named) and the PUBLIC half of the update key (core/version.py)
+#
+# Every answer carries frame-ancestors 'self', X-Frame-Options and HSTS from the app itself
+# (core/dispatch.py _never_framed), so a box set up without this file is protected too.
 {$AIOS_DOMAIN} {
 	encode gzip
 	reverse_proxy 127.0.0.1:8000

@@ -86,7 +86,8 @@ ok("drafted once, nothing rewritten", out.get("drafted") == 1 and out.get("rewri
 ok("...with the rules that wrote it", rules_of(d1.get("id")) == draft.rules("instagram") and len(rules_of(d1["id"])) == 12,
    rules_of(d1.get("id")))
 out = sweep()
-ok("a second sweep pays for nothing", out == {"status": "ok", "drafted": 0, "considered": 0, "rewritten": 0}
+ok("a second sweep pays for nothing", out == {"status": "ok", "drafted": 0, "considered": 0, "rechecked": 0,
+                                             "rewritten": 0}
    and not CALLS, out)
 
 print("\nThe owner changes the reply style\n")
