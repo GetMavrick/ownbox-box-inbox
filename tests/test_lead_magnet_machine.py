@@ -483,9 +483,29 @@ n = len(COMMENTS.replies)
 comment("c-9", "SOP please", user="u9", handle="ivy", hours=0)
 sweep.run(m)
 ok("turned off, nothing is sent", not mod.settings.on(m) and len(COMMENTS.replies) == n)
-rev = mod.morning(date.today())
+# THE BOX'S DAY, which is the day the Morning Review hands a reporter and the day Lead Magnet counts (through
+# m.day_window). `date.today()` was the Mac's day, and the old count was by UTC date: red every evening.
+from core import box_settings as _bs, report as _report  # noqa: E402
+
+rev = mod.morning(_report.today())
 ok("the Morning Review says what happened today, counting only confirmed emails",
    rev.get("headline", {}).get("value") == 2 and "comments answered" in rev["happened"][0]["text"], rev)
+
+# THE OWNER'S DAY, NOT A UTC DATE (WebDev2's walk, OSDev1 10-07): a capture at 18:30 Pacific is 01:30 UTC the next
+# day, and counted by its UTC date it landed in tomorrow's review. Every stamp moved to 18:30 PT on Oct 6, on a
+# Pacific box: Oct 6's review counts them, Oct 7's is quiet. On a UTC box the same stamps are Oct 7's.
+with mod.store.connect() as _c:
+    _c.execute("UPDATE leads SET updated_at = ?, answered_at = CASE WHEN answered_at IS NULL THEN NULL ELSE ? END",
+               ("2026-10-07T01:30:00.000000+00:00", "2026-10-07T01:30:00.000000+00:00"))
+_bs.put(_report.TZ_NS, _report.TZ_KEY, "America/Los_Angeles")
+_eve, _next = mod.morning(date(2026, 10, 6)), mod.morning(date(2026, 10, 7))
+ok("an 18:30 Pacific capture lands in that day's Morning Review on a Pacific box, and not in the next",
+   (_eve.get("headline") or {}).get("value", 0) >= 1 and _next == {}, (_eve, _next))
+_bs.put(_report.TZ_NS, _report.TZ_KEY, "UTC")
+ok("...while on a UTC box the same stamps are the next day's (the window follows the box's zone)",
+   mod.morning(date(2026, 10, 6)) == {} and (mod.morning(date(2026, 10, 7)).get("headline") or {}).get("value", 0) >= 1,
+   (_report.tz_name(), mod.morning(date(2026, 10, 6)), mod.morning(date(2026, 10, 7))))
+_bs.put(_report.TZ_NS, _report.TZ_KEY, "")
 
 # ── built on the promise ────────────────────────────────────────────────────────────────────────────────────
 from core import sdk_check  # noqa: E402

@@ -141,6 +141,15 @@ class Machine:
         from core import report
         report.register_reporter(self.key, title, fn)
 
+    def day_window(self, day) -> tuple[str, str]:
+        """The UTC bounds `(start, end)` of one of the box's LOCAL days: the `day` a reporter is handed.
+
+        EVERY TIMESTAMP IS STORED UTC, AND THE REVIEW'S DAY IS THE OWNER'S. Count a row as that day's when
+        `start <= stamp < end`, never by its UTC date: on a Pacific box a UTC date is the next day from 5 PM on, so
+        Lead Magnet's evening captures landed in tomorrow's review (WebDev2's walk, 2026-10-07)."""
+        from core import report
+        return report.window(day)
+
     # ── tools for the owner's AI ──────────────────────────────────────────────────────────────
     def tool(self, name: str, *, fn, description: str, capability: str,
              args: dict | None = None, title: str | None = None, render=None) -> None:

@@ -141,6 +141,35 @@ STYLE_SALES = (
     "- Anyone else: the light sentence, never a hard sell." + _NEVER_INVENT)
 
 
+# EVERY DRAFT FITS ITS CHANNEL (owner, 2026-10-07: "Drafts should fit the channel they come in on. Emails are in
+# frequent and there's a finality to them so they should just be like a call action, you're doing perfect on those.
+# DM's are designed to continue the conversation very chatty friendly way and also to do soft cells and to be of
+# service and educate and provide links and education."). Email keeps the instructions above, exactly: brief, plain,
+# final. A DM gets its own shape, added here, so only DM drafts change (their fingerprint moves, so the DM drafts
+# still waiting are rewritten once in the new voice; email drafts are left as they are).
+DM_SHAPE = (
+    "\nTHIS IS A DIRECT MESSAGE, NOT AN EMAIL. A DM is a conversation, so it replaces the two-or-three-sentence rule "
+    "above:\n"
+    "- Write the way people chat: warm, friendly, casual and natural, like the owner texting. No greeting line, no "
+    "sign-off, no signature.\n"
+    "- Keep the conversation going: end on a question or an easy next line they will want to answer, never a "
+    "full stop that closes it.\n"
+    "- Be of service: answer what they asked, and teach them something useful about it in a sentence or two, so "
+    "they learn something from the business even if they never buy.\n"
+    "- Share a helpful link when you were given one (the business's own website or a page from what you know about "
+    "it). Never invent a link.\n"
+    "- A soft sell is welcome when it fits and the style below allows it: show how the business could help, "
+    "lightly, as a friend would mention it. Never a hard pitch, never pushy.\n"
+    "- Keep it easy to read on a phone: short lines, a few sentences, a little longer only when it is teaching "
+    "something.")
+
+
+def _shape(platform) -> str:
+    """The channel's own shape: a DM's, or nothing for an email (and for a draft whose channel is unknown)."""
+    p = str(platform or "").strip().lower()
+    return DM_SHAPE if p and p != "email" else ""
+
+
 def reply_style(platform) -> str:
     """"sales" (Strong), "subtle" or "service" as the owner chose it for this conversation's channel (email, or a DM on any other
     platform), or "" when nobody has chosen: then the instructions are exactly what every box already had."""
@@ -159,7 +188,7 @@ def _system(platform=None) -> str:
     style = (STYLE_SALES.format(site=site) + EVERYONE_SENTENCE.format(site=site) if chosen == "sales" else
              STYLE_SUBTLE.format(site=site) + EVERYONE_SENTENCE.format(site=site) if chosen == "subtle" else
              STYLE_SERVICE if chosen == "service" else "")
-    return SYSTEM + (PITCH_CASE.format(link=pb["link"]) if pb["on"] else "") + style
+    return SYSTEM + (PITCH_CASE.format(link=pb["link"]) if pb["on"] else "") + _shape(platform) + style
 
 
 def _bare(link: str) -> str:
@@ -229,6 +258,17 @@ def _pitch_back_on() -> bool:
         return False
 
 
+def _words(space: str, in_reply_to, inbound) -> str:
+    """What they wrote, or, for a message with no words, what they sent (owner, 2026-10-07: "Yes, draft the photo ones
+    too"). The model cannot see a photo, so it is told so, and never describes what it cannot see."""
+    said = str(inbound or "").strip()[:_MAX_INBOUND]
+    if said:
+        return said
+    sent = store.what_was_sent(space, str(in_reply_to or ""))
+    return (f"[They sent {sent}, with no words. You cannot see it, so never describe it or guess what it shows: reply "
+            "warmly to the gesture, and carry the conversation on from what came before.]")
+
+
 def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
               history: list[dict] | None = None, platform: str | None = None) -> str | None:
     """One model call → one stored draft. Returns the text, or None if nothing was written.
@@ -242,9 +282,7 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
     backend it loads no project context, so this repository's CLAUDE.md and its dev framing
     cannot bleed into something a customer might read.
     """
-    inbound = str(inbound or "").strip()[:_MAX_INBOUND]
-    if not inbound:
-        return None
+    inbound = _words(space, in_reply_to, inbound)
     if store.for_inbound(space, in_reply_to) is not None:
         return None                              # already drafted; never pay twice
 
@@ -390,9 +428,9 @@ def rewrite_one(*, space: str, row: dict) -> bool:
     a turned-around pitch is turned around. Whatever it chose, the draft's rules are marked, so it is never
     paid for twice under the same rules."""
     platform = row.get("platform")
-    inbound = str(row.get("asked") or "").strip()[:_MAX_INBOUND]
+    inbound = _words(space, row.get("in_reply_to"), row.get("asked"))
     did = str(row.get("id") or "")
-    if not inbound or not did:
+    if not did:
         return False
     try:
         history = store.history_for(space, row["zcid"])
@@ -424,9 +462,9 @@ def recheck_one(*, space: str, row: dict) -> bool:
     """Ask again, under the rules the box runs now, about a message it once judged needed no reply. One model call.
     A reply now is a draft that waits like any other; no reply again marks the rules so it is never asked twice."""
     platform = row.get("platform")
-    inbound = str(row.get("asked") or "").strip()[:_MAX_INBOUND]
+    inbound = _words(space, row.get("in_reply_to"), row.get("asked"))
     did = str(row.get("id") or "")
-    if not inbound or not did:
+    if not did:
         return False
     try:
         history = store.history_for(space, row["zcid"])

@@ -204,20 +204,50 @@ def needs_a_draft(space: str, *, limit: int = 5, pitch_back: bool = False) -> li
             "                          AND m2.direction = 'in') "
             "   AND NOT EXISTS (SELECT 1 FROM inbox_drafts d "
             "                    WHERE d.space = k.space AND d.in_reply_to = m.zernio_message_id) "
-            # A MESSAGE WITH NO WORDS CAN NEVER BE ANSWERED, so it must never take a slot in this
-            # queue. MEASURED ON THE OWNER'S BOX 2026-09-22: fifteen media-only Instagram messages
-            # arrived at 06:48 with empty bodies. This query is newest-first and the sweep takes
-            # the first three, so for SEVEN HOURS every sweep picked the same empty rows,
-            # `draft_one` returned None on each (silently — an empty inbound was its first
-            # early-out), and `periodic` reported `drafted: 0`. 87 conversations were waiting, 72
-            # of them with real text, and not one could ever be reached. /health was green
-            # throughout, the worker was alive, and nothing said a word.
-            # SQLite's one-argument TRIM strips SPACES ONLY — a body of "\n\t" survives it and the
-            # jam comes straight back through a channel that sends a bare newline. The second
-            # argument is the set of characters to strip, so this is tab, newline and return too.
-            "   AND TRIM(COALESCE(m.body, ''), ' ' || char(9) || char(10) || char(13)) <> '' "
-            " ORDER BY m.created_at DESC LIMIT ?", (space, 1 if pitch_back else 0, int(limit))).fetchall()
+            # A MESSAGE WITH NO WORDS IS DRAFTED TOO, AND LAST (owner, 2026-10-07, asked whether a photo or a shared
+            # post with no words should get a draft: "Yes, draft the photo ones too"). Until then it was left out here,
+            # because of what it once did: MEASURED ON THE OWNER'S BOX 2026-09-22, fifteen media-only Instagram
+            # messages arrived at 06:48 with empty bodies; this query is newest-first and the sweep takes the first
+            # three, so for SEVEN HOURS every sweep picked the same empty rows, `draft_one` returned None on each, and
+            # 72 conversations with real text could never be reached. Two things keep that from coming back:
+            #   * every message that HAS words comes first, whatever its age, so photos can never stand in front of
+            #     a question;
+            #   * `draft_one` now answers a wordless one (what was sent, from its attachment), so each is drafted or
+            #     settled once and leaves the queue, and never comes back to the head of it.
+            # SQLite's one-argument TRIM strips SPACES ONLY — a body of "\n\t" survives it. The second argument is the
+            # set of characters to strip, so this is tab, newline and return too.
+            " ORDER BY (TRIM(COALESCE(m.body, ''), ' ' || char(9) || char(10) || char(13)) = '') ASC, "
+            "          m.created_at DESC LIMIT ?", (space, 1 if pitch_back else 0, int(limit))).fetchall()
     return [dict(r) for r in rows]
+
+
+_SENT = {"image": "a photo", "photo": "a photo", "video": "a video", "audio": "a voice note",
+         "voice": "a voice note", "share": "a shared post", "story": "a story", "story_mention": "a story they "
+         "tagged you in", "story_reply": "a reply to your story", "reel": "a reel", "ig_reel": "a reel",
+         "sticker": "a sticker", "gif": "a GIF", "file": "a file", "document": "a file"}
+
+
+def what_was_sent(space: str, in_reply_to: str) -> str:
+    """A message with no words, said as what it was: "a photo", "a video and a photo", from what the platform told
+    the box about its attachments. "something with no words" when the box was never told (a message mirrored before
+    it kept attachments). Never raises."""
+    import json
+    try:
+        with state.connect() as c:
+            row = c.execute("SELECT x.attachments FROM inbox_messages m JOIN inbox_message_extras x "
+                            "  ON x.message_id = m.id WHERE m.space = ? AND m.zernio_message_id = ?",
+                            (space, str(in_reply_to))).fetchone()
+        kinds = []
+        for a in json.loads((row["attachments"] if row else None) or "[]"):
+            mime = str((a or {}).get("mimeType") or "").split("/")[0]
+            said = _SENT.get(str((a or {}).get("type") or "").lower()) or _SENT.get(mime) or "a file"
+            if said not in kinds:
+                kinds.append(said)
+        if kinds:
+            return " and ".join(kinds[:3])
+    except Exception:                                    # noqa: BLE001 — a description never costs a draft
+        pass
+    return "something with no words (a photo, a video or a shared post)"
 
 
 def newest_inbound(space: str, zcid: str) -> dict | None:
@@ -401,7 +431,6 @@ def stale_no_reply(space: str, *, email_rules: str, dms_rules: str, limit: int =
             "   AND (k.automated IS NOT 2 OR ?) "
             f"   AND {_UNCLAIMED} "
             "   AND m.created_at >= ? "
-            "   AND TRIM(COALESCE(m.body, ''), ' ' || char(9) || char(10) || char(13)) <> '' "
             "   AND (r.rules IS NULL OR r.rules <> CASE WHEN k.platform = 'email' THEN ? ELSE ? END) "
             "   AND m.created_at = (SELECT MAX(m2.created_at) FROM inbox_messages m2 WHERE m2.space = d.space "
             "        AND m2.zernio_conversation_id = d.zernio_conversation_id AND m2.direction = 'in') "

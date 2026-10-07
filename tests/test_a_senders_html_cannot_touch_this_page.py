@@ -243,5 +243,49 @@ ok("...and every ordinary link, inline picture and word is kept as the sender wr
    render.no_script_links(_KEEP) == _KEEP, render.no_script_links(_KEEP))
 
 
+print("\ntest_no_email_moves_its_own_frame")
+# A <meta http-equiv="refresh"> would send the frame elsewhere once drawn (OSDev1, on #2029): taken out in every spelling.
+_REFRESH = ['<meta http-equiv="refresh" content="0;url=https://evil.example/">',
+            "<META HTTP-EQUIV='Refresh' CONTENT='0; URL=/dash/stop'>",
+            '<meta http-equiv=refresh content=0>',
+            '<meta content="0;url=https://evil.example/" http-equiv="&#114;efresh">',
+            '<meta http-equiv=" refresh " content="5">',
+            '<meta\nhttp-equiv="REFRESH"\ncontent="0;url=https://evil.example/"/>',
+            '<meta name="x" content="a>b" http-equiv="refresh">']
+for v in _REFRESH:
+    doc = render.frame_doc("<p>Hi</p>" + v + "<p>there</p>")
+    sender = doc.split("<body>", 1)[1]
+    ok(f"taken out: {v[:60]!r}", "refresh" not in html_mod.unescape(sender).lower() and "<p>Hi</p><p>there</p>" in sender,
+       sender[:200])
+_KEPT = '<meta http-equiv="Content-Type" content="text/html; charset=utf-8"><meta name="viewport" content="width=device-width">'
+ok("...while the sender's other meta tags and the box's own CSP stay",
+   render.no_refresh(_KEPT) == _KEPT and 'http-equiv="Content-Security-Policy"' in render.frame_doc("<p>x</p>"),
+   render.no_refresh(_KEPT))
+
+
+print("\ntest_show_images_swaps_one_policy_for_another")
+# Owner, 2026-10-07: "go with the show images button". Pictures stay blocked until he presses it on one email; the
+# press swaps the box's CSP for one that allows https pictures. Two CSPs on a document BOTH apply, so a frame that
+# carried the strict one beside the wide one would still block every picture (OSDev1's trap): one policy, always.
+_doc = render.frame_doc('<p>Hi</p><img src="https://cdn.example/logo.png">')
+_hidden, _shown = render.csp_meta(), render.csp_meta(images=True)
+ok("the frame carries exactly one CSP, the box's own, in its head before the sender's HTML",
+   _doc.count("Content-Security-Policy") == 1 and _hidden in _doc and _doc.index(_hidden) < _doc.index("<body>"))
+_swapped = _doc.replace(_hidden, _shown)
+ok("...and after the swap still exactly one, the wide one, with the strict one gone",
+   _swapped.count("Content-Security-Policy") == 1 and _shown in _swapped and _hidden not in _swapped)
+ok("the wide policy differs in img-src alone, and adds https only: never http, never a script source",
+   _shown.replace("img-src data: https:;", "img-src data:;") == _hidden and "http:" not in _shown
+   and "script-src" not in _shown and "default-src 'none'" in _shown)
+ok("the frame's own requests carry no referrer", '<meta name="referrer" content="no-referrer">' in _doc)
+for _html, _want in (('<img src="https://cdn.example/a.png">', True), ("<IMG alt='x' SRC='http://a.example/b.png'>", True),
+                     ('<td background="https://a.example/b.png">', True),
+                     ('<div style="background:url( \'https://a.example/b.png\')">', True),
+                     ('<img src="data:image/png;base64,iVBORw0KGgo=">', False), ('<p>see https://example.com</p>', False),
+                     ('<img data-src="https://a.example" src="cid:part1">', False)):
+    ok(f"a picture from the internet is {'seen' if _want else 'not claimed'}: {_html[:50]!r}",
+       render.has_remote_images(_html) is _want)
+
+
 print("\n" + ("all good" if not _failed else f"{_failed} FAILED"))
 sys.exit(1 if _failed else 0)

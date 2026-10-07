@@ -269,9 +269,12 @@ ok("A FRAME AS TALL AS ITS EMAIL (owner, 10-06: 'HTML emails are not displayed!!
    "const FRAME_START_PX = 600;" in email and "onLoad={measure}" in email
    and "documentElement?.getBoundingClientRect().height" in email and "body?.scrollHeight" in email
    and "addEventListener('resize', measure)" in email and 'loading="lazy"' not in email and "loading=" not in email)
-ok("...AND THE NEWEST EMAIL OPENS AT ITS TOP when it is taller than the thread, until he scrolls",
-   "card.offsetHeight > c.clientHeight ? Math.max(0, top - 8) : c.scrollHeight" in email
-   and "'wheel', 'touchstart', 'pointerdown', 'keydown'" in email)
+ok("...AND THE THREAD SETTLES ON ITS NEWEST MESSAGE (owner, 10-07: 'the scroll bars start at the very bottom'): one "
+   "placer per thread re-places it on every change of layout while the thread settles, until he scrolls, taps or types; "
+   "the newest email at its top (stopped at the bottom when it fits), anything else at the bottom",
+   "new ResizeObserver(" in email and "const SETTLE_MS = 4000;" in email and "querySelectorAll<HTMLElement>('[data-message-id]')" in email
+   and "c.scrollTop = Math.max(0, top - 8);" in email and "c.scrollTop = c.scrollHeight;" in email
+   and "'wheel', 'touchstart', 'pointerdown', 'keydown'" in email and "conv={msg.conversationId}" in email)
 
 print("\nan HTML email, on the owner's box (2026-10-06: 'they all look like garbage')")
 from marketing.customer_voice.inbox import render as _render  # noqa: E402
@@ -319,6 +322,13 @@ ok("A LINKEDIN-SHAPED ALERT (dozens of nested tables, Outlook comments): the box
 ok("...and its frame carries no link that could run script, while its job links are kept",
    "javascript:" not in _jf.get("doc", "").lower() and 'data-ownbox-removed="href"' in _jf.get("doc", "")
    and "https://www.linkedin.com/comm/jobs/view/4123/?trackingId=a%3D%3D" in _jf.get("doc", ""), _jf.get("doc", "")[-400:])
+ok("SHOW IMAGES (owner, 10-07): an email that asks for pictures from the internet is sent the box's two policies to "
+   "swap, and one that asks for none is sent nothing to press",
+   (_jf.get("images") or {}) == {"hidden": _render.csp_meta(), "shown": _render.csp_meta(images=True)}
+   and "images" not in (_aios.get("frame") or {}), (_jf.get("images"), (_aios.get("frame") or {}).keys()))
+ok("...the screen swaps the one for the other, never adds a second, for that email alone and remembered nowhere",
+   "frame.doc.replace(swap.hidden, swap.shown)" in email and "setShown(true)" in email
+   and "localStorage" not in email and "sessionStorage" not in email)
 _rows = {c["id"]: c for c in (owner.get("/inbox/api/conversations").get_json() or {})["data"]}
 ok("ITS ROW'S LAST LINE IS ITS WORDS, not its source", _rows.get("mail-loop", {}).get("lastMessage", "").startswith(
    "Hi Brian, Your weekly report is ready."), _rows.get("mail-loop", {}).get("lastMessage"))
@@ -372,6 +382,19 @@ ok("...and when the list's query cannot answer, the stored row still opens it an
    "type only, never the conversation or the person", _res.status_code == 200
    and ((_res.get_json() or {}).get("data") or {}).get("id")
    and _logged == [("inbox.ui_conversation_unlisted", {"error": "RuntimeError"})], (_res.status_code, _logged))
+
+_sr = (ROOT / "web" / "inbox-ui" / "ownbox" / "saved-replies.tsx").read_text(encoding="utf-8")
+_la = (ROOT / "web" / "inbox-ui" / "ownbox" / "list-actions.tsx").read_text(encoding="utf-8")
+_p1 = (ROOT / "web" / "inbox-ui" / "patches" / "0001-draft-card-slot.patch").read_text(encoding="utf-8")
+_ib = (ROOT / "web" / "inbox-ui" / "ownbox" / "entry" / "inbox.tsx").read_text(encoding="utf-8")
+ok("A SAVED REPLY'S UNDO GOES WITH THE TEXT IT WAS FOR (walk, 10-07): their composer counts each send, and the Undo "
+   "is forgotten on a send as on a new conversation, never left under an empty box",
+   "setSent((n) => n + 1);" in _p1 and "    sent: number;" in _p1
+   and "useEffect(() => setUndo(null), [conversation.id, sent]);" in _sr and "sent={ctx.sent}" in _ib)
+ok("A LIST IT JUST STARTED IS OFFERED AT ONCE (walk, 10-07): the first conversation swiped into Done, Trash or Junk "
+   "adds that list's pill, in the box's order and markup, with no reload",
+   "offerList(into)" in _la and "document.querySelector('.chips.pills')" in _la
+   and "['archived', 'Done'], ['deleted', 'Trash'], ['junk', 'Junk']" in _la)
 
 print("\nsaved replies in their composer")
 from marketing.customer_voice.inbox import snippets  # noqa: E402

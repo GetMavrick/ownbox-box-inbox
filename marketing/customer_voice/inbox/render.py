@@ -177,6 +177,13 @@ def readable(text: str) -> str:
 # should almost never be used, not the mechanism.
 _FRAME_CSP = ("default-src 'none'; img-src data:; style-src 'unsafe-inline' data:; "
               "font-src data:; form-action 'none'; base-uri 'none'")
+# SHOW IMAGES (owner, 2026-10-07: "go with the show images button"). An email's pictures stay blocked until he presses
+# Show images on that email: a remote picture tells its sender the email was opened, and when. Pressed, the frame is
+# drawn again under this policy, which differs from the one above in img-src alone (https only; never http, never
+# script). It REPLACES the blocked policy rather than joining it: two CSPs on one document both apply, so a frame
+# carrying both would still block every picture.
+_FRAME_CSP_IMAGES = _FRAME_CSP.replace("img-src data:;", "img-src data: https:;", 1)
+assert _FRAME_CSP_IMAGES != _FRAME_CSP
 _FRAME_SANDBOX = "allow-popups allow-popups-to-escape-sandbox"
 # MEASURED AT 390px, 16px/1.4: about 45 characters to a line and 23px to a line of text. A block
 # element (`p`, `li`, heading, `tr`) costs roughly another 14px in margins. An `img` is the one
@@ -275,12 +282,45 @@ def no_script_links(body_html: str) -> str:
     return _TAG.sub(lambda m: _defang(m.group(0)), str(body_html or ""))
 
 
+# NO EMAIL MOVES ITS OWN FRAME (OSDev1, on #2029). A `<meta http-equiv="refresh">` in the sender's HTML would send the
+# frame somewhere else after it had drawn: another site in the reading pane, or a page of this box now that the frame
+# shares its origin. The tag is dropped whole, read the way a browser reads it (any case, entities decoded, spaces
+# around the value ignored). The box's own CSP meta comes before the sender's HTML and is never touched.
+_META = re.compile(r"""(?is)<meta\b(?:[^>"']|"[^"]*"|'[^']*')*>""")
+_EQUIV = re.compile(r"""(?is)[\s"'/]http-equiv\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+)""")
+
+
+def no_refresh(body_html: str) -> str:
+    """The sender's HTML with every `<meta http-equiv="refresh">` taken out (see the note above)."""
+    def one(m: re.Match) -> str:
+        equiv = _EQUIV.search(m.group(0))
+        value = html.unescape(equiv.group(1).strip("\"'")).strip().lower() if equiv else ""
+        return "" if value == "refresh" else m.group(0)
+    return _META.sub(one, str(body_html or ""))
+
+
+def csp_meta(*, images: bool = False) -> str:
+    """The frame's CSP, exactly as frame_doc writes it: images blocked, or (Show images) allowed from https."""
+    return f'<meta http-equiv="Content-Security-Policy" content="{_FRAME_CSP_IMAGES if images else _FRAME_CSP}">'
+
+
+_REMOTE_IMAGE = re.compile(r"""(?is)(<img\b(?:[^>"']|"[^"]*"|'[^']*')*?\ssrc\s*=\s*["']?\s*https?:"""
+                           r"""|\sbackground\s*=\s*["']?\s*https?:|url\(\s*["']?\s*https?:)""")
+
+
+def has_remote_images(body_html: str) -> bool:
+    """Does this HTML ask for a picture from the internet (an <img>, a background, or a CSS url())?"""
+    return bool(_REMOTE_IMAGE.search(str(body_html or "")))
+
+
 def frame_doc(body_html: str) -> str:
     """The document `safe_frame` puts in its sandboxed frame's `srcdoc`: the CSP, our base styling, then the sender's
     HTML. For a screen that builds the frame itself (the new inbox screens set it as a frame's `srcDoc`, which the
     browser never parses into the page); the frame's `sandbox` and `referrerpolicy` must be `safe_frame`'s."""
     return ('<!doctype html><html><head><meta charset="utf-8">'
-            f'<meta http-equiv="Content-Security-Policy" content="{_FRAME_CSP}">'
+            + csp_meta() +
+            # NO ADDRESS LEAVES WITH A PICTURE OR A LINK: the frame's own requests send no referrer.
+            '<meta name="referrer" content="no-referrer">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             # OUR OWN BASE STYLING, FIRST, so a message that styles nothing still reads like
             # something a person wrote rather than a 1996 default-serif wall. Anything the sender
@@ -290,7 +330,7 @@ def frame_doc(body_html: str) -> str:
             '"Segoe UI",Roboto,sans-serif;color:#111;background:#fff;word-break:break-word}'
             'img{max-width:100%;height:auto}table{max-width:100%}'
             'a{color:#0b57d0}</style></head><body>'
-            + no_script_links(body_html) + '</body></html>')
+            + no_script_links(no_refresh(body_html)) + '</body></html>')
 
 
 def safe_frame(body_html: str, *, label: str = "Message") -> str:

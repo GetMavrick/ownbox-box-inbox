@@ -14,8 +14,9 @@ the worker's threads were alive and looping. Every signal we had said the produc
 
 TWO BUGS, FIXED SEPARATELY, because either one alone would let this happen again:
 
-  1. the QUEUE must not offer work that can never be done — an inbound with no words is excluded
-     in SQL, so it can never take a slot ahead of a customer who actually wrote something
+  1. the QUEUE must never put a message with no words ahead of one with words. Until 2026-10-07 a wordless one
+     was left out altogether; the owner then asked for those to be drafted too ("Yes, draft the photo ones too"),
+     so they are queued LAST, and `draft_one` answers each (from what was sent) so it leaves the queue for good
   2. a SWEEP THAT DID NOTHING must say so — the alarm is on the OUTCOME, not on this cause.
      Logging "empty body" would catch this one and nothing else; the next silent cause would be
      invisible all over again.
@@ -66,16 +67,17 @@ for i in range(6):
     inbound(f"c-media-{i}", f"m-media-{i}", "", f"2026-09-22T06:48:0{i}Z", f"Media {i}")
 
 rows = ds.needs_a_draft(SPACE, limit=5)          # the default the sweep uses
-ok("the queue offers only work that can be done", all(str(r["inbound_body"]).strip() for r in rows),
-   str([(r["zcid"], r["inbound_body"]) for r in rows]))
-ok("...so the person who actually wrote something is reachable",
-   "c-asked" in [r["zcid"] for r in rows], str([r["zcid"] for r in rows]))
-ok("...and the media-only ones are simply not in it",
-   not any(str(r["zcid"]).startswith("c-media") for r in rows), str([r["zcid"] for r in rows]))
+ok("the person who actually wrote something comes first, ahead of every newer wordless one",
+   [r["zcid"] for r in rows][:1] == ["c-asked"], str([(r["zcid"], r["inbound_body"]) for r in rows]))
+ok("...and the media-only ones follow it, newest first (owner, 2026-10-07: they are drafted too)",
+   [r["zcid"] for r in rows][1:] == ["c-media-5", "c-media-4", "c-media-3", "c-media-2"], str([r["zcid"] for r in rows]))
 
 print("test_a_body_of_only_whitespace_counts_as_no_words")
 inbound("c-blank", "m-blank", "   \n\t ", "2026-09-22T07:00:00Z", "Blank")
-ok("whitespace is not a question", "c-blank" not in [r["zcid"] for r in ds.needs_a_draft(SPACE, limit=20)])
+inbound("c-later", "m-later", "Still open Saturday?", "2026-09-22T04:00:00Z", "Lee")
+order = [r["zcid"] for r in ds.needs_a_draft(SPACE, limit=20)]
+ok("whitespace is no words: it waits behind every message with words, even an older one",
+   order.index("c-later") < order.index("c-blank"), order)
 
 print("test_the_head_block_itself_cannot_recur")
 # THE REGRESSION, STATED AS THE SHAPE IT HAD: enough empty arrivals to fill the whole sweep, all
@@ -86,6 +88,20 @@ for i in range(20):
 rows = ds.needs_a_draft(SPACE, limit=5)
 ok("twenty newer empty arrivals do not bury the one real question",
    "c-asked" in [r["zcid"] for r in rows], str([r["zcid"] for r in rows]))
+
+print("test_a_wordless_message_is_drafted_once_and_leaves")
+from core import brain                           # noqa: E402
+_think, ASKED = brain.think, []
+brain.think = lambda task, prompt, **kw: ASKED.append(prompt) or "Love it, thanks for sending! How have you been?"
+with state.connect() as c:
+    c.execute("DELETE FROM inbox_messages WHERE space = ? AND zernio_conversation_id NOT LIKE 'c-flood-%'", (SPACE,))
+got = draft.draft_one(space=SPACE, zcid="c-flood-19", in_reply_to="m-flood-19", inbound="", platform="instagram")
+ok("it gets a draft", got and ds.for_inbound(SPACE, "m-flood-19"), got)
+ok("...the model told what was sent and that it cannot see it, never asked to describe it",
+   ASKED and "with no words. You cannot see it" in ASKED[0], ASKED[:1])
+ok("...and it is gone from the queue, never offered again",
+   "c-flood-19" not in [r["zcid"] for r in ds.needs_a_draft(SPACE, limit=50)])
+brain.think = _think
 
 
 # ── 2. the alarm ────────────────────────────────────────────────────────────────────────────
