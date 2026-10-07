@@ -118,7 +118,13 @@ EVERYONE_SENTENCE = (
     "\nTHE LIGHT SENTENCE: end every reply you write (cases 1, 2 and 4; never case 3), except to a customer with an "
     "open problem, with one short, light, natural sentence about what this business does{site}, as a closing sentence "
     "or a P.S. One sentence, never a pitch paragraph, never pushy. In case 2 it never changes who you are writing as: "
-    "the applicant stays the applicant and simply mentions what they do.")
+    "the applicant stays the applicant and simply mentions what they do.\n"
+    # VARIED, NEVER A STOCK LINE (owner, 2026-10-07: "It's overly using that human approval thing every single time"
+    # and "Switch it up a little bit"). One fixed sentence on every reply reads as a template to anyone who gets two.
+    "Vary it: never a stock line, and never the same claim or phrase every time. Pick the one true thing about the "
+    "business that fits this person best (what it does, who it helps, a result it gets, something useful on its "
+    "website) and say it in fresh words. If an earlier reply in this conversation already said what the business "
+    "does, leave the sentence out.")
 # THE ENDS ARE EXTREME (owner, 2026-10-04: "Make it more extreme one way or the other"). Customer service is pure
 # service, with nothing sold to anyone; Strong sales ends every reply to a prospect with a CTA and asks for the sale.
 STYLE_SERVICE = (
@@ -189,13 +195,32 @@ def reply_style(platform) -> str:
     return ""
 
 
+# WHAT THE BUSINESS DOES, IN ITS OWNER'S OWN WORDS: the description on the "Your business" screen (core.business_context),
+# the one place an owner says how their business should be described. Without it the drafter described the business
+# from whatever its knowledge held, mail the box learned from included, and kept to one phrase of it. Read on every
+# call, so an owner who rewrites it changes the next draft; part of the rules, so drafts still waiting are rewritten.
+OWN_WORDS = ("\nWHAT THIS BUSINESS DOES, IN ITS OWNER'S OWN WORDS (whenever a reply says what the business does, "
+             "draw on this first, in your own fresh words; never quote it whole): {description}")
+
+
+def own_words() -> str:
+    """The owner's description of the business, or "" when there is none. Never raises."""
+    try:
+        from core import business_context
+        return " ".join(str(business_context.get().get("description") or "").split())
+    except Exception:                                    # noqa: BLE001 — a description never costs a draft
+        return ""
+
+
 def _system(platform=None) -> str:
     pb, chosen = pitch_back(), reply_style(platform)
     site = f" ({pb['link']})" if pb["link"] else ""
     style = (STYLE_SALES.format(site=site) + EVERYONE_SENTENCE.format(site=site) if chosen == "sales" else
              STYLE_SUBTLE.format(site=site) + EVERYONE_SENTENCE.format(site=site) if chosen == "subtle" else
              STYLE_SERVICE if chosen == "service" else "")
-    return SYSTEM + (PITCH_CASE.format(link=pb["link"]) if pb["on"] else "") + _shape(platform) + style
+    words = own_words()
+    return (SYSTEM + (PITCH_CASE.format(link=pb["link"]) if pb["on"] else "") + _shape(platform) + style
+            + (OWN_WORDS.format(description=words) if words else ""))
 
 
 def _bare(link: str) -> str:

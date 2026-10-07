@@ -179,10 +179,6 @@ def _message(m: dict, conv: dict, html_by_id: dict | None = None) -> dict:
             text = render.text_of(raw or text)
         if render.has_markup(raw):
             shown["frame"] = {"doc": render.frame_doc(raw), "height": render.frame_height(raw)}
-            # SHOW IMAGES (owner, 10-07): the box's two CSP metas, so the screen swaps the one for the other and the
-            # frame never carries both. Only for an email that asks for a picture from the internet.
-            if render.has_remote_images(raw):
-                shown["frame"]["images"] = {"hidden": render.csp_meta(), "shown": render.csp_meta(images=True)}
     said, quoted = split_quoted(text) if conv.get("platform") == "email" else (text, "")
     if conv.get("platform") == "email":
         shown.update({"readable": render.readable(said if quoted else text),

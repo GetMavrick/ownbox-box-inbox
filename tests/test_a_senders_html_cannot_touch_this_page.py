@@ -263,28 +263,44 @@ ok("...while the sender's other meta tags and the box's own CSP stay",
    render.no_refresh(_KEPT))
 
 
-print("\ntest_show_images_swaps_one_policy_for_another")
-# Owner, 2026-10-07: "go with the show images button". Pictures stay blocked until he presses it on one email; the
-# press swaps the box's CSP for one that allows https pictures. Two CSPs on a document BOTH apply, so a frame that
-# carried the strict one beside the wide one would still block every picture (OSDev1's trap): one policy, always.
+print("\ntest_pictures_load_by_themselves")
+# Owner, 2026-10-07: "I want to always show images. I don't think anyone ever doesn't want to show an image. Just make it
+# automatic." The frame's one policy allows pictures from https, and nothing more than it did: no http, no script.
 _doc = render.frame_doc('<p>Hi</p><img src="https://cdn.example/logo.png">')
-_hidden, _shown = render.csp_meta(), render.csp_meta(images=True)
+_csp = render.csp_meta()
 ok("the frame carries exactly one CSP, the box's own, in its head before the sender's HTML",
-   _doc.count("Content-Security-Policy") == 1 and _hidden in _doc and _doc.index(_hidden) < _doc.index("<body>"))
-_swapped = _doc.replace(_hidden, _shown)
-ok("...and after the swap still exactly one, the wide one, with the strict one gone",
-   _swapped.count("Content-Security-Policy") == 1 and _shown in _swapped and _hidden not in _swapped)
-ok("the wide policy differs in img-src alone, and adds https only: never http, never a script source",
-   _shown.replace("img-src data: https:;", "img-src data:;") == _hidden and "http:" not in _shown
-   and "script-src" not in _shown and "default-src 'none'" in _shown)
+   _doc.count("Content-Security-Policy") == 1 and _csp in _doc and _doc.index(_csp) < _doc.index("<body>"))
+ok("...which lets a picture load from https, never from http, and gives nothing a script source",
+   "img-src data: https:;" in _csp and "http:" not in _csp and "script-src" not in _csp
+   and "default-src 'none'" in _csp and "form-action 'none'" in _csp, _csp)
 ok("the frame's own requests carry no referrer", '<meta name="referrer" content="no-referrer">' in _doc)
-for _html, _want in (('<img src="https://cdn.example/a.png">', True), ("<IMG alt='x' SRC='http://a.example/b.png'>", True),
-                     ('<td background="https://a.example/b.png">', True),
-                     ('<div style="background:url( \'https://a.example/b.png\')">', True),
-                     ('<img src="data:image/png;base64,iVBORw0KGgo=">', False), ('<p>see https://example.com</p>', False),
-                     ('<img data-src="https://a.example" src="cid:part1">', False)):
-    ok(f"a picture from the internet is {'seen' if _want else 'not claimed'}: {_html[:50]!r}",
-       render.has_remote_images(_html) is _want)
+
+
+print("\ntest_no_email_reports_its_own_opening")
+# Owner, 2026-10-07, once pictures loaded by themselves: "yes strip the tracking pixels too". A picture nobody can see
+# (2px or less both ways, by attribute or style, or hidden by style) is taken out before the frame draws; a picture a
+# person can see stays.
+_PIXELS = ('<img src="https://t.example/open?u=1" width="1" height="1" alt="">',
+           '<IMG SRC="https://u1.ct.sendgrid.example/wf/open?upn=x" alt="" width="1" height="1" border="0" '
+           'style="height:1px !important;width:1px !important;border-width:0 !important">',
+           '<img src="https://track.hubspot.example/e2t/to/x" alt="" width="1" height="1" '
+           'style="display:none!important;min-height:1px!important;width:1px!important">',
+           "<img src='https://x.example/p.gif' style='width:0;height:0'>",
+           '<img src="https://x.example/p.gif" style="opacity:0">',
+           '<img src="https://x.example/p.gif" style="visibility:hidden">',
+           '<img src="https://x.example/p.gif" style="max-height:0px;overflow:hidden">')
+_SEEN = ('<img src="https://x.example/logo.png" width="101" height="37" alt="Glow Med Spa">',
+         '<img src="https://x.example/rule.png" width="600" height="1">',
+         '<img src="https://x.example/photo.jpg">',
+         '<img src="https://x.example/a.png" width="1" height="1" style="width:120px;height:40px">',
+         '<img src="https://x.example/a.png" width="100%" height="1">')
+for _p in _PIXELS:
+    ok(f"a pixel nobody can see is taken out: {_p[:70]!r}",
+       render.no_tracking_pixels("<p>a</p>" + _p + "<p>b</p>") == "<p>a</p><p>b</p>")
+for _p in _SEEN:
+    ok(f"a picture a person can see stays: {_p[:70]!r}", _p in render.no_tracking_pixels("<p>a</p>" + _p))
+_doc = render.frame_doc("<p>Hi</p>" + _PIXELS[0] + _SEEN[0])
+ok("...and the frame is drawn without the pixel, with the logo", "t.example/open" not in _doc and _SEEN[0] in _doc)
 
 
 print("\n" + ("all good" if not _failed else f"{_failed} FAILED"))

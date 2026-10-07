@@ -322,12 +322,12 @@ ok("A LINKEDIN-SHAPED ALERT (dozens of nested tables, Outlook comments): the box
 ok("...and its frame carries no link that could run script, while its job links are kept",
    "javascript:" not in _jf.get("doc", "").lower() and 'data-ownbox-removed="href"' in _jf.get("doc", "")
    and "https://www.linkedin.com/comm/jobs/view/4123/?trackingId=a%3D%3D" in _jf.get("doc", ""), _jf.get("doc", "")[-400:])
-ok("SHOW IMAGES (owner, 10-07): an email that asks for pictures from the internet is sent the box's two policies to "
-   "swap, and one that asks for none is sent nothing to press",
-   (_jf.get("images") or {}) == {"hidden": _render.csp_meta(), "shown": _render.csp_meta(images=True)}
-   and "images" not in (_aios.get("frame") or {}), (_jf.get("images"), (_aios.get("frame") or {}).keys()))
-ok("...the screen swaps the one for the other, never adds a second, for that email alone and remembered nowhere",
-   "frame.doc.replace(swap.hidden, swap.shown)" in email and "setShown(true)" in email
+ok("ITS PICTURES LOAD BY THEMSELVES (owner, 10-07: \"Just make it automatic\"): the frame is sent under the box's one "
+   "policy, which allows https pictures, with nothing to press",
+   _render.csp_meta() in _jf.get("doc", "") and "img-src data: https:;" in _render.csp_meta()
+   and "images" not in _jf, (_jf.keys(), _render.csp_meta()))
+ok("...and the screen draws the frame as sent: no Show images, no second policy, nothing remembered",
+   "Show images" not in email and "frame.doc.replace" not in email
    and "localStorage" not in email and "sessionStorage" not in email)
 _rows = {c["id"]: c for c in (owner.get("/inbox/api/conversations").get_json() or {})["data"]}
 ok("ITS ROW'S LAST LINE IS ITS WORDS, not its source", _rows.get("mail-loop", {}).get("lastMessage", "").startswith(

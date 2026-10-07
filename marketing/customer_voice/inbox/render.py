@@ -175,15 +175,12 @@ def readable(text: str) -> str:
 # THE OVERFLOW RULE IS A SAFETY NET, NOT THE DESIGN. `scrolling` is left at its default so that a
 # message the estimate underserves is still reachable rather than clipped — an escape hatch that
 # should almost never be used, not the mechanism.
-_FRAME_CSP = ("default-src 'none'; img-src data:; style-src 'unsafe-inline' data:; "
+# AN EMAIL'S PICTURES LOAD BY THEMSELVES (owner, 2026-10-07: "I want to always show images. I don't think anyone ever
+# doesn't want to show an image. Just make it automatic."), replacing the Show images button he chose earlier that day.
+# From https only: never http, and nothing that runs. Loading one still tells its sender the email was opened, and when;
+# no address goes with it (the frame's no-referrer), and the frame's sandbox runs no script whatever the policy says.
+_FRAME_CSP = ("default-src 'none'; img-src data: https:; style-src 'unsafe-inline' data:; "
               "font-src data:; form-action 'none'; base-uri 'none'")
-# SHOW IMAGES (owner, 2026-10-07: "go with the show images button"). An email's pictures stay blocked until he presses
-# Show images on that email: a remote picture tells its sender the email was opened, and when. Pressed, the frame is
-# drawn again under this policy, which differs from the one above in img-src alone (https only; never http, never
-# script). It REPLACES the blocked policy rather than joining it: two CSPs on one document both apply, so a frame
-# carrying both would still block every picture.
-_FRAME_CSP_IMAGES = _FRAME_CSP.replace("img-src data:;", "img-src data: https:;", 1)
-assert _FRAME_CSP_IMAGES != _FRAME_CSP
 _FRAME_SANDBOX = "allow-popups allow-popups-to-escape-sandbox"
 # MEASURED AT 390px, 16px/1.4: about 45 characters to a line and 23px to a line of text. A block
 # element (`p`, `li`, heading, `tr`) costs roughly another 14px in margins. An `img` is the one
@@ -229,7 +226,7 @@ def _estimate_px(body_html: str) -> int:
     px = (lines * _PX_PER_LINE
           + len(_BLOCK.findall(raw)) * _PX_PER_BLOCK
           + len(_HEADING.findall(raw)) * _PX_PER_HEADING
-          + len(_IMG.findall(raw)) * _PX_PER_IMG
+          + len(_IMG.findall(no_tracking_pixels(raw))) * _PX_PER_IMG   # a pixel taken out takes no room
           + 40)                                                    # the body's own padding
     px = int(px * 1.25)                                            # deliberately over, see above
     return max(_FRAME_MIN_PX, min(_FRAME_MAX_PX, px))
@@ -299,18 +296,50 @@ def no_refresh(body_html: str) -> str:
     return _META.sub(one, str(body_html or ""))
 
 
-def csp_meta(*, images: bool = False) -> str:
-    """The frame's CSP, exactly as frame_doc writes it: images blocked, or (Show images) allowed from https."""
-    return f'<meta http-equiv="Content-Security-Policy" content="{_FRAME_CSP_IMAGES if images else _FRAME_CSP}">'
+# NO EMAIL REPORTS ITS OWN OPENING (owner, 2026-10-07, once pictures loaded by themselves: "yes strip the tracking
+# pixels too"). A sender's invisible picture tells them the email was opened, and when. So a picture nobody can see is
+# taken out before the frame draws: 2px or less both ways (by its width and height attributes, or by its style, which
+# wins as it does in a browser), or hidden by its style (display:none, visibility:hidden, opacity:0, a max-width or
+# max-height of 0). A picture a person can see stays: a logo, a photo, a 1px-tall divider across the email. A pixel
+# with no size and no hiding can't be told from a picture, so it stays too.
+_IMG_TAG = re.compile(r"""(?is)<img\b(?:[^>"']|"[^"]*"|'[^']*')*>""")
+_IMG_ATTR = re.compile(r"""(?is)[\s"'/](?P<name>[a-z][a-z0-9-]*)\s*=\s*(?P<value>"[^"]*"|'[^']*'|[^\s"'=<>`]+)""")
+_PIXELS = re.compile(r"(?i)^\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$")
+PIXEL_PX = 2
 
 
-_REMOTE_IMAGE = re.compile(r"""(?is)(<img\b(?:[^>"']|"[^"]*"|'[^']*')*?\ssrc\s*=\s*["']?\s*https?:"""
-                           r"""|\sbackground\s*=\s*["']?\s*https?:|url\(\s*["']?\s*https?:)""")
+def _px(value) -> float | None:
+    """A length in pixels, or None when it isn't one (auto, a percentage, nothing)."""
+    m = _PIXELS.match(str(value or ""))
+    return float(m.group(1)) if m else None
 
 
-def has_remote_images(body_html: str) -> bool:
-    """Does this HTML ask for a picture from the internet (an <img>, a background, or a CSS url())?"""
-    return bool(_REMOTE_IMAGE.search(str(body_html or "")))
+def _invisible(tag: str) -> bool:
+    attrs = {}
+    for m in _IMG_ATTR.finditer(tag):
+        attrs.setdefault(m.group("name").lower(), html.unescape(m.group("value").strip("\"'")))
+    style = {}
+    for decl in attrs.get("style", "").split(";"):
+        name, _, value = decl.partition(":")
+        if value:
+            style.setdefault(name.strip().lower(), value.lower().replace("!important", "").strip())
+    if style.get("display") == "none" or style.get("visibility") == "hidden":
+        return True
+    if _px(style.get("opacity")) == 0 or 0 in (_px(style.get("max-width")), _px(style.get("max-height"))):
+        return True
+    w = _px(style["width"]) if "width" in style else _px(attrs.get("width"))
+    h = _px(style["height"]) if "height" in style else _px(attrs.get("height"))
+    return w is not None and h is not None and w <= PIXEL_PX and h <= PIXEL_PX
+
+
+def no_tracking_pixels(body_html: str) -> str:
+    """The sender's HTML with every picture nobody can see taken out (see the note above)."""
+    return _IMG_TAG.sub(lambda m: "" if _invisible(m.group(0)) else m.group(0), str(body_html or ""))
+
+
+def csp_meta() -> str:
+    """The frame's CSP, exactly as frame_doc writes it."""
+    return f'<meta http-equiv="Content-Security-Policy" content="{_FRAME_CSP}">'
 
 
 def frame_doc(body_html: str) -> str:
@@ -330,7 +359,7 @@ def frame_doc(body_html: str) -> str:
             '"Segoe UI",Roboto,sans-serif;color:#111;background:#fff;word-break:break-word}'
             'img{max-width:100%;height:auto}table{max-width:100%}'
             'a{color:#0b57d0}</style></head><body>'
-            + no_script_links(no_refresh(body_html)) + '</body></html>')
+            + no_script_links(no_refresh(no_tracking_pixels(body_html))) + '</body></html>')
 
 
 def safe_frame(body_html: str, *, label: str = "Message") -> str:
