@@ -43,9 +43,12 @@ TOOLS = {
     "/inbox/drafts": ("inbox.propose_drafting",),
     "/inbox/signature": ("inbox.propose_signature",),
     "/inbox/pitch-back": ("inbox.propose_pitch_back",),
-    "/inbox/reply-style": ("inbox.propose_reply_style",),
+    # how each channel is answered and its style (2026-10-07); Reply Style keeps the levels' words and no control
+    "/inbox/channels": ("inbox.propose_channel_mode",),
     "/inbox/sending": ("inbox.propose_first_message", "inbox.propose_hourly_cap"),
     "/inbox/snippets": ("inbox.saved_replies", "inbox.propose_saved_reply"),
+    # the business's other addresses, on the Mailbox screen (2026-10-07); no password is in this one
+    "/inbox/mailbox/addresses": ("inbox.propose_business_addresses",),
 }
 
 # WHAT A CHAT CANNOT DO, AND WHY. Short on purpose; a route belongs here only for a reason a person accepts.

@@ -410,42 +410,46 @@ def status():
     }
 
 
-def _rs_get() -> dict:
-    from marketing.customer_voice.inbox import reply_style
-    return reply_style.get()
-
-
 def settings():
     """Every Inbox setting, its value, and what it means — the Settings screen, in words."""
-    from marketing.customer_voice.inbox import mailbox_drafts
+    from marketing.customer_voice.inbox import answering, mailbox_drafts
     from marketing.customer_voice.inbox import sending
     snd = sending.get()
+    chans = answering.get()
     return {
         "settings": [
             {"name": "writing_replies", "value": _onoff(_drafting()),
              "means": "the box writes a reply for each new message, for a person to read and send; "
-                      "a written reply sends on its own only on a channel where replies on their own are on",
+                      "a written reply sends on its own only on a channel set to auto on the Channels screen",
              "changed_at": "/inbox/settings"},
             {"name": "opener", "value": snd["first_message"],
              "means": "when on, the box sends one fixed first message to a new conversation by "
                       "itself, within the hourly cap",
              "changed_at": "/inbox/sending"},
-            *[{"name": f"auto_reply_{ch}", "value": snd["auto_reply"][ch],
-               "means": f"when on, every new {name} message gets the reply the box wrote, sent by itself within "
-                        "about a minute, with nobody pressing send; only messages after it was turned on, never while "
-                        "a person is chatting on that conversation, within the hourly cap",
-               "changed_at": "/inbox/sending"} for ch, name in sending.AUTO_CHANNELS],
+            # EACH CHANNEL, AS THE CHANNELS SCREEN SHOWS IT (2026-10-07): its one home.
+            *[{"name": f"answering_{r['channel']}", "value": r["mode"],
+               "means": f"how the box answers {r['label']}: off writes no reply (a person answers), draft writes one "
+                        "that waits for a person to send it"
+                        + (", auto sends the written reply by itself within about 20 seconds with nobody approving "
+                           "it, only for messages after it was turned on" if r["channel"] != "email" else
+                           "; email never sends by itself")
+                        + ". Replies to cold pitches and conversations a machine is handling always wait",
+               "changed_at": "/inbox/channels"} for r in chans],
             {"name": "hourly_send_cap", "value": snd["hourly_cap"],
              "means": "the most messages the box sends in any hour, counted across every send",
              "changed_at": "/inbox/sending"},
-            *[{"name": f"reply_style_{ch}", "value": _rs_get()[ch],
-               "means": f"how the box writes drafted replies to {'email' if ch == 'email' else 'direct messages'}: "
-                        "service sells nothing, subtle ends every reply with one light sentence about the business, "
-                        "sales (strong) ends every reply to a prospect with a clear next step and asks for the sale",
-               "changed_at": "/inbox/reply-style"} for ch in ("email", "dms")],
+            *[{"name": f"reply_style_{r['channel']}", "value": r["style"],
+               "means": f"how the box writes replies on {r['label']}: service sells nothing, subtle ends every reply "
+                        "with one light sentence about the business, sales (strong) ends every reply to a prospect "
+                        "with a clear next step and asks for the sale",
+               "changed_at": "/inbox/channels"} for r in chans],
             {"name": "mailbox_drafts", "value": "on" if mailbox_drafts.enabled() else "off",
              "means": "replies to email are also left in the mailbox's own Drafts folder",
              "changed_at": "the box's configuration (not on a screen yet)"},
+            {"name": "business_addresses", "value": sorted(_business_addresses()),
+             "means": "the business's other email addresses: mail FROM them is the business speaking, filed as "
+                      "sent, never given a draft reply and never counted as waiting",
+             "changed_at": "/inbox/mailbox"},
         ],
         "connections": _connections(),
         "note": "reading only: nothing here changes a setting",
@@ -1002,6 +1006,95 @@ def propose_reply_style(email=None, dms=None, seat=None):
     return _ask_control("reply_style", want, {"Change": what, **words}, what, seat)
 
 
+def _business_addresses() -> set:
+    from marketing.customer_voice.inbox import store
+    return store.business_addresses()
+
+
+def _addresses_in(v) -> list:
+    """One address, a comma-separated line of them, or a list: as typed, each once, lower case."""
+    items = v if isinstance(v, (list, tuple)) else str(v or "").split(",")
+    out = []
+    for a in items:
+        a = str(a or "").strip().lower()
+        if a and a not in out:
+            out.append(a)
+    return out
+
+
+def _mailbox_address() -> str:
+    from core import box_secrets
+    try:
+        return str(box_secrets.email_state().get("user") or "")
+    except Exception:                                    # noqa: BLE001 — no mailbox: nothing is its own
+        return ""
+
+
+def propose_business_addresses(add=None, remove=None, seat=None):
+    """Ask the owner to add or remove the business's other email addresses (Inbox Settings, Mailbox)."""
+    from marketing.customer_voice.inbox import store
+    plus, minus = _addresses_in(add), _addresses_in(remove)
+    if not plus and not minus:
+        return {"asked": False, "error": "give add, remove or both: one address, or several separated by commas"}
+    have = sorted(store.business_addresses())
+    plus = [a for a in plus if a not in have]
+    minus = [a for a in minus if a in have]
+    if not plus and not minus:
+        return {"asked": False, "note": "the business's addresses are already that way"}
+    want = [a for a in have if a not in minus] + plus
+    try:
+        store.clean_business_addresses(want)
+    except ValueError as e:
+        return {"asked": False, "error": str(e)}
+    own = _mailbox_address().strip().lower()
+    if own and own in plus:
+        return {"asked": False, "error": "That's the mailbox the box reads, so it's already the business's."}
+    words = {}
+    if plus:
+        words["Add"] = ", ".join(plus)
+        words["What that means"] = ("Mail FROM these addresses is filed as sent by your business and never gets a "
+                                    "draft reply. Only approve addresses your business sends from, never a "
+                                    "customer's: their messages would stop getting replies.")
+    if minus:
+        words["Remove"] = ", ".join(minus)
+    what = "Your business's addresses: " + "; ".join(
+        x for x in (f"add {words['Add']}" if plus else "", f"remove {words['Remove']}" if minus else "") if x)
+    return _ask_control("business_addresses", {"add": plus, "remove": minus}, {"Change": what, **words}, what, seat)
+
+
+def propose_channel_mode(channel=None, mode=None, style=None, seat=None):
+    """Ask the owner to change how one channel is answered, its reply style, or both (Inbox Settings, Channels)."""
+    from marketing.customer_voice.inbox import answering, reply_style
+    rows = {r["channel"]: r for r in answering.get()}
+    ch = str(channel or "").strip().lower()
+    if ch not in rows:
+        return {"asked": False, "error": "give channel: " + ", ".join(rows)}
+    if mode is None and style is None:
+        return {"asked": False, "error": "give mode (off, draft or auto), style (service, subtle or sales), or both"}
+    try:
+        want = {}
+        if mode is not None:
+            want["mode"] = answering.clean_mode(ch, mode)
+        if style is not None:
+            want["style"] = reply_style.clean(style)
+    except ValueError as e:
+        return {"asked": False, "error": str(e)}
+    cur = rows[ch]
+    if all(cur[k] == v for k, v in want.items()):
+        return {"asked": False, "note": f"{cur['label']} is already set that way"}
+    words = {"Channel": cur["label"]}
+    if "mode" in want:
+        words["When a message comes in"] = answering.MODES[want["mode"]]
+    if "style" in want:
+        words["Reply style"] = reply_style.STYLES[want["style"]]
+    if want.get("mode") == "auto":
+        words["What that means"] = ("Replies to new messages send by themselves, with nobody approving them. Replies "
+                                    "to cold pitches still wait for you.")
+    what = f"{cur['label']}: " + ", ".join(v for k, v in words.items() if k in ("When a message comes in",
+                                                                              "Reply style"))
+    return _ask_control("channel_mode", {"channel": ch, **want}, {"Change": what, **words}, what, seat)
+
+
 def propose_first_message(on=None, text=None, seat=None):
     """Ask the owner to turn the first message on or off, or change its words (Inbox Settings, Sending)."""
     from marketing.customer_voice.inbox import sending
@@ -1123,10 +1216,40 @@ def _run_control(detail: dict) -> dict:
         from marketing.customer_voice.inbox import reply_style
         try:
             cur = reply_style.put(email=detail.get("email"), dms=detail.get("dms"), by=_who_approved())
+            # A DM CHANNEL STYLED ON ITS OWN (Channels) reads its own style before the all-DMs one, so "direct
+            # messages" is set on each of them too: asked for DMs, every DM channel writes that way.
+            if detail.get("dms") is not None:
+                from marketing.customer_voice.inbox import answering
+                for r in answering.get():
+                    if r["channel"] != "email":
+                        answering.put(r["channel"], style=detail.get("dms"), by=_who_approved())
         except ValueError as e:
             return {"ok": False, "text": f"Not changed: {e}"}
         return {"ok": True, "text": "Saved. New drafts are written this way: " + ", ".join(
             f"{reply_style.CHANNEL_WORDS[ch]} {reply_style.STYLES[cur[ch]]}" for ch in reply_style.CHANNELS) + "."}
+    if action == "business_addresses":
+        from marketing.customer_voice.inbox import store as _st
+        minus = set(_addresses_in(detail.get("remove")))
+        want = [a for a in sorted(_st.business_addresses()) if a not in minus] + _addresses_in(detail.get("add"))
+        try:
+            got = _st.put_business_addresses(want, by=_who_approved(), own_address=_mailbox_address())
+        except ValueError as e:
+            return {"ok": False, "text": f"Not changed: {e}"}
+        n = got["refiled"]
+        return {"ok": True, "text": "Saved. " + (f"{n} message{'' if n == 1 else 's'} already in from them "
+                                                f"{'is' if n == 1 else 'are'} now filed as your business's. "
+                                                if n else "") + "Mail from these addresses is filed as sent: "
+                + (", ".join(got["addresses"]) or "none") + "."}
+    if action == "channel_mode":
+        from marketing.customer_voice.inbox import answering
+        try:
+            rows = answering.put(str(detail.get("channel") or ""), mode=detail.get("mode"), style=detail.get("style"),
+                                 by=_who_approved())
+        except ValueError as e:
+            return {"ok": False, "text": f"Not changed: {e}"}
+        r = next(x for x in rows if x["channel"] == detail.get("channel"))
+        styles = {x["value"]: x["label"] for x in r["styles"]}
+        return {"ok": True, "text": f"Saved. {r['label']}: {answering.MODES[r['mode']]}, {styles[r['style']]}."}
     if action == "sending":
         from marketing.customer_voice.inbox import sending
         try:
@@ -1201,6 +1324,37 @@ tools.register(
     args={"email": {"type": "string", "required": False, "description": "service, subtle or sales, for email."},
           "dms": {"type": "string", "required": False,
                   "description": "service, subtle or sales, for direct messages."}},
+)
+
+tools.register(
+    "propose_business_addresses",
+    title="Ask before changing the business's email addresses",
+    fn=propose_business_addresses, machine=MACHINE, min_role="act", render=_render_proposal,
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to add or remove the business's other email addresses (the owner's personal account, "
+                "staff, a front desk, sales@), up to 20. Mail FROM these addresses is filed as SENT by the business "
+                "and NEVER gets a draft reply or counts as waiting, so never add a customer's address. Adding one "
+                "also files the mail already in from it. Nothing changes until the owner approves.",
+    args={"add": {"type": "string", "required": False,
+                  "description": "An address to add, or several separated by commas."},
+          "remove": {"type": "string", "required": False,
+                     "description": "An address to remove, or several separated by commas."}},
+)
+
+tools.register(
+    "propose_channel_mode",
+    title="Ask before changing how a channel is answered",
+    fn=propose_channel_mode, machine=MACHINE, min_role="act", render=_render_proposal,
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to change how one channel (email, instagram or messenger) is answered, its reply "
+                "style, or both. mode: off writes no reply, draft writes one that waits for the owner to send it, auto "
+                "(Instagram and Messenger only, never email) sends the written reply by itself within about 20 "
+                "seconds with NO approval. Replies to cold pitches and conversations a machine is handling still wait "
+                "whatever is chosen. style: service, subtle or sales. Nothing changes until the owner approves.",
+    args={"channel": {"type": "string", "required": True, "description": "email, instagram or messenger."},
+          "mode": {"type": "string", "required": False,
+                   "description": "off, draft or auto (auto is refused for email)."},
+          "style": {"type": "string", "required": False, "description": "service, subtle or sales."}},
 )
 
 tools.register(

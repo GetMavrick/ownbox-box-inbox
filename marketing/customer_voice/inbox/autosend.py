@@ -1,4 +1,4 @@
-"""Replies on their own: the DM channels the owner switched on answer themselves (Inbox Settings, Sending).
+"""Replies on their own: the DM channels the owner switched on answer themselves (Inbox Settings, Channels).
 
 Owner, 2026-10-07: *"We also should build something that allows automatic sending of messages per channel. Like I
 would like automatic instant responses to any Instagram or messenger DM's that come in. I don't wanna have to approve

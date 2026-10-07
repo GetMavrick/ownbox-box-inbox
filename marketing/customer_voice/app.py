@@ -1237,6 +1237,7 @@ shell.register_section(
         {"key": "overview", "label": "Overview", "href": "/inbox/settings"},
         {"key": "mailbox", "label": "Mailbox", "href": "/inbox/mailbox"},
         {"key": "signature", "label": "Email Signature", "href": "/inbox/signature"},
+        {"key": "answering", "label": "Channels", "href": "/inbox/channels"},
         {"key": "reply_style", "label": "Reply Style", "href": "/inbox/reply-style"},
         {"key": "sending", "label": "Sending", "href": "/inbox/sending"},
         {"key": "pitch_back", "label": "Cold Pitches", "href": "/inbox/pitch-back"},
@@ -4478,6 +4479,13 @@ def r_mailbox():
         except box_secrets.SecretRejected as e:
             note = (f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>')
 
+    return _shell(_mailbox_owner_body(note, typed), here="/inbox/mailbox"), 200
+
+
+def _mailbox_owner_body(note: str, typed: str, **addresses) -> str:
+    """The Mailbox screen as its owner sees it. `addresses` is what the business's addresses card says after a save
+    (`_business_addresses_card`): drawn by r_mailbox and by its POST, r_business_addresses."""
+    from core import box_secrets
     st = box_secrets.email_state()
     status, who = st.get("status"), st.get("user") or ""
     detail = str(st.get("detail") or "").strip()
@@ -4519,6 +4527,7 @@ def r_mailbox():
                 '<span>Make a new app password in Google and paste it here. The address stays '
                 'the same unless you change it too.</span></div></div>'
                 + _mailbox_form(user=who, note=note, verb="Save this password")
+                + _business_addresses_card(who, **addresses)
                 + '<p style="margin-top:16px">'
                 + _post_button("/inbox/mailbox", "off", "1", "Stop reading this inbox") + '</p>'
                 + _back_link())
@@ -4545,7 +4554,107 @@ def r_mailbox():
                 + _mailbox_no_password_yet()
                 + _mailbox_steps()
                 + _back_link())
-    return _shell(body, here="/inbox/mailbox"), 200
+    return body
+
+# ── your business's addresses (inbox/store.py put_business_addresses, #2048) ───────────────────────────────────────────
+# Owner, 2026-10-07: "Yes rename the field and make sure that it's adequately explained on screen." Its one home is
+# this screen, in its own card under the connected mailbox (docs/SCOPE_BUSINESS_ADDRESSES.md); the words are the
+# hand-off's, written to be shown as they are. Mail FROM these addresses is the business speaking: filed as sent, never
+# drafted to, never waiting.
+_BIZ_CSS = (
+    '<style>'
+    '.biz{padding:14px 16px 16px;margin-top:16px}'
+    '.biz h2{margin:0 0 8px;font-size:calc(18 * var(--px, 1px));font-weight:var(--w-strong);letter-spacing:-.01em}'
+    '.biz p{margin:0 0 8px;overflow-wrap:anywhere}.biz ul.why{margin:0 0 12px;padding-left:20px}.biz ul.why li{margin:2px 0}'
+    '.biz ul.list{list-style:none;margin:4px 0 12px;padding:0}'
+    '.biz ul.list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;'
+    'border-bottom:1px solid var(--hair)}'
+    '.biz ul.list li:last-child{border-bottom:0}'
+    '.biz ul.list .a{min-width:0;overflow-wrap:anywhere}'
+    '.biz .rm{min-height:48px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:transparent;'
+    'color:var(--ink);font:inherit;flex:none}'
+    '.biz label.lbl{display:block;margin:0 0 6px;color:var(--dim);font-weight:var(--w-regular);'
+    'font-size:calc(14.5 * var(--px, 1px))}'
+    '.biz .add{display:flex;gap:8px}'
+    '.biz .add input{flex:1;min-width:0;font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:0 14px;'
+    'min-height:48px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)}'
+    '.biz .add .btn{min-height:48px;flex:none;width:auto;padding:0 22px}'
+    '.biz .said{color:var(--ink);font-weight:var(--w-strong)}'
+    '.biz .err{color:var(--accent);margin:8px 0 0}'
+    '.biz .careful{margin:10px 0 0;color:var(--dim);font-size:calc(14 * var(--px, 1px))}'
+    '.biz .careful p{margin:0 0 4px}'
+    '</style>')
+
+
+def _business_addresses_card(who: str, said: str = "", err: str = "", adding: str = "") -> str:
+    """The card under the connected mailbox: what it does, the list with Remove, one field to add, two cautions.
+    `said` is the confirmation after a save, `err` the store's sentence when it refused (nothing was saved),
+    `adding` what was in the field then."""
+    from marketing.customer_voice.inbox import store as _store
+    mine = _esc(who)
+    have = sorted(_store.business_addresses())
+    rows = "".join(
+        f'<li><span class="a">{_esc(a)}</span>'
+        '<form method="post" action="/inbox/mailbox/addresses" class="inline">'
+        f'<input type="hidden" name="remove" value="{_esc(a)}">'
+        f'<button class="rm" type="submit" aria-label="Remove {_esc(a)}">Remove</button></form></li>' for a in have)
+    listing = (f'<ul class="list">{rows}</ul>' if have else
+               f'<p class="quiet">No other addresses yet. Until you add some, only {mine} counts as your business.</p>')
+    return (_BIZ_CSS + '<div class="card biz" id="addresses"><h2>Your business&#x27;s addresses</h2>'
+            f'<p>Your Ownbox reads <b>{mine}</b>. If your business also sends email from other addresses, add them '
+            'here. That could be your personal email, your staff, your front desk, or a shared address like sales@.</p>'
+            '<p>When mail from these addresses lands in this inbox (because someone CC&#x27;d you, BCC&#x27;d you, or '
+            'forwarded it), your Ownbox treats it as your business talking, not a customer:</p>'
+            '<ul class="why"><li>it won&#x27;t write a reply to it,</li>'
+            '<li>it won&#x27;t count it as someone waiting on you,</li>'
+            '<li>and if your team already answered a customer, that customer won&#x27;t show as waiting.</li></ul>'
+            + (f'<p class="said" role="status">{_esc(said)}</p>' if said else "")
+            + listing +
+            '<form method="post" action="/inbox/mailbox/addresses">'
+            '<label class="lbl" for="biz-add">Add an address</label>'
+            '<div class="add"><input id="biz-add" type="email" name="add" autocomplete="email" required '
+            f'spellcheck="false" placeholder="frontdesk@yourbusiness.com" value="{_esc(adding)}">'
+            '<button class="btn" type="submit">Add</button></div>'
+            + (f'<p class="err" role="alert">{_esc(err)}</p>' if err else "") +
+            '<div class="careful"><p>Only add addresses your business sends from. Never add a customer&#x27;s '
+            'address: their messages would stop getting replies.</p>'
+            '<p>Adding an address also sorts the mail already here from it.</p></div></form></div>')
+
+
+@blueprint.route("/inbox/mailbox/addresses", methods=["POST"])
+def r_business_addresses():
+    """Add one of the business's addresses, or remove one, through store.put_business_addresses (which validates the
+    whole list before writing any of it), and draw the Mailbox screen again with what happened."""
+    from core import box_secrets
+    from marketing.customer_voice.inbox import store as _store
+    gate = _gate()
+    if gate is not None:
+        return gate
+    if not _is_owner():
+        return _owner_refusal()
+    try:
+        whoami = (dash.session_user(request) or {}).get("id")
+    except Exception:                            # noqa: BLE001 — only whose name the audit line carries
+        whoami = None
+    own = str(box_secrets.email_state().get("user") or "")
+    have = sorted(_store.business_addresses())
+    add = str(request.form.get("add") or "").strip()
+    gone = str(request.form.get("remove") or "").strip().lower()
+    said = err = ""
+    try:
+        if gone:
+            _store.put_business_addresses([a for a in have if a != gone], by=whoami, own_address=own)
+            said = f"Removed. New mail from {gone} will be treated like any other sender."
+        elif not add:
+            err = "Type an address to add."
+        else:
+            n = _store.put_business_addresses(have + [add], by=whoami, own_address=own)["refiled"]
+            said = (f"Done. {n} message{'' if n == 1 else 's'} from these addresses {'is' if n == 1 else 'are'} now "
+                    "filed as your business's, and the replies drafted to them were removed." if n else "Saved.")
+            add = ""
+    except ValueError as e:
+        err = str(e)
+    return _shell(_mailbox_owner_body("", "", said=said, err=err, adding=add), here="/inbox/mailbox"), 200
 
 
 # ── B1: where a buyer connects the accounts the inbox reads from ────────────────────────────
@@ -5344,6 +5453,153 @@ def r_signature():
     return _shell(head + form + _back_link(), here="/inbox/signature"), 200
 
 
+# ── channels: how each one is answered (inbox/answering.py, #2047) ────────────────────────────────────────────────────
+# Owner, 2026-10-07: "We also need to build different settings per channel. For example, DM's get an auto reply whereas
+# email just gets an auto draft." THE ONE HOME for answering a channel (docs/SCOPE_CHANNELS_SCREEN.md; OSDev1's fold-in,
+# 10-07): Reply Style and Sending link here. One card per channel, in answering.get()'s order. A tap saves its card
+# (a Save button without script), and Auto-reply asks once first: from then on replies go out with nobody pressing send.
+_CHANNEL_LINES = {"draft": "Drafts wait for you in the Inbox.", "off": "No drafts. You answer these yourself."}
+
+
+def _channel_line(row: dict) -> str:
+    """The one plain line under a card: what this channel does now."""
+    if row["mode"] == "auto":
+        since = _when(row.get("since"))
+        return ((f"On since {since}. " if since else "On. ") + "Answers within about 20 seconds. Pauses when you "
+                "reply yourself; at most 3 an hour per person.")
+    return _CHANNEL_LINES[row["mode"]]
+
+
+_CHANNELS_CSS = (
+    '<style>'
+    '.ans{padding:14px 16px 16px;margin-top:12px}'
+    '.ans .top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 12px}'
+    '.ans h2{margin:0;font-size:calc(18 * var(--px, 1px));font-weight:var(--w-strong);letter-spacing:-.01em}'
+    '.ans .ok{color:var(--dim);font-size:calc(14 * var(--px, 1px))}'
+    '.ans fieldset{border:0;margin:0 0 14px;padding:0;min-width:0}'
+    '.ans legend,.ans label.lbl{display:block;padding:0;margin:0 0 6px;color:var(--dim);'
+    'font-weight:var(--w-regular);font-size:calc(14.5 * var(--px, 1px))}'
+    # A SEGMENTED CONTROL, the iOS one, in the box's tokens: a track of the ground colour, the chosen one raised on
+    # the card colour, and Auto-reply in ink, because from then on nobody presses send.
+    '.ans-seg{display:flex;gap:3px;padding:3px;border-radius:12px;background:var(--bg)}'
+    '.ans-seg label{flex:1 1 0;min-width:0;position:relative}'
+    '.ans-seg input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}'
+    '.ans-seg span{display:flex;align-items:center;justify-content:center;min-height:44px;padding:0 6px;'
+    'border-radius:9px;text-align:center;line-height:1.15;color:var(--dim);font-weight:var(--w-regular);'
+    'font-size:calc(15 * var(--px, 1px))}'
+    '.ans-seg input:checked+span{background:var(--surface);color:var(--ink);font-weight:var(--w-strong);'
+    'box-shadow:var(--lift)}'
+    '.ans-seg input[value=auto]:checked+span{background:var(--accent);color:var(--accent-ink)}'
+    '.ans-seg input:focus-visible+span{outline:2px solid var(--accent-line);outline-offset:1px}'
+    '.ans select{font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:0 14px;width:100%;'
+    'min-height:48px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)}'
+    '.ans .line{margin:12px 0 0;color:var(--dim)}'
+    '.ans .ask{margin:0 0 14px;padding:12px 14px;border-radius:12px;background:var(--bg)}'
+    '.ans .ask p{margin:0 0 10px}'
+    '.ans .ask .row2{display:flex;gap:8px;flex-wrap:wrap}.ans .ask .btn{flex:1 1 auto;width:auto}'
+    '.ans .ghost{min-height:48px;padding:0 16px;border-radius:12px;border:1px solid var(--line);'
+    'background:transparent;color:var(--ink);font:inherit}'
+    '.ans .save{margin-top:12px;min-height:48px}'
+    'html.ans-js .ans .save{display:none}'
+    '.ans-note{padding:12px 16px;margin-top:12px}'
+    '@media (max-width:820px){.ans-seg span{min-height:48px}}'
+    '</style>')
+
+# A tap saves its card; Auto-reply asks once first. Without script, the Save button under each card does the same.
+_CHANNELS_JS = (
+    '<script>(function(){document.documentElement.classList.add("ans-js");'
+    'document.querySelectorAll("form.ans").forEach(function(f){'
+    'var ask=f.querySelector(".ask"),line=f.querySelector(".line"),ok=f.querySelector(".ok"),'
+    'sel=f.querySelector("select"),timer;'
+    'function back(){var r=f.querySelector("input[name=mode][value=\'"+f.dataset.mode+"\']");if(r)r.checked=true;'
+    'sel.value=f.dataset.style;}'
+    'function save(){var said=line.textContent;ok.textContent="Saving…";'
+    'fetch(f.action,{method:"POST",body:new FormData(f),headers:{"Accept":"application/json"},'
+    'credentials:"same-origin"}).then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});})'
+    '.then(function(x){if(!x.ok||!x.j.ok){back();line.textContent=said;'
+    'ok.textContent=(x.j&&x.j.error)||"Not saved. Try again.";return;}'
+    'f.dataset.mode=x.j.mode;f.dataset.style=x.j.style;line.textContent=x.j.line;ok.textContent="Saved";'
+    'clearTimeout(timer);timer=setTimeout(function(){ok.textContent="";},2500);})'
+    '.catch(function(){back();line.textContent=said;ok.textContent="Not saved. Try again.";});}'
+    'f.addEventListener("change",function(e){'
+    'if(e.target.name==="mode"&&e.target.value==="auto"&&f.dataset.mode!=="auto"){ask.hidden=false;'
+    'ask.querySelector("[data-yes]").focus();return;}ask.hidden=true;save();});'
+    'ask.querySelector("[data-yes]").addEventListener("click",function(){ask.hidden=true;save();});'
+    'ask.querySelector("[data-no]").addEventListener("click",function(){ask.hidden=true;back();});'
+    'f.addEventListener("submit",function(e){e.preventDefault();save();});'
+    '});})();</script>')
+
+
+@blueprint.route("/inbox/channels", methods=["GET", "POST"])
+def r_channels():
+    from marketing.customer_voice.inbox import answering as _ans
+    gate = _gate()
+    if gate is not None:
+        return gate
+    owner = _is_owner()
+    if request.method == "POST" and not owner:
+        return _owner_refusal()
+    note = ""
+    if request.method == "POST":
+        ch = str(request.form.get("channel") or "").strip().lower()
+        wants_json = "application/json" in (request.headers.get("Accept") or "")
+        try:
+            u = dash.session_user(request) or {}
+        except Exception:                        # noqa: BLE001 — only whose name the audit line carries
+            u = {}
+        try:
+            rows = _ans.put(ch, mode=request.form.get("mode"), style=request.form.get("style"), by=u.get("id"))
+        except ValueError as e:
+            if wants_json:
+                return jsonify({"ok": False, "error": str(e)}), 400
+            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
+        else:
+            row = next(r for r in rows if r["channel"] == ch)
+            if wants_json:
+                return jsonify({"ok": True, "mode": row["mode"], "style": row["style"], "line": _channel_line(row)})
+            return redirect(f"/inbox/channels?saved={ch}#ch-{ch}", code=303)
+    rows = _ans.get()
+    saved = "" if note else str(request.args.get("saved") or "")
+    head = ('<h1>Channels</h1>'
+            '<p class="quiet">How your Ownbox answers each place people message you.</p>'
+            '<div class="card ans-note">Always waits for you, on every channel: replies to cold pitches, and anyone '
+            'a machine (like Lead Magnet) is handling.</div>' + note)
+    foot = ('<p class="quiet" style="margin-top:14px"><a href="/inbox/reply-style" style="color:var(--href)">'
+            'What each reply style does</a></p>')
+    if not owner:
+        cards = "".join(
+            f'<div class="card ans" id="ch-{r["channel"]}"><div class="top"><h2>{_esc(r["label"])}</h2></div>'
+            f'<p style="margin:0">When a message comes in: {_esc(_ans.MODES[r["mode"]])}</p>'
+            f'<p style="margin:4px 0 0">Reply style: {_esc(dict((x["value"], x["label"]) for x in r["styles"])[r["style"]])}'
+            f'</p><p class="line">{_esc(_channel_line(r))}</p></div>' for r in rows)
+        return _shell(_CHANNELS_CSS + head + cards + foot + _back_link(), here="/inbox/channels"), 200
+
+    def card(r):
+        ch = r["channel"]
+        modes = "".join(
+            f'<label><input type="radio" name="mode" value="{m["value"]}"{" checked" if m["value"] == r["mode"] else ""}>'
+            f'<span>{_esc(m["label"])}</span></label>' for m in r["modes"])
+        styles = "".join(f'<option value="{x["value"]}"{" selected" if x["value"] == r["style"] else ""}>'
+                         f'{_esc(x["label"])}</option>' for x in r["styles"])
+        auto_ask = (f'<div class="ask" hidden><p>Turn on Auto-reply for {_esc(r["label"])}? New messages there get '
+                    'your Ownbox\'s reply within about 20 seconds, with nobody pressing send.</p><div class="row2">'
+                    '<button type="button" class="btn" data-yes style="min-height:48px">Turn on Auto-reply</button>'
+                    '<button type="button" class="ghost" data-no>Cancel</button></div></div>')
+        return (f'<form class="card ans" id="ch-{ch}" method="post" action="/inbox/channels" '
+                f'data-mode="{r["mode"]}" data-style="{r["style"]}">'
+                f'<input type="hidden" name="channel" value="{ch}">'
+                f'<div class="top"><h2>{_esc(r["label"])}</h2>'
+                f'<span class="ok" role="status">{"Saved" if saved == ch else ""}</span></div>'
+                f'<fieldset><legend>When a message comes in</legend><div class="ans-seg">{modes}</div></fieldset>'
+                + auto_ask +
+                f'<label class="lbl" for="style-{ch}">Reply style</label>'
+                f'<select id="style-{ch}" name="style">{styles}</select>'
+                f'<p class="line">{_esc(_channel_line(r))}</p>'
+                '<button class="btn save" type="submit">Save</button></form>')
+    return _shell(_CHANNELS_CSS + head + "".join(card(r) for r in rows) + foot + _back_link() + _CHANNELS_JS,
+                  here="/inbox/channels"), 200
+
+
 # WHAT EACH LEVEL DOES, said on the page (owner, 2026-10-04: "And that should be explained on the webpage"). One card per
 # level, stacked: a table three columns wide does not fit a mobile screen. The words follow the drafter's STYLE_* text.
 _LEVELS = (
@@ -5371,57 +5627,25 @@ def _style_levels() -> str:
     return f'<div style="margin:6px 0 16px">{cards}</div>'
 
 
-# ── reply style, per channel (inbox/reply_style.py, drafter STYLE_SALES / STYLE_SERVICE) ─────────────────────────────
+# ── reply style: what each level does (drafter STYLE_SALES / STYLE_SERVICE) ──────────────────────────────────────────
 # Owner, 2026-10-04: "I wish there was a setting of a style of response that we could select per channel... I just
-# always want to be trying to get more business so want to always be closing ABC." Owner edits; members read.
-@blueprint.route("/inbox/reply-style", methods=["GET", "POST"])
+# always want to be trying to get more business so want to always be closing ABC." The choice moved to Channels, one
+# card per channel (OSDev1's fold-in, 2026-10-07: one place per setting); this page keeps what each level does, which
+# the owner asked to have explained on the page.
+@blueprint.route("/inbox/reply-style")
 def r_reply_style():
-    from marketing.customer_voice.inbox import reply_style as _rs
     gate = _gate()
     if gate is not None:
         return gate
-    owner = _is_owner()
-    if request.method == "POST" and not owner:
-        return _owner_refusal()
-    note = ""
-    if request.method == "POST":
-        try:
-            u = dash.session_user(request) or {}
-        except Exception:                        # noqa: BLE001 — only whose name the audit line carries
-            u = {}
-        try:
-            _rs.put(email=request.form.get("email"), dms=request.form.get("dms"), by=u.get("id"))
-            return redirect("/inbox/reply-style?saved=1", code=303)
-        except ValueError as e:
-            note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
-    cur = _rs.get()
-    saved = request.args.get("saved") and not note
     head = ('<h1>Reply style</h1>'
             '<p class="quiet">Your box reads every message before it drafts a reply. It tells a <b>prospect</b> '
             '(not a customer yet) from a <b>customer</b> (already bought or booked) and from <b>anyone else</b> (a '
             'recruiter, a supplier, someone pitching you), and writes to each the way a good owner would. That is '
             'built in, and a customer with a problem always gets it solved first.</p>'
-            '<p class="quiet">The style sets how far it leans: further toward service, or further toward the sale. Pick '
-            'one for each channel. Every draft still waits for you to send it.</p>'
-            + _style_levels()
-            + ('<p class="quiet">Saved. New drafts are written this way.</p>' if saved else "") + note)
-    if not owner:
-        rows = "".join(f'<p>{_rs.CHANNEL_WORDS[ch]}: {_rs.STYLES[cur[ch]]}</p>' for ch in _rs.CHANNELS)
-        return _shell(head + rows + _back_link(), here="/inbox/reply-style"), 200
-    field = ('font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;width:100%;'
-             'min-height:48px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)')
-
-    def pick(ch):
-        opts = "".join(f'<option value="{k}"{" selected" if cur[ch] == k else ""}>{_esc(v)}</option>'
-                       for k, v in _rs.STYLES.items())
-        return ('<label style="display:block"><span class="t" style="display:block;'
-                f'font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px">{_rs.CHANNEL_WORDS[ch]}</span>'
-                f'<select name="{ch}" aria-label="{_rs.CHANNEL_WORDS[ch]}" style="{field}">{opts}</select></label>')
-    form = ('<form class="compose" method="post" action="/inbox/reply-style" '
-            'style="display:flex;flex-direction:column;gap:12px;align-items:stretch">'
-            + pick("email") + pick("dms")
-            + '<button class="btn" type="submit" style="min-height:48px">Save</button></form>')
-    return _shell(head + form + _back_link(), here="/inbox/reply-style"), 200
+            '<p class="quiet">The style sets how far it leans: further toward service, or further toward the sale. '
+            'You choose it for each channel on <a href="/inbox/channels" style="color:var(--href)">Channels</a>.</p>'
+            + _style_levels())
+    return _shell(head + _back_link(), here="/inbox/reply-style"), 200
 
 
 # ── sending, what the box sends on its own (inbox/sending.py) ────────────────────────────────────────────────────
@@ -5444,25 +5668,17 @@ def r_sending():
             u = {}
         try:
             _snd.put(first_message=request.form.get("first_message") or "off", text=request.form.get("text"),
-                     hourly_cap=request.form.get("hourly_cap"),
-                     auto_reply={ch: request.form.get(f"auto_{ch}") or "off" for ch, _ in _snd.AUTO_CHANNELS},
-                     by=u.get("id"))
+                     hourly_cap=request.form.get("hourly_cap"), by=u.get("id"))
             return redirect("/inbox/sending?saved=1", code=303)
         except ValueError as e:
             note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
     cur = _snd.get()
     saved = request.args.get("saved") and not note
-    # REPLIES ON THEIR OWN (owner, 2026-10-07): one switch per DM channel, first on the screen because it is the one
-    # that changes the most. Email has none.
+    # REPLIES ON THEIR OWN MOVED TO CHANNELS (OSDev1's fold-in, 2026-10-07: one place per setting), a card per channel.
     head = ('<h1>Sending</h1>'
-            '<p class="quiet">Your Ownbox writes a reply to every message, and it waits for you to send it, except '
-            'where you turn on <b>replies on their own</b>. Turned on for Instagram or Messenger, every new message '
-            'there is answered within about a minute, in a friendly, chatty reply your Ownbox writes, with nobody '
-            'pressing send. It answers only messages that arrive after you turn it on. It never cuts in while you '
-            'are chatting on that conversation yourself (it waits 30 minutes after your last message there), never '
-            'answers someone who asked it to stop, and holds back a reply it judged nobody needs and a reply to a '
-            'cold pitch for you. Email always waits for you.</p>'
-            '<p class="quiet">A <b>first message</b> is the other thing it can send on its own: when it is on, a '
+            '<p class="quiet">Which channels answer on their own is chosen on '
+            '<a href="/inbox/channels" style="color:var(--href)">Channels</a>.</p>'
+            '<p class="quiet">A <b>first message</b> is something it can send on its own: when it is on, a '
             'brand-new conversation on Messenger, Instagram or WhatsApp gets the fixed words below at once. It goes '
             'once per conversation, never by email, and stops the moment the person asks it to.</p>'
             '<p class="quiet">The <b>hourly cap</b> is the most messages your box sends in any hour, counted across '
@@ -5472,23 +5688,15 @@ def r_sending():
             + ('<p class="quiet">Saved.</p>' if saved else "") + note)
     on = cur["first_message"] == "on"
     if not owner:
-        rows = ("".join(f'<p>{name} replies on their own: {"On" if cur["auto_reply"][ch] == "on" else "Off"}</p>'
-                        for ch, name in _snd.AUTO_CHANNELS)
-                + f'<p>First message on its own: {"On" if on else "Off"}</p>'
+        rows = (f'<p>First message on its own: {"On" if on else "Off"}</p>'
                 + (f'<p>The first message: {_esc(cur["text"])}</p>' if cur["text"] else "")
                 + f'<p>Most messages in an hour: {cur["hourly_cap"]}</p>')
         return _shell(head + rows + _back_link(), here="/inbox/sending"), 200
     field = ('font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;width:100%;'
              'min-height:48px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)')
     label = 'class="t" style="display:block;font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px"'
-    auto = "".join(
-        f'<label style="display:block"><span {label}>{name} replies on their own</span>'
-        f'<select name="auto_{ch}" aria-label="{name} replies on their own" style="{field}">'
-        f'<option value="off"{"" if cur["auto_reply"][ch] == "on" else " selected"}>Off: I send each reply</option>'
-        f'<option value="on"{" selected" if cur["auto_reply"][ch] == "on" else ""}>On: answer new messages at once'
-        '</option></select></label>' for ch, name in _snd.AUTO_CHANNELS)
     form = ('<form class="compose" method="post" action="/inbox/sending" '
-            'style="display:flex;flex-direction:column;gap:12px;align-items:stretch">' + auto +
+            'style="display:flex;flex-direction:column;gap:12px;align-items:stretch">' +
             f'<label style="display:block"><span {label}>First message on its own</span>'
             f'<select name="first_message" aria-label="First message on its own" style="{field}">'
             f'<option value="off"{"" if on else " selected"}>Off</option>'

@@ -85,10 +85,14 @@ PROPOSE_TOOLS = ("inbox.propose_reply", "inbox.propose_drafts",
                  "inbox.propose_pitch_back",
                  # reply style per channel (owner, 2026-10-04): changed from a chat, on one tap
                  "inbox.propose_reply_style",
+                 # each channel answered its own way (2026-10-07): the Channels screen's choice, on one tap
+                 "inbox.propose_channel_mode",
                  # sending (owner, 2026-10-04): the first message and the hourly cap, changed from a chat, on one tap
                  "inbox.propose_first_message", "inbox.propose_hourly_cap",
                  # saved replies (#1821): one added from a chat, on one tap
-                 "inbox.propose_saved_reply")
+                 "inbox.propose_saved_reply",
+                 # the business's other addresses (2026-10-07): added or removed from a chat, on one tap
+                 "inbox.propose_business_addresses")
 
 
 def test_the_inbox_is_actually_offered():
@@ -362,8 +366,9 @@ def test_a_chat_sees_what_the_screens_show():
     st = inbox_tools.settings()
     names = [x["name"] for x in st["settings"]]
     ok("settings lists every Inbox setting",
-       names == ["writing_replies", "opener", "auto_reply_instagram", "auto_reply_messenger", "hourly_send_cap",
-                 "reply_style_email", "reply_style_dms", "mailbox_drafts"], str(names))
+       names == ["writing_replies", "opener", "answering_email", "answering_instagram", "answering_messenger",
+                 "hourly_send_cap", "reply_style_email", "reply_style_instagram", "reply_style_messenger",
+                 "mailbox_drafts", "business_addresses"], str(names))
     ok("...each with what it means and where it is changed",
        all(x.get("means") and x.get("changed_at") for x in st["settings"]))
     ok("...and the connections, by state only",
@@ -468,6 +473,119 @@ def test_a_reply_from_a_chat_waits_for_a_tap():
         reply.send_reply = real
 
 
+def test_the_business_addresses_change_on_a_tap():
+    """2026-10-07, the Mailbox screen: the business's other addresses, asked for from a chat. The owner is told plainly
+    that mail FROM them is filed as sent and never answered, so a customer's address isn't approved by mistake.
+    Nothing changes until the owner approves, and then only through store.put_business_addresses."""
+    print("test_the_business_addresses_change_on_a_tap")
+    from core import approvals, box_secrets
+    real_state = box_secrets.email_state
+    box_secrets.email_state = lambda: {"status": "connected", "user": "owner@acme.co"}
+    try:
+        desc = registry.registry()["inbox.propose_business_addresses"].get("description", "").lower()
+        ok("its description says mail from them is filed as sent and never answered",
+           "filed as sent" in desc and "never" in desc and "customer" in desc, desc)
+        seat = {"id": "seat_mine", "role": "act", "label": "My Claude"}
+        before = store.business_addresses()
+        out, code = registry.call("inbox.propose_business_addresses", {"add": "FrontDesk@acme.co, sam@gmail.com"},
+                                  seat)
+        got = (out or {}).get("result", out)
+        ok("asking is answered through the call path, and nothing changes by asking",
+           code == 200 and got.get("asked") is True and store.business_addresses() == before, str(out)[:200])
+        a = approvals.get(got.get("approval"))
+        args = (a or {}).get("detail", {}).get("arguments", {})
+        ok("the owner is shown the addresses, and that mail FROM them is filed as sent and never gets a draft",
+           args.get("Add") == "frontdesk@acme.co, sam@gmail.com" and "FROM" in args.get("What that means", "")
+           and "filed as sent" in args["What that means"] and "never gets a draft" in args["What that means"], args)
+        approvals.decide(a["id"], True, by="usr_owner")
+        ok("approved: both saved", {"frontdesk@acme.co", "sam@gmail.com"} <= store.business_addresses(),
+           store.business_addresses())
+        ok("asking for what is already there asks nothing",
+           inbox_tools.propose_business_addresses(add="sam@gmail.com").get("asked") is False)
+        ok("the mailbox's own address, a bad one, the 21st, or nothing at all asks for nothing",
+           all(inbox_tools.propose_business_addresses(**kw).get("asked") is False
+               for kw in ({"add": "owner@acme.co"}, {"add": "not an address"}, {},
+                          {"add": ",".join(f"s{i}@acme.co" for i in range(19))})))
+        b = inbox_tools.propose_business_addresses(remove="sam@gmail.com")
+        approvals.decide(b["approval"], False, by="usr_owner")
+        ok("declined: nothing changed", "sam@gmail.com" in store.business_addresses())
+        calls, real = [], store.put_business_addresses
+
+        def spy(*args_, **kw):
+            calls.append((args_, kw))
+            return real(*args_, **kw)
+        store.put_business_addresses = spy
+        try:
+            c = inbox_tools.propose_business_addresses(remove="sam@gmail.com")
+            r = approvals.decide(c["approval"], True, by="usr_owner")
+        finally:
+            store.put_business_addresses = real
+        ok("approved: carried out once, by store.put_business_addresses, the screen's own write",
+           len(calls) == 1 and "sam@gmail.com" not in calls[0][0][0] and "frontdesk@acme.co" in calls[0][0][0]
+           and calls[0][1].get("own_address") == "owner@acme.co" and r["status"] == "done"
+           and store.business_addresses() == {"frontdesk@acme.co"}, f"{calls} {r}")
+        st = {x["name"]: x["value"] for x in inbox_tools.settings()["settings"]}
+        ok("inbox.settings lists them", st.get("business_addresses") == ["frontdesk@acme.co"], st)
+    finally:
+        box_secrets.email_state = real_state
+
+
+def test_a_channel_is_changed_on_a_tap():
+    """2026-10-07, the Channels screen: how a channel is answered, asked for from a chat. Nothing changes until the
+    owner approves, and then only through answering.put, the screen's own write. Email never answers on its own."""
+    print("test_a_channel_is_changed_on_a_tap")
+    from core import approvals
+    from marketing.customer_voice.inbox import answering, sending
+
+    def row(ch):
+        return next(r for r in answering.get() if r["channel"] == ch)
+
+    desc = registry.registry()["inbox.propose_channel_mode"].get("description", "").lower()
+    ok("its description says auto sends with no approval, and that cold pitches still wait",
+       "auto" in desc and "no approval" in desc and "cold pitch" in desc, desc)
+    seat = {"id": "seat_mine", "role": "act", "label": "My Claude"}
+    before = answering.get()
+    out, code = registry.call("inbox.propose_channel_mode", {"channel": "instagram", "mode": "auto"}, seat)
+    got = (out or {}).get("result", out)
+    ok("asking is answered through the call path, and nothing changes by asking",
+       code == 200 and got.get("asked") is True and answering.get() == before, str(out)[:200])
+    a = approvals.get(got.get("approval"))
+    ok("the owner is shown the channel and the choice, and who asked",
+       a and a["detail"]["arguments"].get("Channel") == "Instagram"
+       and a["detail"]["arguments"].get("When a message comes in") == "Auto-reply"
+       and a["proposed_by"] == "My Claude", str(a and a["detail"]))
+    approvals.decide(a["id"], True, by="usr_owner")
+    ok("approved: Instagram answers on its own, its gate switched on", row("instagram")["mode"] == "auto"
+       and sending.auto_reply_since("instagram"), row("instagram"))
+    ok("asking for what is already set asks nothing",
+       inbox_tools.propose_channel_mode(channel="instagram", mode="auto").get("asked") is False)
+    ok("email is never asked for Auto-reply",
+       inbox_tools.propose_channel_mode(channel="email", mode="auto").get("asked") is False)
+    ok("an unknown channel, a bad style or nothing to change asks for nothing",
+       all(inbox_tools.propose_channel_mode(**kw).get("asked") is False
+           for kw in ({"channel": "fax", "mode": "draft"}, {"channel": "messenger", "style": "loud"},
+                      {"channel": "messenger"})))
+    was = row("messenger")
+    b = inbox_tools.propose_channel_mode(channel="messenger", mode="off", style="sales")
+    approvals.decide(b["approval"], False, by="usr_owner")
+    ok("declined: nothing changed", row("messenger") == was, row("messenger"))
+    calls, real = [], answering.put
+
+    def spy(*a, **k):
+        calls.append((a, k))
+        return real(*a, **k)
+    answering.put = spy
+    try:
+        c = inbox_tools.propose_channel_mode(channel="messenger", mode="off", style="sales")
+        r = approvals.decide(c["approval"], True, by="usr_owner")
+    finally:
+        answering.put = real
+    ok("approved: carried out once, by answering.put, the screen's own write",
+       len(calls) == 1 and calls[0][0] == ("messenger",) and calls[0][1].get("mode") == "off"
+       and calls[0][1].get("style") == "sales" and (row("messenger")["mode"], row("messenger")["style"])
+       == ("off", "sales") and r["status"] == "done", f"{calls} {r}")
+
+
 if __name__ == "__main__":
     seed()
     test_the_inbox_is_actually_offered()
@@ -480,5 +598,7 @@ if __name__ == "__main__":
     test_a_coworker_can_leave_a_draft_and_nothing_more()
     test_a_chat_sees_what_the_screens_show()
     test_a_reply_from_a_chat_waits_for_a_tap()
+    test_a_channel_is_changed_on_a_tap()
+    test_the_business_addresses_change_on_a_tap()
     print("\nall ok" if not _failed else f"\n{_failed} FAILED")
     sys.exit(1 if _failed else 0)

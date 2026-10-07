@@ -254,22 +254,23 @@ ok("the listener's poll reads Instagram alone: one Zernio call, no mailbox, no o
 state.heartbeat = real_beat
 poller._spaces, zernio.client, poller._vendor_intake_allowed, poller._sweep_email = real_poll
 
-print("\ntest_the_sending_screen")
+# THE SWITCH'S ONE HOME IS CHANNELS (2026-10-07), a card per channel; tests/test_each_channel_has_a_card.py holds it.
+print("\ntest_the_channels_screen")
 from core import dash  # noqa: E402
 from core.dispatch import app  # noqa: E402
 o = app.test_client()
 o.set_cookie(dash.COOKIE, dash.new_session(state.owner_user()["id"]))
-page = o.get("/inbox/sending").get_data(as_text=True)
-ok("the owner sees a switch for Instagram and one for Messenger", 'name="auto_instagram"' in page
-   and 'name="auto_messenger"' in page and "Email always waits for you" in page)
-r = o.post("/inbox/sending", data={"auto_instagram": "on", "auto_messenger": "off", "first_message": "off",
-                                   "text": "", "hourly_cap": "40"})
+page = o.get("/inbox/channels").get_data(as_text=True)
+ok("the owner can choose Auto-reply for Instagram and for Messenger, never for email",
+   page.count('name="mode" value="auto"') == 2 and 'id="ch-email"' in page)
+sending.put(auto_reply={"instagram": "off"})
+r = o.post("/inbox/channels", data={"channel": "instagram", "mode": "auto"})
 ok("...and switching Instagram on there works", r.status_code == 303 and sending.get()["auto_reply"]["instagram"] == "on",
    r.status_code)
 m = app.test_client()
 m.set_cookie(dash.COOKIE, dash.new_session(state.add_user("sam@example.com", name="Sam", role="member")["id"]))
-ok("a member reads it and can't change it", "Instagram replies on their own: On" in m.get("/inbox/sending")
-   .get_data(as_text=True) and m.post("/inbox/sending", data={"auto_instagram": "off"}).status_code == 403
+ok("a member reads it and can't change it", "Auto-reply" in m.get("/inbox/channels").get_data(as_text=True)
+   and m.post("/inbox/channels", data={"channel": "instagram", "mode": "off"}).status_code == 403
    and sending.get()["auto_reply"]["instagram"] == "on")
 
 print("\nALL AUTO-REPLY CHECKS PASS" if not _failed else f"\n{_failed} AUTO-REPLY CHECK(S) FAILED")

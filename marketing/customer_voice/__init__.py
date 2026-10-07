@@ -116,7 +116,7 @@ register_periodic(_mailbox_drafts.periodic, interval_s=_interval("mailbox_drafts
 # the three halves in order and passes nothing between them, so the file that thinks still cannot send and the files
 # that send still cannot think. Fetch what came in (the 45-second poll, sooner), write its reply (the drafter), send
 # the ones whose channel the owner switched on (inbox/autosend.py). OFF, and one settings read, until he switches a
-# channel on at Inbox Settings, Sending. A slow model holds the next tick, never a send.
+# channel on at Inbox Settings, Channels. A slow model holds the next tick, never a send.
 AUTO_REPLY_S = 20
 from .inbox import autosend as _autosend                                 # noqa: E402
 from .inbox import sending as _sending                                   # noqa: E402

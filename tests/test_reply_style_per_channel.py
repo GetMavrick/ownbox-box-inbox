@@ -36,7 +36,7 @@ state.init_db()
 from core.dispatch import app  # noqa: E402
 from marketing.customer_voice import app as inbox_app  # noqa: E402
 from marketing.customer_voice.drafter import draft  # noqa: E402
-from marketing.customer_voice.inbox import pitch_back, reply_style, store  # noqa: E402
+from marketing.customer_voice.inbox import answering, pitch_back, reply_style, store  # noqa: E402
 from marketing.customer_voice.inbox import tools as inbox_tools  # noqa: E402
 
 FAILS: list[str] = []
@@ -102,26 +102,28 @@ ok("...and nothing changed", reply_style.get() == {"email": "sales", "dms": "sal
 print("\nInbox Settings, Reply Style\n")
 o = app.test_client()
 o.set_cookie(dash.COOKIE, dash.new_session(state.owner_user()["id"]))
+# THE CHOICE IS ON CHANNELS (2026-10-07), a card per channel (tests/test_each_channel_has_a_card.py); this page keeps
+# what each level does, for the owner and a member alike.
 html = o.get("/inbox/reply-style").get_data(as_text=True)
-ok("the owner sees both channels, Sales selected", 'name="email"' in html and 'name="dms"' in html
-   and html.count('value="sales" selected') == 2, html[:300])
-ok("...at 16px, 48px tall, on a mobile", "max(16px" in html and "min-height:48px" in html)
-r = o.post("/inbox/reply-style", data={"email": "service", "dms": "sales"})
-ok("saving works", r.status_code == 303 and reply_style.get() == {"email": "service", "dms": "sales"})
-r = o.post("/inbox/reply-style", data={"email": "rude", "dms": "sales"})
+ok("the page explains the levels and sends the choice to Channels",
+   all(w in html for w in reply_style.STYLES.values()) and 'href="/inbox/channels"' in html and "<select" not in html)
+r = o.post("/inbox/channels", data={"channel": "email", "style": "service"})
+ok("saving email's style on Channels works", r.status_code == 303
+   and reply_style.get() == {"email": "service", "dms": "sales"}, reply_style.get())
+r = o.post("/inbox/channels", data={"channel": "email", "style": "rude"})
 ok("a bad value is refused on the page, in words", r.status_code == 200 and "Subtle sales or Strong sales"
    in r.get_data(as_text=True) and reply_style.get()["email"] == "service")
 ok("the settings menu lists it", "/inbox/reply-style" in o.get("/inbox/settings").get_data(as_text=True))
 m = app.test_client()
 m.set_cookie(dash.COOKIE, dash.new_session(state.add_user("sam@example-medspa.com", name="Sam", role="member")["id"]))
-ok("a member reads it", "Direct messages: Strong sales" in m.get("/inbox/reply-style").get_data(as_text=True))
-m.post("/inbox/reply-style", data={"email": "sales", "dms": "service"})
-ok("...but can't change it", reply_style.get() == {"email": "service", "dms": "sales"})
+ok("a member reads it", "Strong sales" in m.get("/inbox/reply-style").get_data(as_text=True))
+m.post("/inbox/channels", data={"channel": "email", "style": "sales"})
+ok("...but can't change a style", reply_style.get() == {"email": "service", "dms": "sales"})
 
 print("\nFrom the owner's AI\n")
 s = {x["name"]: x["value"] for x in inbox_tools.settings()["settings"]}
 ok("inbox.settings says the style per channel", s.get("reply_style_email") == "service"
-   and s.get("reply_style_dms") == "sales", s)
+   and s.get("reply_style_instagram") == "sales" and s.get("reply_style_messenger") == "sales", s)
 asked = inbox_tools.propose_reply_style(email="sales", seat={"label": "Claude"})
 ok("it can ask, and nothing changes yet", asked.get("asked") is True and reply_style.get()["email"] == "service",
    asked)
@@ -164,10 +166,20 @@ ok("the page explains each level for prospects, customers and anyone else (owner
    all(x in page for x in ("Your box reads every message", "a <b>prospect</b>", "a <b>customer</b>",
                            "Startup mode", "a clear next step in every reply", "Customers: problem-solving service", "sets how far it leans")),
    page[:800])
+_p = o.get("/inbox/reply-style").get_data(as_text=True)
 ok("the levels are offered gentlest first, on the page", [*reply_style.STYLES] == ["service", "subtle", "sales"]
-   and o.get("/inbox/reply-style").get_data(as_text=True).count("Subtle sales") >= 2)
+   and -1 < _p.find("Customer service") < _p.find("Subtle sales") < _p.find("Strong sales"))
 ok("names a person might use are understood", reply_style.clean("Strong") == "sales"
    and reply_style.clean("aggressive") == "sales" and reply_style.clean("Subtle sales") == "subtle")
+
+# LAST, because it styles a DM channel on its own, which the checks above don't expect: a chat asking for DMs still
+# reaches a DM channel the owner styled on Channels, which reads its own style before the all-DMs one.
+answering.put("instagram", style="service", by="owner")
+asked = inbox_tools.propose_reply_style(dms="subtle", seat={"label": "Claude"})
+approvals.decide(asked["approval"], True, by="owner@example-medspa.com")
+ok("approved for DMs, every DM channel writes that way, one styled on its own included",
+   reply_style.get()["dms"] == "subtle"
+   and all(r["style"] == "subtle" for r in answering.get() if r["channel"] != "email"), answering.get())
 
 print("\nALL REPLY STYLE CHECKS PASS" if not FAILS else f"\n{len(FAILS)} REPLY STYLE CHECK(S) FAILED")
 sys.exit(1 if FAILS else 0)
