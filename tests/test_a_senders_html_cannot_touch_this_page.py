@@ -303,5 +303,28 @@ _doc = render.frame_doc("<p>Hi</p>" + _PIXELS[0] + _SEEN[0])
 ok("...and the frame is drawn without the pixel, with the logo", "t.example/open" not in _doc and _SEEN[0] in _doc)
 
 
+print("\ntest_no_picture_that_can_never_load")
+# OSDev1's walk of release .11 on the owner's real mail, 2026-10-07: personal emails drew blank boxes and broken icons.
+# An Outlook signature, as it arrives: its logo is an inline attachment (cid:) the box doesn't serve.
+_SIG = ('<p>Thanks, see you Tuesday.</p><p>Dana Kovac<br>Senior Associate</p>'
+        '<p><img width="160" height="48" src="cid:image001.png@01DB18A2.5C3E9F10" alt="Colliers International"></p>'
+        '<p><img src="cid:image002.png@01DB18A2.5C3E9F10" alt="image002.png"></p>')
+_doc = render.frame_doc(_SIG)
+ok("an inline-attachment logo (cid:) is taken out, its real words kept in its place",
+   "cid:" not in _doc and "<img" not in _doc.split("<body>", 1)[1] and "Colliers International" in _doc
+   and "image002.png" not in _doc, _doc.split("<body>", 1)[1])
+for _tag, _left in (('<img src="" alt="">', ""), ("<img alt='Peaksware'>", "Peaksware"),
+                    ('<img src="http://old.example/logo.gif" alt="Logo">', ""),
+                    ('<img src="images/sig.png" alt="Denker &amp; Co">', "Denker &amp; Co"),
+                    ('<img src="cid:x" alt="Image 2">', ""), ('<img src="data:text/html,x" alt="x">', "")):
+    ok(f"a picture that can never load leaves {_left or 'nothing'!r}: {_tag[:50]!r}",
+       render.no_dead_images("<p>a</p>" + _tag + "<p>b</p>") == f"<p>a</p>{_left}<p>b</p>")
+for _tag in ('<img src="https://cdn.example/a.png" alt="A">', '<img src="//cdn.example/a.png">',
+             '<img src="data:image/png;base64,iVBORw0KGgo=">'):
+    ok(f"a picture that can load stays: {_tag[:50]!r}", _tag in render.no_dead_images("<p>a</p>" + _tag))
+ok("...and the frame's height guess counts none of the dead ones",
+   render.frame_height("<p>Hi</p>" + '<img src="cid:a" alt="">' * 5) == render.frame_height("<p>Hi</p>"))
+
+
 print("\n" + ("all good" if not _failed else f"{_failed} FAILED"))
 sys.exit(1 if _failed else 0)

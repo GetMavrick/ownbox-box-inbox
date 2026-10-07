@@ -226,7 +226,7 @@ def _estimate_px(body_html: str) -> int:
     px = (lines * _PX_PER_LINE
           + len(_BLOCK.findall(raw)) * _PX_PER_BLOCK
           + len(_HEADING.findall(raw)) * _PX_PER_HEADING
-          + len(_IMG.findall(no_tracking_pixels(raw))) * _PX_PER_IMG   # a pixel taken out takes no room
+          + len(_IMG.findall(no_dead_images(no_tracking_pixels(raw)))) * _PX_PER_IMG   # a picture taken out takes no room
           + 40)                                                    # the body's own padding
     px = int(px * 1.25)                                            # deliberately over, see above
     return max(_FRAME_MIN_PX, min(_FRAME_MAX_PX, px))
@@ -314,10 +314,16 @@ def _px(value) -> float | None:
     return float(m.group(1)) if m else None
 
 
-def _invisible(tag: str) -> bool:
+def _img_attrs(tag: str) -> dict:
+    """An <img> tag's attributes, names in lower case, values unescaped; the first of a repeated name wins."""
     attrs = {}
     for m in _IMG_ATTR.finditer(tag):
         attrs.setdefault(m.group("name").lower(), html.unescape(m.group("value").strip("\"'")))
+    return attrs
+
+
+def _invisible(tag: str) -> bool:
+    attrs = _img_attrs(tag)
     style = {}
     for decl in attrs.get("style", "").split(";"):
         name, _, value = decl.partition(":")
@@ -335,6 +341,37 @@ def _invisible(tag: str) -> bool:
 def no_tracking_pixels(body_html: str) -> str:
     """The sender's HTML with every picture nobody can see taken out (see the note above)."""
     return _IMG_TAG.sub(lambda m: "" if _invisible(m.group(0)) else m.group(0), str(body_html or ""))
+
+
+# NO PICTURE THAT CAN NEVER LOAD (OSDev1's walk of release .11 on the owner's real mail, 2026-10-07: personal emails drew
+# blank boxes and broken icons). An <img> with no source, an inline attachment (cid:, which the box doesn't serve), an
+# http: picture (the frame's policy loads https only) or a bare path (on no site from inside the frame) is taken out
+# before the frame draws. Its alt text stays in its place when it is real words ("Colliers International"), never a
+# file name, a link, or a word like "image" that only says a picture was there.
+_LOADS = re.compile(r"(?i)^(?:https:|//|data:image/)")
+_FILE_NAME = re.compile(r"(?i)\.(?:png|jpe?g|gif|bmp|webp|svg|tiff?|ico|heic)$")
+_TWO_LETTERS = re.compile(r"[^\W\d_]{2}")
+_NOT_WORDS = {"image", "img", "picture", "pic", "photo", "logo", "icon", "spacer", "pixel", "banner", "graphic",
+              "signature", "attachment", "inline image", "untitled", "blank"}
+
+
+def _alt_words(alt: str) -> str:
+    """The alt text when it is real words, else ""."""
+    a = " ".join(str(alt or "").split())
+    if (not _TWO_LETTERS.search(a) or _FILE_NAME.search(a) or "://" in a or ":" in a.split(" ", 1)[0]
+            or a.lower().rstrip(" 0123456789_-") in _NOT_WORDS):
+        return ""
+    return a
+
+
+def no_dead_images(body_html: str) -> str:
+    """The sender's HTML with every picture that can never load replaced by its alt text, or by nothing (see above)."""
+    def one(m: re.Match) -> str:
+        attrs = _img_attrs(m.group(0))
+        if _LOADS.match(attrs.get("src", "").strip()):
+            return m.group(0)
+        return html.escape(_alt_words(attrs.get("alt", "")), quote=False)
+    return _IMG_TAG.sub(one, str(body_html or ""))
 
 
 def csp_meta() -> str:
@@ -359,7 +396,7 @@ def frame_doc(body_html: str) -> str:
             '"Segoe UI",Roboto,sans-serif;color:#111;background:#fff;word-break:break-word}'
             'img{max-width:100%;height:auto}table{max-width:100%}'
             'a{color:#0b57d0}</style></head><body>'
-            + no_script_links(no_refresh(no_tracking_pixels(body_html))) + '</body></html>')
+            + no_script_links(no_refresh(no_dead_images(no_tracking_pixels(body_html)))) + '</body></html>')
 
 
 def safe_frame(body_html: str, *, label: str = "Message") -> str:
