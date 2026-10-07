@@ -688,8 +688,14 @@ def _vendor_intake_allowed() -> bool:
     return bool(_VENDOR_OK)
 
 
-def poll_sweep() -> dict:
-    """Worker periodic. Cheap no-op when nothing changed or nothing is keyed."""
+def poll_sweep(only: tuple | None = None) -> dict:
+    """Worker periodic. Cheap no-op when nothing changed or nothing is keyed.
+
+    `only` (channel keys, e.g. ("instagram", "messenger")) polls just those: the 20-second listener for replies on
+    their own (customer_voice/__init__.py) reads only the DM channels switched on, never the mailbox or the rest, so it
+    costs one Zernio list call per channel per tick (Zernio's limit: 60 requests a minute for a team with up to two
+    connected accounts, 600 above that; docs.zernio.com/rate-limits). A partial poll writes no heartbeat: the full one
+    owns it."""
     spaces = _spaces()
     if not spaces:
         # Explicit 'disabled' (not silence): a box that WAS keyed leaves a stale row
@@ -716,6 +722,8 @@ def poll_sweep() -> dict:
         z = (zernio.client(sp)
              if sp.get("zernio_key") and _vendor_intake_allowed() else None)
         for ch in channels.POLLED:
+            if only is not None and ch.key not in only:
+                continue
             if ch.vendor == channels.IMAP:
                 ch_scanned, ch_stored, ch_ok = _sweep_email(space, ch)
                 scanned += ch_scanned
@@ -766,7 +774,8 @@ def poll_sweep() -> dict:
     # operator forever about a channel the client never connected — and a pager that
     # cries every 45 minutes is a pager nobody reads when Messenger actually dies. A
     # channel that is configured but broken is the throttled warning's job, not a page.
-    state.heartbeat("inbox_poll", "ok" if ok_channels else "fail")
+    if only is None:
+        state.heartbeat("inbox_poll", "ok" if ok_channels else "fail")
     if enqueued:
         log.info("inbox.polled", scanned=scanned, enqueued=enqueued)
     return {"scanned": scanned, "enqueued": enqueued}

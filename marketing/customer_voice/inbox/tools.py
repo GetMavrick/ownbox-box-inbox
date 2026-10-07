@@ -424,12 +424,17 @@ def settings():
         "settings": [
             {"name": "writing_replies", "value": _onoff(_drafting()),
              "means": "the box writes a reply for each new message, for a person to read and send; "
-                      "a written reply never sends on its own",
+                      "a written reply sends on its own only on a channel where replies on their own are on",
              "changed_at": "/inbox/settings"},
             {"name": "opener", "value": snd["first_message"],
              "means": "when on, the box sends one fixed first message to a new conversation by "
                       "itself, within the hourly cap",
              "changed_at": "/inbox/sending"},
+            *[{"name": f"auto_reply_{ch}", "value": snd["auto_reply"][ch],
+               "means": f"when on, every new {name} message gets the reply the box wrote, sent by itself within "
+                        "about a minute, with nobody pressing send; only messages after it was turned on, never while "
+                        "a person is chatting on that conversation, within the hourly cap",
+               "changed_at": "/inbox/sending"} for ch, name in sending.AUTO_CHANNELS],
             {"name": "hourly_send_cap", "value": snd["hourly_cap"],
              "means": "the most messages the box sends in any hour, counted across every send",
              "changed_at": "/inbox/sending"},

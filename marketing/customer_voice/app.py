@@ -5444,17 +5444,27 @@ def r_sending():
             u = {}
         try:
             _snd.put(first_message=request.form.get("first_message") or "off", text=request.form.get("text"),
-                     hourly_cap=request.form.get("hourly_cap"), by=u.get("id"))
+                     hourly_cap=request.form.get("hourly_cap"),
+                     auto_reply={ch: request.form.get(f"auto_{ch}") or "off" for ch, _ in _snd.AUTO_CHANNELS},
+                     by=u.get("id"))
             return redirect("/inbox/sending?saved=1", code=303)
         except ValueError as e:
             note = f'<p class="quiet" style="color:var(--accent)">{_esc(str(e))}</p>'
     cur = _snd.get()
     saved = request.args.get("saved") and not note
+    # REPLIES ON THEIR OWN (owner, 2026-10-07): one switch per DM channel, first on the screen because it is the one
+    # that changes the most. Email has none.
     head = ('<h1>Sending</h1>'
-            '<p class="quiet">Everything your box writes waits for you to send it, except one thing you can turn on '
-            'here: a <b>first message</b>. When it is on, a brand-new conversation on Messenger, Instagram or '
-            'WhatsApp gets the fixed words below at once, so nobody waits while you are busy. It goes once per '
-            'conversation, never by email, and stops the moment the person asks it to.</p>'
+            '<p class="quiet">Your Ownbox writes a reply to every message, and it waits for you to send it, except '
+            'where you turn on <b>replies on their own</b>. Turned on for Instagram or Messenger, every new message '
+            'there is answered within about a minute, in a friendly, chatty reply your Ownbox writes, with nobody '
+            'pressing send. It answers only messages that arrive after you turn it on. It never cuts in while you '
+            'are chatting on that conversation yourself (it waits 30 minutes after your last message there), never '
+            'answers someone who asked it to stop, and holds back a reply it judged nobody needs and a reply to a '
+            'cold pitch for you. Email always waits for you.</p>'
+            '<p class="quiet">A <b>first message</b> is the other thing it can send on its own: when it is on, a '
+            'brand-new conversation on Messenger, Instagram or WhatsApp gets the fixed words below at once. It goes '
+            'once per conversation, never by email, and stops the moment the person asks it to.</p>'
             '<p class="quiet">The <b>hourly cap</b> is the most messages your box sends in any hour, counted across '
             'every channel and every send. The default, 40, is safe. Your mailbox provider and Meta have limits of '
             'their own and watch for bursts: set this high and a busy hour can get your mail marked as junk or '
@@ -5462,15 +5472,23 @@ def r_sending():
             + ('<p class="quiet">Saved.</p>' if saved else "") + note)
     on = cur["first_message"] == "on"
     if not owner:
-        rows = (f'<p>First message on its own: {"On" if on else "Off"}</p>'
+        rows = ("".join(f'<p>{name} replies on their own: {"On" if cur["auto_reply"][ch] == "on" else "Off"}</p>'
+                        for ch, name in _snd.AUTO_CHANNELS)
+                + f'<p>First message on its own: {"On" if on else "Off"}</p>'
                 + (f'<p>The first message: {_esc(cur["text"])}</p>' if cur["text"] else "")
                 + f'<p>Most messages in an hour: {cur["hourly_cap"]}</p>')
         return _shell(head + rows + _back_link(), here="/inbox/sending"), 200
     field = ('font:inherit;font-size:max(16px, calc(17 * var(--px, 1px)));padding:12px 14px;width:100%;'
              'min-height:48px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)')
     label = 'class="t" style="display:block;font-size:calc(14.5 * var(--px, 1px));margin-bottom:4px"'
+    auto = "".join(
+        f'<label style="display:block"><span {label}>{name} replies on their own</span>'
+        f'<select name="auto_{ch}" aria-label="{name} replies on their own" style="{field}">'
+        f'<option value="off"{"" if cur["auto_reply"][ch] == "on" else " selected"}>Off: I send each reply</option>'
+        f'<option value="on"{" selected" if cur["auto_reply"][ch] == "on" else ""}>On: answer new messages at once'
+        '</option></select></label>' for ch, name in _snd.AUTO_CHANNELS)
     form = ('<form class="compose" method="post" action="/inbox/sending" '
-            'style="display:flex;flex-direction:column;gap:12px;align-items:stretch">'
+            'style="display:flex;flex-direction:column;gap:12px;align-items:stretch">' + auto +
             f'<label style="display:block"><span {label}>First message on its own</span>'
             f'<select name="first_message" aria-label="First message on its own" style="{field}">'
             f'<option value="off"{"" if on else " selected"}>Off</option>'

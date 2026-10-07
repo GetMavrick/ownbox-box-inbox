@@ -573,6 +573,109 @@ def send_for_machine(*, space: str, zcid: str, text: str, machine: str, key: str
     return {"status": "ok", "message_id": mid, "idem_key": idem, "duplicate": False}
 
 
+# ── a reply the box sends on its own, on a DM channel the owner switched on (inbox/autosend.py) ─────────────────────
+PERSON_QUIET_S = 30 * 60        # a person who wrote on the thread this recently is talking: the box doesn't cut in
+# NEVER A LOOP (OSDev1's review of #2037): another business's auto-responder answers every reply at once, and two
+# machines answering each other would spend the box's whole hourly cap on one thread. Three of the box's own replies
+# on one conversation in a rolling hour, then that conversation waits for a person.
+AUTO_PER_CONVERSATION_HOUR = 3
+
+
+def _auto_sends_last_hour(space: str, zcid: str) -> int:
+    from datetime import datetime, timedelta, timezone
+    since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    with state.connect() as c:
+        return int(c.execute("SELECT COUNT(*) FROM inbox_send_ledger WHERE space = ? AND zernio_conversation_id = ? "
+                             "AND kind = 'auto' AND status <> 'failed' AND created_at > ?",
+                             (space, str(zcid), since)).fetchone()[0])
+
+
+def send_automatic(*, space: str, zcid: str, text: str, in_reply_to: str, asked_at: str) -> dict:
+    """Send the reply the box wrote to `in_reply_to`, with nobody pressing send. -> {"status", "message_id", ...}.
+
+    Owner, 2026-10-07: "I would like automatic instant responses to any Instagram or messenger DM's that come in. I
+    don't wanna have to approve those". Nobody reads this one first, so it passes every gate a machine's message
+    passes (`send_for_machine` above), with the owner's switch in place of a claim:
+
+      1. THE OWNER TURNED IT ON FOR THIS CHANNEL, and the message came after he did (sending.auto_reply_since).
+         Never email.
+      2. NO AUTOMATION HOLDS THE CONVERSATION (the lead magnet's funnel speaks for itself there), and NO PERSON
+         HAS WRITTEN ON IT IN THE LAST PERSON_QUIET_S: someone chatting live is never talked over. And at most
+         AUTO_PER_CONVERSATION_HOUR of these on one conversation in a rolling hour, so two machines never loop.
+      3. NOT OPTED OUT, THE BOX ISN'T STOPPED, the channel's window is open, the hourly cap has room.
+      4. STILL THE MESSAGE TO ANSWER: nothing went out on the thread since it came in, checked again after the
+         ledger claim, so a person's reply or the first message landing in between wins.
+      5. EXACTLY ONCE per inbound message (`auto:{space}:{in_reply_to}`); a may-have-landed is never resent.
+
+    Mirrored as sent_by='ai', which the thread labels "the machine"."""
+    text = str(text or "").strip()
+    if not text:
+        raise ReplyRefused("a message needs words")
+    conv = store.get_conversation(space, zcid)
+    if not conv:
+        raise ReplyRefused("no such conversation on this box")
+    platform = str(conv.get("platform") or "").strip().lower()
+    from . import sending
+    since = sending.auto_reply_since(platform)
+    if platform == "email" or not since:
+        raise ReplyRefused("replying on its own is off for this channel", code="off")
+    if str(asked_at or "") < since:
+        raise ReplyRefused("this message came in before replying on its own was turned on", code="too_old")
+    from marketing.customer_voice import claims
+    if claims.holder(space, zcid):
+        raise ReplyRefused("an automation is handling this conversation", code="claimed")
+    from datetime import datetime, timedelta, timezone
+    quiet = (datetime.now(timezone.utc) - timedelta(seconds=PERSON_QUIET_S)).isoformat()
+    if claims.person_wrote_since(space, zcid, quiet):
+        raise ReplyRefused("a person is talking on this conversation, so the box waits", code="person_active")
+    if _auto_sends_last_hour(space, zcid) >= AUTO_PER_CONVERSATION_HOUR:
+        raise ReplyRefused(f"the box has answered this conversation {AUTO_PER_CONVERSATION_HOUR} times this hour, so "
+                           "the next reply waits for a person", code="conversation_cap")
+    if conv.get("opted_out"):
+        raise ReplyRefused("this person has opted out — nothing is sent to them", code="opted_out")
+    try:
+        from core import pause
+        stopped = pause.is_paused()
+    except Exception:                    # noqa: BLE001 — an unreadable switch fails toward silence
+        stopped = True
+    if stopped:
+        raise ReplyRefused("the box is stopped, so nothing sends on its own", code="box_stopped")
+    if window.allowed_send(conv.get("last_inbound_at"), platform=platform) != "freeform":
+        raise ReplyRefused("this channel's window to reply is closed", code="window_closed")
+    cap = sending.hourly_cap()
+    if store.sends_last_hour(space) >= cap:
+        raise ReplyRefused(f"the box has sent its {cap} messages for this hour; try again later", code="hourly_cap")
+    account_id = conv.get("account_id") or ""
+    if not account_id:
+        raise ReplyRefused("this conversation has no account to send from")
+
+    def answered() -> bool:
+        with state.connect() as c:
+            return c.execute("SELECT 1 FROM inbox_messages WHERE space = ? AND zernio_conversation_id = ? "
+                             "AND direction = 'out' AND created_at > ? LIMIT 1",
+                             (space, str(zcid), str(asked_at))).fetchone() is not None
+
+    if answered():
+        raise ReplyRefused("someone already answered this message", code="answered")
+    idem = f"auto:{space}:{in_reply_to}"
+    if not store.claim_send(space=space, zcid=zcid, idem_key=idem, kind="auto", user_id="auto_reply"):
+        prior = store.get_send(space, idem) or {}
+        if prior.get("status") == "ok":
+            return {"status": "ok", "message_id": prior.get("zernio_message_id"), "idem_key": idem,
+                    "duplicate": True}
+        if prior.get("status") == "failed":
+            raise ReplyRefused(str(prior.get("error") or "the message did not send"))
+        raise ReplyIndeterminate(str(prior.get("error") or "the earlier attempt may have landed"))
+    if answered() or claims.person_wrote_since(space, zcid, quiet) or claims.holder(space, zcid):
+        store.resolve_send(space=space, idem_key=idem, status="failed",
+                           error="someone answered first, so the box sent nothing")
+        raise ReplyRefused("someone answered first, so the box sent nothing", code="answered")
+    mid = _deliver(space=space, zcid=zcid, conv=conv, account_id=account_id, text=text, idem=idem)
+    _mirror(space=space, zcid=zcid, mid=mid, sent_by="ai", body=text)
+    log.info("inbox.auto_sent", extra={"space": space, "conversation": zcid, "message_id": mid})
+    return {"status": "ok", "message_id": mid, "idem_key": idem, "duplicate": False}
+
+
 # ── a machine's private reply to a comment: how a conversation starts ──────────────────────────────────────────
 PRIVATE_REPLY_DAYS = 7          # Instagram accepts a private reply to a comment for 7 days after it was written
 

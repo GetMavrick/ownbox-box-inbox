@@ -103,13 +103,42 @@ def clean_text(value) -> str:
     return t
 
 
+# REPLIES ON THEIR OWN, PER CHANNEL (owner, 2026-10-07: "We also should build something that allows automatic sending
+# of messages per channel. Like I would like automatic instant responses to any Instagram or messenger DM's that come
+# in. I don't wanna have to approve those and I trust that sonnet will keep the conversation rolling."). One switch per
+# DM channel, OFF until the owner turns it on, and only ever for messages that arrive AFTER it was turned on: a backlog
+# is never answered in one burst by flipping a switch. Email has no switch (owner, same day: "Emails are in frequent
+# and there's a finality to them"). What sends and what holds it back is inbox/autosend.py.
+AUTO_CHANNELS = (("instagram", "Instagram"), ("messenger", "Messenger"))
+KEY_AUTO = "sending.auto_reply.{ch}"              # "on" | "off"
+KEY_AUTO_SINCE = "sending.auto_reply.{ch}.since"  # when it was last turned on, ISO, UTC
+
+
+def auto_reply_since(platform) -> str:
+    """When replying on its own was turned on for this conversation's channel, or "" when it is off (and for email,
+    and for any channel without a switch). Fails closed: an unreadable setting is off."""
+    ch = str(platform or "").strip().lower()
+    if ch not in dict(AUTO_CHANNELS):
+        return ""
+    if _setting(KEY_AUTO.format(ch=ch)) != "on":
+        return ""
+    return str(_setting(KEY_AUTO_SINCE.format(ch=ch)) or "")
+
+
+def auto_reply_any() -> bool:
+    return any(auto_reply_since(ch) for ch, _ in AUTO_CHANNELS)
+
+
 def get() -> dict:
-    """{"first_message": "on"|"off", "text": str, "hourly_cap": int}, as the box runs right now."""
+    """{"first_message": "on"|"off", "text": str, "hourly_cap": int, "auto_reply": {channel: "on"|"off"}}, as the box
+    runs right now."""
     return {"first_message": "on" if first_message_on() else "off",
-            "text": first_message_text(), "hourly_cap": hourly_cap()}
+            "text": first_message_text(), "hourly_cap": hourly_cap(),
+            "auto_reply": {ch: "on" if auto_reply_since(ch) else "off" for ch, _ in AUTO_CHANNELS}}
 
 
-def put(*, first_message=None, text=None, hourly_cap=None, by: str | None = None) -> dict:
+def put(*, first_message=None, text=None, hourly_cap=None, auto_reply: dict | None = None,
+        by: str | None = None) -> dict:
     """Save any of the three. Validates everything before writing anything; a first message turned on with no
     words to send is refused, since an empty message is not a first message."""
     from core import box_settings
@@ -120,6 +149,15 @@ def put(*, first_message=None, text=None, hourly_cap=None, by: str | None = None
         want[KEY_TEXT] = clean_text(text)
     if hourly_cap is not None:
         want[KEY_CAP] = clean_cap(hourly_cap)
+    for ch, v in (auto_reply or {}).items():
+        if ch not in dict(AUTO_CHANNELS):
+            raise ValueError("Replies on their own are for Instagram and Messenger.")
+        v = clean_on(v)
+        was = "on" if auto_reply_since(ch) else "off"
+        want[KEY_AUTO.format(ch=ch)] = v
+        if v == "on" and was == "off":            # FROM NOW: only messages after this moment are answered
+            from datetime import datetime, timezone
+            want[KEY_AUTO_SINCE.format(ch=ch)] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     on = want.get(KEY_ON, "on" if first_message_on() else "off")
     words = want[KEY_TEXT] if KEY_TEXT in want else first_message_text()
     if on == "on" and not words:

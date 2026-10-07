@@ -156,7 +156,8 @@ def dismiss(space: str, draft_id: str) -> None:
                   (state._now(), space, str(draft_id)))
 
 
-def needs_a_draft(space: str, *, limit: int = 5, pitch_back: bool = False) -> list[dict]:
+def needs_a_draft(space: str, *, limit: int = 5, pitch_back: bool = False,
+                  platforms: tuple | None = None) -> list[dict]:
     """Conversations whose newest inbound has no draft yet, newest first.
 
     THE `limit` IS A SPEND BOUND, not a page size. Each row this returns becomes one model call,
@@ -195,6 +196,8 @@ def needs_a_draft(space: str, *, limit: int = 5, pitch_back: bool = False) -> li
             # ONLY A LIST HEADER (2) IS A COLD PITCH'S SHAPE: drafted only while pitch-back is on (OSDev4's F4 #1852,
             # plan #1857 H7), and kept out of the capped query otherwise, so pitches can't starve a real customer.
             "   AND (k.automated IS NOT 2 OR ?) "
+            # ONLY THESE CHANNELS, when asked (the 20-second listener drafts just the DM channels it sends on).
+            + (f"   AND LOWER(k.platform) IN ({','.join('?' * len(platforms))}) " if platforms else "") +
             # A CONVERSATION AN AUTOMATION IS RUNNING IS NOT DRAFTED (customer_voice/claims.py, owner
             # 2026-10-01, decision 2): it would be a model call for a reply nobody should send.
             f"   AND {_UNCLAIMED} "
@@ -217,7 +220,8 @@ def needs_a_draft(space: str, *, limit: int = 5, pitch_back: bool = False) -> li
             # SQLite's one-argument TRIM strips SPACES ONLY — a body of "\n\t" survives it. The second argument is the
             # set of characters to strip, so this is tab, newline and return too.
             " ORDER BY (TRIM(COALESCE(m.body, ''), ' ' || char(9) || char(10) || char(13)) = '') ASC, "
-            "          m.created_at DESC LIMIT ?", (space, 1 if pitch_back else 0, int(limit))).fetchall()
+            "          m.created_at DESC LIMIT ?",
+            (space, 1 if pitch_back else 0, *(platforms or ()), int(limit))).fetchall()
     return [dict(r) for r in rows]
 
 

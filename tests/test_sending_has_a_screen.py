@@ -80,7 +80,8 @@ except ValueError as e:
     said = str(e)
 ok("a first message with no words is refused in words", "Write the first message" in said and not sending.first_message_on(), said)
 cur = sending.put(first_message="on", text="  Thanks!  I got your message and I'm on it. ", hourly_cap="25", by="owner")
-ok("saved, tidied", cur == {"first_message": "on", "text": "Thanks! I got your message and I'm on it.", "hourly_cap": 25}, cur)
+ok("saved, tidied", cur == {"first_message": "on", "text": "Thanks! I got your message and I'm on it.", "hourly_cap": 25,
+                           "auto_reply": {"instagram": "off", "messenger": "off"}}, cur)
 ok("the handler now sends: it passes the gate and stops only for want of an account",
    handler.handle(inbound(2)).get("status") == "no_account")
 ok("...with the owner's words, over the file's and the Space's",
@@ -103,7 +104,8 @@ except Exception as e:                                   # noqa: BLE001 — past
 ok("the handler keeps the owner's cap: at 1 an hour, with one sent, the next waits", capped is True, capped)
 sending.put(hourly_cap=25, by="owner")
 src = (ROOT / "marketing/customer_voice/inbox/reply.py").read_text()
-ok("the reply path reads the same cap, both places", src.count("sending.hourly_cap()") == 2
+# THREE PLACES SINCE 2026-10-07: a person's reply, a machine's, and a reply sent on its own (send_automatic).
+ok("the reply path reads the same cap, every place", src.count("sending.hourly_cap()") == 3
    and "hourly_send_cap" not in src.replace("inbox.hourly_send_cap", ""), src.count("sending.hourly_cap()"))
 for bad in ("0", "201", "ten", ""):
     try:
@@ -128,7 +130,7 @@ ok("...and says in plain words that the default is safe and a high cap can get m
    "The default, 40, is safe" in html and "marked as junk" in html)
 r = o.post("/inbox/sending", data={"first_message": "on", "text": "Hello! One moment.", "hourly_cap": "30"})
 ok("saving works", r.status_code == 303 and sending.get() == {"first_message": "on", "text": "Hello! One moment.",
-                                                                "hourly_cap": 30}, sending.get())
+                                                                "hourly_cap": 30, "auto_reply": {"instagram": "off", "messenger": "off"}}, sending.get())
 r = o.post("/inbox/sending", data={"first_message": "on", "text": "", "hourly_cap": "30"})
 ok("turning it on with no words is refused on the page, in words", r.status_code == 200
    and "Write the first message" in r.get_data(as_text=True) and sending.get()["text"] == "Hello! One moment.")

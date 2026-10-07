@@ -109,6 +109,42 @@ from .inbox import mailbox_drafts as _mailbox_drafts                     # noqa:
 register_periodic(_mailbox_drafts.periodic, interval_s=_interval("mailbox_drafts", 180),
                   name="voice_drafts_to_mailbox")
 
+# THE DM LISTENER: REPLIES ON THEIR OWN, EVERY 20 SECONDS (owner, 2026-10-07: "I would like automatic instant
+# responses to any Instagram or messenger DM's that come in. I don't wanna have to approve those ... I think we need
+# to build a listener on a 20 second interval, like we did with the lead magnet machine."). The lead magnet's cadence
+# (my/machines/lead-magnet, SWEEP_S = 20), and the same split as `_learn_the_business` above: this function only runs
+# the three halves in order and passes nothing between them, so the file that thinks still cannot send and the files
+# that send still cannot think. Fetch what came in (the 45-second poll, sooner), write its reply (the drafter), send
+# the ones whose channel the owner switched on (inbox/autosend.py). OFF, and one settings read, until he switches a
+# channel on at Inbox Settings, Sending. A slow model holds the next tick, never a send.
+AUTO_REPLY_S = 20
+from .inbox import autosend as _autosend                                 # noqa: E402
+from .inbox import sending as _sending                                   # noqa: E402
+
+
+def _auto_reply() -> dict:
+    # ONLY THE CHANNELS SWITCHED ON, AND ONLY WHAT IS NEW (OSDev1's review of #2037). The poll reads just those DM
+    # channels: one Zernio list call each per tick, 6 a minute for Instagram and Messenger, beside the full 45-second
+    # poll's 4 and the lead magnet's own; Zernio allows a team 60 a minute with up to two connected accounts and 600
+    # above that (docs.zernio.com/rate-limits). The drafter writes only new messages on them; its re-checks and
+    # rewrites stay on its own two-minute periodic, so the buyer's AI limit is not spent six times as fast.
+    on = tuple(ch for ch, _ in _sending.AUTO_CHANNELS if _sending.auto_reply_since(ch))
+    if not on:
+        return {"status": "off"}
+    from . import inbox as _inbox
+    if not getattr(_inbox, "_sdk_ok", False):            # the same fail-closed gate as the poll and every send
+        return {"status": "no_sdk"}
+    from .inbox import poller as _poller
+    try:
+        _poller.poll_sweep(only=on)
+    except Exception as e:                                               # noqa: BLE001 — send what is already here
+        log.warning("voice.auto_reply_poll_failed", error=type(e).__name__)
+    _drafter.periodic(new_only=True, platforms=on)
+    return _autosend.tick()
+
+
+register_periodic(_auto_reply, interval_s=_interval("auto_reply", AUTO_REPLY_S), name="inbox_auto_reply")
+
 # MONTHLY, AND THAT IS THE POINT. This is the only rail on the machine that spends money —
 # one metered Places call per competitor — and a rating moves over months. Polling it hourly
 # would buy the same number seven hundred times.

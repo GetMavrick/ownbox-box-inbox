@@ -362,8 +362,8 @@ def test_a_chat_sees_what_the_screens_show():
     st = inbox_tools.settings()
     names = [x["name"] for x in st["settings"]]
     ok("settings lists every Inbox setting",
-       names == ["writing_replies", "opener", "hourly_send_cap", "reply_style_email", "reply_style_dms",
-                 "mailbox_drafts"], str(names))
+       names == ["writing_replies", "opener", "auto_reply_instagram", "auto_reply_messenger", "hourly_send_cap",
+                 "reply_style_email", "reply_style_dms", "mailbox_drafts"], str(names))
     ok("...each with what it means and where it is changed",
        all(x.get("means") and x.get("changed_at") for x in st["settings"]))
     ok("...and the connections, by state only",

@@ -535,7 +535,7 @@ def _note_if_refused(e: Exception) -> None:
         pass                                     # be the thing that breaks the sweep
 
 
-def periodic() -> dict:
+def periodic(*, new_only: bool = False, platforms: tuple | None = None) -> dict:
     """Worker entry. Draft for every Space on this box, then stop.
 
     A SEPARATE PERIODIC FROM THE POLLER, not a step inside it, and that is structural rather
@@ -558,7 +558,7 @@ def periodic() -> dict:
         if not name:
             continue
         try:
-            drafted += int(sweep(name).get("drafted") or 0)
+            drafted += int(sweep(name, new_only=new_only, platforms=platforms).get("drafted") or 0)
         except Exception as e:                   # noqa: BLE001 — one Space never stops the rest
             log.warning("drafter.space_failed", extra={"space": name,
                                                        "error": type(e).__name__})
@@ -571,7 +571,7 @@ def periodic() -> dict:
 _SCAN_MULTIPLE = 20
 
 
-def sweep(space: str) -> dict:
+def sweep(space: str, *, new_only: bool = False, platforms: tuple | None = None) -> dict:
     """Draft for the conversations that have a new inbound and no draft. Sends nothing.
 
     Called by a periodic, NOT by the inbox handler: `inbox/` holds the send path, and no file in
@@ -589,7 +589,8 @@ def sweep(space: str) -> dict:
         # ones would leave the same undraftable rows at the head of a newest-first queue forever —
         # which is precisely the seven-hour head-block of 2026-09-22, arriving by a new road.
         # Bounded, because this is still a queue and not a mailbox scan.
-        waiting = store.needs_a_draft(space, limit=cap * _SCAN_MULTIPLE, pitch_back=_pitch_back_on())
+        waiting = store.needs_a_draft(space, limit=cap * _SCAN_MULTIPLE, pitch_back=_pitch_back_on(),
+                                      platforms=platforms)
     except Exception as e:                       # noqa: BLE001 — a box without the table yet
         log.warning("drafter.unreadable", extra={"error": f"{type(e).__name__}: {e}"[:120]})
         return {"status": "unreadable", "drafted": 0}
@@ -648,8 +649,11 @@ def sweep(space: str) -> dict:
     # draft that only needs better words.
     # THEN A "NO REPLY NEEDED" MADE UNDER OLDER RULES, asked once more (owner, 2026-10-06: "slightly error on the side
     # of drafting too many"): someone with no draft at all comes before a draft that only needs better words.
+    # NEW MESSAGES ONLY, FROM THE 20-SECOND LISTENER (OSDev1's review of #2037): it drafts what just came in on the
+    # channels that answer on their own, and nothing more. Re-checks and rewrites stay on this periodic's own two
+    # minutes, so a fast listener never runs them six times as often on the buyer's own AI limit.
     rechecked = 0
-    left = cap - len(waiting)
+    left = 0 if new_only else cap - len(waiting)
     if left > 0:
         try:
             again = store.stale_no_reply(space, email_rules=rules("email"), dms_rules=rules("instagram"),
