@@ -221,5 +221,27 @@ ok("...and no empty Plain text fold", 'class="orig"' not in dm)
 ok("...and still says what it says", "Are you open Saturday?" in dm)
 
 
+print("\ntest_no_link_in_a_frame_can_run_script")
+# THE NEW SCREENS MEASURE THEIR FRAME (#2029), which needs allow-same-origin: the sender's document then shares the box's
+# origin, scripts still off. So frame_doc takes out every URL that could run script, in every spelling a browser reads.
+_VECTORS = ['<a href="javascript:alert(1)">x</a>', "<a href='JaVaScRiPt:alert(1)' target=_blank>x</a>",
+            '<a href="jav&#x61;script:alert(1)">x</a>', '<a href="java\tscript:alert(1)">x</a>',
+            '<a href=" javascript:alert(1)">x</a>', '<a href=javascript:alert(1)>x</a>',
+            '<a href="&#106;avascript:alert(1)">x</a>', '<a\nhref="vbscript:msgbox(1)">x</a>',
+            '<a href="data:text/html,<script>alert(1)</script>">x</a>', '<iframe srcdoc="<script>alert(1)</script>"></iframe>',
+            '<form action="javascript:1"><button formaction="javascript:2">b</button></form>',
+            '<img src="data:image/svg+xml,<svg onload=alert(1)>">', '<a title="x>y" href="javascript:alert(1)">t</a>',
+            '<object data="javascript:alert(1)"></object>']
+for v in _VECTORS:
+    out = render.frame_doc(v).lower().replace(" ", "")
+    ok(f"taken out: {v[:60]!r}", not any(k in out for k in ("javascript:", "vbscript:", "data:text", "svg+xml", "srcdoc=")),
+       render.no_script_links(v))
+_KEEP = ('<a href="https://www.linkedin.com/comm/jobs/view/4123?trackingId=a%3D&amp;refId=b">AI Architect</a>'
+         '<a href="mailto:jobs@example.com">mail</a><img src="data:image/png;base64,iVBORw0KGgo=" alt="logo">'
+         '<p>Say javascript: in a sentence and it stays a sentence.</p>')
+ok("...and every ordinary link, inline picture and word is kept as the sender wrote it",
+   render.no_script_links(_KEEP) == _KEEP, render.no_script_links(_KEEP))
+
+
 print("\n" + ("all good" if not _failed else f"{_failed} FAILED"))
 sys.exit(1 if _failed else 0)

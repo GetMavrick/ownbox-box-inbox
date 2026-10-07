@@ -241,6 +241,40 @@ def frame_height(body_html: str) -> int:
     return _estimate_px(body_html)
 
 
+# NO LINK IN A FRAME MAY RUN SCRIPT (#2029, the measured frame). The new inbox screens measure an email's frame, which
+# needs `allow-same-origin`: the sender's document then shares the box's origin. Nothing in it runs (no
+# `allow-scripts`), but a `javascript:` link opened in a window of its own leaves the sandbox behind, so every URL
+# attribute that names a scheme able to run script is taken out here, before the frame is built. The test is on the
+# value as a browser reads it: entities decoded, and tab, newline and every other control or space character
+# removed, which is how `jav&#x61;script:` and `java<TAB>script:` would otherwise get through.
+_URL_ATTR = re.compile(r"""(?is)(?P<lead>[\s"'/])(?P<name>href|src|action|formaction|xlink:href|background|poster|data|srcdoc)"""
+                       r"""\s*=\s*(?P<val>"[^"]*"|'[^']*'|[^\s"'=<>`]+)""")
+_TAG = re.compile(r"""<[a-zA-Z][^\s/>]*(?:[^>"']|"[^"]*"|'[^']*')*>""")
+_SCRIPT_SCHEME = re.compile(r"(?i)^(javascript|vbscript|livescript|data|blob|filesystem):")
+
+
+def _runs_script(value: str) -> bool:
+    """Would a browser read this attribute's value as a URL that runs script (or carries a document of its own)?"""
+    v = html.unescape(value.strip("\"'"))
+    v = re.sub(r"[\x00-\x20\x7f-\x9f\u00a0\u1680\u2000-\u200f\u2028\u2029\u202f\u205f\u3000\ufeff]", "", v)
+    if v.lower().startswith("data:image/") and not v.lower().startswith("data:image/svg"):
+        return False                                             # an inline picture, which the frame's CSP allows
+    return bool(_SCRIPT_SCHEME.match(v))
+
+
+def _defang(tag: str) -> str:
+    def one(m: re.Match) -> str:
+        if m.group("name").lower() == "srcdoc" or _runs_script(m.group("val")):
+            return f'{m.group("lead")}data-ownbox-removed="{html.escape(m.group("name").lower(), quote=True)}"'
+        return m.group(0)
+    return _URL_ATTR.sub(one, tag)
+
+
+def no_script_links(body_html: str) -> str:
+    """The sender's HTML with every URL attribute that could run script taken out (see the note above)."""
+    return _TAG.sub(lambda m: _defang(m.group(0)), str(body_html or ""))
+
+
 def frame_doc(body_html: str) -> str:
     """The document `safe_frame` puts in its sandboxed frame's `srcdoc`: the CSP, our base styling, then the sender's
     HTML. For a screen that builds the frame itself (the new inbox screens set it as a frame's `srcDoc`, which the
@@ -256,7 +290,7 @@ def frame_doc(body_html: str) -> str:
             '"Segoe UI",Roboto,sans-serif;color:#111;background:#fff;word-break:break-word}'
             'img{max-width:100%;height:auto}table{max-width:100%}'
             'a{color:#0b57d0}</style></head><body>'
-            + str(body_html) + '</body></html>')
+            + no_script_links(body_html) + '</body></html>')
 
 
 def safe_frame(body_html: str, *, label: str = "Message") -> str:

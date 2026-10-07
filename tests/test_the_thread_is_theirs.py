@@ -260,9 +260,18 @@ _inner = re.findall(r"dangerouslySetInnerHTML=\{\{ __html: ([^}]+) \}\}", email)
 ok("...THE SENDER'S MARKUP NEVER REACHES THE PAGE: the only HTML put in it is the box's own render.readable (escaped "
    "first), never a field of the sender's", _inner and all(x.strip() in ("words", "email.quotedReadable ?? ''")
                                                          for x in _inner) and "body_html" not in email, _inner)
-ok("...AND A SENDER'S HTML ONLY EVER IN THE OLD THREAD'S SANDBOX: no scripts, no same origin, no referrer",
-   "const FRAME_SANDBOX = 'allow-popups allow-popups-to-escape-sandbox';" in email and "allow-scripts" not in email
-   and "allow-same-origin" not in email and 'referrerPolicy="no-referrer"' in email and "srcDoc={" in email)
+ok("...AND A SENDER'S HTML ONLY EVER IN A SANDBOX WITH NO SCRIPTS: same origin only so its height can be read "
+   "(#2029), never allow-scripts beside it, no referrer",
+   "const FRAME_SANDBOX = 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';" in email
+   and "allow-scripts" not in email and 'referrerPolicy="no-referrer"' in email and "srcDoc={doc}" in email)
+ok("A FRAME AS TALL AS ITS EMAIL (owner, 10-06: 'HTML emails are not displayed!!'): it starts at the box's guess, never "
+   "over 600px, is measured once drawn (and again on a resize) from the email's own height, and loads at once",
+   "const FRAME_START_PX = 600;" in email and "onLoad={measure}" in email
+   and "documentElement?.getBoundingClientRect().height" in email and "body?.scrollHeight" in email
+   and "addEventListener('resize', measure)" in email and 'loading="lazy"' not in email and "loading=" not in email)
+ok("...AND THE NEWEST EMAIL OPENS AT ITS TOP when it is taller than the thread, until he scrolls",
+   "card.offsetHeight > c.clientHeight ? Math.max(0, top - 8) : c.scrollHeight" in email
+   and "'wheel', 'touchstart', 'pointerdown', 'keydown'" in email)
 
 print("\nan HTML email, on the owner's box (2026-10-06: 'they all look like garbage')")
 from marketing.customer_voice.inbox import render as _render  # noqa: E402
@@ -285,6 +294,31 @@ ok("A MAIL WITH NO TEXT PART READS AS ITS WORDS, never '<!doctype html>'", "<" n
 ok("...AND IS SHOWN AS THE SENDER WROTE IT, in the old thread's frame: its CSP inside, the sender's own HTML",
    "Content-Security-Policy" in (_aios.get("frame") or {}).get("doc", "") and "Your weekly report is ready."
    in (_aios.get("frame") or {}).get("doc", "") and (_aios.get("frame") or {}).get("height", 0) >= 140, _aios)
+_JOB = ('<!--[if (gte mso 9)|(IE)]><table cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->'
+        '<table role="presentation" width="100%"><tbody><tr><td><table role="presentation"><tbody><tr>'
+        '<td><a href="https://www.linkedin.com/comm/jobs/view/4123/?trackingId=a%3D%3D">AI Architect</a></td></tr>'
+        '<tr><td><p>Acme Health · Irvine, CA</p></td></tr></tbody></table></td></tr></tbody></table>'
+        '<!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->')
+_LI_HTML = ('<html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta name="viewport" content="width=device-width; '
+            'initial-scale=0.666667"><!--[if mso]><style type="text/css"> </style><![endif]--><style>@media (max-width:'
+            '600px){.hide-mobile{display:none!important}}</style></head><body dir="ltr" style="margin:0;padding:0">'
+            '<div style="display:none;max-height:0;overflow:hidden">2 new jobs</div>'
+            '<h2>Your job alert for senior AI Consultant</h2>' + _JOB * 30
+            + '<a href="javascript:fetch(\'/inbox/api/conversations\')">Unsubscribe</a>'
+            '<!--[if !mso]><!--><img alt="LinkedIn" src="https://static.licdn.com/x.png"><!--<![endif]--></body></html>')
+store.upsert_conversation(space=SP, zcid="mail-jobs", platform="email", participant="LinkedIn Job Alerts",
+                          last_inbound_at="2026-10-06T23:02:00Z", account_id="hello-box")
+store.record_message(space=SP, zcid="mail-jobs", zmid="mail-jobs-m1", direction="in", sent_by="contact", body="",
+                     detail={"body_html": _LI_HTML, "body_text": "", "headers": {"Subject": "Your job alert"}})
+_jobs = (owner.get("/inbox/api/conversations/mail-jobs/messages").get_json() or {}).get("messages", [{}])[0]
+_jf = ((_jobs.get("metadata") or {}).get("aios") or {}).get("frame") or {}
+ok("A LINKEDIN-SHAPED ALERT (dozens of nested tables, Outlook comments): the box's guess runs far past the email, which "
+   "is why the screen measures it rather than trusting the guess",
+   _jf.get("height", 0) >= 3000 and "Your job alert for senior AI Consultant" in _jf.get("doc", "")
+   and _jf.get("doc", "").count("AI Architect") == 30, _jf.get("height"))
+ok("...and its frame carries no link that could run script, while its job links are kept",
+   "javascript:" not in _jf.get("doc", "").lower() and 'data-ownbox-removed="href"' in _jf.get("doc", "")
+   and "https://www.linkedin.com/comm/jobs/view/4123/?trackingId=a%3D%3D" in _jf.get("doc", ""), _jf.get("doc", "")[-400:])
 _rows = {c["id"]: c for c in (owner.get("/inbox/api/conversations").get_json() or {})["data"]}
 ok("ITS ROW'S LAST LINE IS ITS WORDS, not its source", _rows.get("mail-loop", {}).get("lastMessage", "").startswith(
    "Hi Brian, Your weekly report is ready."), _rows.get("mail-loop", {}).get("lastMessage"))
@@ -309,8 +343,8 @@ ok("THE LIST'S WIDTH IS THE PERSON'S: a divider dragged or moved by the arrow ke
    .read_text(encoding="utf-8") and "width:var(--ib-list-w,24rem)" in (app_ui.STATIC / "inbox-ui.css").read_text())
 
 _dp = (ROOT / "web" / "inbox-ui" / "ownbox" / "details-panel.tsx").read_text(encoding="utf-8")
-ok("THE PERSON BESIDE THE CONVERSATION on a wide screen: their label (changed there), Prospect, waiting, Done, Delete",
-   "min-[1440px]:flex" in _dp and "actions.act(conversation, { disposition:" in _dp and "Prospect" in _dp
+ok("THE PERSON BESIDE THE CONVERSATION on a wide screen (1800px up, so at 1500 the email keeps its column): their label (changed there), Prospect, waiting, Done, Delete",
+   "min-[1800px]:flex" in _dp and "min-[1440px]" not in _dp and "actions.act(conversation, { disposition:" in _dp and "Prospect" in _dp
    and "Waiting on a reply" in _dp and "Came from an ad" in built)
 store.mark_conversation(SP, "ig-priya", disposition="lead")
 _one = (owner.get("/inbox/api/conversations/ig-priya").get_json() or {}).get("data") or {}

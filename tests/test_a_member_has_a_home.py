@@ -25,6 +25,7 @@ import os
 import pathlib
 import sys
 import tempfile
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -140,7 +141,8 @@ def test_a_stranger_still_gets_nothing():
     c = _stranger()
     r = c.get("/dashboard")
     ok("the dashboard refuses a stranger", r.status_code != 200, str(r.status_code))
-    ok("...by sending them to sign in", str(r.headers.get("Location", "")).endswith("/dash/login"),
+    # The login may carry this page as `next` so a sign-in comes back here (test_a_sign_in_returns_where_it_was_going).
+    ok("...by sending them to sign in", urlsplit(str(r.headers.get("Location", ""))).path.endswith("/dash/login"),
        r.headers.get("Location", ""))
     body = r.get_data(as_text=True)
     for word in ("conversations mirrored", "Waiting on you", "emails sent"):

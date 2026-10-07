@@ -139,10 +139,16 @@ def require_session():
     convenience and grants nothing.
     """
     if not session_ok(request):
-        here = safe_next(request.full_path.rstrip("?") if request.full_path else request.path)
-        return redirect("/dash/login?next=" + quote(here, safe="/") if here
-                        else "/dash/login")
+        return login_redirect()
     return None
+
+
+def login_redirect():
+    """The login, carrying this request's own path as `next` (require_session's bounce, and review._admit's for a
+    visitor who is not signed in, which covers /settings, /settings/mobile and /approvals: a push that lands on
+    /approvals after the session ran out came back to the default page). safe_next keeps it a path on this box."""
+    here = safe_next(request.full_path.rstrip("?") if request.full_path else request.path)
+    return redirect("/dash/login?next=" + quote(here, safe="/") if here else "/dash/login")
 
 
 

@@ -107,14 +107,20 @@ ok("...and no row or heading on it still says Dashboard",
 ok("...while its address stays /dashboard, so installed apps still open it",
    '<a href="/dashboard"' in nav)
 
-print("\ntest_one_subtle_gap_before_the_add_on_machines")
+print("\ntest_the_add_on_machines_are_named_above_them")
+# Owner, 2026-10-07: "add a separator in the main base machine menu that says: ADD-ON MACHINES".
 grp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
                  nav, re.S)
 ok("exactly one row opens a new group, and it is the first add-on machine: the Morning Review is the box's own",
    grp == ["AEO Machine"], str(grp))
 css = home.CSS
-ok("the gap is extra room above that row", re.search(r"\.nav a\.grp\{margin-top:\d+px\}", css))
-ok("...and nothing else: no rule and no heading between the groups",
+ok("ADD-ON MACHINES sits once, directly above that row, in the menu's own group label",
+   nav.count('<span class="glabel">Add-on machines</span>') == 1
+   and re.search(r'<span class="glabel">Add-on machines</span><a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>'
+                 r'.*?<span class="lbl">AEO Machine<', nav, re.S) is not None, nav[:600])
+ok("...set in capitals by the label's style, as System Settings' group names are",
+   re.search(r"\.nav \.glabel\{[^}]*text-transform:uppercase", css) is not None)
+ok("...and still no rule and no heading between the groups",
    "<hr" not in nav and "<h2" not in nav and "<h3" not in nav
    and not re.search(r"\.nav a\.grp\{[^}]*border", css))
 

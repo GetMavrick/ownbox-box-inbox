@@ -528,14 +528,17 @@ def _admit(*, owner_only: bool = True):
     # far. The owner-only rule here exists because the REVIEW publishes the meters, the monthly
     # ceiling and the AT-CAP line; a page with none of that on it does not inherit the rule just
     # because it reuses this function. That inheritance is exactly what broke a member's login.
+    # A VISITOR WHO IS NOT SIGNED IN comes back here after signing in (OSDev1, 10-06, from WebDev2's walk): the
+    # login carries this path as `next`, as the inbox's bounce does. A signed-in member on an owner-only page keeps
+    # the plain bounce; sending them back here after a sign-in would only bounce them again.
     if owner_only:
         if not _dash.viewer_is_owner(request):
-            return redirect("/dash/login")
+            return _dash.login_redirect() if _dash.session_user(request) is None else redirect("/dash/login")
     elif _dash.session_user(request) is None and not _dash.viewer_is_owner(request):
         # A REAL PERSON OR THE APP TOKEN. `session_user` refuses a session with no user on it, so
         # "signed in" cannot mean "carries any cookie that parses" — the distinction
         # `viewer_is_owner` spells out above, kept here for the same reason.
-        return redirect("/dash/login")
+        return _dash.login_redirect()
     return None
 
 

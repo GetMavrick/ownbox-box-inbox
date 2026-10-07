@@ -186,9 +186,15 @@ _SECTIONS: dict[str, Section] = {}
 # And then you can put System Settings right below it. And then almost in another section. We
 # should have the add-on machines. Which would be unified inbox and then add a machine."* — and
 # of the second group: *"very subtle. Almost just like an extra space."* So the box's own rows come
-# first, every machine added to it comes after, and the gap between is space, not a heading.
-# `order` still sorts rows WITHIN a group; it can no longer lift a machine above the box's own.
+# first, every machine added to it comes after. `order` still sorts rows WITHIN a group; it can no
+# longer lift a machine above the box's own.
+#
+# THE GAP NOW CARRIES A NAME. Owner, 2026-10-07: *"add a separator in the main base machine menu
+# that says: ADD-ON MACHINES"*. It is the menu's own group label (`.glabel`, the small capitals
+# System Settings' groups already wear), above the first add-on row a person is shown, so it never
+# sits over nothing. Written in sentence case; the label's style sets it in capitals.
 GROUPS = ("base", "addons")
+ADDONS_LABEL = "Add-on machines"
 
 
 def register_section(key: str, *, order: int, machine: str, title: str, href: str,
@@ -434,7 +440,9 @@ def rail(path: str) -> Rail:
     got = tuple(s for s in sections() if not s.parent)
     top = tuple(Item(key=s.key, label=s.title, href=s.href, icon=s.icon, count=s.count,
                      owner_only=s.owner_only, submenu=bool(s.items) and not s.home,
-                     group_start=i > 0 and s.group != got[i - 1].group)
+                     group_start=i > 0 and s.group != got[i - 1].group,
+                     label_above=ADDONS_LABEL if s.group == "addons" and (i == 0 or got[i - 1].group != "addons")
+                     else "")
                 for i, s in enumerate(got))
     return Rail(level=1, title="", back="", items=top, here=path)
 
