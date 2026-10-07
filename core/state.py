@@ -548,6 +548,17 @@ CREATE TABLE IF NOT EXISTS schema_state (
   updated_at TEXT NOT NULL
 );
 
+-- THE CONNECTOR'S LAST FEW REQUESTS (OSDev1 ASSIGNED 2026-10-07, owner-approved, for his "Couldn't reload tools"):
+-- when, which method, which client, and how it went. Never a parameter or a credential. Written and pruned only by
+-- core/connector/requests_log.py, read by /health and core.health.
+CREATE TABLE IF NOT EXISTS connector_requests (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  at       TEXT NOT NULL,
+  method   TEXT NOT NULL,
+  client   TEXT NOT NULL,
+  outcome  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS connector_box (
   only_row   INTEGER PRIMARY KEY CHECK (only_row = 1),   -- the constraint IS the documentation
   box_id     TEXT NOT NULL,

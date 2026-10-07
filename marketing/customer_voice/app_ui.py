@@ -222,6 +222,15 @@ def inbox_body() -> str:
             'html.ib-thread-open nav.tabs{display:none}'
             'html.ib-thread-open body{padding-bottom:0}html.ib-thread-open :is(.sum,.pills,#ownbox-notify,.ib-below)'
             '{display:none}}'
+            # A MESSAGE GETS THE PHONE'S SCREEN (owner, 2026-10-07, with Gmail's app as the model: "only about 10% of
+            # the screen is the actual message"). Inside a conversation on a phone: no search bar (the thread's own
+            # header, its back arrow first, is the top of the screen), no gutter around the page, only a touch of room
+            # around the messages, and an email edge to edge, without the card's border.
+            '@media (max-width:820px){html.ib-thread-open .bar-find{display:none}'
+            'html.ib-thread-open .wrap{padding-left:0;padding-right:0}'
+            r'html.ib-thread-open #ib-inbox .max-w-\[900px\].space-y-3{padding:6px 4px}'
+            r'html.ib-thread-open #ib-inbox .max-w-\[760px\]{max-width:none;border:0;border-radius:0;'
+            'padding:10px 8px;box-shadow:none}}'
             # THEIR COMPOSER'S FIELD IS THE COMPOSER, in dark too: its own dark tint drew a second box inside it.
             'html.dark #ib-inbox textarea{background-color:transparent}</style>'
             '<div id="ib-inbox"></div>'

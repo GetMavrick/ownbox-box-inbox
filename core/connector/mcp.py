@@ -417,6 +417,34 @@ def _call_tool(params: dict, rpc_id, seat: dict) -> dict:
     return _ok(rpc_id, _tool_result(payload, status, tools.lookup(name), seat))
 
 
+# EVERY REQUEST TO THE CONNECTOR, ONE LINE (OSDev1 ASSIGNED 2026-10-07, for the owner's "Couldn't reload tools"):
+# when, which method, which client, how it went, kept by core/connector/requests_log.py for the box's health answers.
+# AFTER the request, so it sees what was actually answered, including the gate's own refusal (a 401 never reaches
+# `mcp_post`). Never a parameter. Matched by the route it reached, so both of its addresses count.
+
+
+@blueprint.after_app_request
+def _log_mcp(response):
+    if request.endpoint != f"{blueprint.name}.mcp_post":
+        return response
+    try:
+        from core.connector import requests_log
+        body = request.get_json(force=True, silent=True)
+        body = body if isinstance(body, dict) else {}
+        method = body.get("method") if isinstance(body.get("method"), str) else "?"
+        info = (body.get("params") or {}).get("clientInfo") if method == "initialize" else None
+        outcome = "ok" if response.status_code in (200, 202) else f"http {response.status_code}"
+        if response.status_code == 200 and response.is_json:
+            err = (response.get_json(silent=True) or {}).get("error")
+            if isinstance(err, dict):
+                outcome = f"error {err.get('code')}"
+        requests_log.record(method=method, client=requests_log.client_of(request.headers.get("User-Agent"), info),
+                            outcome=outcome)
+    except Exception:                                    # noqa: BLE001 — logging never changes an answer
+        pass
+    return response
+
+
 @blueprint.get("/mcp")
 @blueprint.get("/api/v1/mcp")
 def mcp_get():

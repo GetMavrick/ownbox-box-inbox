@@ -19,6 +19,11 @@ EnvironmentFile=/opt/aios/.env
 ExecStart=/opt/aios/.venv/bin/gunicorn --worker-class gthread --workers 2 \
   --threads 8 --timeout 120 --keep-alive 5 --bind 127.0.0.1:8000 \
   --access-logfile - --error-logfile - core.dispatch:app
+# AN UPDATE RELOADS, IT NEVER RESTARTS (OSDev1 ASSIGNED 2026-10-07, for the owner's "Couldn't reload tools"): HUP
+# makes gunicorn start new workers on the new code and only then let the old ones finish, while the master keeps
+# the socket open. A restart closed it for 10-20s on every update, and a connected AI asking in that window got
+# nothing. No --preload, so each new worker imports the code as it is on disk now. scripts/box_update.sh reloads.
+ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
 RestartSec=3
 

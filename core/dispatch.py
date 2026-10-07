@@ -565,5 +565,9 @@ def health():
     tick has run, and it names no coworker: this endpoint is public.
     """
     from core.coworkers import runner as _shifts
+    from core.connector import requests_log
     pulse = _shifts.health()
-    return jsonify({"ok": True, **version.status(), **({"shifts": pulse} if pulse else {})})
+    # `connector`: the last few requests an AI made of this box (core/connector/requests_log.py): when, which method,
+    # which client, how it went. No parameter, seat or credential, so it is as public as the commit.
+    return jsonify({"ok": True, **version.status(), **({"shifts": pulse} if pulse else {}),
+                    "connector": requests_log.recent()})

@@ -214,6 +214,7 @@ fi
 # (scripts/install_services.sh). Each candidate is verified before it is copied, and the old
 # copy is kept under /root/aios-units-backup-<ts>/ — nothing is overwritten without a backup.
 changed=0
+changed_units=" "
 for f in /opt/aios/deploy/aios-*.service; do
   n="$(basename "$f")"
   [ -f "/etc/systemd/system/$n" ] || continue
@@ -227,13 +228,30 @@ for f in /opt/aios/deploy/aios-*.service; do
   cp "$f" "/etc/systemd/system/$n"
   echo "unit updated: $n (previous copy in $UNIT_BACKUP)"
   changed=$((changed+1))
+  changed_units="$changed_units$n "
 done
 if [ "$changed" -gt 0 ]; then systemctl daemon-reload; echo "daemon-reload after $changed unit change(s)"; fi
 
-# Restart services once they exist as systemd units (no-op until then).
+# THE WEB SERVICE RELOADS, IT NEVER GOES DARK (OSDev1 ASSIGNED 2026-10-07, for the owner's "Couldn't reload
+# tools"). A restart closed port 8000 for 10-20s on every update, and his connected AI, asking in that window, got
+# nothing. A reload (deploy/aios-dispatch.service ExecReload: gunicorn HUP) brings up workers on the new code before
+# the old ones stop, on the same open socket. Only when this run changed the unit itself is it restarted, since a
+# reload never re-reads ExecStart; that is one dark window on the rare update that edits the unit. The worker and
+# Slack serve no requests, so they restart as before.
+# It reads `svc` from the loop that calls it: this updater takes no positional parameter anywhere
+# (tests/test_self_deploy.py), so a caller can never pass it anything.
+restart_or_reload() {
+  if [ "$svc" = "aios-dispatch" ] && [ "${changed_units#* aios-dispatch.service }" = "$changed_units" ] \
+     && systemctl show -p ExecReload --value aios-dispatch | grep -q "HUP" \
+     && systemctl is-active --quiet aios-dispatch; then
+    systemctl reload aios-dispatch && echo "reloaded aios-dispatch (no dark window)" && return 0
+    echo "reload of aios-dispatch failed; restarting it instead"
+  fi
+  systemctl restart "$svc" && echo "restarted $svc"
+}
 for svc in aios-dispatch aios-worker aios-slack; do
   if systemctl is-enabled "$svc" >/dev/null 2>&1; then
-    systemctl restart "$svc" && echo "restarted $svc"
+    restart_or_reload || echo "could not restart $svc"   # as before: the health check below decides
   fi
 done
 # THE NEW RELEASE MUST COME UP, OR THE OLD ONE COMES BACK. Only where the web service runs — a box
@@ -251,7 +269,7 @@ if systemctl is-enabled aios-dispatch >/dev/null 2>&1; then
     printf '%s\n' "$PREV_RELEASE" > /var/lib/aios/release
     install_deps
     for svc in aios-dispatch aios-worker aios-slack; do
-      systemctl is-enabled "$svc" >/dev/null 2>&1 && systemctl restart "$svc"
+      systemctl is-enabled "$svc" >/dev/null 2>&1 && restart_or_reload
     done
     printf '{"at":"%s","status":"rolled_back","from":"%s","to":"%s"}\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG" "${PREV_RELEASE:-$PREV_SHA}" >> /var/lib/aios/updates.jsonl

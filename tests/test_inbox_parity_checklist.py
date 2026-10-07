@@ -172,9 +172,11 @@ for name, on in screens():
             r["words"].startswith("Hi Priya, we're open") for r in got.get("replies", [])), got)
         ok(f"[{name}] ...with an Undo that puts back what was in the box", "Undo: put back what was in the box"
            in BUILT)
-        sig = owner.get("/inbox/api/signature").get_json() or {}
-        ok(f"[{name}] an email says its signature before Send", sig.get("signature") == "Maya Ortiz\nGlow Med Spa"
-           and "Your signature goes at the end:" in BUILT, sig)
+        # THE SIGNATURE IS NOT SHOWN ON THE NEW SCREENS (owner, 2026-10-07: "the signature does not need to be
+        # displayed at all. people know what their signature is"). The send path still adds it (inbox/signature.py).
+        ok(f"[{name}] an email's signature is not shown before Send (owner, 10-07), and is still the box's to add",
+           "Your signature goes at the end:" not in BUILT and "signature-note" not in BUILT
+           and (ROOT / "marketing" / "customer_voice" / "inbox" / "signature.py").is_file())
     else:
         th = page("/inbox/inbox/ig-priya")
         ok(f"[{name}] saved replies, with an Undo", 'id="snip-pick"' in th and 'id="snip-undo"' in th)

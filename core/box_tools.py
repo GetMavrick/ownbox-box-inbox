@@ -172,6 +172,11 @@ def health():
     from core import restore_check
     out["backup"] = restore_check.last()
 
+    # WHAT THE CONNECTED AI LAST ASKED, AND HOW IT WENT (OSDev1 ASSIGNED 2026-10-07): the newest requests to this
+    # box's connector, so "Couldn't reload tools" can be read off the box instead of guessed at.
+    from core.connector import requests_log
+    out["connector"] = requests_log.recent()
+
     # `ok` is withheld — None, not True — whenever any input was unreadable or any component is
     # itself unknown. A green light computed from data we could not read is the one output of this
     # tool that would be worse than no tool.

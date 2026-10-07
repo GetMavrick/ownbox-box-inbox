@@ -396,6 +396,16 @@ ok("A LIST IT JUST STARTED IS OFFERED AT ONCE (walk, 10-07): the first conversat
    "offerList(into)" in _la and "document.querySelector('.chips.pills')" in _la
    and "['archived', 'Done'], ['deleted', 'Trash'], ['junk', 'Junk']" in _la)
 
+_body = app_ui.inbox_body()
+_p8 = (ROOT / "web" / "inbox-ui" / "patches" / "0008-no-today-chip.patch").read_text(encoding="utf-8")
+ok("A MESSAGE GETS THE PHONE'S SCREEN (owner, 10-07, Gmail's app the model): inside a conversation on a phone, no search "
+   "bar, no gutter, a touch of room, an email edge to edge, and no Today chip over a thread that is all today",
+   "@media (max-width:820px){html.ib-thread-open .bar-find{display:none}" in _body
+   and "html.ib-thread-open .wrap{padding-left:0;padding-right:0}" in _body
+   and r"html.ib-thread-open #ib-inbox .max-w-\[760px\]{max-width:none;border:0;border-radius:0;" in _body
+   and ": msgDate.toDateString() !== new Date().toDateString();" in _p8
+   and not (ROOT / "web" / "inbox-ui" / "ownbox" / "signature-note.tsx").exists())
+
 print("\nsaved replies in their composer")
 from marketing.customer_voice.inbox import snippets  # noqa: E402
 
