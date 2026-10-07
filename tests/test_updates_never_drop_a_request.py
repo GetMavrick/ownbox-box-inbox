@@ -108,16 +108,38 @@ def hammer():
         time.sleep(0.01)
 
 
+def workers() -> set:
+    """The master's worker processes, read from /proc: what is serving right now."""
+    out = set()
+    for d in pathlib.Path("/proc").iterdir():
+        if d.name.isdigit():
+            try:
+                if int((d / "stat").read_text().rsplit(")", 1)[1].split()[1]) == proc.pid:
+                    out.add(int(d.name))
+            except (OSError, IndexError, ValueError):
+                continue
+    return out
+
+
 threads = [threading.Thread(target=hammer) for _ in range(4)]
 for t in threads:
     t.start()
 time.sleep(0.5)
+old_workers = workers()
 (app_dir / "VERSION").write_text("new\n")         # the update: new code on disk
 os.kill(proc.pid, signal.SIGHUP)                  # what `systemctl reload aios-dispatch` sends
-deadline = time.time() + 30
-while time.time() < deadline and seen[-1:] != ["new"]:
+# THE OLD WORKERS FINISH, THEN EXIT. Gunicorn starts the new workers and stops the old ones gracefully: one may still
+# answer a request it had already taken for a second or two, which is the point (nothing is dropped). What must never
+# happen is an old worker that lives on, serving old code under a box that reports the new release. So the check
+# waits for every old worker process to be gone (inside gunicorn's 30-second graceful timeout), then keeps asking: from
+# there on, every answer must be the new code. A fixed wait after the first "new" raced a slow CI runner.
+deadline = time.time() + 40
+while time.time() < deadline and old_workers & workers():
     time.sleep(0.1)
-time.sleep(1.0)                                   # and keep asking while the old workers finish
+old_gone = not (old_workers & workers())
+time.sleep(0.2)                                   # a reply already on the wire from an old worker lands first
+after = len(seen)
+time.sleep(1.0)                                   # and keep asking on the new code alone
 stop.set()
 for t in threads:
     t.join()
@@ -128,7 +150,10 @@ except subprocess.TimeoutExpired:
     proc.kill()
 ok(f"not one of {len(seen) + len(errors)} requests failed across the reload", up and not errors and len(seen) > 50,
    errors[:3])
-ok("...the old code answered before it, the new code after it", "old" in seen and seen[-1:] == ["new"], seen[-3:])
+ok("...the old code answered before it, and its workers exited inside gunicorn's graceful timeout",
+   "old" in seen[:after] and old_workers and old_gone, (sorted(old_workers), seen[-3:]))
+ok("...and once they had, every answer was the new code", seen[after:] and set(seen[after:]) == {"new"},
+   sorted(set(seen[after:])))
 
 print("\ntest_the_update_reloads_and_restarts_only_when_it_must")
 fn = re.search(r"restart_or_reload\(\) \{(.*?)\n\}", UPDATE, re.S)

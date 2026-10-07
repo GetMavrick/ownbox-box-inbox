@@ -1048,13 +1048,14 @@ def propose_business_addresses(add=None, remove=None, seat=None):
         return {"asked": False, "error": str(e)}
     own = _mailbox_address().strip().lower()
     if own and own in plus:
-        return {"asked": False, "error": "That's the mailbox the box reads, so it's already the business's."}
+        return {"asked": False, "error": "That's the mailbox your Ownbox reads, so it's already the business's."}
     words = {}
     if plus:
         words["Add"] = ", ".join(plus)
         words["What that means"] = ("Mail FROM these addresses is filed as sent by your business and never gets a "
-                                    "draft reply. Only approve addresses your business sends from, never a "
-                                    "customer's: their messages would stop getting replies.")
+                                    "draft reply. Mail already here from them is sorted the same way. Only approve "
+                                    "addresses your business sends from, never a customer's: their messages would "
+                                    "stop getting replies.")
     if minus:
         words["Remove"] = ", ".join(minus)
     what = "Your business's addresses: " + "; ".join(
@@ -1236,10 +1237,12 @@ def _run_control(detail: dict) -> dict:
         except ValueError as e:
             return {"ok": False, "text": f"Not changed: {e}"}
         n = got["refiled"]
+        gone = sorted(minus - set(got["addresses"]))
         return {"ok": True, "text": "Saved. " + (f"{n} message{'' if n == 1 else 's'} already in from them "
                                                 f"{'is' if n == 1 else 'are'} now filed as your business's. "
                                                 if n else "") + "Mail from these addresses is filed as sent: "
-                + (", ".join(got["addresses"]) or "none") + "."}
+                + (", ".join(got["addresses"]) or "none") + "."
+                + (f" New mail from {', '.join(gone)} will be treated like any other sender." if gone else "")}
     if action == "channel_mode":
         from marketing.customer_voice.inbox import answering
         try:

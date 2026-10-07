@@ -497,6 +497,8 @@ def test_the_business_addresses_change_on_a_tap():
         ok("the owner is shown the addresses, and that mail FROM them is filed as sent and never gets a draft",
            args.get("Add") == "frontdesk@acme.co, sam@gmail.com" and "FROM" in args.get("What that means", "")
            and "filed as sent" in args["What that means"] and "never gets a draft" in args["What that means"], args)
+        ok("...and that the mail already here from them is sorted the same way, since approving changes it too",
+           "Mail already here from them is sorted the same way" in args.get("What that means", ""), args)
         approvals.decide(a["id"], True, by="usr_owner")
         ok("approved: both saved", {"frontdesk@acme.co", "sam@gmail.com"} <= store.business_addresses(),
            store.business_addresses())
@@ -524,6 +526,10 @@ def test_the_business_addresses_change_on_a_tap():
            len(calls) == 1 and "sam@gmail.com" not in calls[0][0][0] and "frontdesk@acme.co" in calls[0][0][0]
            and calls[0][1].get("own_address") == "owner@acme.co" and r["status"] == "done"
            and store.business_addresses() == {"frontdesk@acme.co"}, f"{calls} {r}")
+        ok("...and the owner is told new mail from the removed address is treated like any other sender",
+           "New mail from sam@gmail.com will be treated like any other sender" in r.get("text", ""), r)
+        ok("a buyer reads 'your Ownbox', never 'the box'",
+           "your Ownbox" in inbox_tools.propose_business_addresses(add="owner@acme.co").get("error", ""))
         st = {x["name"]: x["value"] for x in inbox_tools.settings()["settings"]}
         ok("inbox.settings lists them", st.get("business_addresses") == ["frontdesk@acme.co"], st)
     finally:
