@@ -9,6 +9,8 @@ code has to out-argue: there is nothing here that could carry it out.
 from __future__ import annotations
 
 import hashlib
+import html
+import re
 
 from core import brain, cost_guard
 from core.logging import get_logger
@@ -172,14 +174,19 @@ def _shape(platform) -> str:
 
 def reply_style(platform) -> str:
     """"sales" (Strong), "subtle" or "service" as the owner chose it for this conversation's channel (email, or a DM on any other
-    platform), or "" when nobody has chosen: then the instructions are exactly what every box already had."""
-    ch = "email" if str(platform or "").strip().lower() == "email" else "dms"
+    platform), or "" when nobody has chosen: then the instructions are exactly what every box already had. A DM channel
+    the owner styled on its own (Inbox Settings, Channels: `reply_style.instagram`) wins over the style for all DMs."""
+    p = str(platform or "").strip().lower()
+    keys = ("email",) if p == "email" else ((p, "dms") if p in CHANNEL_KEYS else ("dms",))
     try:
         from core import box_settings
-        v = str(box_settings.get("inbox", f"reply_style.{ch}", default="") or "")
+        for ch in keys:
+            v = str(box_settings.get("inbox", f"reply_style.{ch}", default="") or "")
+            if v in ("sales", "subtle", "service"):
+                return v
     except Exception:                                    # noqa: BLE001 — a setting never costs a draft
         return ""
-    return v if v in ("sales", "subtle", "service") else ""
+    return ""
 
 
 def _system(platform=None) -> str:
@@ -240,6 +247,37 @@ def enabled() -> bool:
     return bool(_cfg().get("enabled", True))
 
 
+# PER CHANNEL (owner, 2026-10-07: "We also need to build different settings per channel. For example, DM's get an auto
+# reply whereas email just gets an auto draft."). Inbox Settings, Channels writes ("inbox", "drafts.<channel>") as "on"
+# or "off" (inbox/answering.py); a channel nobody set there follows the box-wide switch above, so every box drafts
+# exactly as it did until its owner touches the screen.
+CHANNEL_KEYS = ("email", "instagram", "messenger")
+
+
+def channel_drafting() -> dict:
+    """{channel: True | False} for each channel the owner set on Channels. A channel not in it follows enabled()."""
+    out = {}
+    try:
+        from core import box_settings
+        for ch in CHANNEL_KEYS:
+            v = box_settings.get("inbox", f"drafts.{ch}", default=None)
+            if v in ("on", "off"):
+                out[ch] = v == "on"
+    except Exception:                            # noqa: BLE001 — unreadable is "follows the box-wide switch"
+        return {}
+    return out
+
+
+def _rules_by_channel() -> dict:
+    """The rules fingerprint each DM channel that can be styled on its own runs now (store._RULES_FOR)."""
+    return {ch: rules(ch) for ch in CHANNEL_KEYS if ch != "email"}
+
+
+def drafts_for(platform) -> bool:
+    """Whether a message on this channel gets a draft: the channel's own setting, else the box-wide one."""
+    return channel_drafting().get(str(platform or "").strip().lower(), enabled())
+
+
 def per_sweep() -> int:
     """How many drafts one sweep may pay for. A SPEND BOUND: each one is a model call, and the
     $90 guard underneath should be the last line of defence, not the first."""
@@ -258,15 +296,51 @@ def _pitch_back_on() -> bool:
         return False
 
 
+# AN EMAIL THAT IS ONLY A WEB PAGE (owner, 2026-10-07, a Gmail Drafts folder of "Could you resend your message in plain
+# text?"). A mailer that sends HTML alone was stored as its markup, and the model, handed `<!doctype html>` and the
+# first 2,000 characters of a stylesheet, asked a robot to resend. The words are read out of the markup here, so rows
+# already stored that way are read right too (the mail sweep now stores the words for new mail).
+_MARKUP = re.compile(r"^\s*<(!doctype|html|head|body|div|table|meta|style|center|span|p|!--)\b", re.I)
+
+
+def _readable(text) -> str:
+    """The words in a message: as they are, or read out of the markup when it is a web page. Never raises."""
+    t = str(text or "")
+    if not _MARKUP.match(t):
+        return t.strip()
+    t = re.sub(r"(?is)<!--.*?-->", " ", t)
+    t = re.sub(r"(?is)<(head|style|script|title)\b.*?</\1\s*>", " ", t)
+    t = re.sub(r"(?is)<br\s*/?>|</(p|div|tr|li|h\d)\s*>", "\n", t)
+    t = re.sub(r"(?s)<[^>]+>", " ", t)
+    t = html.unescape(t).replace("\u200c", " ").replace("\xa0", " ")
+    t = re.sub(r"[ \t\r\f\v]+", " ", t)
+    return re.sub(r"\s*\n\s*", "\n", t).strip()
+
+
 def _words(space: str, in_reply_to, inbound) -> str:
     """What they wrote, or, for a message with no words, what they sent (owner, 2026-10-07: "Yes, draft the photo ones
-    too"). The model cannot see a photo, so it is told so, and never describes what it cannot see."""
-    said = str(inbound or "").strip()[:_MAX_INBOUND]
+    too"). The model cannot see a photo, so it is told so, and never describes what it cannot see. A web page with no
+    words in it (an image pasted into an email) is that same wordless message, never its markup."""
+    said = _readable(inbound)[:_MAX_INBOUND]
     if said:
         return said
     sent = store.what_was_sent(space, str(in_reply_to or ""))
     return (f"[They sent {sent}, with no words. You cannot see it, so never describe it or guess what it shows: reply "
             "warmly to the gesture, and carry the conversation on from what came before.]")
+
+
+def _no_reply(space: str, zcid: str, in_reply_to: str, platform) -> None:
+    """Record that this message needs no reply, stored and dismissed in one step. Never raises."""
+    try:
+        if store.put(space=space, zcid=zcid, in_reply_to=in_reply_to,
+                     body=store.NO_REPLY_BODY, rules=rules(platform)):
+            row = store.for_inbound(space, in_reply_to)
+            if row:
+                store.dismiss(space, row["id"])
+    except Exception as e:                       # noqa: BLE001 — bookkeeping never breaks a sweep
+        log.warning("drafter.no_reply_unrecorded", extra={"space": space,
+                                                          "error": type(e).__name__})
+    log.info("drafter.no_reply_needed", extra={"space": space, "conversation": zcid})
 
 
 def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
@@ -302,16 +376,7 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
     # (#1436) wearing a third face. So it is stored and dismissed in one step: the decision is
     # on the record, the Drafts tab never shows it, and the sweep never sees it again.
     if text.strip().upper().startswith(NO_REPLY):
-        try:
-            if store.put(space=space, zcid=zcid, in_reply_to=in_reply_to,
-                         body=store.NO_REPLY_BODY, rules=rules(platform)):
-                row = store.for_inbound(space, in_reply_to)
-                if row:
-                    store.dismiss(space, row["id"])
-        except Exception as e:                       # noqa: BLE001 — bookkeeping never breaks a sweep
-            log.warning("drafter.no_reply_unrecorded", extra={"space": space,
-                                                              "error": type(e).__name__})
-        log.info("drafter.no_reply_needed", extra={"space": space, "conversation": zcid})
+        _no_reply(space, zcid, in_reply_to, platform)
         return None
 
 
@@ -557,6 +622,8 @@ def periodic(*, new_only: bool = False, platforms: tuple | None = None) -> dict:
         name = (sp or {}).get("name") if isinstance(sp, dict) else str(sp)
         if not name:
             continue
+        if not new_only:
+            store.redo_drafts_from_markup(name)  # once per Space: the drafts written to page code are written again
         try:
             drafted += int(sweep(name, new_only=new_only, platforms=platforms).get("drafted") or 0)
         except Exception as e:                   # noqa: BLE001 — one Space never stops the rest
@@ -578,8 +645,13 @@ def sweep(space: str, *, new_only: bool = False, platforms: tuple | None = None)
     this machine may both think and send. The separation is enforced in
     `tests/test_customer_voice.py`, not merely intended.
     """
-    if not enabled():
-        return {"status": "off", "drafted": 0}
+    said = channel_drafting()
+    skip = tuple(ch for ch, on in said.items() if not on)          # the channels set to Leave to me
+    if not enabled():                                               # box-wide off: only channels switched on alone
+        only = tuple(ch for ch, on in said.items() if on)
+        platforms = tuple(p for p in (platforms or only) if p in only)
+        if not platforms:
+            return {"status": "off", "drafted": 0}
     cap = per_sweep()
     if not cap:
         return {"status": "capped", "drafted": 0}
@@ -590,7 +662,7 @@ def sweep(space: str, *, new_only: bool = False, platforms: tuple | None = None)
         # which is precisely the seven-hour head-block of 2026-09-22, arriving by a new road.
         # Bounded, because this is still a queue and not a mailbox scan.
         waiting = store.needs_a_draft(space, limit=cap * _SCAN_MULTIPLE, pitch_back=_pitch_back_on(),
-                                      platforms=platforms)
+                                      platforms=platforms, skip=skip)
     except Exception as e:                       # noqa: BLE001 — a box without the table yet
         log.warning("drafter.unreadable", extra={"error": f"{type(e).__name__}: {e}"[:120]})
         return {"status": "unreadable", "drafted": 0}
@@ -656,7 +728,8 @@ def sweep(space: str, *, new_only: bool = False, platforms: tuple | None = None)
     left = 0 if new_only else cap - len(waiting)
     if left > 0:
         try:
-            again = store.stale_no_reply(space, email_rules=rules("email"), dms_rules=rules("instagram"),
+            again = store.stale_no_reply(space, email_rules=rules("email"), dms_rules=rules("dm"),
+                                         by_channel=_rules_by_channel(),
                                          limit=left * _SCAN_MULTIPLE, pitch_back=pitch_back)
         except Exception as e:                   # noqa: BLE001 — a box without the table yet
             log.warning("drafter.recheck_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:120]})
@@ -675,7 +748,8 @@ def sweep(space: str, *, new_only: bool = False, platforms: tuple | None = None)
     rewritten = 0
     if left > 0:
         try:
-            stale = store.stale_waiting(space, email_rules=rules("email"), dms_rules=rules("instagram"), limit=left)
+            stale = store.stale_waiting(space, email_rules=rules("email"), dms_rules=rules("dm"),
+                                        by_channel=_rules_by_channel(), limit=left)
         except Exception as e:                   # noqa: BLE001 — a box without the table yet
             log.warning("drafter.stale_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:120]})
             stale = []

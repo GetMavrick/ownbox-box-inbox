@@ -73,7 +73,21 @@ def mark_rules(space: str, draft_id: str, rules: str) -> None:
                   (space, str(draft_id), str(rules), state._now()))
 
 
-def stale_waiting(space: str, *, email_rules: str, dms_rules: str, limit: int = 5) -> list[dict]:
+# EACH CHANNEL'S RULES, BY ITS OWN NAME. Instagram and Messenger can be styled apart (Inbox Settings, Channels), so their
+# fingerprints can differ; comparing every DM against Instagram's would call a Messenger draft stale forever and pay to
+# rewrite it every sweep. Any other DM platform follows the all-DMs style, so it has the all-DMs rules.
+_RULES_FOR = ("CASE LOWER(k.platform) WHEN 'email' THEN ? WHEN 'instagram' THEN ? WHEN 'messenger' THEN ? "
+              "ELSE ? END")
+
+
+def _rules_args(email_rules, dms_rules, by_channel) -> tuple:
+    by = by_channel or {}
+    return (str(email_rules), str(by.get("instagram") or dms_rules), str(by.get("messenger") or dms_rules),
+            str(dms_rules))
+
+
+def stale_waiting(space: str, *, email_rules: str, dms_rules: str, limit: int = 5,
+                  by_channel: dict | None = None) -> list[dict]:
     """Drafts still waiting on a person that were written under other rules than the box runs now, oldest
     first: no rules row (written before the box kept one), or a fingerprint that no longer matches the
     conversation's channel. Never one marked KEEP, never one dismissed or already answered. The `limit`
@@ -91,13 +105,13 @@ def stale_waiting(space: str, *, email_rules: str, dms_rules: str, limit: int = 
             "   AND k.automated IS NOT 1 "
             f"   AND {_UNCLAIMED} "
             "   AND (r.rules IS NULL OR (r.rules <> ? AND "
-            "        r.rules <> CASE WHEN k.platform = 'email' THEN ? ELSE ? END)) "
+            f"        r.rules <> {_RULES_FOR})) "
             "   AND NOT EXISTS (SELECT 1 FROM inbox_messages o "
             "                    WHERE o.space = d.space "
             "                      AND o.zernio_conversation_id = d.zernio_conversation_id "
             "                      AND o.direction = 'out' AND o.created_at > m.created_at) "
             " ORDER BY m.created_at ASC LIMIT ?",
-            (space, KEEP, str(email_rules), str(dms_rules), int(limit))).fetchall()
+            (space, KEEP, *_rules_args(email_rules, dms_rules, by_channel), int(limit))).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -162,7 +176,7 @@ def dismiss(space: str, draft_id: str) -> None:
 
 
 def needs_a_draft(space: str, *, limit: int = 5, pitch_back: bool = False,
-                  platforms: tuple | None = None) -> list[dict]:
+                  platforms: tuple | None = None, skip: tuple = ()) -> list[dict]:
     """Conversations whose newest inbound has no draft yet, newest first.
 
     THE `limit` IS A SPEND BOUND, not a page size. Each row this returns becomes one model call,
@@ -202,7 +216,9 @@ def needs_a_draft(space: str, *, limit: int = 5, pitch_back: bool = False,
             # plan #1857 H7), and kept out of the capped query otherwise, so pitches can't starve a real customer.
             "   AND (k.automated IS NOT 2 OR ?) "
             # ONLY THESE CHANNELS, when asked (the 20-second listener drafts just the DM channels it sends on).
-            + (f"   AND LOWER(k.platform) IN ({','.join('?' * len(platforms))}) " if platforms else "") +
+            + (f"   AND LOWER(k.platform) IN ({','.join('?' * len(platforms))}) " if platforms else "")
+            # NOR THE CHANNELS THE OWNER SET TO "LEAVE TO ME" (Inbox Settings, Channels; draft.channel_drafting).
+            + (f"   AND LOWER(k.platform) NOT IN ({','.join('?' * len(skip))}) " if skip else "") +
             # A CONVERSATION AN AUTOMATION IS RUNNING IS NOT DRAFTED (customer_voice/claims.py, owner
             # 2026-10-01, decision 2): it would be a model call for a reply nobody should send.
             f"   AND {_UNCLAIMED} "
@@ -226,7 +242,7 @@ def needs_a_draft(space: str, *, limit: int = 5, pitch_back: bool = False,
             # set of characters to strip, so this is tab, newline and return too.
             " ORDER BY (TRIM(COALESCE(m.body, ''), ' ' || char(9) || char(10) || char(13)) = '') ASC, "
             "          m.created_at DESC LIMIT ?",
-            (space, 1 if pitch_back else 0, *(platforms or ()), int(limit))).fetchall()
+            (space, 1 if pitch_back else 0, *(platforms or ()), *(skip or ()), int(limit))).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -422,7 +438,7 @@ RECHECK_DAYS = 30
 
 
 def stale_no_reply(space: str, *, email_rules: str, dms_rules: str, limit: int = 3,
-                   pitch_back: bool = False) -> list[dict]:
+                   pitch_back: bool = False, by_channel: dict | None = None) -> list[dict]:
     """The box's own "no reply needed" decisions made under other rules than it runs now, newest first. The `limit`
     is a spend bound: each row is one model call."""
     from datetime import datetime, timedelta, timezone
@@ -440,14 +456,14 @@ def stale_no_reply(space: str, *, email_rules: str, dms_rules: str, limit: int =
             "   AND (k.automated IS NOT 2 OR ?) "
             f"   AND {_UNCLAIMED} "
             "   AND m.created_at >= ? "
-            "   AND (r.rules IS NULL OR r.rules <> CASE WHEN k.platform = 'email' THEN ? ELSE ? END) "
+            f"   AND (r.rules IS NULL OR r.rules <> {_RULES_FOR}) "
             "   AND m.created_at = (SELECT MAX(m2.created_at) FROM inbox_messages m2 WHERE m2.space = d.space "
             "        AND m2.zernio_conversation_id = d.zernio_conversation_id AND m2.direction = 'in') "
             "   AND NOT EXISTS (SELECT 1 FROM inbox_messages o WHERE o.space = d.space "
             "        AND o.zernio_conversation_id = d.zernio_conversation_id "
             "        AND o.direction = 'out' AND o.created_at > m.created_at) "
             " ORDER BY m.created_at DESC LIMIT ?",
-            (space, NO_REPLY_BODY, 1 if pitch_back else 0, cut, str(email_rules), str(dms_rules),
+            (space, NO_REPLY_BODY, 1 if pitch_back else 0, cut, *_rules_args(email_rules, dms_rules, by_channel),
              int(limit))).fetchall()
     return [dict(r) for r in rows]
 
@@ -486,3 +502,37 @@ def pitch_backs(space: str) -> set:
                                             (space,)).fetchall()}
     except Exception:                                    # noqa: BLE001
         return set()
+
+
+# THE DRAFTS WRITTEN TO PAGE CODE, WRITTEN AGAIN (owner, 2026-10-07, his Gmail Drafts full of "Could you resend your
+# message in plain text?"). An HTML-only email was stored as its markup, and the drafter answered the markup. The
+# drafter now reads the words out of it (draft._readable); this forgets which rules those drafts were written under,
+# so the rewrite path (stale_waiting) writes each again from the words, or dismisses it when nobody wrote any. ONCE
+# PER BOX, by a box setting, so a draft rewritten from a page is never forgotten again. Never one a person's own AI
+# wrote (KEEP). A copy already put in his Gmail Drafts is not changed; the rewrite never touched those.
+_MARKUP_REDONE = "drafts.markup_redone"
+
+
+def redo_drafts_from_markup(space: str) -> int:
+    """-> drafts sent back to be written again. Never raises."""
+    from core import box_settings
+    try:
+        if box_settings.get("inbox", f"{_MARKUP_REDONE}.{space}", default=None):
+            return 0
+        with state.connect() as c:
+            cur = c.execute(
+                "DELETE FROM inbox_draft_rules WHERE space = ? AND rules <> ? AND draft_id IN ("
+                "  SELECT d.id FROM inbox_drafts d JOIN inbox_messages m "
+                "    ON m.space = d.space AND m.zernio_message_id = d.in_reply_to "
+                "   WHERE d.space = ? AND d.dismissed_at IS NULL "
+                "     AND LOWER(LTRIM(m.body, ' ' || char(9) || char(10) || char(13))) GLOB '<[!a-z]*')",
+                (space, KEEP, space))
+            n = cur.rowcount
+            # A DRAFT WITH NO RULES ROW IS ALREADY STALE (stale_waiting: `r.rules IS NULL`), so this is the whole job.
+        box_settings.put("inbox", f"{_MARKUP_REDONE}.{space}", True, set_by="drafter")
+    except Exception as e:                       # noqa: BLE001 — housekeeping never stops a sweep
+        log.warning("drafter.markup_redo_failed", extra={"space": space, "error": type(e).__name__})
+        return 0
+    if n:
+        log.info("drafter.markup_redone", extra={"space": space, "drafts": n})
+    return n

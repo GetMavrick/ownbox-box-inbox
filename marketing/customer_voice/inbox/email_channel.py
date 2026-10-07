@@ -236,7 +236,10 @@ def _body_text(msg) -> str:
             return ""
 
     if not msg.is_multipart():
-        return decode(msg).strip()
+        got = decode(msg).strip()
+        # A SINGLE-PART HTML EMAIL IS ITS WORDS TOO (owner, 2026-10-07): stored as markup, it was the page code that
+        # the drafter read and answered with "Could you resend your message in plain text?".
+        return _strip_html(got) if msg.get_content_type() == "text/html" else got
     html = ""
     for part in msg.walk():
         if part.get_content_maintype() == "multipart":
@@ -249,9 +252,13 @@ def _body_text(msg) -> str:
                 return got
         elif part.get_content_type() == "text/html" and not html:
             html = decode(part)
-    if not html:
-        return ""
-    text = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
+    return _strip_html(html) if html else ""
+
+
+def _strip_html(html: str) -> str:
+    """The words in an HTML body, for the preview and the drafter: no head, style, script or comments, no tags."""
+    text = re.sub(r"(?is)<!--.*?-->", " ", html)
+    text = re.sub(r"(?is)<(head|script|style|title)\b.*?</\1\s*>", " ", text)
     text = re.sub(r"(?s)<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", html_mod.unescape(text)).strip()
 
@@ -573,6 +580,7 @@ def sweep(space: str) -> tuple[int, int]:
 
         scanned = stored = 0
         newest = since
+        ours = store.business_addresses()            # the business's other addresses, as its owner named them
         for uid in uids:
             # BODY.PEEK IS THE SECOND GUARD. Plain BODY[] sets \Seen as a side effect of reading.
             typ, fetched = conn.uid("FETCH", uid, "(BODY.PEEK[])")
@@ -598,7 +606,10 @@ def sweep(space: str) -> tuple[int, int]:
             frm = _header(msg, "From")
             name, addr = email.utils.parseaddr(frm)
             own = (cred.get("user") or "").lower()
-            inbound = addr.lower() != own
+            # YOUR BUSINESS'S ADDRESSES ARE THE BUSINESS SPEAKING (Mailbox settings; store.business_addresses): staff, a
+            # front desk, the owner's personal account. Exact addresses the owner named, filed as outbound exactly like
+            # the mailbox's own, so a CC'd or forwarded copy is never drafted or counted as waiting.
+            inbound = addr.lower() != own and addr.lower() not in ours
             store.upsert_conversation(
                 space=space, zcid=zcid, platform="email",
                 participant=(name or addr or frm)[:200],

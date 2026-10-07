@@ -153,6 +153,12 @@ def our_addresses() -> set:
         from core import box_secrets
         cred = box_secrets.email_credential() or {}
         user = str(cred.get("user") or "").strip().lower()
-        return {user} if user else set()
+        # AND YOUR BUSINESS'S ADDRESSES (Mailbox settings; inbox/store.business_addresses, read here by its key
+        # because the drafter may not import inbox/): a CC'd or forwarded copy of the business's own mail is never
+        # answered.
+        from core import box_settings
+        named = box_settings.get("inbox", "mailbox.business_addresses", default=None) or []
+        mine = {str(a).strip().lower() for a in named if isinstance(named, list) and "@" in str(a or "")}
+        return ({user} if user else set()) | mine
     except Exception:                                # noqa: BLE001 — never break a sweep over this
         return set()

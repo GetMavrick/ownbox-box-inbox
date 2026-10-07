@@ -1255,3 +1255,89 @@ def unjudged_email_senders(space: str, *, limit: int = 500) -> list[dict]:
             " WHERE k.space = ? AND k.platform = 'email' AND k.automated IS NULL "
             " LIMIT ?", (space, int(limit))).fetchall()
     return [dict(r) for r in rows if (r["sender"] or "")]
+
+
+# ── YOUR BUSINESS'S ADDRESSES ─────────────────────────────────────────────────────────────────────
+# Every box files mail From its own mailbox address as the business speaking (email_channel.sweep). Most businesses
+# write from more than that one address: the owner's personal account, staff, a front desk, a sales alias. Their mail
+# reaches the inbox by CC, BCC or a forward, and until this the box read each copy as somebody writing in: it drafted
+# a reply to the business's own people and counted them as waiting. The owner found it on 2026-10-07 ("It's making a
+# bunch of drafts that are not connected to any email that comes in"); the gap is the snapshot's, on any box.
+#
+# NAMED BY THE OWNER, NEVER GUESSED. A first version guessed from display names and was withdrawn before merging: a
+# sender writes the To line, so any mailer could teach a box that "Front Desk" was the business, and a customer who
+# shared a name would vanish. An exact address the owner typed matches nobody else. Owner, 2026-10-07, approving this
+# shape: "it looks like you built something good for the Golden snapshot that fits all customers. Yes rename the field
+# and make sure that it's adequately explained on screen." The screen is docs/SCOPE_BUSINESS_ADDRESSES.md.
+KEY_BUSINESS_ADDRESSES = "mailbox.business_addresses"
+MAX_BUSINESS_ADDRESSES = 20
+
+
+def business_addresses() -> set:
+    """The business's other addresses, lower case. Empty when none are set or the setting is unreadable."""
+    from core import box_settings
+    try:
+        got = box_settings.get("inbox", KEY_BUSINESS_ADDRESSES, default=None) or []
+    except Exception:                                    # noqa: BLE001 — unreadable is "none named"
+        return set()
+    return {str(a).strip().lower() for a in got if isinstance(got, list) and "@" in str(a or "")}
+
+
+def clean_business_addresses(addresses) -> list:
+    """The list as stored: trimmed, lower case, each one checked. Raises ValueError with a sentence the page can show."""
+    import email.utils
+    out = []
+    for raw in addresses or []:
+        a = str(raw or "").strip().lower()
+        if not a:
+            continue
+        name, addr = email.utils.parseaddr(a)
+        if addr != a or a.count("@") != 1 or "." not in a.split("@")[1] or any(c in a for c in " ,;<>\r\n"):
+            raise ValueError(f"{raw} doesn't look like an email address.")
+        if a not in out:
+            out.append(a)
+    if len(out) > MAX_BUSINESS_ADDRESSES:
+        raise ValueError(f"Add up to {MAX_BUSINESS_ADDRESSES} addresses.")
+    return out
+
+
+def put_business_addresses(addresses, *, by: str | None = None, own_address: str = "") -> dict:
+    """Save the business's addresses, then file the mail already in from each NEWLY added one as the business's own.
+    Validates everything before writing anything. -> {"addresses": [...], "refiled": n}."""
+    from core import box_settings
+    want = clean_business_addresses(addresses)
+    own = str(own_address or "").strip().lower()
+    if own and own in want:
+        raise ValueError("That's the mailbox your Ownbox reads, so it's already yours. Add your business's other "
+                         "addresses.")
+    added = set(want) - business_addresses()
+    box_settings.put("inbox", KEY_BUSINESS_ADDRESSES, want, set_by=by)
+    return {"addresses": want, "refiled": refile_from(added) if added else 0}
+
+
+def refile_from(addresses) -> int:
+    """File the email already stored as inbound From exactly these addresses as the business's outbound, in every
+    Space, and withdraw the drafts the box wrote to it. Run when the owner adds an address, so the change is their own
+    act. A copy the box already put in their Gmail Drafts stays there. -> messages refiled. Never raises."""
+    want = sorted({str(a).strip().lower() for a in addresses or () if "@" in str(a or "")})
+    if not want:
+        return 0
+    marks = ",".join("?" * len(want))
+    try:
+        with state.connect() as c:
+            rows = c.execute(
+                "SELECT m.id, m.space, m.zernio_message_id AS zmid FROM inbox_messages m "
+                "  JOIN inbox_conversations k ON k.space = m.space "
+                "   AND k.zernio_conversation_id = m.zernio_conversation_id "
+                f" WHERE m.direction = 'in' AND k.platform = 'email' AND LOWER(m.sent_by) IN ({marks})",
+                want).fetchall()
+            for r in rows:
+                c.execute("UPDATE inbox_messages SET direction = 'out' WHERE id = ? AND direction = 'in'", (r["id"],))
+                c.execute("UPDATE inbox_drafts SET dismissed_at = ? WHERE space = ? AND in_reply_to = ? "
+                          "AND dismissed_at IS NULL", (state._now(), r["space"], r["zmid"]))
+    except Exception as e:                               # noqa: BLE001 — the setting is saved either way
+        log.warning("inbox.business_addresses_unrefiled", extra={"error": type(e).__name__})
+        return 0
+    if rows:
+        log.info("inbox.business_addresses_refiled", extra={"rows": len(rows), "addresses": len(want)})
+    return len(rows)
