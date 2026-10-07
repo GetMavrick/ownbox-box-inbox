@@ -387,10 +387,13 @@ _sr = (ROOT / "web" / "inbox-ui" / "ownbox" / "saved-replies.tsx").read_text(enc
 _la = (ROOT / "web" / "inbox-ui" / "ownbox" / "list-actions.tsx").read_text(encoding="utf-8")
 _p1 = (ROOT / "web" / "inbox-ui" / "patches" / "0001-draft-card-slot.patch").read_text(encoding="utf-8")
 _ib = (ROOT / "web" / "inbox-ui" / "ownbox" / "entry" / "inbox.tsx").read_text(encoding="utf-8")
-ok("A SAVED REPLY'S UNDO GOES WITH THE TEXT IT WAS FOR (walk, 10-07): their composer counts each send, and the Undo "
-   "is forgotten on a send as on a new conversation, never left under an empty box",
-   "setSent((n) => n + 1);" in _p1 and "    sent: number;" in _p1
-   and "useEffect(() => setUndo(null), [conversation.id, sent]);" in _sr and "sent={ctx.sent}" in _ib)
+ok("SAVED REPLIES LIVE INSIDE THE COMPOSER (owner, 10-07; OSDev1's assignment): one button in its own row (patch 0001's "
+   "inComposer), picking fills the text, its Undo a toast that a send or a new conversation dismisses; nothing parked "
+   "above the composer",
+   "inComposer?: (ctx: ComposerSlot) => ReactNode;" in _p1 and "actions={inComposer?.(slot)}" in _p1
+   and "{!recordingVoice && actions}" in _p1 and "setSent((n) => n + 1);" in _p1
+   and "toast.dismiss(UNDO_TOAST);" in _sr and "[conversation.id, sent]" in _sr and "label: 'Undo'" in _sr
+   and "inComposer={(ctx) =>" in _ib and "<SavedReplies" not in _ib.split("inComposer={(ctx) =>")[0].split("aboveComposer={(ctx) =>")[-1])
 ok("A LIST IT JUST STARTED IS OFFERED AT ONCE (walk, 10-07): the first conversation swiped into Done, Trash or Junk "
    "adds that list's pill, in the box's order and markup, with no reload",
    "offerList(into)" in _la and "document.querySelector('.chips.pills')" in _la
@@ -404,6 +407,7 @@ ok("A MESSAGE GETS THE PHONE'S SCREEN (owner, 10-07, Gmail's app the model): ins
    and "html.ib-thread-open .wrap{padding-left:0;padding-right:0}" in _body
    and r"html.ib-thread-open #ib-inbox .max-w-\[760px\]{max-width:none;border:0;border-radius:0;" in _body
    and ": msgDate.toDateString() !== new Date().toDateString();" in _p8
+   and r'#ib-inbox textarea[aria-label="Message"]:not(:placeholder-shown){flex:1 1 100%}' in _body
    and not (ROOT / "web" / "inbox-ui" / "ownbox" / "signature-note.tsx").exists())
 
 print("\nsaved replies in their composer")

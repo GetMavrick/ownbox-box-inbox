@@ -230,7 +230,13 @@ def inbox_body() -> str:
             'html.ib-thread-open .wrap{padding-left:0;padding-right:0}'
             r'html.ib-thread-open #ib-inbox .max-w-\[900px\].space-y-3{padding:6px 4px}'
             r'html.ib-thread-open #ib-inbox .max-w-\[760px\]{max-width:none;border:0;border-radius:0;'
-            'padding:10px 8px;box-shadow:none}}'
+            'padding:10px 8px;box-shadow:none}'
+            # WHAT HE WRITES GETS THE WIDTH: with the saved replies, emoji, attach and send buttons in its row, the
+            # field was 125 of 351px and a reply wrapped into a narrow column. Empty, the row stays one line; with
+            # words in it, the field takes the full width and the buttons sit on the line below.
+            r'#ib-inbox div.items-end:has(> textarea[aria-label="Message"]:not(:placeholder-shown))'
+            '{flex-wrap:wrap;justify-content:flex-end}'
+            r'#ib-inbox textarea[aria-label="Message"]:not(:placeholder-shown){flex:1 1 100%}}'
             # THEIR COMPOSER'S FIELD IS THE COMPOSER, in dark too: its own dark tint drew a second box inside it.
             'html.dark #ib-inbox textarea{background-color:transparent}</style>'
             '<div id="ib-inbox"></div>'

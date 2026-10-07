@@ -170,8 +170,8 @@ for name, on in screens():
         got = owner.get("/inbox/api/conversations/ig-priya/saved-replies").get_json() or {}
         ok(f"[{name}] saved replies, filled in for this person", any(
             r["words"].startswith("Hi Priya, we're open") for r in got.get("replies", [])), got)
-        ok(f"[{name}] ...with an Undo that puts back what was in the box", "Undo: put back what was in the box"
-           in BUILT)
+        ok(f"[{name}] ...picked inside the composer, with an Undo that puts back what was in the box",
+           "Saved reply added" in BUILT and "Saved replies" in BUILT)
         # THE SIGNATURE IS NOT SHOWN ON THE NEW SCREENS (owner, 2026-10-07: "the signature does not need to be
         # displayed at all. people know what their signature is"). The send path still adds it (inbox/signature.py).
         ok(f"[{name}] an email's signature is not shown before Send (owner, 10-07), and is still the box's to add",
