@@ -10,9 +10,14 @@ from core.logging import get_logger
 # not imported, because this directory may think and so may import only core and stdlib
 # (tests/test_customer_voice.py: reasoning and sending never meet). tests/test_inbox_claims.py holds the
 # copy equal to claims.UNCLAIMED, so the drafter and the Inbox can never disagree about who holds one.
+# A CONVERSATION A MACHINE STARTED AND HASN'T CLAIMED YET IS RESERVED, and not drafted either (owner, 2026-10-07).
 _UNCLAIMED = ("NOT EXISTS (SELECT 1 FROM inbox_claims c WHERE c.space = k.space "
               "AND c.zernio_conversation_id = k.zernio_conversation_id AND c.released_at IS NULL "
-              "AND c.expires_at > strftime('%Y-%m-%dT%H:%M:%S','now'))")
+              "AND c.expires_at > strftime('%Y-%m-%dT%H:%M:%S','now')) "
+              "AND NOT EXISTS (SELECT 1 FROM inbox_reservations r JOIN inbox_participant_ids p "
+              "  ON p.space = r.space AND p.ident = r.ident "
+              "  WHERE r.space = k.space AND p.zernio_conversation_id = k.zernio_conversation_id "
+              "   AND r.expires_at > strftime('%Y-%m-%dT%H:%M:%S','now'))")
 
 
 log = get_logger(__name__)

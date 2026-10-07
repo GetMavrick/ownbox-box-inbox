@@ -236,7 +236,11 @@ def inbox_body() -> str:
             # words in it, the field takes the full width and the buttons sit on the line below.
             r'#ib-inbox div.items-end:has(> textarea[aria-label="Message"]:not(:placeholder-shown))'
             '{flex-wrap:wrap;justify-content:flex-end}'
-            r'#ib-inbox textarea[aria-label="Message"]:not(:placeholder-shown){flex:1 1 100%}}'
+            r'#ib-inbox textarea[aria-label="Message"]:not(:placeholder-shown){flex:1 1 100%}'
+            # ...AND EMPTY, IT READS ON ONE LINE: four 48px buttons left the field 125px on Instagram and Facebook, so
+            # "Type a message..." broke in two. The emoji button steps aside on a phone, as in Gmail's app: the
+            # phone's own keyboard has every emoji.
+            '#ib-inbox button[aria-label="Insert emoji"]{display:none}}'
             # THEIR COMPOSER'S FIELD IS THE COMPOSER, in dark too: its own dark tint drew a second box inside it.
             'html.dark #ib-inbox textarea{background-color:transparent}</style>'
             '<div id="ib-inbox"></div>'

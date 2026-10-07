@@ -145,6 +145,11 @@ def _auto_reply() -> dict:
 
 register_periodic(_auto_reply, interval_s=_interval("auto_reply", AUTO_REPLY_S), name="inbox_auto_reply")
 
+# A MACHINE'S RESERVATION THAT LAPSED UNCLAIMED IS SAID IN THE LOG (claims.expire_reservations): its sweep stopped,
+# or it looked and let the person be. The readers already ignore it by its time; this tells.
+from . import claims as _claims                                          # noqa: E402
+register_periodic(_claims.expire_reservations, interval_s=_interval("reservations", 300), name="inbox_reservations")
+
 # MONTHLY, AND THAT IS THE POINT. This is the only rail on the machine that spends money —
 # one metered Places call per competitor — and a rating moves over months. Polling it hourly
 # would buy the same number seven hundred times.

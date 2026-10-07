@@ -22,6 +22,8 @@ from __future__ import annotations
 from core import state
 from core.logging import get_logger
 
+from marketing.customer_voice import claims
+
 from . import sending
 
 log = get_logger(__name__)
@@ -51,9 +53,7 @@ def ready(space: str) -> list[dict]:
                 f"   AND LOWER(k.platform) IN ({','.join('?' * len(on))}) "
                 "   AND NOT EXISTS (SELECT 1 FROM inbox_pitch_backs p WHERE p.space = d.space "
                 "        AND p.in_reply_to = d.in_reply_to) "
-                "   AND NOT EXISTS (SELECT 1 FROM inbox_claims cl WHERE cl.space = d.space "
-                "        AND cl.zernio_conversation_id = d.zernio_conversation_id AND cl.released_at IS NULL "
-                "        AND cl.expires_at > strftime('%Y-%m-%dT%H:%M:%S','now')) "
+                f"   AND {claims.UNCLAIMED} "
                 "   AND m.created_at = (SELECT MAX(m2.created_at) FROM inbox_messages m2 WHERE m2.space = d.space "
                 "        AND m2.zernio_conversation_id = d.zernio_conversation_id AND m2.direction = 'in') "
                 "   AND NOT EXISTS (SELECT 1 FROM inbox_messages o WHERE o.space = d.space "

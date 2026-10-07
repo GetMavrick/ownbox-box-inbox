@@ -50,6 +50,9 @@ echo "== our layer, type-checked against their code"
 cp -R "$UI/ownbox" "$BUILD/ownbox"
 (cd "$BUILD" && npx --no-install tsc --noEmit -p .)
 
+echo "== our layer's own checks (their vitest, our config: theirs reads src/ only)"
+(cd "$BUILD" && npx --no-install vitest run --config ownbox/vitest.config.ts --reporter=dot)
+
 echo "== the screens"
 # THEIR PUBLIC SETTINGS ARE FIXED HERE, as Next.js fixes NEXT_PUBLIC_* at its build. Left alone, a browser meets
 # `process.env` and the thread throws as it opens. WhatsApp calling is off: no box offers WhatsApp yet (#1990 Phase 2).

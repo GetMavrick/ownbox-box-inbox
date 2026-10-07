@@ -42,14 +42,25 @@ log = get_logger(__name__)
 
 CLAIM_DAYS = 7          # SCOPE_AUTO_REPLY.md §9, decision 4 (recommended): a stalled sequence lets go in 7 days
 MAX_DAYS = 30
+# A RESERVATION LASTS MINUTES, NOT DAYS (OSDev1's review of #2041). It only has to cover the gap until the machine's
+# next sweep, 20 seconds away; if that sweep has died, everyone the machine wrote to would otherwise go unanswered for
+# a week. Thirty minutes is ninety sweeps.
+RESERVE_MINUTES = 30
 
 _NOW = "strftime('%Y-%m-%dT%H:%M:%S','now')"
 _ACTIVE = f"c.released_at IS NULL AND c.expires_at > {_NOW}"
 
+# RESERVED: a machine started this conversation with a private reply to the person's comment, and hasn't claimed it
+# yet (`reserve`). Matched on the person's own id or @handle, never a display name.
+RESERVED = ("EXISTS (SELECT 1 FROM inbox_reservations r JOIN inbox_participant_ids p "
+            "  ON p.space = r.space AND p.ident = r.ident "
+            "  WHERE r.space = k.space AND p.zernio_conversation_id = k.zernio_conversation_id "
+            f"   AND r.expires_at > {_NOW})")
 # THE PREDICATE EVERY READER SHARES, over a conversation aliased `k`. One string, so the list, the counts,
-# the drafter and the notice cannot disagree about whether a conversation is someone else's.
+# the drafter, the replies sent on their own and the notice cannot disagree about whether a conversation is someone
+# else's: claimed, or reserved by the machine that started it.
 UNCLAIMED = ("NOT EXISTS (SELECT 1 FROM inbox_claims c WHERE c.space = k.space "
-             f"AND c.zernio_conversation_id = k.zernio_conversation_id AND {_ACTIVE})")
+             f"AND c.zernio_conversation_id = k.zernio_conversation_id AND {_ACTIVE}) AND NOT {RESERVED}")
 
 # WHO HOLDS IT, for the row's tag: the claiming machine's title, or NULL.
 HELD_BY = ("(SELECT c.title FROM inbox_claims c WHERE c.space = k.space "
@@ -77,6 +88,8 @@ def claim(space: str, zcid: str, *, machine: str, title: str, days: float = CLAI
     Renewing extends the expiry; it is how a machine says it is still working on it."""
     days = max(0.01, min(float(days), MAX_DAYS))
     now = datetime.now(timezone.utc)
+    # THE MACHINE HAS LOOKED: whether it takes the conversation or not, its reservation has done its job.
+    _unreserve(space, zcid, machine)
     if taken_over(space, zcid) and not _new_start(space, zcid, trigger):
         log.info("inbox.claim_refused_taken_over", space=space, conversation=zcid, machine=machine)
         return False
@@ -100,6 +113,67 @@ def claim(space: str, zcid: str, *, machine: str, title: str, days: float = CLAI
     held = bool(row) and row["machine"] == machine
     log.info("inbox.claim", space=space, conversation=zcid, machine=machine, held=held)
     return held
+
+
+def reserve(space: str, idents, *, machine: str, minutes: float = RESERVE_MINUTES) -> int:
+    """THE CONVERSATION IS THE MACHINE'S FROM ITS FIRST MESSAGE (owner, 2026-10-07: "If I create a custom machine called
+    the lead magnet machine ... how are they gonna play nice together"). A machine's private reply to a comment starts
+    a conversation; the person writes back; until the machine's next sweep finds and claims it, the inbox would see an
+    ordinary new message, and draft it, or answer it on its own. So the private reply reserves the person, by their id
+    and @handle, and every reader of UNCLAIMED leaves the conversation alone until that machine claims it (or looks
+    and declines: `claim` clears it either way), or the reservation expires (RESERVE_MINUTES). -> rows written.
+    Never raises."""
+    rows = sorted({str(i).strip().lower().lstrip("@") for i in (idents or ()) if str(i or "").strip()})
+    if not rows:
+        return 0
+    now = datetime.now(timezone.utc)
+    minutes = max(1.0, min(float(minutes), RESERVE_MINUTES))
+    try:
+        with state.connect() as c:
+            c.executemany("INSERT OR REPLACE INTO inbox_reservations (space, ident, machine, created_at, expires_at) "
+                          "VALUES (?, ?, ?, ?, ?)",
+                          [(space, i, machine, _stamp(now), _stamp(now + timedelta(minutes=minutes))) for i in rows])
+        log.info("inbox.reserved", space=space, machine=machine, idents=len(rows))
+        return len(rows)
+    except Exception as e:                          # noqa: BLE001 — the reply already went; this is bookkeeping
+        log.warning("inbox.reserve_failed", space=space, machine=machine, error=type(e).__name__)
+        return 0
+
+
+def reserved(space: str, zcid: str) -> dict | None:
+    """The machine that started this conversation and hasn't claimed it yet, or None: {"machine"}."""
+    with state.connect() as c:
+        row = c.execute(
+            "SELECT r.machine FROM inbox_reservations r JOIN inbox_participant_ids p "
+            "  ON p.space = r.space AND p.ident = r.ident "
+            f" WHERE r.space = ? AND p.zernio_conversation_id = ? AND r.expires_at > {_NOW} LIMIT 1",
+            (space, str(zcid))).fetchone()
+    return {"machine": row["machine"]} if row else None
+
+
+def expire_reservations() -> int:
+    """Clear reservations that lapsed unclaimed, each said in the log as `inbox.reservation_expired`: a machine wrote
+    to someone and never took the conversation, which means its sweep stopped or it looked and let them be. Already
+    ignored by every reader (RESERVED compares the time), so this only tidies and tells. -> rows cleared. Never
+    raises; a periodic in customer_voice/__init__.py calls it."""
+    try:
+        with state.connect() as c:
+            gone = c.execute("SELECT space, machine, COUNT(*) AS n FROM inbox_reservations "
+                             f"WHERE expires_at <= {_NOW} GROUP BY space, machine").fetchall()
+            c.execute(f"DELETE FROM inbox_reservations WHERE expires_at <= {_NOW}")
+    except Exception as e:                          # noqa: BLE001 — a box without the table yet
+        log.warning("inbox.reservation_sweep_failed", error=type(e).__name__)
+        return 0
+    for r in gone:
+        log.warning("inbox.reservation_expired", space=r["space"], machine=r["machine"], idents=r["n"])
+    return sum(r["n"] for r in gone)
+
+
+def _unreserve(space: str, zcid: str, machine: str) -> None:
+    with state.connect() as c:
+        c.execute("DELETE FROM inbox_reservations WHERE space = ? AND machine = ? AND ident IN "
+                  "(SELECT ident FROM inbox_participant_ids WHERE space = ? AND zernio_conversation_id = ?)",
+                  (space, machine, space, str(zcid)))
 
 
 def release(space: str, zcid: str, *, machine: str, note: str = "") -> bool:
@@ -146,7 +220,16 @@ def take_over(space: str, zcid: str) -> bool:
     try:
         held = holder(space, zcid)
         if not held:
-            return False
+            # A PERSON ANSWERED BEFORE THE MACHINE CLAIMED IT: the conversation is theirs, so the machine that started
+            # it never takes it now (its claim is refused as taken over, and it stops that lead).
+            pending = reserved(space, zcid)
+            if not pending:
+                return False
+            with state.connect() as c:
+                c.execute("INSERT OR REPLACE INTO inbox_takeovers (space, zernio_conversation_id, taken_at) "
+                          "VALUES (?, ?, ?)", (space, str(zcid), _stamp(datetime.now(timezone.utc))))
+            _unreserve(space, zcid, pending["machine"])
+            return True
         with state.connect() as c:
             c.execute("INSERT OR REPLACE INTO inbox_takeovers (space, zernio_conversation_id, taken_at) "
                       "VALUES (?, ?, ?)", (space, str(zcid), _stamp(datetime.now(timezone.utc))))

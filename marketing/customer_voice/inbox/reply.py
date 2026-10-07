@@ -622,7 +622,7 @@ def send_automatic(*, space: str, zcid: str, text: str, in_reply_to: str, asked_
     if str(asked_at or "") < since:
         raise ReplyRefused("this message came in before replying on its own was turned on", code="too_old")
     from marketing.customer_voice import claims
-    if claims.holder(space, zcid):
+    if claims.holder(space, zcid) or claims.reserved(space, zcid):
         raise ReplyRefused("an automation is handling this conversation", code="claimed")
     from datetime import datetime, timedelta, timezone
     quiet = (datetime.now(timezone.utc) - timedelta(seconds=PERSON_QUIET_S)).isoformat()
@@ -666,7 +666,8 @@ def send_automatic(*, space: str, zcid: str, text: str, in_reply_to: str, asked_
         if prior.get("status") == "failed":
             raise ReplyRefused(str(prior.get("error") or "the message did not send"))
         raise ReplyIndeterminate(str(prior.get("error") or "the earlier attempt may have landed"))
-    if answered() or claims.person_wrote_since(space, zcid, quiet) or claims.holder(space, zcid):
+    if (answered() or claims.person_wrote_since(space, zcid, quiet) or claims.holder(space, zcid)
+            or claims.reserved(space, zcid)):
         store.resolve_send(space=space, idem_key=idem, status="failed",
                            error="someone answered first, so the box sent nothing")
         raise ReplyRefused("someone answered first, so the box sent nothing", code="answered")
@@ -786,6 +787,10 @@ def reply_to_comment(*, space: str, machine: str, comment: dict, text: str, key:
         raise ReplyIndeterminate(str(e)) from e
     mid = (sent or {}).get("message_id")
     _settle(space=space, idem_key=idem, status="ok", zernio_message_id=mid)
+    # THE CONVERSATION THIS STARTS IS THE MACHINE'S FROM ITS FIRST MESSAGE (owner, 2026-10-07): reserved by the
+    # commenter's own id and @handle, so the inbox neither drafts nor answers it on its own before the machine claims it.
+    from marketing.customer_voice import claims
+    claims.reserve(space, (author.get("id"), author.get("username")), machine=machine)
     log.info("inbox.machine_comment_reply", extra={"space": space, "comment": cid, "machine": machine,
                                                    "message_id": mid})
     return {"status": "ok", "message_id": mid, "idem_key": idem, "duplicate": False}

@@ -290,6 +290,21 @@ CREATE TABLE IF NOT EXISTS inbox_state (
 -- WHO IS HANDLING A CONVERSATION (customer_voice/claims.py, docs/PLAN_LEAD_MAGNET_MACHINE.md step 2). One row per
 -- conversation: its current or latest claim. While a claim is active the Inbox doesn't draft it, send its
 -- opener or count it as waiting. A NEW table, so no migration number (the rule above).
+-- A CONVERSATION A MACHINE HAS STARTED BUT NOT YET CLAIMED (customer_voice/claims.py `reserve`, owner 2026-10-07: "how
+-- are they gonna play nice together"). A machine's private reply to a comment starts a conversation the inbox hasn't
+-- seen yet; when the person writes back, the inbox reads it before the machine's next sweep claims it. Written the
+-- moment the private reply goes, by the commenter's own id and @handle (as inbox_participant_ids keeps them), so the
+-- conversation is the machine's from its first message. Ends when that machine claims or looks at it, or expires.
+-- A NEW table, so no migration number.
+CREATE TABLE IF NOT EXISTS inbox_reservations (
+  space      TEXT NOT NULL,
+  ident      TEXT NOT NULL,               -- the commenter's id or @handle, lowercased, no "@"
+  machine    TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,               -- YYYY-MM-DDTHH:MM:SS UTC
+  PRIMARY KEY (space, ident)
+);
+
 CREATE TABLE IF NOT EXISTS inbox_claims (
   space       TEXT NOT NULL,
   zernio_conversation_id TEXT NOT NULL,

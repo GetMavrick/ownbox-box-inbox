@@ -134,7 +134,7 @@ def handle(job: dict) -> dict:
     # is the Inbox's own automatic send, and two automations greeting one person is the double message
     # a claim exists to prevent.
     from marketing.customer_voice import claims
-    held = claims.holder(space_name, zcid)
+    held = claims.holder(space_name, zcid) or claims.reserved(space_name, zcid)
     if held:
         return {"status": "claimed", "conversation": zcid, "by": held.get("machine")}
 
