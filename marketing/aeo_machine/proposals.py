@@ -16,8 +16,10 @@ THE SAME CHECKS AS THE SCREENS, TWICE. A proposal is checked when it is made, so
 that a topic is a duplicate or a number is out of range, and again when it runs, because a week may
 have passed and the plan or the settings may have changed.
 
-SIX ACTIONS:
-  * add a topic (AEO → Articles, "Add a topic"), optionally next up ("Write and publish now");
+SEVEN ACTIONS:
+  * add a topic (AEO → Articles, "Add a topic"), optionally next up ("Write this next");
+  * set the plan: the topics to write next in order, new ones added and planned ones taken off, in one approval
+    (owner, 2026-10-08: "yes, build 1–3"; AEO → Articles has the same Move up and Remove, one topic at a time);
   * try a stopped article again (AEO → Articles, "Try again now");
   * change one setting (AEO → Settings): the website, articles a week, or one entry added to or removed
     from a list. Connections and their keys are never proposable: those stay on Data sources;
@@ -30,6 +32,7 @@ SIX ACTIONS:
 from __future__ import annotations
 
 import json as _json
+import re
 
 from core import approvals, box_settings, state
 from core.logging import get_logger
@@ -229,6 +232,227 @@ def propose_rewrite(id=None, seat=None):
                 {"app": APP, "do": "rewrite", "arguments": args}, seat)
 
 
+# ── the plan: the order, new topics and topics taken off, in one approval ──────────────────────────────
+# Owner, 2026-10-08, "yes, build 1–3": the buyer's own AI reads their content plan and asks once, instead of a tap
+# per topic. The approval card is the plan itself, one row per article in the order it will be written, and `_run`
+# reads those same rows back (WHAT IS SHOWN IS WHAT RUNS). Each row says what happens to that article, in words, so
+# the owner approves what he reads: "Article 6: …" keeps a planned topic, "New: …" adds one, "Rewrite article 3 …"
+# writes a live one again first, "Take off 01" removes one. Rows are keyed 01, 02… because Approvals stores and
+# shows them in key order (core/approvals.py sorts the detail).
+
+PLAN_MAX = 30                      # lines in one plan: a 20-article content plan fits, and one card stays readable
+_ID_LINE = re.compile(r"^(?:article\s*)?(?:no\.?\s*)?#?\s*(\d{1,9})\.?$", re.I)
+# "Article 6: self hosted vs saas" or "#6 …", as aeo.articles and this card write them: the number decides.
+_ID_NAMED = re.compile(r"^(?:article\s*#?|#)\s*(\d{1,9})\b", re.I)
+_MARKER = re.compile(r"^(?:[-*•]|\d{1,3}[.)])\s+")
+_SHOWN_REWRITE = re.compile(r"^Rewrite article (\d+) at its own address: ")
+_SHOWN_ARTICLE = re.compile(r"^Article (\d+): ")
+_SHOWN_NEW = re.compile(r"^New: (.+)$", re.S)
+_SHOWN_ORDER, _SHOWN_OFF = re.compile(r"^\d{2}$"), re.compile(r"^Take off \d{2}$")
+THEN = "Every other planned topic keeps its turn, after these."
+
+
+def _key(text) -> str:
+    """A question compared by its words only, so "Do I need one?" and "do i need one" are the same question."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split())
+
+
+def _removable(row: dict | None) -> bool:
+    """plan.remove's own rule: never an article, and not from the owner's Airtable."""
+    return bool(row) and row.get("status") in ("planned", "refused", "failed") and not row.get("url") \
+        and not (row.get("airtable_id") or "").strip()
+
+
+def _is_new_topic(row: dict | None) -> bool:
+    return bool(row) and row.get("status") == "planned" and not row.get("url")
+
+
+def _known() -> tuple[dict, dict, dict]:
+    """Every row by id, and the words of each planned new topic and of every other article, for matching a new
+    line against what the plan already has."""
+    rows = plan.rows()
+    planned, others = {}, {}
+    for r in rows:
+        keys = {_key(r.get("topic")), _key(r.get("question")), _key(r.get("title"))} - {""}
+        for k in keys:
+            (planned if _is_new_topic(r) else others).setdefault(k, r)
+    return {r["id"]: r for r in rows}, planned, others
+
+
+def _what_it_is(row: dict) -> str:
+    if row.get("status") == "published":
+        return "live" + (f" at {row['url']}" if row.get("url") else "")
+    if plan.is_unpublished(row):
+        return "unpublished"
+    return {"writing": "being written now", "refused": "held back", "failed": "did not publish",
+            "planned": "planned"}.get(row.get("status"), str(row.get("status")))
+
+
+def _name(row: dict) -> str:
+    return _short(row.get("title") or row.get("topic") or row.get("question") or "", 120)
+
+
+def _check_plan(order, remove) -> dict:
+    """The plan as Approvals will show it, row by row, or Refused with the line to fix. Changes nothing."""
+    lines = [_MARKER.sub("", ln.strip()).strip() for ln in str(order or "").splitlines()]
+    lines = [ln for ln in lines if ln]
+    bits = [b for b in re.split(r"[,;\s]+", re.sub(r"(?i)\barticles?\b|\band\b", " ", str(remove or ""))) if b]
+    if not lines and not bits:
+        raise Refused("Give the order (one article number or new question per line), the numbers to take off, "
+                      "or both.")
+    if len(lines) > PLAN_MAX:
+        raise Refused(f"That is {len(lines)} lines. Send at most {PLAN_MAX} at once: every topic not listed keeps "
+                      "its turn after them, so the next ones can follow in another plan.")
+    by_id, planned, others = _known()
+    rewrites, kept, seen_ids, seen_new = [], [], set(), set()
+    for n, line in enumerate(lines, 1):
+        m = _ID_LINE.match(line) or _ID_NAMED.match(line)
+        if m:
+            pid = int(m.group(1))
+            row = by_id.get(pid)
+            if not row:
+                raise Refused(f"Line {n}: there is no article {pid}. Use the numbers from aeo.articles.")
+        else:
+            k = _key(line)
+            if k in planned:                             # already planned: that topic, never a second copy
+                row = planned[k]
+                pid = int(row["id"])
+            elif k in others:
+                row = others[k]
+                raise Refused(f"Line {n}: \"{_short(line)}\" is already article {row['id']} "
+                              f"({_what_it_is(row)}). Put {row['id']} on that line to rewrite it from your facts, "
+                              "or leave it out.")
+            else:
+                try:
+                    q = plan._clean(line, plan.TOPIC_MAX, "question")
+                except plan.Rejected as e:
+                    raise Refused(f"Line {n}: {e}") from None
+                if k in seen_new:
+                    raise Refused(f"Line {n}: \"{_short(q)}\" is listed twice.")
+                seen_new.add(k)
+                kept.append(f"New: {q}")
+                continue
+        if pid in seen_ids:
+            raise Refused(f"Line {n}: article {pid} is listed twice.")
+        seen_ids.add(pid)
+        if _is_new_topic(row):
+            kept.append(f"Article {pid}: {_name(row)}")
+        elif plan.is_rewrite(row) or row.get("status") == "published" or plan.is_unpublished(row):
+            if not plan.is_rewrite(row):
+                _rewritable(pid)                         # facts first, as for one rewrite
+            rewrites.append(f"Rewrite article {pid} at its own address: {_name(row)}")
+        elif row.get("status") == "writing":
+            raise Refused(f"Line {n}: article {pid} is being written now. Leave it out.")
+        else:
+            raise Refused(f"Line {n}: article {pid} {_what_it_is(row)}. Try it again first (aeo.propose_retry), "
+                          "or leave it out.")
+    off = []
+    for bit in bits:
+        m = _ID_LINE.match(bit)
+        if not m:
+            raise Refused(f"\"{_short(bit, 40)}\" isn't an article number. Give the numbers to take off from "
+                          "aeo.articles, separated by commas.")
+        pid = int(m.group(1))
+        row = by_id.get(pid)
+        if not row:
+            raise Refused(f"There is no article {pid} to take off.")
+        if pid in seen_ids:
+            raise Refused(f"Article {pid} is both in the order and taken off. Choose one.")
+        if not _removable(row):
+            raise Refused(f"Article {pid} can't be taken off: it is {_what_it_is(row)}"
+                          + (". Unpublish it instead (aeo.propose_unpublish)." if row.get("url") else
+                             ". It comes from your Airtable table: change its Status there." if row.get("airtable_id")
+                             else "."))
+        if f"Article {pid}: {_name(row)}" not in off:
+            off.append(f"Article {pid}: {_name(row)}")
+    shown = {f"{n:02d}": v for n, v in enumerate(rewrites + kept, 1)}
+    shown.update({f"Take off {n:02d}": v for n, v in enumerate(off, 1)})
+    if rewrites or kept:
+        shown["Then"] = THEN
+    return shown
+
+
+def propose_plan(order=None, remove=None, seat=None):
+    """Ask the owner to set the plan in one approval: the order, new topics, and topics taken off."""
+    try:
+        args = _check_plan(order, remove)
+    except Refused as e:
+        return {"asked": False, "error": str(e)}
+    rows = [k for k in args if _SHOWN_ORDER.match(k)]
+    new = sum(1 for k in rows if _SHOWN_NEW.match(args[k]))
+    off = sum(1 for k in args if _SHOWN_OFF.match(k))
+    said = ([f"{len(rows)} in this order" + (f" ({new} new)" if new else "")] if rows else []) + \
+        ([f"{off} taken off"] if off else [])
+    try:
+        return _ask(f"Set your AEO plan: {', '.join(said)}", {"app": APP, "do": "plan", "arguments": args}, seat)
+    except ValueError:                                   # approvals' own size limit
+        return {"asked": False, "error": "That plan is too long for one approval. Send fewer lines at once."}
+
+
+def _run_plan(args: dict) -> dict:
+    """An approved plan, read back from the rows the owner approved, checked again, then carried out."""
+    rewrites, order, off = [], [], []
+    for k in sorted(args):
+        v = str(args[k])
+        if _SHOWN_ORDER.match(k):
+            m = _SHOWN_REWRITE.match(v) or _SHOWN_ARTICLE.match(v)
+            if m and v.startswith("Rewrite"):
+                rewrites.append(int(m.group(1)))
+            elif m:
+                order.append(int(m.group(1)))
+            elif _SHOWN_NEW.match(v):
+                order.append(_SHOWN_NEW.match(v).group(1).strip())
+            else:
+                raise Refused("This plan can't be read any more, so nothing was changed. Ask for it again.")
+        elif _SHOWN_OFF.match(k):
+            m = _SHOWN_ARTICLE.match(v)
+            if not m:
+                raise Refused("This plan can't be read any more, so nothing was changed. Ask for it again.")
+            off.append(int(m.group(1)))
+    # CHECKED AGAIN BEFORE ANYTHING CHANGES: a week may have passed. Any article no longer where the plan found it
+    # stops the whole plan, so the owner never gets half of what he approved.
+    by_id, planned, others = _known()
+    for pid in rewrites:
+        row = by_id.get(pid)
+        if not plan.is_rewrite(row):
+            _rewritable(pid)
+    for item in order:
+        if isinstance(item, int) and not _is_new_topic(by_id.get(item)):
+            raise Refused(f"Article {item} isn't planned any more, so nothing was changed. Ask for the plan again.")
+        if isinstance(item, str) and _key(item) in others:
+            raise Refused(f"\"{_short(item)}\" is already an article, so nothing was changed. Ask for the plan again.")
+    for pid in off:
+        if not _removable(by_id.get(pid)):
+            raise Refused(f"Article {pid} can't be taken off any more, so nothing was changed.")
+    for pid in rewrites:
+        if not plan.is_rewrite(by_id.get(pid)):
+            plan.rewrite(pid)
+    ids, added = [], 0
+    for item in order:
+        if isinstance(item, str):
+            hit = planned.get(_key(item))                # added since it was asked: that topic, not a second one
+            if hit:
+                ids.append(int(hit["id"]))
+                continue
+            ids.append(plan.add(item, ""))
+            added += 1
+        else:
+            ids.append(item)
+    removed = sum(1 for pid in off if plan.remove(pid))
+    if ids:
+        plan.place(ids)
+    from . import job
+    when, pace = job.when_words(job.next_at()), job.pace_words()
+    said = [f"{len(rewrites)} to be rewritten first"] if rewrites else []
+    if ids:
+        said.append(f"{len(ids)} in your order" + (f", {added} of them new" if added else ""))
+    if removed:
+        said.append(f"{removed} taken off")
+    nxt = f" The next new article goes out {when}, then {pace}." if ids and when and pace else ""
+    log.info("aeo.plan_set", rewrites=len(rewrites), ordered=len(ids), added=added, removed=removed)
+    return {"ok": True, "text": "Your AEO plan is set: " + ", ".join(said) + "." + nxt}
+
+
 # ── facts drafted from the buyer's website ─────────────────────────────────────────────────────────
 
 DRAFT_INTENT = "aeo_facts_draft"
@@ -347,8 +571,20 @@ def _run(detail: dict) -> dict:
             t, q = _check_topic(args.get("topic"), question)
             pid = plan.add(t, q)
             if args.get("write now") == "yes" and plan.request_now(pid):
-                return {"ok": True, "text": f"Added \"{t}\" as next up. Writing starts within a minute or so."}
+                # THE WEEKLY NUMBER IS SPREAD ACROSS THE WEEK, so "next" says when, never "within a minute" unless
+                # it is (owner, 2026-10-08).
+                from . import job
+                when = job.when_words(job.next_at())
+                ahead = [r["id"] for r in plan.queue()].index(pid)
+                if not when:
+                    return {"ok": True, "text": f"Added \"{t}\" as next up. Articles a week is 0, so nothing goes "
+                                                "out until it is raised."}
+                return {"ok": True, "text": f"Added \"{t}\" as next up. It goes out {when}." if not ahead else
+                        f"Added \"{t}\" as next up, after {ahead} asked for before it. The next article goes out "
+                        f"{when}, then {job.pace_words()}."}
             return {"ok": True, "text": f"Added \"{t}\" to the plan. It is written in its turn."}
+        if do == "plan":
+            return _run_plan(args)
         if do == "retry":
             row = _stopped(args.get("article"))
             if not plan.request_now(int(row["id"])):

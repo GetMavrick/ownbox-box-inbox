@@ -189,8 +189,8 @@ with state.connect() as c:
     idx = c.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='seo_plan_airtable_id'").fetchone()
 ok("seo_plan has site, airtable_id and airtable_pushed", {"site", "airtable_id", "airtable_pushed"} <= cols, cols)
 ok("...and the record id is unique where it is set", idx is not None and "UNIQUE" in idx[0].upper(), idx)
-ok("the box is at 58, and 58 belongs to the AEO Machine",
-   state.SCHEMA_VERSION == 58 and state._MIGRATION_OWNER.get(58) == "aeo_machine")
+ok("the box is at 58 or later, and 58 belongs to the AEO Machine",
+   state.SCHEMA_VERSION >= 58 and state._MIGRATION_OWNER.get(58) == "aeo_machine")
 a = plan.add("Botox aftercare", "What should I avoid after Botox?")
 b = plan.add("Filler or Botox")
 ok("a new row carries the site it was planned for", plan.get(a)["site"] == "ownbox.io", plan.get(a))

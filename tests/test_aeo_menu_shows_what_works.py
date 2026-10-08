@@ -91,8 +91,9 @@ ok("every article is a row in one list, not a card of its own",
    len(rows) == 6 and main.count('class="card ar-list"') == 1, f"{len(rows)} rows")
 ok("each row has a title and a state word",
    main.count('class="ar-t"') == 6 and main.count('class="ar-w"') == 6)
-ok("...and no detail row that only repeats the state word",
-   'class="ar-s"' not in main and "Planned." not in main)
+ok("...and no detail row that only repeats the state word", "Planned." not in main)
+ok("each planned row's one line is the owner's order: Move up (not on the first) and Remove",
+   main.count('value="up"') == 5 and main.count('value="remove"') == 6 and main.count('class="ar-s"') == 6)
 ok("a question shows as the row's two lines", 'class="ar-p">What should I do after microneedling?' in main)
 ok("one ink pill, and it is Add topic", ink_pills(page) == ["Add topic"], str(ink_pills(page)))
 ok("the example topic is a med spa's, never a trade's",
@@ -101,8 +102,8 @@ _real = aeo_app.writer_installed, aeo_app.missing
 aeo_app.writer_installed, aeo_app.missing = (lambda: True), (lambda: [])
 try:
     page = owner.get("/aeo/topics").get_data(as_text=True)
-    ok("Write and publish now is still offered on a planned row, in its detail row",
-       page.count("Write and publish now") == 6 and 'class="ar-s"' in page)
+    ok("Write this next is offered on every planned row but the next one, in its detail row",
+       page.count("Write this next") == 5 and 'class="ar-s"' in page)
     ok("the list comes before the add form, as in the inbox",
        page.index('class="card ar-list"') < page.index('class="ar-add"'))
     ok("...as a quiet action inside the row, not a second ink pill",

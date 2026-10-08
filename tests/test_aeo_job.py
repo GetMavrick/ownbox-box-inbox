@@ -160,9 +160,16 @@ ok("the writer and the publisher get the SAME lists, the box's own",
    w.calls[0]["lists"] == s.lists() and p.published[0]["lists"] == s.lists())
 ok("the reasoning call is tagged to its row for the spend ledger", w.calls[0]["job_id"] == f"aeo:{a}")
 ok("the live URL is pinged to IndexNow", p.pinged == [done["url"]], p.pinged)
+_, w, _ = wire()
+r = job.periodic()
+ok("the next tick waits: four a week is one every 42 hours, not the week's four in four minutes",
+   r.get("skipped") == "paced" and r.get("next_at") and row(b)["status"] == "planned" and w.calls == [], r)
+with state.connect() as c:
+    c.execute("UPDATE seo_plan SET published_at = ? WHERE id = ?",
+              ((datetime.now(timezone.utc) - timedelta(hours=42, minutes=1)).isoformat(), a))
 wire()
 job.periodic()
-ok("the next tick takes the next topic", row(b)["status"] == "published", row(b))
+ok("…and once 42 hours have passed, the next tick takes the next topic", row(b)["status"] == "published", row(b))
 _, w, _ = wire()
 ok("with nothing planned, a tick spends nothing", job.periodic().get("skipped") == "nothing_planned"
    and w.calls == [])
@@ -239,14 +246,14 @@ ok("…and is never looked up: the live article at that slug is the row's own", 
    p.looked_up)
 
 print("\n-- a minted slug never lands on another article (OSDev1, #1561) --")
-a, b = reset(("How do I start?", "published", now.isoformat(), None, "how-do-i-start"),
+a, b = reset(("How do I start?", "published", (now - timedelta(days=3)).isoformat(), None, "how-do-i-start"),
              ("How do I start?",))
 _, _, p = wire()
 job.periodic()
 ok("the same question asked again gets its own address, not the live article's",
    row(b)["slug"] == "how-do-i-start-2" and p.published[0]["slug"] == "how-do-i-start-2", row(b))
 ok("…and the first row keeps its own", row(a)["slug"] == "how-do-i-start", row(a))
-a, b = reset(("How do I start?", "published", now.isoformat(), None, "how-do-i-start"),
+a, b = reset(("How do I start?", "published", (now - timedelta(days=3)).isoformat(), None, "how-do-i-start"),
              ("How do I start",))
 wire()
 job.periodic()
@@ -281,8 +288,12 @@ ok("…saying what to do", row(a)["refusal"] == job.INTERRUPTED, row(a)["refusal
 ok("…without spending a call on it", all(x["question"] != "a?" for x in w.calls), w.calls)
 ok("a row being written right now is left alone", row(b)["status"] == "writing", row(b))
 ok("the tick still publishes the next planned topic", row(c)["status"] == "published", row(c))
-ok("…and the released row can be sent again from the screen", plan.request_now(a)
-   and job.periodic().get("status") == "published")
+ok("…and the released row can be sent again from the screen, first in line", plan.request_now(a)
+   and plan.next_up(1)[0]["id"] == a)
+with state.connect() as c_:
+    c_.execute("UPDATE seo_plan SET published_at = ? WHERE id = ?",
+               ((datetime.now(timezone.utc) - timedelta(days=2)).isoformat(), c))
+ok("…and goes out when the pace allows", job.periodic().get("status") == "published" and row(a)["status"] == "published")
 ok("a row being written cannot be asked for twice", not plan.request_now(b))
 
 print("\n-- a ping never undoes a publish --")

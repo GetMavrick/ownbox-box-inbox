@@ -4,10 +4,17 @@ ONE ROW, ONE ARTICLE, ONE TICK. `periodic()` publishes at most one article per c
 is a reasoning call that can take a minute, and periodics share the worker's one background
 thread, so four articles in one tick would hold every other machine's clock for four minutes.
 The tick itself is cheap when there is nothing to do (one query), so it can run every minute:
-"Write and publish now" is then honoured within about a minute, and a day-one box with four
-planned topics is fully published within minutes of being set up.
+an asked-for topic is taken within about a minute of the week having room.
 
-"WRITE AND PUBLISH NOW" IS A REQUEST, NOT A CALL. The Topics screen runs `plan.request_now`,
+THE WEEKLY NUMBER IS SPREAD ACROSS THE WEEK (owner, 2026-10-08: "yes, build 1–3"). It was only a
+rolling count, so a box that had room published its whole week within minutes and then said nothing
+for six days, and the rolling window kept that shape every week after. Now a new article waits until a week divided
+by the weekly number has passed since the last one went live (four a week: one every 42 hours), as
+well as for room in the rolling week. A new box's first article still goes out as soon as it is set
+up, because nothing has gone out before it. `next_at` says when the next one goes, so the screen and
+the connector say a time instead of "0 left this week".
+
+"WRITE THIS NEXT" IS A REQUEST, NOT A CALL. The Topics screen runs `plan.request_now`,
 which moves the row to the front of the queue. The click never does the write itself: a minute
 inside a web request would time out on a phone, and two taps would pay for the same article twice.
 
@@ -36,7 +43,7 @@ WEEK = timedelta(days=7)
 # A write takes about a minute. A row still `writing` after this long was interrupted, almost
 # always by a release restarting the worker mid-write, and nothing else will ever pick it up.
 STALE_WRITING = timedelta(minutes=30)
-INTERRUPTED = "interrupted, press Write and publish now"
+INTERRUPTED = "interrupted, press Try again now"
 # Each try is one lookup on the site. Past this many articles on one question, stop and say so.
 MAX_SLUG_TRIES = 50
 NO_FACTS = "no facts the writer may state yet: add them on AEO Settings"
@@ -46,16 +53,47 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _cap() -> int:
+    try:
+        return max(0, int(settings.get().get("weekly_cap") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def room(*, now: datetime | None = None) -> int:
     """How many more articles this box may publish before the rolling week resets.
 
     The weekly cap is the owner's number, so an asked-for row waits for room like any other.
     """
-    try:
-        cap = int(settings.get().get("weekly_cap") or 0)
-    except (TypeError, ValueError):
-        cap = 0
-    return max(0, cap - plan.published_since(((now or _now()) - WEEK).isoformat()))
+    return max(0, _cap() - plan.published_since(((now or _now()) - WEEK).isoformat()))
+
+
+def spacing(cap: int | None = None) -> timedelta | None:
+    """The least time between two new articles: a week divided by the weekly number. None when paused (0)."""
+    cap = _cap() if cap is None else cap
+    return WEEK / cap if cap > 0 else None
+
+
+def next_at(*, now: datetime | None = None) -> datetime | None:
+    """The earliest moment the next NEW article may go live: now, or later. None when the weekly number is 0.
+
+    Two gates, and the later one wins. THE WEEK'S ROOM: with the weekly number already out in the last seven
+    days, the moment enough of them are a week old. THE PACE: a week divided by the weekly number after the
+    newest article went live. An asked-for row waits for both like any other (the number is the owner's); a
+    rewrite waits for neither, because it replaces an article rather than adding one.
+    """
+    now = now or _now()
+    cap = _cap()
+    if cap <= 0:
+        return None
+    gates = [now]
+    times = [t for t in (_when(x) for x in plan.published_times_since((now - WEEK).isoformat())) if t]
+    if len(times) >= cap:
+        gates.append(times[len(times) - cap] + WEEK)
+    last = _when(plan.last_published_at())
+    if last is not None:
+        gates.append(last + spacing(cap))
+    return max(gates)
 
 
 def _when(iso) -> datetime | None:
@@ -64,6 +102,40 @@ def _when(iso) -> datetime | None:
     except (TypeError, ValueError):
         return None
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def pace_words(cap: int | None = None) -> str:
+    """"one about every 42 hours" for 4 a week; "one a day" for 7; "one a week" for 1. "" when paused."""
+    cap = _cap() if cap is None else cap
+    if cap <= 0:
+        return ""
+    hours = 168 / cap
+    if hours % 24 == 0:
+        days = int(hours // 24)
+        return "one a day" if days == 1 else ("one a week" if days == 7 else f"one every {days} days")
+    return f"one about every {round(hours)} hours"
+
+
+def when_words(at: datetime | None, *, now: datetime | None = None) -> str:
+    """When the next new article goes out, on the box's clock: "within a few minutes", "today at 7:45 PM",
+    "tomorrow at 7:45 PM" or "Sat, Oct 10 at 7:45 PM". UTC is named when the box has no timezone set."""
+    if at is None:
+        return ""
+    now = now or _now()
+    if at <= now + timedelta(minutes=2):
+        return "within a few minutes"
+    try:
+        from core import report
+        tz = report.tz()
+    except Exception:                                    # noqa: BLE001 — a sentence, never the job
+        tz = timezone.utc
+    local, today = at.astimezone(tz), now.astimezone(tz).date()
+    hm = local.strftime("%I:%M %p").lstrip("0") + (" UTC" if str(getattr(tz, "key", tz)) in ("UTC", "Etc/UTC") else "")
+    if local.date() == today:
+        return f"today at {hm}"
+    if local.date() == today + timedelta(days=1):
+        return f"tomorrow at {hm}"
+    return f"{local.strftime('%a, %b')} {local.day} at {hm}"
 
 
 def release_stale(*, now: datetime | None = None) -> int:
@@ -182,8 +254,8 @@ def _write_and_publish(row: dict) -> dict:
 
 
 def periodic() -> dict:
-    """Worker entry: publish the next topic (asked-for first, then oldest), if the box is set up
-    and has room this week.
+    """Worker entry: publish the next topic (in the plan's order, QUEUE), if the box is set up, has
+    room this week, and the pace allows one now (`next_at`).
 
     Dark until configured, and honest about it: an unconfigured box returns the reason and
     touches no row, so a fresh box from the snapshot does nothing and reports why.
@@ -198,14 +270,17 @@ def periodic() -> dict:
     # article, a rewrite too, starts here; the row stays planned and the screens say what is missing.
     if not settings.facts():
         return {"skipped": "no_facts", "why": NO_FACTS}
-    if room() <= 0:
-        # A REWRITE REPLACES AN ARTICLE, IT DOESN'T ADD ONE, so it doesn't wait for the week's room: the
-        # owner asked for it, it is the same address, and the count of live articles doesn't change.
-        redo = [r for r in plan.next_up(5, requested_only=True) if plan.is_rewrite(r)]
-        if not redo:
-            return {"skipped": "weekly_cap"}
-        return _write_and_publish(redo[0])
     nxt = plan.next_up(1)
     if not nxt:
         return {"skipped": "nothing_planned"}
+    now = _now()
+    due = next_at(now=now)
+    if due is None or due > now:
+        # A REWRITE REPLACES AN ARTICLE, IT DOESN'T ADD ONE, so it doesn't wait for the week's room or the
+        # pace: the owner asked for it, it is the same address, and the count of live articles doesn't change.
+        redo = [r for r in plan.next_up(5, requested_only=True) if plan.is_rewrite(r)]
+        if not redo:
+            return ({"skipped": "weekly_cap"} if due is None or room(now=now) <= 0 else {"skipped": "paced"}) \
+                | ({"next_at": due.isoformat()} if due else {})
+        return _write_and_publish(redo[0])
     return _write_and_publish(nxt[0])

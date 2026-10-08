@@ -311,8 +311,13 @@ _SAID = {
     "added": ("Topic added", "It is in the plan below.", True),
     "now": ("Next up", "Writing starts within a minute or so. It takes a few minutes, then this "
                        "page shows whether it went live.", True),
-    "full": ("First in line", "This week's articles are already out, so it goes live once the "
-                              "oldest of them is a week old.", True),
+    # THE TIME IS FILLED IN WHEN THE PAGE IS DRAWN (`_said_detail`): the weekly number is spread across the week,
+    # so "next" can be hours away, and the sentence says when instead of promising a minute (owner, 2026-10-08).
+    "full": ("First in line", "It goes out as soon as the weekly number allows.", True),
+    "moved": ("Moved up", "It is written one place sooner.", True),
+    "removed": ("Taken off the plan", "It won't be written. Add it again any time.", True),
+    "kept": ("Not changed", "That topic can't be moved or taken off any more: it is being written, or is live.",
+             False),
     "paused": ("First in line", "Publishing is paused: articles a week is set to 0 in AEO "
                                 "settings.", True),
     "gone": ("That topic cannot go now", "It is already being written or is live.", False),
@@ -326,6 +331,16 @@ _SAID = {
     "drafting": ("Reading your website", "In a minute or two, the facts it found wait on Approvals for your OK, each "
                                          "word for word from your own pages. Nothing is saved before you approve.", True),
 }
+
+
+def _said_detail(key: str) -> str:
+    """The sentences that carry a time, written when the page is drawn."""
+    if key != "full":
+        return ""
+    from . import job
+    when = job.when_words(job.next_at())
+    pace = job.pace_words()
+    return (f"It goes out {when}: {weekly_cap()} a week means {pace}." if when and pace else "")
 
 
 def _note(key: str, detail: str = "") -> str:
@@ -417,6 +432,7 @@ font-size:calc(15 * var(--px, 1px));color:var(--ink-3)}
 button.ar-go{display:inline-flex;align-items:center;width:auto;min-height:44px;margin:0;padding:0;
 border:0;background:none;color:var(--link);font-size:calc(15 * var(--px, 1px));font-weight:600}
 button.ar-go:hover{background:none;text-decoration:underline}
+button.ar-go.ar-rm{color:var(--ink-3);font-weight:400}
 .ar-cap{margin:-8px 2px 16px;font-size:calc(15 * var(--px, 1px))}
 .ar-add details{margin:6px 0 0}
 </style>"""
@@ -437,20 +453,36 @@ def _brought_span(b: dict | None) -> str:
     return f'<span class="ar-b">Brought {_esc(said)}</span>'
 
 
-def _topic_row(row: dict, *, can_go: bool, brought: dict | None = None) -> str:
+def _removable(row: dict) -> bool:
+    """plan.remove's own rule, so the screen never offers a Remove that would do nothing."""
+    return (row.get("status") in ("planned", "refused", "failed") and not row.get("url")
+            and not (row.get("airtable_id") or "").strip())
+
+
+def _topic_row(row: dict, *, can_go: bool, brought: dict | None = None, place: int = 0,
+               can_edit: bool = False) -> str:
+    """`place` is the row's turn among new topics (1 = next), 0 for any other row."""
     st = row.get("status")
-    tone, word = _STATE.get(st, ("ink", "Next") if row.get("requested_at") else ("", "Planned"))
+    tone, word = _STATE.get(st, ("ink", "Next") if place == 1 or (row.get("requested_at") and not place)
+                            else ("", "Planned"))
     off = plan.is_unpublished(row)
     if off:
         tone, word = "", "Off"
     q = f'<p class="ar-p">{_esc(row["question"])}</p>' if row.get("question") else ""
+    rid = f'<input type="hidden" name="id" value="{int(row["id"])}">'
     btn = ""
-    if can_go and st in ("planned", "refused", "failed") and not (
-            st == "planned" and row.get("requested_at")):
+    if can_go and ((st == "planned" and place > 1) or st in ("refused", "failed")):
         # An unpublished article goes back at its own address, written from today's facts (plan.is_rewrite).
-        label = "Write and publish now" if st == "planned" else ("Rewrite from your facts" if off else "Try again now")
-        btn = _post(TOPICS, "now", label, cls="ghost ar-go",
-                    extra=f'<input type="hidden" name="id" value="{int(row["id"])}">')
+        label = "Write this next" if st == "planned" else ("Rewrite from your facts" if off else "Try again now")
+        btn = _post(TOPICS, "now", label, cls="ghost ar-go", extra=rid)
+    # THE OWNER'S ORDER (owner, 2026-10-08): move a topic up one place, or take it off the plan. Remove asks
+    # first, and sits last on the line, so it is never the easiest thing to hit (CLAUDE.md, Mobile first).
+    if can_edit and place > 1:
+        btn += _post(TOPICS, "up", "Move up", cls="ghost ar-go", extra=rid)
+    if can_edit and _removable(row):
+        btn += (f'<form method="post" action="{TOPICS}" onsubmit="return confirm(\'Take this topic off the plan?\')">'
+                f'<input type="hidden" name="do" value="remove">{rid}'
+                '<button class="ghost ar-go ar-rm" type="submit">Remove</button></form>')
     # THE DETAIL ROW ONLY SAYS WHAT THE STATE WORD CANNOT: when it went live and where, or why it
     # was held. "Planned." under "Planned" is a row's worth of nothing.
     detail = f"<span>{_status(row)}</span>" if st in ("published", "refused", "failed") else ""
@@ -478,11 +510,13 @@ def weekly_cap() -> int:
         return 0
 
 
-def _week_full() -> bool:
-    """Has this box published its weekly number in the last seven days? (Always, at 0.)"""
-    from datetime import timedelta, timezone
-    since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-    return plan.published_since(since) >= weekly_cap()
+def _not_yet() -> bool:
+    """Must the next new article wait: the week is full, or the last one went out too recently? (Always, at 0.)"""
+    from datetime import timezone
+
+    from . import job
+    due = job.next_at()
+    return due is None or due > datetime.now(timezone.utc)
 
 
 @blueprint.route(HOME, methods=["GET"])
@@ -520,17 +554,36 @@ def aeo_topics():
                 # THE CLICK ONLY MARKS THE ROW. The loop takes asked-for rows first, within about a
                 # minute (OSDev6, 2026-09-25). Writing never runs inside this request: it can take a
                 # minute, and the web server kills a request at 120 seconds, mid-write.
-                ok = plan.request_now(int(request.form.get("id") or 0)) is not None
-            except ValueError:
+                pid = int(request.form.get("id") or 0)
+                row = plan.get(pid) or {}
+                if row.get("status") == "planned" and not row.get("url"):
+                    plan.place([pid])                   # first among new topics, the rest keep their order
+                    ok = True
+                else:
+                    ok = plan.request_now(pid) is not None
+            except (ValueError, plan.Rejected):
                 ok = False
             # STILL MARKED WHEN THE WEEK IS FULL, so it goes first once there is room. What changes
             # is the sentence: "within a minute" would be false (OSDev1, 2026-09-25).
             said = "gone" if not ok else ("paused" if weekly_cap() == 0
-                                          else "full" if _week_full() else "now")
+                                          else "full" if _not_yet() else "now")
             return redirect(f"{TOPICS}?said={said}", code=303)
+        if do in ("up", "remove"):
+            try:
+                pid = int(request.form.get("id") or 0)
+            except ValueError:
+                pid = 0
+            if do == "up":
+                ok = plan.move_up(pid)
+            else:
+                gone = plan.remove(pid)
+                ok = gone is not None
+                if ok:
+                    log.info("aeo.topic_removed", id=pid, topic=gone.get("topic"), user=uid)
+            return redirect(f"{TOPICS}?said={({'up': 'moved', 'remove': 'removed'}[do]) if ok else 'kept'}", code=303)
         return redirect(TOPICS, code=303)
     said = request.args.get("said") or ""
-    return _topics_page(title, lede, note=_note(said) if said in _SAID else ""), 200
+    return _topics_page(title, lede, note=_note(said, _said_detail(said)) if said in _SAID else ""), 200
 
 
 def _topics_page(title: str, lede: str, *, note: str = "", typed=("", "")) -> str:
@@ -548,8 +601,13 @@ def _topics_page(title: str, lede: str, *, note: str = "", typed=("", "")) -> st
     rows = plan.rows()
     if rows:
         got = _brought(rows)
+        # EACH NEW TOPIC'S TURN, from the writing order itself (plan.QUEUE), so "Next" and "Move up" are always
+        # about the topic the job will really take. A rewrite is never placed: it goes first on its own.
+        turn = {r["id"]: n for n, r in enumerate((r for r in rows if r.get("status") == "planned"
+                                                  and not r.get("url")), 1)}
         listed = ('<div class="card ar-list">'
-                  + "".join(_topic_row(r, can_go=owner and ready and writer, brought=got.get(r.get("id")))
+                  + "".join(_topic_row(r, can_go=owner and ready and writer, brought=got.get(r.get("id")),
+                                       place=turn.get(r.get("id"), 0), can_edit=owner)
                             for r in rows)
                   + '</div>')
     else:
@@ -559,12 +617,13 @@ def _topics_page(title: str, lede: str, *, note: str = "", typed=("", "")) -> st
         listed += ('<p class="quiet ar-cap">Publishing is paused: articles a week is set to 0. '
                    f'Change it in <a href="{SETTINGS}">AEO settings</a> to start again.</p>')
     elif ready and writer:
-        cap = weekly_cap()
-        full = (' This week\'s are out. The next goes live once the oldest of them is a week '
-                'old.') if _week_full() else ""
-        listed += ('<p class="quiet ar-cap">Up to '
-                   f'{_esc(cap)} a week are written from this list, oldest first, and each '
-                   f'is checked against your settings before it goes live.{_esc(full)}</p>')
+        from . import job
+        cap, when = weekly_cap(), job.when_words(job.next_at())
+        nxt = (f" The next goes out {when}." if any(r.get("status") == "planned" for r in rows) else
+               f" Add a topic and it goes out {when}.") if when else ""
+        listed += (f'<p class="quiet ar-cap">{_esc(cap)} a week, {_esc(job.pace_words(cap))}, are written from '
+                   'this list in the order shown, and each is checked against your settings before it goes '
+                   f'live.{_esc(nxt)}</p>')
     if owner:
         # The question is optional and folds away, and opens again when a refused form comes
         # back with one typed in it.
@@ -657,8 +716,8 @@ def _settings_form(typed=None) -> str:
     out.append('<div class="card"><h2>How often</h2><label for="weekly_cap">Articles a week</label>'
                f'<input id="weekly_cap" name="weekly_cap" type="number" inputmode="numeric" min="0" '
                f'max="{_CAP_MAX}" step="1" value="{_esc(s.get("weekly_cap"))}">'
-               '<p class="sub">Up to this many go live in any seven days, oldest topic first. '
-               '0 pauses publishing.</p></div>')
+               '<p class="sub">Spread across the week: 4 means one about every 42 hours, in the order on '
+               'Articles. 0 pauses publishing.</p></div>')
     out.append('<div class="card"><h2>Search engines</h2>' + field(*f["indexnow_key"])
                + f'<div class="foot"><a href="{GOOGLE}">Google Search Console &rarr;</a></div>'
                '</div>')

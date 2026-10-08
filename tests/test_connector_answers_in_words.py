@@ -295,6 +295,7 @@ def fixtures() -> dict:
                                                      "from your own pages."},
         "aeo.propose_rewrite": {"asked": False, "error": "There are no facts for the writer yet, so a rewrite "
                                                            "would say no more than the first one. Add them on AEO Settings first."},
+        "aeo.propose_plan": asked,
     }
 
 

@@ -5,7 +5,7 @@ machine's: *"If it doesn't expose enough for a user to actually be in full comma
 then we need to upgrade the MCP immediately."* He agreed to the plan's first step the same morning
 (`docs/PLAN_AEO_MACHINE_UPGRADE.md` §1.1, #1793): *"Agree. go."*
 
-SEVEN READS AND THREE PROPOSALS. A buyer's own AI can see what the machine is doing, what it needs,
+READS AND PROPOSALS. A buyer's own AI can see what the machine is doing, what it needs,
 what it published, why anything stopped, and how the site is doing, the same answers the AEO screens
 give. It can also ASK for a topic, a retry or a settings change: each waits in the box's approvals
 queue until a person taps Approve (proposals.py). The proposals are `write:proposals`, `act` and up,
@@ -50,14 +50,19 @@ def _clamp(value, default: int, high: int = MAX_LIMIT) -> int:
     return max(1, min(n, high))
 
 
-def _article(row: dict) -> dict:
+def _ordinal(n: int) -> str:
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _article(row: dict, turn: int | None = None) -> dict:
     """One topic as the connector sees it. NAMED FIELDS, never the row, so a column added later for
-    another reason is never published by accident."""
+    another reason is never published by accident. `turn` is a planned topic's place in the writing order."""
     st = row.get("status")
     out = {
         "id": row.get("id"),
         "status": st,
-        "state": "next up" if st == "planned" and row.get("requested_at") else _STATE.get(st, st),
+        "state": (("next up" if turn == 1 else f"planned, {_ordinal(turn)} in line") if st == "planned" and turn
+                  else "next up" if st == "planned" and row.get("requested_at") else _STATE.get(st, st)),
         "topic": row.get("topic"),
         "question": row.get("question"),
         "title": row.get("title"),
@@ -118,6 +123,8 @@ def status():
     published_week = plan.published_since(since)
     rows = plan.rows()
     count = {s: sum(1 for r in rows if r.get("status") == s) for s in _STATE}
+    from . import job
+    due = job.next_at()
     return {
         "ready": not need and writer_installed() and cap > 0,
         "missing": need,
@@ -127,12 +134,18 @@ def status():
         "paused": cap == 0,
         "published_last_7_days": published_week,
         "left_this_week": max(0, cap - published_week),
+        # THE WEEKLY NUMBER IS SPREAD ACROSS THE WEEK (job.py): when the next new article may go out, and the pace.
+        "next_article_at": due.isoformat() if due else None,
+        "next_article": job.when_words(due),
+        "pace": job.pace_words(cap),
         "topics": count,
         "waiting_on_you": count["refused"] + count["failed"] - sum(1 for r in rows if plan.is_unpublished(r)),
         "suggestions_waiting_for_ok": _suggestions_waiting(),
         "search_console": _wrong_site(),
-        "note": ("The machine publishes on its own, within the weekly number, once nothing is "
-                 "missing. Articles that stopped are listed by aeo.articles with the reason."),
+        "note": ("The machine publishes on its own once nothing is missing, spread across the week: a new "
+                 "article waits for room in the last 7 days and for the pace (a week divided by articles a week) "
+                 "since the last one. next_article says when. Articles that stopped are listed by aeo.articles "
+                 "with the reason."),
     }
 
 
@@ -159,12 +172,20 @@ def articles(status=None, limit=None):
     rows = [r for r in plan.rows() if not want or r.get("status") == want]
     lim = _clamp(limit, 25)
     got = _brought(rows[:lim])
-    note = "waiting topics first (the one asked for now leading), then the rest newest first"
+    turn = _turns()
+    note = ("the topic being written, then planned topics in the order they will be written (next first), then "
+            "the rest newest first")
     if got:
         note += (". brought: visits from people and from AI answers to each live article, this week and since it "
                  "went live, from the box's own numbers")
-    return {"articles": [{**_article(r), **got.get(r.get("id"), {})} for r in rows[:lim]], "total": len(rows),
-            "note": note}
+    return {"articles": [{**_article(r, turn.get(r.get("id"))), **got.get(r.get("id"), {})} for r in rows[:lim]],
+            "total": len(rows), "note": note}
+
+
+def _turns() -> dict:
+    """{id: its turn} for every planned row, 1 = written next (plan.QUEUE, the job's own order)."""
+    from . import plan
+    return {r["id"]: n for n, r in enumerate(plan.queue(), 1)}
 
 
 def article(id=None):
@@ -176,7 +197,7 @@ def article(id=None):
         return {"error": "give the article's id, from aeo.articles"}
     if not row:
         return {"error": f"there is no article with id {id}"}
-    return {**_article(row), **_brought([row]).get(row.get("id"), {})}
+    return {**_article(row, _turns().get(row.get("id"))), **_brought([row]).get(row.get("id"), {})}
 
 
 def _brought(rows: list[dict]) -> dict:
@@ -398,10 +419,13 @@ def _render_status(r: dict) -> str:
     missing = [say.plain(m) for m in r.get("missing") or []]
     cap = int(r.get("articles_a_week") or 0)
     lines = []
-    if cap:
-        lines.append(f"Published in the last 7 days: {say.n(r.get('published_last_7_days') or 0)} of {cap} a week, "
-                     f"{say.n(r.get('left_this_week') or 0)} left this week.")
     topics = r.get("topics") or {}
+    if cap:
+        lines.append(f"Published in the last 7 days: {say.n(r.get('published_last_7_days') or 0)}. "
+                     f"{cap} a week means {r.get('pace') or 'spread across the week'}.")
+        if r.get("ready") and r.get("next_article"):
+            lines.append(f"Next new article: {r['next_article']}." if topics.get("planned") else
+                         f"Next new article: {r['next_article']}, once a topic is planned.")
     words = {"planned": "planned", "writing": "being written now", "published": "live",
              "refused": "held back", "failed": "did not publish"}
     counted = [f"{say.n(topics[k])} {w}" for k, w in words.items() if topics.get(k)]
@@ -433,15 +457,21 @@ def _render_articles(r: dict) -> str:
         return say.answer(say.plain(r["error"]) + ".", say.ask_next((f"{MACHINE}.articles", "Show me every article")))
     arts = [a for a in r.get("articles") or [] if isinstance(a, dict)]
     total = int(r.get("total") or len(arts))
-    stuck = [a for a in arts if a.get("status") in _WAITING_ON_YOU]
-    rest = [a for a in arts if a.get("status") not in _WAITING_ON_YOU]
+    # AN UNPUBLISHED ARTICLE WAITS ON NOBODY: the owner took it off on purpose, so it is listed with the rest and
+    # never offered "try again" (status counts it the same way).
+    stuck = [a for a in arts if a.get("status") in _WAITING_ON_YOU and a.get("state") != "unpublished"]
+    queued = [a for a in arts if a.get("status") in ("writing", "planned")]
+    rest = [a for a in arts if a not in stuck and a not in queued]
     parts = [f"{say.plural(total, 'topic')} in the plan" + (f", showing {len(arts)}." if len(arts) < total else ".")
              if total else "No topics are in the plan yet.",
              say.section("Waiting on you:", [_article_line(a) for a in stuck]),
-             say.section("The rest, newest first:" if stuck else "Newest first:", [_article_line(a) for a in rest]),
+             say.section("To be written, in this order:", [_article_line(a) for a in queued]),
+             say.section("The rest, newest first:", [_article_line(a) for a in rest]),
              f"Every article: {_page('TOPICS')}"]
     starts = [(f"{MACHINE}.propose_retry", say.approve_line(f"Try again {_topic_name(stuck[0])}"))] if stuck else []
     starts.append((f"{MACHINE}.propose_topic", say.approve_line("Add a topic for the next article")))
+    if queued:
+        starts.append((f"{MACHINE}.propose_plan", say.approve_line("Put the plan in the order you want")))
     first = (stuck or rest or [{}])[0]
     return say.answer(
         *parts,
@@ -704,13 +734,32 @@ tools.register(
     wants_seat=True,
     description="Ask the owner to add a topic to the AEO Machine's plan. It is NOT added: it waits on "
                 "Approvals until the owner approves or declines. With now=true, an approved topic "
-                "goes next and is written and published within minutes.",
+                "goes next, and is written when the weekly number next allows (aeo.status says when). "
+                "To add or reorder several topics at once, use aeo.propose_plan instead.",
     args={"question": {"type": "string", "required": True,
                        "description": "The question the article answers, as a customer would ask it."},
           "topic": {"type": "string", "required": False,
                     "description": "A short topic name. Defaults to the question."},
           "now": {"type": "boolean", "required": False,
                   "description": "Ask for it to be written first, once approved. Defaults to false."}})
+tools.register(
+    "propose_plan", title="Suggest the order your AEO articles are written in",
+    fn=proposals.propose_plan, machine=MACHINE, min_role="act", capability="write:proposals",
+    render=_render_proposal,
+    wants_seat=True,
+    description="Turn a content plan into ONE approval: the topics to write next, in order, new ones added, and "
+                "planned ones taken off. Read aeo.articles first. In `order`, one line per article, first to last: "
+                "a planned topic's number, a live or unpublished article's number to rewrite it from today's facts "
+                "(a rewrite goes first, at its own address), or a new question to add. Use the number of an "
+                "article that already answers a question rather than adding it again. Every planned topic not "
+                "listed keeps its turn after these. Nothing changes until the owner approves. Articles still go "
+                "out at the weekly number's pace.",
+    args={"order": {"type": "string", "required": False,
+                    "description": f"One per line, first to last, at most {proposals.PLAN_MAX} lines: an article "
+                                   "number from aeo.articles, or a new question as a customer would ask it."},
+          "remove": {"type": "string", "required": False,
+                     "description": "Numbers of planned topics to take off the plan, separated by commas. Only "
+                                    "topics never published can be taken off."}})
 tools.register(
     "propose_retry", title="Suggest trying an AEO article again",
     fn=proposals.propose_retry, machine=MACHINE, min_role="act", capability="write:proposals",

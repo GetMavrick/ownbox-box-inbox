@@ -1,7 +1,8 @@
 """The plan: every topic this box means to write about, and what became of each.
 
-THE ONLY CODE THAT TOUCHES `seo_plan`. The Topics screen adds rows and asks for one to go now; the
-writing job takes the next row and records what happened. Both go through here, so a status the
+THE ONLY CODE THAT TOUCHES `seo_plan`. The Topics screen adds rows, puts one next, moves one up or
+takes one off; an approved plan sets the order; the writing job takes the next row (QUEUE) and records
+what happened. Both go through here, so a status the
 table's CHECK would refuse is refused here first, with a sentence, instead of as an IntegrityError
 inside a worker nobody is watching.
 
@@ -55,15 +56,23 @@ def get(plan_id: int) -> dict | None:
     return dict(r) if r else None
 
 
+# THE WRITING ORDER, in one place, so the job, the screen and the connector can never disagree about what is next.
+# Asked-for rows first ("Write this next", a rewrite), oldest ask first; then the owner's own order (`queue_order`,
+# migration 59: a topic moved up, or a plan he approved); then everything else, oldest first.
+QUEUE = "requested_at IS NULL, requested_at, queue_order IS NULL, queue_order, id"
+
+
 def rows() -> list[dict]:
-    """Every row, for the screen: waiting ones first (the one asked for now leading), then the
-    rest newest first."""
+    """Every row, for the screen: the one being written, then the planned ones in the order they will be written,
+    then the rest newest first."""
     with state.connect() as c:
         got = c.execute(
             "SELECT * FROM seo_plan ORDER BY "
             "CASE status WHEN 'writing' THEN 0 WHEN 'planned' THEN 1 ELSE 2 END, "
-            "CASE WHEN status = 'planned' AND requested_at IS NOT NULL THEN 0 ELSE 1 END, "
-            "requested_at, "
+            "CASE WHEN status = 'planned' THEN requested_at IS NULL END, "
+            "CASE WHEN status = 'planned' THEN requested_at END, "
+            "CASE WHEN status = 'planned' THEN queue_order IS NULL END, "
+            "CASE WHEN status = 'planned' THEN queue_order END, "
             "CASE WHEN status IN ('planned', 'writing') THEN id ELSE -id END").fetchall()
     return [dict(r) for r in got]
 
@@ -125,13 +134,82 @@ def is_rewrite(row: dict | None) -> bool:
 
 
 def next_up(limit: int = 1, *, requested_only: bool = False) -> list[dict]:
-    """The rows the writing job should take next: asked-for first, oldest first, then the queue."""
+    """The rows the writing job should take next, in the writing order (QUEUE)."""
     where = "status = 'planned'" + (" AND requested_at IS NOT NULL" if requested_only else "")
     with state.connect() as c:
-        got = c.execute(f"SELECT * FROM seo_plan WHERE {where} "
-                        "ORDER BY requested_at IS NULL, requested_at, id LIMIT ?",
+        got = c.execute(f"SELECT * FROM seo_plan WHERE {where} ORDER BY {QUEUE} LIMIT ?",
                         (max(0, int(limit)),)).fetchall()
     return [dict(r) for r in got]
+
+
+# ── the owner's order ────────────────────────────────────────────────────────────────────────────────
+# A REWRITE IS NEVER PLACED. It fixes an article already live, so it stays first in line (`rewrite`), and moving
+# or removing applies only to topics that have never been an article: planned, with no address.
+
+def _queue(c) -> list[int]:
+    """The planned new topics, in the order they will be written."""
+    return [int(r["id"]) for r in c.execute(
+        f"SELECT id FROM seo_plan WHERE status = 'planned' AND url IS NULL ORDER BY {QUEUE}")]
+
+
+def _renumber(c, ids: list[int]) -> None:
+    """Write `ids` as the queue, first to last. Their asks are folded into the order, so the order is all there is:
+    a topic asked for next and then moved down stays where it was put."""
+    now = state._now()
+    for n, pid in enumerate(ids, 1):
+        c.execute("UPDATE seo_plan SET queue_order = ?, requested_at = NULL, updated_at = ? "
+                  "WHERE id = ? AND status = 'planned' AND url IS NULL", (n, now, int(pid)))
+
+
+def queue() -> list[dict]:
+    """Every planned row, in the order the writing job will take them (rewrites first)."""
+    return next_up(100_000)
+
+
+def move_up(plan_id: int) -> bool:
+    """Swap a planned topic with the one written before it. False when it is already first among new topics, or
+    isn't a planned new topic at all, so a second tap on a stale page changes nothing it shouldn't."""
+    with state.connect() as c:
+        ids = _queue(c)
+        try:
+            i = ids.index(int(plan_id))
+        except ValueError:
+            return False
+        if i == 0:
+            return False
+        ids[i - 1], ids[i] = ids[i], ids[i - 1]
+        _renumber(c, ids)
+    return True
+
+
+def place(first: list[int]) -> list[int]:
+    """Put these planned new topics first, in this order; every other planned topic follows in its current order.
+    Returns the whole queue. Raises Rejected, changing nothing, when one isn't a planned new topic."""
+    first = [int(x) for x in first]
+    if len(set(first)) != len(first):
+        raise Rejected("A topic is listed twice.")
+    with state.connect() as c:
+        ids = _queue(c)
+        stray = [x for x in first if x not in ids]
+        if stray:
+            raise Rejected(f"Article {stray[0]} isn't a planned topic any more, so the order wasn't changed.")
+        order = first + [x for x in ids if x not in first]
+        _renumber(c, order)
+    return order
+
+
+def remove(plan_id: int) -> dict | None:
+    """Take a topic off the plan. Only one that never became an article: planned, held back or failed, with no
+    address. A live or unpublished article is never removed here (it is unpublished, never deleted: owner,
+    2026-10-04), and a topic from the owner's Airtable is changed there, or the sync would bring it back.
+    Returns the removed row, or None when nothing was removed."""
+    with state.connect() as c:
+        r = c.execute("SELECT * FROM seo_plan WHERE id = ? AND status IN ('planned', 'refused', 'failed') "
+                      "AND url IS NULL AND COALESCE(airtable_id, '') = ''", (int(plan_id),)).fetchone()
+        if not r:
+            return None
+        c.execute("DELETE FROM seo_plan WHERE id = ?", (int(plan_id),))
+    return dict(r)
 
 
 def published_since(iso: str) -> int:
@@ -139,6 +217,23 @@ def published_since(iso: str) -> int:
     with state.connect() as c:
         return int(c.execute("SELECT COUNT(*) n FROM seo_plan WHERE status = 'published' "
                              "AND published_at >= ?", (iso,)).fetchone()["n"])
+
+
+def published_times_since(iso: str) -> list[str]:
+    """When each one counted by `published_since` went live, oldest first. The job works out from these when the
+    week next has room."""
+    with state.connect() as c:
+        return [str(r["published_at"]) for r in c.execute(
+            "SELECT published_at FROM seo_plan WHERE status = 'published' AND published_at >= ? "
+            "ORDER BY published_at", (iso,))]
+
+
+def last_published_at() -> str | None:
+    """When the newest article first went live, whatever became of it since: the pace counts from it. A rewrite keeps
+    its first date (`mark`), so rewriting never holds back the next new article."""
+    with state.connect() as c:
+        r = c.execute("SELECT MAX(published_at) t FROM seo_plan WHERE published_at IS NOT NULL").fetchone()
+    return str(r["t"]) if r and r["t"] else None
 
 
 def mark(plan_id: int, status: str, *, slug: str | None = None, url: str | None = None,
