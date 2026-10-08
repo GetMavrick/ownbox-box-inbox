@@ -313,7 +313,11 @@ def waiting(space: str, *, limit: int = 50) -> list[dict]:
         rows = c.execute(
             "SELECT d.id, d.zernio_conversation_id AS zcid, d.body, d.created_at,"
             "       d.in_reply_to, k.participant, k.platform,"
-            "       m.body AS asked, m.created_at AS asked_at "
+            "       m.body AS asked, m.created_at AS asked_at, "
+            # WHO WROTE IT: a person's own AI, through the connector (KEEP), or the box. The box never rewrites the first
+            # on its own, so a screen or a tool can say why such a draft kept its old words.
+            "       (SELECT r.rules FROM inbox_draft_rules r WHERE r.space = d.space AND r.draft_id = d.id) = 'kept' "
+            "         AS kept "
             "  FROM inbox_drafts d "
             "  JOIN inbox_conversations k ON k.space = d.space "
             "   AND k.zernio_conversation_id = d.zernio_conversation_id "
@@ -536,3 +540,96 @@ def redo_drafts_from_markup(space: str) -> int:
     if n:
         log.info("drafter.markup_redone", extra={"space": space, "drafts": n})
     return n
+
+
+# ── HOW RECENT REPLIES ENDED (owner, 2026-10-08: "It's still writing that human approval thing every single time") ─
+# Every draft is its own model call and sees no other draft, so an instruction to vary the closing line cannot be kept
+# by any one call: each reaches for the same most salient fact about the business. The cure is to show it how the
+# replies written and sent lately ended, so it can say something else. Last sentences only, clipped, a handful.
+import re as _re
+
+
+
+def _last_sentence(text: str) -> str:
+    t = " ".join(str(text or "").split())
+    if not t:
+        return ""
+    parts = [p.strip() for p in _re.split(r"(?<=[.!?])\s+", t) if p.strip()]
+    tail = parts[-1] if parts else t
+    if len(tail) < 25 and len(parts) > 1:                # "Thanks!" or a sign-off: the line before is the ending
+        tail = parts[-2]
+    return tail[:200]
+
+
+def recent_endings(space: str, *, exclude_zcid: str = "", limit: int = 6) -> list[str]:
+    """The last sentence of the newest replies on this Space, each once, newest first. Never raises.
+
+    WHAT WENT OUT, AND WHAT IS ABOUT TO: the words a business really sent, and the drafts still waiting on a person. A
+    draft that was edited before it went, or discarded, never reached anyone, so its words are not repeated by anyone
+    and stay out of the prompt (the box's own superseded words are never something to show the model).
+    """
+    try:
+        rows = [{"body": d["body"], "at": d["created_at"]} for d in waiting(space, limit=200)
+                if d["zcid"] != str(exclude_zcid or "") and d["body"] != NO_REPLY_BODY]
+        with state.connect() as c:
+            rows += [{"body": r["sent_body"], "at": r["created_at"]} for r in c.execute(
+                "SELECT sent_body, created_at FROM inbox_draft_lessons WHERE space = ? "
+                " ORDER BY created_at DESC LIMIT ?", (space, int(limit) * 4)).fetchall()]
+    except Exception:                                    # noqa: BLE001 — a nicety, never a draft's blocker
+        return []
+    out: list[str] = []
+    for r in sorted(rows, key=lambda r: str(r["at"] or ""), reverse=True):
+        end = _last_sentence(r["body"])
+        if end and end.casefold() not in {e.casefold() for e in out}:
+            out.append(end)
+        if len(out) >= limit:
+            break
+    return out
+
+
+# ── REWRITE THESE NOW (OSDev1 ASSIGNED, 2026-10-08, after the owner's "It's still writing that human approval thing
+# every single time": "one owner-approved 'rewrite these with the current rules' ... that rewrites the selected or all
+# ready drafts, KEEP included, once, under the sweep's spend cap"). The approval (inbox.propose_rewrite_drafts) names
+# the drafts; the drafter's sweep rewrites them before anything but a new message, each once, and takes it off the list.
+REWRITE_KEY = "drafter.rewrite_requested"
+
+
+def request_rewrites(space: str, draft_ids, *, by: str | None = None) -> int:
+    """Add these drafts to the Space's rewrite list. -> how many are on it now. Raises nothing it can avoid."""
+    from core import box_settings
+    have = requested_rewrites(space)
+    for i in draft_ids or ():
+        i = str(i or "").strip()
+        if i and i not in have:
+            have.append(i)
+    box_settings.put("inbox", f"{REWRITE_KEY}.{space}", have[:500], set_by=by)
+    return len(have)
+
+
+def requested_rewrites(space: str) -> list:
+    """The draft ids waiting to be rewritten on request, oldest request first. [] when none or unreadable."""
+    from core import box_settings
+    try:
+        got = box_settings.get("inbox", f"{REWRITE_KEY}.{space}", default=None) or []
+    except Exception:                                    # noqa: BLE001
+        return []
+    return [str(i) for i in got if str(i or "").strip()] if isinstance(got, list) else []
+
+
+def done_rewriting(space: str, draft_ids) -> None:
+    """Take these drafts off the rewrite list: rewritten, judged to need no reply, or no longer waiting."""
+    from core import box_settings
+    gone = {str(i) for i in draft_ids or ()}
+    if gone:
+        box_settings.put("inbox", f"{REWRITE_KEY}.{space}",
+                         [i for i in requested_rewrites(space) if i not in gone], set_by="drafter")
+
+
+def rows_to_rewrite(space: str, draft_ids) -> list[dict]:
+    """The requested drafts still waiting on a person, shaped like stale_waiting's rows, in the order asked.
+    KEEP included: the owner asked for these by name. Never a dismissed or already answered one."""
+    ids = [str(i) for i in draft_ids or () if str(i or "").strip()]
+    if not ids:
+        return []
+    waiting_now = {str(r["id"]): r for r in waiting(space, limit=1000)}
+    return [dict(waiting_now[i]) for i in ids if i in waiting_now]

@@ -461,11 +461,24 @@ def _prompt(*, space: str, zcid: str, inbound: str, history: list[dict] | None) 
         sent = " ".join(str(ex.get("sent_body") or "").split())[:_MAX_EXAMPLE_CHARS]
         if asked and sent:
             examples.append(f"They wrote: {asked}\nBusiness replied: {sent}")
+    # MATCH HOW THEY WRITE, NOT WHAT THEY ONCE WROTE (owner, 2026-10-08: "It's still writing that human approval
+    # thing every single time"). "Their wording" made every draft copy the closing line of the replies he had sent.
     voice = ("" if not examples else
-             "Here are replies this business has actually sent before. Match how they write — "
-             "their length, their tone, their wording.\n\n--- examples ---\n"
+             "Here are replies this business has actually sent before. Match how they write: their length, their "
+             "tone, their way of putting things. Never copy a sentence from them, least of all their closing line."
+             "\n\n--- examples ---\n"
              + "\n\n".join(examples) + "\n--- end of examples ---\n\n")
-    prompt = (voice + (started + "\n\n" if started else "") + "Here is the conversation so far.\n\n--- transcript ---\n"
+    # AND HOW RECENT REPLIES ENDED, so the closing line really varies: no call can vary against drafts it never saw.
+    try:
+        endings = store.recent_endings(space, exclude_zcid=zcid)
+    except Exception:                            # noqa: BLE001 — a nicety, never a draft's blocker
+        endings = []
+    ended = ("" if not endings else
+             "Other replies this business wrote lately ended like this. If you close with a line about the "
+             "business, say something different from all of them, in different words, about a different thing:\n"
+             + "\n".join(f"- {e}" for e in endings) + "\n\n")
+    prompt = (voice + ended + (started + "\n\n" if started else "")
+              + "Here is the conversation so far.\n\n--- transcript ---\n"
               + "\n".join(lines)
               + "\n--- end of transcript ---\n\nWrite the business's next reply, as the business's owner.")
     return prompt
@@ -801,6 +814,20 @@ def sweep(space: str, *, new_only: bool = False, platforms: tuple | None = None)
     # New messages still come first, and all three share the one spend bound.
     rechecked = rewritten = 0
     left = 0 if new_only else cap - len(waiting)
+    # FIRST, THE DRAFTS A PERSON ASKED TO HAVE REWRITTEN (inbox.propose_rewrite_drafts, approved): their own AI's
+    # included, each once, then off the list. One no longer waiting (sent, discarded, answered) simply leaves it.
+    asked = store.requested_rewrites(space) if left > 0 else []
+    if asked:
+        rows = {str(r["id"]): r for r in store.rows_to_rewrite(space, asked)}
+        store.done_rewriting(space, [i for i in asked if i not in rows])
+        for did in [i for i in asked if i in rows and not _resting(f"{space}:asked:{i}")][:left]:
+            if rewrite_one(space=space, row=rows[did]):
+                rewritten += 1
+                store.done_rewriting(space, [did])
+                _worked(f"{space}:asked:{did}")
+            else:
+                _failed(f"{space}:asked:{did}", "requested rewrite")
+            left -= 1
     if left > 0:
         try:
             stale = store.stale_waiting(space, email_rules=rules("email"), dms_rules=rules("dm"),

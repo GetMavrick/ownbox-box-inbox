@@ -355,7 +355,9 @@ def waiting(limit=None):
         "drafts_ready": [{"conversation": d.get("zcid"), "who": d.get("participant"),
                           "channel": d.get("platform"), "they_said": d.get("asked"),
                           "they_said_at": d.get("asked_at"), "draft": d.get("body"),
-                          "draft_id": d.get("id")} for d in ready],
+                          "draft_id": d.get("id"),
+                          "written_by": "your own AI, through the connector" if d.get("kept") else "your Ownbox"}
+                         for d in ready],
         "note": ("waiting means their message was the last one; a conversation an automation is "
                  "running is not counted. drafts_ready are replies written and not yet sent, "
                  "oldest first: nothing here has been sent"),
@@ -977,6 +979,31 @@ def propose_discard_draft(id=None, seat=None):
                         f"Throw away the reply to {who}", seat)
 
 
+def propose_rewrite_drafts(drafts=None, seat=None):
+    """Ask the owner to have written replies rewritten under the current settings: some, or all of them."""
+    from marketing.customer_voice.drafter import store as _drafts
+    ready = _drafts.waiting(_space(), limit=1000)
+    want = str(drafts or "").strip()
+    if not want:
+        return {"asked": False, "error": "give drafts: 'all', or draft ids from waiting's drafts_ready, by commas"}
+    if want.lower() == "all":
+        pick = ready
+    else:
+        ids = {x.strip() for x in want.split(",") if x.strip()}
+        pick = [d for d in ready if str(d["id"]) in ids]
+    if not pick:
+        return {"asked": False, "note": "none of those replies is waiting; see waiting's drafts_ready"}
+    kept = sum(1 for d in pick if d.get("kept"))
+    n = len(pick)
+    words = {"Rewrite": f"{n} written repl{'y' if n == 1 else 'ies'}, not yet sent",
+             "What that means": ("Each is written again under your current settings (reply style, your business "
+                                 "description), a few every two minutes. Nothing is sent."
+                                 + (f" {kept} of them were written by your own AI; they are rewritten too."
+                                    if kept else ""))}
+    return _ask_control("rewrite_drafts", {"draft_ids": [str(d["id"]) for d in pick]}, {"Change": words["Rewrite"],
+                        **words}, f"Rewrite {n} written repl{'y' if n == 1 else 'ies'}", seat)
+
+
 def propose_opt_out(id=None, seat=None):
     """Ask the owner to mark one person as opted out: nothing is ever sent to them again."""
     from marketing.customer_voice.inbox import store
@@ -1260,6 +1287,14 @@ def _run_control(detail: dict) -> dict:
                                                 if n else "") + "Mail from these addresses is filed as sent: "
                 + (", ".join(got["addresses"]) or "none") + "."
                 + (f" New mail from {', '.join(gone)} will be treated like any other sender." if gone else "")}
+    if action == "rewrite_drafts":
+        from marketing.customer_voice.drafter import store as _drafts
+        ids = [str(i) for i in detail.get("draft_ids") or [] if str(i or "").strip()]
+        if not ids:
+            return {"ok": False, "text": "Not changed: no replies were named."}
+        _drafts.request_rewrites(_space(), ids, by=_who_approved())
+        return {"ok": True, "text": f"Done. {len(ids)} written repl{'y is' if len(ids) == 1 else 'ies are'} being "
+                                    "rewritten under your current settings, a few every two minutes."}
     if action == "channel_mode":
         from marketing.customer_voice.inbox import answering
         try:
@@ -1431,6 +1466,19 @@ tools.register(
                 "until the owner approves.",
     args={"id": {"type": "string", "required": True,
                  "description": "The conversation id from waiting's drafts_ready."}},
+)
+
+tools.register(
+    "propose_rewrite_drafts",
+    title="Ask before rewriting written replies",
+    fn=propose_rewrite_drafts, machine=MACHINE, min_role="act", render=_render_proposal,
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to have replies already written, and not yet sent, written again under the current "
+                "settings (reply style, the business description): 'all', or some by draft id. Replies the owner's "
+                "own AI wrote are rewritten too, which the box never does on its own. Each is rewritten once, a few "
+                "every two minutes; nothing is sent. Nothing changes until the owner approves.",
+    args={"drafts": {"type": "string", "required": True,
+                     "description": "'all', or draft ids from waiting's drafts_ready, separated by commas."}},
 )
 
 tools.register(

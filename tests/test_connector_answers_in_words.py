@@ -238,6 +238,7 @@ def fixtures() -> dict:
         "inbox.propose_discard_draft": {"asked": False, "note": "no written reply is waiting for that conversation"},
         "inbox.propose_opt_out": asked,
         "inbox.propose_business_addresses": asked,
+        "inbox.propose_rewrite_drafts": asked,
         "aeo.status": {"ready": False, "missing": ["a signed-in AI account (System Settings → AI account)"],
                        "ai": {"state": "no_ai_key", "note": "no AI key"}, "articles_a_week": 3, "paused": False,
                        "published_last_7_days": 1, "left_this_week": 2,

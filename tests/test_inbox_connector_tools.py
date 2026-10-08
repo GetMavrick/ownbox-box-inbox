@@ -92,7 +92,9 @@ PROPOSE_TOOLS = ("inbox.propose_reply", "inbox.propose_drafts",
                  # saved replies (#1821): one added from a chat, on one tap
                  "inbox.propose_saved_reply",
                  # the business's other addresses (2026-10-07): added or removed from a chat, on one tap
-                 "inbox.propose_business_addresses")
+                 "inbox.propose_business_addresses",
+                 # written replies rewritten under today's settings (OSDev1 2026-10-08), on one tap
+                 "inbox.propose_rewrite_drafts")
 
 
 def test_the_inbox_is_actually_offered():
