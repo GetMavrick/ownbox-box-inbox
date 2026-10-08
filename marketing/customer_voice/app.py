@@ -5264,8 +5264,17 @@ def _ai_home() -> str:
 # THE ROUTE IS `/inbox/waiting` WHILE THE TAB SAYS DRAFTS. `/inbox/drafts` is already taken by
 # the AI-account form (§2.6) — a misnamed route from before this screen existed. Renaming it
 # today would break a link somebody may already have; it should move, in its own change.
-def _draft_card(d: dict, n: int, pitched: bool = False) -> str:
+def _draft_card(d: dict, n: int, pitched: bool = False, rewriting: bool = False) -> str:
     asked = str(d.get("asked") or "").strip()
+    # ITS FOOT: who wrote it when that was the owner's own AI (the box never rewrites those by itself, so this is the
+    # way to), and "Rewrite with current settings", which posts to its own route, never to Send (OSDev1, 2026-10-08).
+    foot = ('<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:-6px 0 4px">'
+            + ('<span class="tag">Written by your own AI</span>' if d.get("kept") else "")
+            + ('<span class="quiet">Being rewritten under your current settings.</span>' if rewriting else
+               '<button type="submit" class="ghost txt" formaction="/inbox/waiting/rewrite" formnovalidate '
+               f'name="draft" value="{_esc(str(d["id"]))}" style="min-height:48px;padding:0">'
+               'Rewrite with current settings</button>')
+            + '</div>')
     return (
         f'<div class="card dcard" style="margin-top:12px">'
         f'<label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">'
@@ -5288,7 +5297,7 @@ def _draft_card(d: dict, n: int, pitched: bool = False) -> str:
         f'<span class="quiet" style="display:block;margin-top:8px">'
         f'<a href="/inbox/inbox/{_esc(str(d["zcid"]))}" style="color:var(--href)">'
         f'Open the conversation to edit it</a></span>'
-        f'</span></label></div>')
+        f'</span></label>' + foot + '</div>')
 
 
 def _pitch_tick(rows: list, pitched: set) -> str:
@@ -5299,6 +5308,33 @@ def _pitch_tick(rows: list, pitched: set) -> str:
     return ('<p style="margin:12px 0 0"><button type="button" class="btn" style="min-height:48px" '
             'onclick="document.querySelectorAll(\'input[data-pitch]\').forEach(function(c){c.checked=true})">'
             f'Tick all {k} cold {"pitch" if k == 1 else "pitches"}</button></p>')
+
+
+@blueprint.route("/inbox/waiting/rewrite", methods=["POST"])
+def r_waiting_rewrite():
+    """REWRITE WITH CURRENT SETTINGS (OSDev1, 2026-10-08, from the owner's drafts that kept an old closing line): one
+    waiting reply, or all of them, go on the drafter's rewrite list (drafter/store.request_rewrites, #2057), the same
+    list inbox.propose_rewrite_drafts fills on the owner's approval. The sweep writes each again under the current
+    settings, a few every two minutes, the owner's own AI's included. NOTHING HERE SENDS: this route never reads the
+    ticks, so a tap on Rewrite inside the send form can't send a reply."""
+    from marketing.customer_voice.drafter import store as drafts
+    gate = _gate()
+    if gate is not None:
+        return gate
+    try:
+        u = dash.session_user(request) or {}
+    except Exception:                                    # noqa: BLE001 — cannot say who: nothing changes
+        u = {}
+    if not u.get("id"):
+        return redirect("/inbox/waiting", code=303)
+    space = _space()
+    queued = set(drafts.requested_rewrites(space))
+    ready = [str(d["id"]) for d in drafts.waiting(space, limit=200) if str(d["id"]) not in queued]
+    want = str(request.form.get("draft") or "").strip()
+    ids = ready if request.form.get("all") else [i for i in ready if i == want]
+    if ids:
+        drafts.request_rewrites(space, ids, by=str(u["id"]))
+    return redirect(f"/inbox/waiting?rewriting={len(ids)}", code=303)
 
 
 @blueprint.route("/inbox/waiting", methods=["GET", "POST"])
@@ -5387,14 +5423,33 @@ def r_waiting():
 
     pitched = drafts.pitch_backs(space)
     n = len(rows)
+    rewriting = set(drafts.requested_rewrites(space))
+    try:
+        asked_for = int(request.args.get("rewriting") or 0)
+    except ValueError:
+        asked_for = 0
+    if asked_for and not note:
+        note = (f'<div class="card"><p><b>Rewriting {asked_for} {"reply" if asked_for == 1 else "replies"}.</b> Each is '
+                'written again under your current settings, a few every two minutes. Nothing is sent.</p></div>')
+    left = sum(1 for d in rows if str(d["id"]) not in rewriting)
+    # REWRITE THEM ALL WITH THE CURRENT SETTINGS (OSDev1, 2026-10-08): its own form, above the list, so it never sends.
+    rewrite_all = ('<form method="post" action="/inbox/waiting/rewrite" style="margin:12px 0 0">'
+                   '<input type="hidden" name="all" value="1">'
+                   '<button type="submit" class="ghost txt" style="min-height:48px;padding:0">'
+                   + (f'Rewrite {"it" if n == 1 else f"all {n}"}' if left == n else f'Rewrite the other {left}')
+                   + ' with current settings</button>'
+                   '<span class="quiet" style="display:block;margin:0">Written again under your reply style and business '
+                   'description, a few every two minutes. Nothing is sent.</span></form>') if left else ""
     body = (f'<h1>{n} {"reply" if n == 1 else "replies"} to send.</h1>'
             '<p class="quiet">Your box wrote these. Read them, tick the ones you are happy with, '
             'and send. Nothing goes out until you press the button — and anything you want to '
             'change, open the conversation and edit it there.</p>'
             + note
+            + rewrite_all
             + '<form method="post">'
             + _pitch_tick(rows, pitched)
-            + "".join(_draft_card(d, i, str(d.get("in_reply_to")) in pitched) for i, d in enumerate(rows, 1))
+            + "".join(_draft_card(d, i, str(d.get("in_reply_to")) in pitched, str(d["id"]) in rewriting)
+                      for i, d in enumerate(rows, 1))
             + '<p style="margin:18px 0 0"><button class="btn" type="submit">'
               'Send the ones I ticked</button></p></form>'
             + '<div class="foot"><a href="/inbox/inbox">← All conversations</a></div>')

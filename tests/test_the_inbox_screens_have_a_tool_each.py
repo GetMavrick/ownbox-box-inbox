@@ -40,6 +40,8 @@ TOOLS = {
     "/inbox/api/conversations/<path:zcid>/messages": ("inbox.propose_reply",),
     "/inbox/api/conversations/<path:zcid>/draft/discard": ("inbox.propose_discard_draft",),
     "/inbox/waiting": ("inbox.propose_drafts", "inbox.propose_discard_draft"),
+    # rewrite one waiting reply, or all, under the current settings (2026-10-08)
+    "/inbox/waiting/rewrite": ("inbox.propose_rewrite_drafts",),
     "/inbox/drafts": ("inbox.propose_drafting",),
     "/inbox/signature": ("inbox.propose_signature",),
     "/inbox/pitch-back": ("inbox.propose_pitch_back",),
