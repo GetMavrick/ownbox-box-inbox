@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import html
 import re
+from datetime import datetime, timezone
 
 from core import brain, cost_guard
 from core.logging import get_logger
@@ -657,6 +658,43 @@ def periodic(*, new_only: bool = False, platforms: tuple | None = None) -> dict:
     return {"drafted": drafted}
 
 
+# A MESSAGE THAT KEEPS FAILING IS SET ASIDE FOR A WHILE, NOT RETRIED EVERY SWEEP (owner, 2026-10-08, the rewrites of
+# #2054 stalled on his box before an investor demo: "It's still writing that human approval thing every single
+# time"). The queues are oldest first and capped, so one draft or rewrite that fails every time (a model that will
+# not answer that message, a row that cannot be written) would take the same slot every sweep and hold up everything
+# behind it: the head-block of 2026-09-22 by a new road. One failure is retried next sweep as always (a reply's
+# speed matters more than a model's passing hiccup); three in a row rest it for 15 sweeps (half an hour at the
+# default two minutes), counted in this process only. A success clears the count.
+_FAILS_TO_REST = 3
+_REST_SWEEPS = 15
+_FAILS: dict = {}
+_RESTING: dict = {}
+_SWEEPS = [0]
+
+
+def _resting(key: str) -> bool:
+    at = _RESTING.get(key)
+    if at is None:
+        return False
+    if _SWEEPS[0] - at >= _REST_SWEEPS:
+        _RESTING.pop(key, None)
+        return False
+    return True
+
+
+def _failed(key: str, what: str) -> None:
+    _FAILS[key] = _FAILS.get(key, 0) + 1
+    if _FAILS[key] >= _FAILS_TO_REST:
+        _FAILS.pop(key, None)
+        _RESTING[key] = _SWEEPS[0]
+        log.warning("drafter.set_aside", extra={"what": what, "after_failures": _FAILS_TO_REST,
+                                                "for_sweeps": _REST_SWEEPS})
+
+
+def _worked(key: str) -> None:
+    _FAILS.pop(key, None)
+
+
 # How far past the cap the sweep looks for real people. Twenty is generous on purpose: in the
 # owner's own mailbox 81% of inbound is automated, so scanning only `cap` rows would usually
 # find nobody at all.
@@ -670,6 +708,7 @@ def sweep(space: str, *, new_only: bool = False, platforms: tuple | None = None)
     this machine may both think and send. The separation is enforced in
     `tests/test_customer_voice.py`, not merely intended.
     """
+    _SWEEPS[0] += 1
     said = channel_drafting()
     skip = tuple(ch for ch, on in said.items() if not on)          # the channels set to Leave to me
     if not enabled():                                               # box-wide off: only channels switched on alone
@@ -721,7 +760,7 @@ def sweep(space: str, *, new_only: bool = False, platforms: tuple | None = None)
         # this is the same class of event and it gets the same treatment.
         log.info("drafter.not_a_person", extra={"space": space, "refused": refused,
                                                 "considered": len(waiting)})
-    waiting = people[:cap]
+    waiting = [r for r in people if not _resting(f"{space}:new:{r['inbound_id']}")][:cap]
 
     drafted = 0
     for row in waiting:
@@ -729,9 +768,15 @@ def sweep(space: str, *, new_only: bool = False, platforms: tuple | None = None)
             history = store.history_for(space, row["zcid"])
         except Exception:                        # noqa: BLE001 — draft on the inbound alone
             history = []
+        key = f"{space}:new:{row['inbound_id']}"
         if draft_one(space=space, zcid=row["zcid"], in_reply_to=row["inbound_id"],
                      inbound=row.get("inbound_body") or "", history=history, platform=row.get("platform")):
             drafted += 1
+            _worked(key)
+        elif store.for_inbound(space, row["inbound_id"]) is None:    # nothing written, not even "no reply"
+            _failed(key, "draft")
+        else:
+            _worked(key)
     # A SWEEP THAT LOOKED AT WORK AND DID NONE OF IT SAYS SO, OUT LOUD. This is the alarm that was
     # missing when the drafter sat head-blocked for seven hours on the owner's own box: every
     # early-out inside `draft_one` is individually reasonable and individually quiet, so the sweep
@@ -744,13 +789,33 @@ def sweep(space: str, *, new_only: bool = False, platforms: tuple | None = None)
     # THEN THE STALE ONES, with whatever the spend bound has left (owner, 2026-10-04: drafts still waiting are
     # rewritten when the drafter changes). New messages come first: a person waiting on a first draft beats a
     # draft that only needs better words.
-    # THEN A "NO REPLY NEEDED" MADE UNDER OLDER RULES, asked once more (owner, 2026-10-06: "slightly error on the side
-    # of drafting too many"): someone with no draft at all comes before a draft that only needs better words.
+    # LAST, A "NO REPLY NEEDED" MADE UNDER OLDER RULES, asked once more (owner, 2026-10-06: "slightly error on the side
+    # of drafting too many").
     # NEW MESSAGES ONLY, FROM THE 20-SECOND LISTENER (OSDev1's review of #2037): it drafts what just came in on the
     # channels that answer on their own, and nothing more. Re-checks and rewrites stay on this periodic's own two
     # minutes, so a fast listener never runs them six times as often on the buyer's own AI limit.
-    rechecked = 0
+    # THEN THE DRAFTS WAITING ON A PERSON, REWRITTEN UNDER TODAY'S RULES, BEFORE OLD "NO REPLY" CALLS ARE ASKED AGAIN
+    # (owner, 2026-10-08, his demo day: the drafts waiting on him kept the old closing line for hours after #2054,
+    # because a style change made every "no reply needed" of the last 30 days look stale too, and their re-checks
+    # took every slot). A waiting draft is the one a person reads next; a re-check of an old call is a second look.
+    # New messages still come first, and all three share the one spend bound.
+    rechecked = rewritten = 0
     left = 0 if new_only else cap - len(waiting)
+    if left > 0:
+        try:
+            stale = store.stale_waiting(space, email_rules=rules("email"), dms_rules=rules("dm"),
+                                        by_channel=_rules_by_channel(), limit=left * _SCAN_MULTIPLE)
+        except Exception as e:                   # noqa: BLE001 — a box without the table yet
+            log.warning("drafter.stale_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:120]})
+            stale = []
+        stale = [r for r in stale if not _resting(f"{space}:rewrite:{r['id']}")][:left]
+        for row in stale:
+            if rewrite_one(space=space, row=row):
+                rewritten += 1
+                _worked(f"{space}:rewrite:{row['id']}")
+            else:
+                _failed(f"{space}:rewrite:{row['id']}", "rewrite")
+        left -= len(stale)
     if left > 0:
         try:
             again = store.stale_no_reply(space, email_rules=rules("email"), dms_rules=rules("dm"),
@@ -765,27 +830,35 @@ def sweep(space: str, *, new_only: bool = False, platforms: tuple | None = None)
                 store.mark_rules(space, row["id"], rules(row.get("platform")))   # never holds the queue
             else:
                 people_again.append(row)
-        again = people_again[:left]
-        for row in again:
+        for row in people_again[:left]:
             if recheck_one(space=space, row=row):
                 rechecked += 1
-        left -= len(again)
-    rewritten = 0
-    if left > 0:
-        try:
-            stale = store.stale_waiting(space, email_rules=rules("email"), dms_rules=rules("dm"),
-                                        by_channel=_rules_by_channel(), limit=left)
-        except Exception as e:                   # noqa: BLE001 — a box without the table yet
-            log.warning("drafter.stale_unreadable", extra={"error": f"{type(e).__name__}: {e}"[:120]})
-            stale = []
-        for row in stale:
-            if rewrite_one(space=space, row=row):
-                rewritten += 1
     if waiting and not drafted:
         log.warning("drafter.sweep_wrote_nothing",
                     extra={"space": space, "considered": len(waiting),
                            "oldest": str(waiting[-1].get("inbound_at") or "")[:19],
                            "platforms": ",".join(sorted({str(r.get("platform") or "?")
                                                          for r in waiting}))})
-    return {"status": "ok", "drafted": drafted, "considered": len(waiting), "rechecked": rechecked,
-            "rewritten": rewritten}
+    out = {"status": "ok", "drafted": drafted, "considered": len(waiting), "rechecked": rechecked,
+           "rewritten": rewritten}
+    if not new_only:
+        _said_out_loud(space, out)
+    return out
+
+
+def _said_out_loud(space: str, out: dict) -> None:
+    """THE LAST SWEEP, WHERE ANYONE CAN READ IT (OSDev1, 2026-10-08: "Add the sweep's counts ... so next time nobody
+    needs a log"; a customer box has no ops shell by design). Box setting `inbox / drafter.last_sweep`, which
+    inbox.status reads: what it wrote, rewrote and re-checked, how many waiting drafts are still to be rewritten, and
+    how many it has set aside. Never raises."""
+    try:
+        behind = len(store.stale_waiting(space, email_rules=rules("email"), dms_rules=rules("dm"),
+                                         by_channel=_rules_by_channel(), limit=500))
+        from core import box_settings
+        box_settings.put("inbox", "drafter.last_sweep", {
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "space": space,
+            "drafted": out["drafted"], "rewritten": out["rewritten"], "rechecked": out["rechecked"],
+            "considered": out["considered"], "still_to_rewrite": behind,
+            "set_aside": sum(1 for k in _RESTING if k.startswith(f"{space}:") and _resting(k))}, set_by="drafter")
+    except Exception as e:                       # noqa: BLE001 — a report never stops a sweep
+        log.info("drafter.last_sweep_unrecorded", extra={"error": type(e).__name__})

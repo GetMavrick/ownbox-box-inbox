@@ -407,7 +407,20 @@ def status():
         "channels": _channels_seen(space),
         "connections": _connections(),
         "handled_by_automations": _held(space, MAX_LIMIT),
+        "drafter_last_sweep": _last_sweep(),
     }
+
+
+def _last_sweep() -> dict:
+    """The drafter's last two-minute sweep as it recorded it (drafter/draft._said_out_loud): when, what it wrote,
+    rewrote and re-checked, how many waiting drafts are still to be rewritten, how many it set aside. {} before the
+    first one. Read by key: this directory may not import the drafter."""
+    from core import box_settings
+    try:
+        got = box_settings.get("inbox", "drafter.last_sweep", default=None)
+    except Exception:                                    # noqa: BLE001 — a status line, never a failed tool
+        return {}
+    return got if isinstance(got, dict) else {}
 
 
 def settings():
@@ -534,6 +547,10 @@ def _render_status(r: dict) -> str:
                         "and send.",
                   "off": "Writing replies is off."}.get(writing, "Whether the box is writing replies could not be "
                                                                   "read just now."))
+    behind = int((r.get("drafter_last_sweep") or {}).get("still_to_rewrite") or 0)
+    if writing == "on" and behind:
+        lines.append(f"{say.n(behind)} written {'reply is' if behind == 1 else 'replies are'} being rewritten under "
+                     "your latest settings, a few every two minutes.")
     lines.append(f"Sent this hour: {say.n(r.get('sent_this_hour') or 0)} of the "
                  f"{say.n(r.get('hourly_send_cap') or 0)} allowed.")
     waiting = int(r.get("waiting_on_you") or 0)
