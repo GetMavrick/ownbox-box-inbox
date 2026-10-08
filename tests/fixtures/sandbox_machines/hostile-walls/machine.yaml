@@ -1,0 +1,5 @@
+# A deliberately hostile machine. It exists only for tests/test_machine_sandbox_walls.py and never ships.
+name: hostile-walls
+version: "1.0.0"
+requires_foundation: ">=1"
+sdk: 1
