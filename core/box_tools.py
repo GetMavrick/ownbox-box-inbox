@@ -453,6 +453,105 @@ tools.register(
     description="Ask the owner to start this box again after a stop. Nothing changes until the owner approves.",
 )
 
+# ── YOUR BUSINESS, IN YOUR OWN WORDS ─────────────────────────────────────────────────────────────────────────────
+# Owner, 2026-10-08: "we also want the owners to be able to paste in a big paragraph of text which takes precedence
+# over everything else". Their AI can read it and ask to replace it; only the owner's yes on Approvals changes it.
+WORDS_KIND = "business_words"
+WORDS_SCREEN = "/settings/business"
+WORDS_MEANS = ("everything your Ownbox writes starts from these words: replies, the Morning Review and your website's "
+               "articles. Where anything it read on your website says otherwise, these win. Anything here may be said "
+               "to a customer. Replies waiting to be sent are rewritten in them.")
+
+
+def business_words():
+    """What the box says about the business, and whose words they are."""
+    from core import business_context
+    return business_context.words()
+
+
+def _render_words(r: dict) -> str:
+    text, whose = str(r.get("text") or ""), r.get("from")
+    head = ("Your business, in your own words, which everything your Ownbox writes starts from:" if whose == "you" else
+            "Your Ownbox has a first draft from your website, and nothing in your own words yet. Replace it with your "
+            "own and everything it writes starts from them:" if whose == "your website" else
+            "Nothing is written about your business yet. Paste a paragraph in your own words and everything your "
+            "Ownbox writes starts from it.")
+    body = [head] + ([text] if text else []) + [f"Change it on Your business: {say.link(WORDS_SCREEN)}"]
+    return say.answer("\n\n".join(body), say.ask_next(("core.propose_business_words", "Replace it with my words")))
+
+
+def propose_business_words(words=None, clear=False, seat=None):
+    """Ask the owner to replace the business's description with these words, or to clear their own."""
+    from core import approvals, business_context
+    if clear in (True, "true", "yes", 1):
+        if business_context.words()["from"] != "you":
+            return {"asked": False, "note": "there are no words of the owner's to clear"}
+        text, title = "", "Clear your business in your own words"
+        shown = {"Change": title, "Means": "your Ownbox goes back to a first draft from what it read on your website"}
+    else:
+        try:
+            text = business_context.clean_words(words)
+        except ValueError as e:
+            return {"asked": False, "note": str(e)}
+        if not text:
+            return {"asked": False, "note": "no words were given: send the paragraph to use, as it should read"}
+        if text == business_context.own_words():
+            return {"asked": False, "note": "those are already the business's own words, word for word"}
+        title = "Replace your business, in your own words"
+        shown = {"Change": title, "New words": text, "Means": WORDS_MEANS}
+    a = approvals.propose(WORDS_KIND, machine=MACHINE, title=title,
+                          detail={"app": "Your business", "arguments": shown, "words": text, "clear": not text},
+                          seat_id=str((seat or {}).get("label") or (seat or {}).get("id") or ""))
+    return {"asked": True, "approval": a["id"], "repeat": bool(a.get("repeat")),
+            "note": "waiting for the owner, who approves or declines in the mobile app. Nothing has changed yet."}
+
+
+def _run_words(detail: dict) -> dict:
+    from core import approvals, business_context
+    by = f"approval:{approvals.decider() or 'owner'}"
+    try:
+        business_context.set_words("" if (detail or {}).get("clear") else (detail or {}).get("words"), by=by)
+    except ValueError as e:
+        return {"ok": False, "text": f"Not changed: {e}"}
+    if (detail or {}).get("clear"):
+        return {"ok": True, "text": "Done. Your own words are cleared, and your Ownbox works from what it read on "
+                                    "your website."}
+    return {"ok": True, "text": "Done. Everything your Ownbox writes now starts from your own words, and replies "
+                                "waiting to be sent are being rewritten in them."}
+
+
+_approvals.register_kind(WORDS_KIND, run=_run_words)
+
+
+def _render_words_ask(r: dict) -> str:
+    return say.proposal(r, ("core.business_words", "What does my Ownbox say about my business?"))
+
+
+tools.register(
+    "business_words",
+    title="Read your business, in your own words",
+    fn=business_words, machine=MACHINE, min_role="read", render=_render_words, capability="read:manifest",
+    description="The business described in the owner's own words (up to 5,000 characters), which everything the box "
+                "writes starts from and which wins over anything the box read on the business's website. `from` says "
+                "whose words they are: the owner's, or a first draft the box wrote from the website.",
+)
+
+tools.register(
+    "propose_business_words",
+    title="Ask before replacing your business, in your own words",
+    fn=propose_business_words, machine=MACHINE, min_role="act", render=_render_words_ask,
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to replace how the business is described, with words they gave you: their mission, what "
+                "they sell, why they're different, who it's for, up to 5,000 characters. Send their words as they "
+                "should read, never your own summary of them. Everything the box writes then starts from these words, "
+                "and anything in them may be said to a customer. Or clear=true to go back to the box's first draft "
+                "from the website. Nothing changes until the owner approves.",
+    args={"words": {"type": "string", "required": False,
+                    "description": "The paragraph to use, as the owner wrote it. Line breaks are kept."},
+          "clear": {"type": "boolean", "required": False,
+                    "description": "true to clear the owner's words instead."}},
+)
+
 # WHAT NEEDS THE OWNER TODAY includes a box that is not well (core/connector/prompts.py; the ask is registered in
 # core/report_tools.py beside the review it reads first).
 prompts.use("what_needs_me", "core.health", "whether the box itself is running, and anything on it that is "

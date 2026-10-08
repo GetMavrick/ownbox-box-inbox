@@ -186,6 +186,9 @@ def fixtures() -> dict:
                        "vendors_note": None},
         "core.propose_stop": asked,
         "core.propose_start": {"asked": False, "note": "the box is already running"},
+        "core.business_words": {"text": "We give a business's AI agents one place to work beside its team.",
+                                "from": "you", "max": 5000},
+        "core.propose_business_words": asked,
         "morning_review.report_day": REVIEW,
         "morning_review.report_days": {"days": [DAY, "2026-10-01", "2026-09-30"], "count": 3},
         "morning_review.report_trend": {

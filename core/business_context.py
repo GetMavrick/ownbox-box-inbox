@@ -51,8 +51,20 @@ CUSTOMER_KINDS = ("locals", "families", "professionals", "businesses", "tourists
 STAGES = ("just starting", "growing", "established")
 TEAM_SIZES = ("just me", "2-5", "6-20", "more than 20")
 
-TEXT = {"name": 120, "area": 300, "hours": 300, "description": 600, "customers": 300}
+TEXT = {"name": 120, "area": 300, "hours": 300, "customers": 300}
 LISTS_MAX = 50
+# YOUR BUSINESS, IN YOUR OWN WORDS. Owner, 2026-10-08: "we also want the owners to be able to paste in a big paragraph
+# of text which takes precedence over everything else ... one big open field would probably be the best rather than a
+# bunch of little entries", and yes to it driving the website's articles too and to the screen saying "Anything here
+# may be said to a customer." Kept as `description`, the field it grew out of, so every box keeps what it has. It is
+# read FIRST by everything the box writes (core/brain.knowledge_context, the Inbox's drafter), and where anything else
+# the box knows says otherwise, it wins.
+WORDS_MAX = 5000
+SUGGESTED_DESCRIPTION_MAX = 600                          # a home page's own short description, as the light scan reads it
+# SMART FROM DAY ONE, NEVER THE OWNER'S WORDS BY MISTAKE: the text the box last wrote into the field itself, from the
+# website read. While the field still holds exactly that, it is the box's first draft: the screen says so, the next
+# weekly read may rewrite it, and nothing treats it as the owner's. The moment a person changes it, it is theirs.
+WORDS_DRAFT = "_words_draft"
 
 # WHAT STILL LIVES IN A MACHINE'S OWN SETTINGS, read through until C5 moves the machine onto the context.
 LEGACY = {"website": ("seo", "site_url"), "competitors": ("seo", "competitors")}
@@ -168,9 +180,23 @@ def _month(value) -> str:
     return v
 
 
+def clean_words(value) -> str:
+    """The owner's own words as they pasted them: line breaks kept (a pasted list stays a list), spaces inside a line
+    collapsed, at most one blank line in a row. Raises ValueError, in a sentence a person can act on, past WORDS_MAX:
+    cutting the end off what someone pasted would lose the part they wrote last, silently."""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(" ".join(line.split()) for line in text.split("\n"))).strip()
+    if len(text) > WORDS_MAX:
+        raise ValueError(f"That is {len(text):,} characters, and your own words hold up to {WORDS_MAX:,}. Shorten it "
+                         "and save again.")
+    return text
+
+
 def _clean(field: str, value):
     if field == "website":
         return clean_website(value)
+    if field == "description":
+        return clean_words(value)
     if field in TEXT:
         return " ".join(str(value or "").split())[:TEXT[field]]
     if field == "industry":
@@ -252,7 +278,78 @@ def confirm_suggested(*, by: str) -> dict:
                 filled[field] = put(field, s[field], by=by)
             except ValueError:
                 continue
+    if filled.get("description"):                        # the site's own words, not the owner's: a first draft
+        box_settings.put(NS, WORDS_DRAFT, filled["description"], set_by=str(by)[:80])
     return filled
+
+
+# ── your business, in your own words ──────────────────────────────────────────────────────────────────────────────
+def own_words() -> str:
+    """The owner's own words about the business, or "" when there are none: the field is empty, or it still holds the
+    first draft the box wrote from the website (which says nothing the website read doesn't already carry, and is not
+    theirs to be held to). What every writer on the box reads first. Never raises."""
+    try:
+        text = str(get().get("description") or "")
+        return "" if not text or text == box_settings.get(NS, WORDS_DRAFT, default=None) else text
+    except Exception:                                    # noqa: BLE001 — a description never costs a reply
+        return ""
+
+
+def words() -> dict:
+    """For a screen or a tool: {"text", "from": "you" | "your website" | "", "max"}. Never raises."""
+    try:
+        text = str(get().get("description") or "")
+    except Exception:                                    # noqa: BLE001
+        text = ""
+    mine = own_words()
+    return {"text": text, "from": "you" if mine else ("your website" if text else ""), "max": WORDS_MAX}
+
+
+def set_words(text, *, by: str) -> str:
+    """A person's own words, made theirs even when they match the box's draft word for word (they chose it). An empty
+    text goes back to the first draft from the website read. -> the words as stored. Raises ValueError."""
+    v = put("description", text, by=by)
+    box_settings.put(NS, WORDS_DRAFT, None, set_by=str(by)[:80])
+    if not v:
+        draft_words()
+    return v
+
+
+def _words_from_site(profile: list[dict]) -> str:
+    """The first draft: the home page's own short description, then what the site says under each heading, word for
+    word. Only quoted words, so it can say nothing the business didn't. "" when the site gave nothing."""
+    head = str((get().get("suggested") or {}).get("description") or "").strip()
+    parts = [head] if head else []
+    for field, heading, _ in PROFILE_FIELDS:
+        lines = [x["line"] for x in profile if x.get("field") == field and x.get("line")]
+        if lines:
+            parts.append(heading + "\n" + "\n".join(f"- {line}" for line in lines))
+    out = ""
+    for part in parts:                                   # whole sections only, within the field's size
+        if len(out) + len(part) + 2 > WORDS_MAX:
+            break
+        out = (out + "\n\n" + part) if out else part
+    return out
+
+
+def draft_words(profile: list[dict] | None = None) -> bool:
+    """SMART FROM DAY ONE: until the owner writes their own, the field holds a first draft from the website read, so a
+    new owner starts from something true, never an empty box. Rewritten after each read while it is still the box's;
+    never once a person has changed it. -> True when it wrote. Never raises."""
+    try:
+        cur = str(get().get("description") or "")
+        if cur and cur != box_settings.get(NS, WORDS_DRAFT, default=None):
+            return False                                 # a person's words: never touched
+        text = _words_from_site(get().get("profile") or [] if profile is None else profile)
+        if not text or text == cur:
+            return False
+        box_settings.put(NS, "description", text, set_by="website read")
+        box_settings.put(NS, WORDS_DRAFT, text, set_by="website read")
+        log.info("business.words_drafted", chars=len(text))
+        return True
+    except Exception as e:                               # noqa: BLE001 — the draft is a nicety, the read stands
+        log.warning("business.words_draft_failed", error=type(e).__name__)
+        return False
 
 
 def reject_suggested(*, by: str) -> None:
@@ -397,7 +494,7 @@ def read_home_page(raw: str, url: str) -> dict:
                if _social_host(s) and "/share" not in s and "sharer" not in s][:10]
     found = {
         "website": url, "name": _html.unescape(name)[:TEXT["name"]],
-        "description": " ".join(_html.unescape(desc).split())[:TEXT["description"]],
+        "description": " ".join(_html.unescape(desc).split())[:SUGGESTED_DESCRIPTION_MAX],
         "area": _area(biz) or _address(biz.get("address")), "hours": _hours(biz), "socials": socials,
     }
     return found if any(found[k] for k in ("name", "description", "area", "hours", "socials")) else {}
@@ -574,6 +671,7 @@ def strike(line: str, *, by: str) -> bool:
     box_settings.put(NS, STRUCK, rows[-STRUCK_MAX:], set_by=str(by)[:80])
     put("profile", keep, by=by)
     _write_profile_file(keep)
+    draft_words(keep)                                    # a line struck as wrong leaves the first draft too
     log.info("business.line_struck", by=str(by)[:40])
     return True
 
@@ -591,6 +689,7 @@ def unstrike(line: str, *, by: str) -> bool:
     if f not in {_fold(p.get("line")) for p in prof}:
         prof = put("profile", prof + [{k: back[k] for k in ("line", "source", "field")}], by=by)
     _write_profile_file(prof)
+    draft_words(prof)
     log.info("business.line_put_back", by=str(by)[:40])
     return True
 
@@ -687,6 +786,7 @@ def full_scan(site: str | None = None, *, think=None, fetch=None) -> dict:
             return {"ok": False, "final": True, "lines": 0,
                     "why": "The box read your website and found no sentence about the business it could quote."}
         brain.write_knowledge(PROFILE_FILE, profile_text(profile, site, _now()[:10]), made_from="your own website")
+        draft_words(profile)
         log.info("business.full_scanned", site=bare_host(site), pages=len(got["pages"]), lines=len(profile))
         return {"ok": True, "why": "", "lines": len(profile)}
     except Exception as e:                               # noqa: BLE001 — a scan that fails says so, never raises

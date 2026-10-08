@@ -75,7 +75,7 @@ print("test_the_drafter_asks_for_that_knowledge")
 src = pathlib.Path(__file__).resolve().parents[1] / "marketing/customer_voice/drafter/draft.py"
 t = src.read_text()
 ok("draft.py passes the business's facts to the model",
-   "knowledge_context()" in t, "the drafter still knows nothing about the business")
+   "knowledge_context(" in t, "the drafter still knows nothing about the business")
 ok("...and stays isolated, so this repo's own context never reaches a customer",
    "isolated=True" in t)
 
