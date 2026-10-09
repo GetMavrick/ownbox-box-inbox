@@ -7,7 +7,8 @@ One section per ruling, each run twice: the switch off (the old screens, every b
 WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED, on either screen:
   · the search pill leaves the bar (#1977), or search stops reading what people wrote;
   · the Unanswered or ad filter is not offered, or does not filter;
-  · the line above the list says how many wait on a reply again, or stops linking the drafts ready to send;
+  · the line above the list says how many wait on a reply again, or stops linking the drafts ready to send (on theirs,
+    the drafts are the Drafts pill in their filter row, with nothing above the list: owner, 2026-10-09);
   · a draft is not offered above the reply box, or loses Send, Edit or Discard;
   · saved replies, their Undo, or the email signature note go missing;
   · someone who said STOP gets a reply box, or the banner that says so is gone, or a send to them is not refused;
@@ -20,6 +21,8 @@ Run: python tests/test_inbox_parity_checklist.py
 """
 from __future__ import annotations
 
+import html
+import json
 import os
 import pathlib
 import re
@@ -127,11 +130,21 @@ for name, on in screens():
         ok(f"[{name}] at 390 the bar's search; at 1280 the bar hides and the page's own comes back",
            bar_390 and ".find-wide{display:none}" in flat and ".find-wide{display:block}" in flat)
 
+def pills_of(lst: str) -> dict:
+    """Theirs: the box's pills as the page hands them to their filter row (app_ui.pills), label -> the pill."""
+    m = re.search(r'<div id="ib-inbox" data-pills="([^"]*)"', lst)
+    return {p["label"]: p for p in json.loads(html.unescape(m.group(1)))} if m else {}
+
+
 print("\nthe Unanswered and ad filters")
 for name, on in screens():
     lst = page("/inbox/inbox")
-    ok(f"[{name}] both filters are offered above the list", 'href="/inbox/inbox?waiting=1"' in lst
-       and 'href="/inbox/inbox?from_ad=1"' in lst, lst[:300])
+    if on:
+        ok(f"[{name}] both filters are offered, in their filter row", {"Unanswered", "Prospects"} <= set(pills_of(lst)),
+           pills_of(lst))
+    else:
+        ok(f"[{name}] both filters are offered above the list", 'href="/inbox/inbox?waiting=1"' in lst
+           and 'href="/inbox/inbox?from_ad=1"' in lst, lst[:300])
     if on:
         def ids(q):
             return {c["id"] for c in (owner.get("/inbox/api/conversations?" + q).get_json() or {})["data"]}
@@ -142,13 +155,17 @@ for name, on in screens():
         ok(f"[{name}] ...and each filters: who is waiting, who came from an ad",
            "Priya Shah" in w and "Tom Becker" not in w and "Tom Becker" in a and "Priya Shah" not in a)
 
-print("\nthe line above the list: the drafts ready, linked (owner, 10-06)")
-for name, _ in screens():
+print("\nthe line above the list: the drafts ready, linked (owner, 10-06); on theirs, the Drafts pill (owner, 10-09)")
+for name, on in screens():
     lst = page("/inbox/inbox")
-    ok(f"[{name}] no waiting count above the list, and the drafts ready to send are a link to them",
-       not any("waiting on" in s for s in re.findall(r'<p class="quiet sum">(.*?)</p>', lst)) and re.search(
-           r'<p class="quiet sum"><a href="/inbox/waiting"><b>\d+ drafts?</b> ready to send</a></p>', lst) is not None,
-       lst[:400])
+    if on:
+        ok(f"[{name}] nothing above their list, and the drafts ready to send are the Drafts pill, with their number",
+           'class="quiet sum"' not in lst and (pills_of(lst).get("Drafts") or {}).get("count", 0) >= 1, pills_of(lst))
+    else:
+        ok(f"[{name}] no waiting count above the list, and the drafts ready to send are a link to them",
+           not any("waiting on" in s for s in re.findall(r'<p class="quiet sum">(.*?)</p>', lst)) and re.search(
+               r'<p class="quiet sum"><a href="/inbox/waiting"><b>\d+ drafts?</b> ready to send</a></p>', lst)
+           is not None, lst[:400])
 
 print("\na draft, with Send, Edit and Discard")
 for name, on in screens():

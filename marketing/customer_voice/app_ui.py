@@ -12,6 +12,8 @@ routes (app_api.py, step 1.2) for everything; the box alone calls Zernio.
 from __future__ import annotations
 
 import hashlib
+import html
+import json
 import pathlib
 import re
 
@@ -153,13 +155,42 @@ def has_conversations(space: str) -> bool:
         return False
 
 
-def pills(space: str, counts: dict, waiting: bool, from_ad: bool, view: str) -> str:
-    """OUR FILTERS ABOVE THEIR LIST: the inbox's own (All, Unanswered, Prospects: app._pills, unchanged), then Done, Trash
-    and Junk. Each list shows only when it holds something or is the one on screen, the rule _pills keeps: a pill that
-    cannot change the screen is not drawn. In Done, Trash or Junk nothing waits, so All is the way back."""
-    from .app import _pills
+# THE PILLS THAT NARROW THE INBOX, and can be on together (box-pills.tsx): Drafts, Unanswered, Prospects.
+NARROWS = (("drafts", "Drafts"), ("waiting", "Unanswered"), ("from_ad", "Prospects"))
+
+
+def drafts_ready(space: str) -> int:
+    """How many conversations in the inbox have a reply waiting: the Drafts pill's number, counted with the same SQL
+    its list uses (store.count_among over drafter.store.waiting), or -1 when the box cannot say."""
+    from .drafter import store as _drafts
     from .inbox import store
-    lists = []
+    try:
+        return store.count_among(space, [str(d["zcid"]) for d in _drafts.waiting(space, limit=1000)])
+    except Exception:                            # noqa: BLE001 — a missing number is not a 500
+        return -1
+
+
+def pills(space: str, counts: dict, waiting: bool, from_ad: bool, view: str, drafts: bool = False) -> list[dict]:
+    """THE BOX'S PILLS, FOR THEIR FILTER ROW (owner, 2026-10-09, on the phone's inbox: "these things should be
+    consolidated right into the slider, horizontal menu, filtering menu"): Drafts, Unanswered and Prospects first, then
+    their platform menu and sort, then Done, Trash and Junk ("Please move done and trash to the very end"). Patch 0010
+    and ownbox/box-pills.tsx draw them.
+
+    DRAFTS IS THE LINE THAT SAT ABOVE THE LIST ("61 drafts ready to send Should be Drafts pill"), now a filter with its
+    number. ALL IS GONE ("All - Delete this one"): the pill that is on turns itself off.
+
+    A PILL THAT CANNOT CHANGE THE SCREEN IS NOT OFFERED, the rule app._pills keeps: each shows when its list holds
+    someone, or while it is on (answering the last one must not take the pill from under the thumb). In Done, Trash or
+    Junk the narrowing pills lead back to the inbox."""
+    from .inbox import store
+    n = {"drafts": drafts_ready(space), "waiting": counts.get("waiting", 0), "from_ad": counts.get("from_ad", 0)}
+    chosen = {"drafts": drafts, "waiting": waiting, "from_ad": from_ad}
+    out = []
+    for key, name in NARROWS:
+        on = chosen[key] and not view
+        if on or n[key] > 0:
+            out.append({"key": key, "label": name, "on": on, **({"count": n[key]} if key == "drafts" and n[key] > 0
+                                                                else {})})
     for key, name in VIEWS:
         on = view == key
         if not on:
@@ -168,23 +199,14 @@ def pills(space: str, counts: dict, waiting: bool, from_ad: bool, view: str) -> 
                     continue
             except Exception:                    # noqa: BLE001 — a list that can't be counted is not offered
                 continue
-        lists.append(f'<a class="chip{" on" if on else ""}" aria-pressed="{"true" if on else "false"}" '
-                     f'href="{"/inbox/inbox" if on else "/inbox/inbox?status=" + key}">{name}</a>')
-    if view:
-        return ('<div class="chips pills"><a class="chip" aria-pressed="false" href="/inbox/inbox">All</a>'
-                + "".join(lists) + "</div>")
-    row = _pills(counts, waiting, from_ad)
-    if not lists:
-        return row
-    if not row:
-        row = '<div class="chips pills"><a class="chip on" aria-pressed="true" href="/inbox/inbox">All</a></div>'
-    return row[:-len("</div>")] + "".join(lists) + "</div>"
+        out.append({"key": key, "label": name, "on": on})
+    return out
 
 
-def inbox_body() -> str:
+def inbox_body(pills: list[dict] | None = None) -> str:
     """THE LIST IS THEIRS (#1990 1.4), with the open thread beside it on a desktop, inside the inbox's own frame: the
     box's menu on a desktop, the bottom bar on a mobile. Selection is in the address (?conversation=account:id), so
-    a link to a conversation opens it."""
+    a link to a conversation opens it. The box's pills (`pills` above) ride on it, for their filter row."""
     css, js = f"/inbox/ui/inbox-ui.css?v={_version('inbox-ui.css')}", f"/inbox/ui/inbox.js?v={_version('inbox.js')}"
     return (f'<link rel="stylesheet" href="{css}">'
             # THE FRAME STOPS RESERVING A SCREEN OF ITS OWN: its layout box is a full screen tall below a header, which
@@ -194,11 +216,22 @@ def inbox_body() -> str:
             # column held one list; this holds the list and the conversation beside it, so the conversation was
             # squeezed under 400px. Up to 1600px, so a wide monitor does not stretch a line across a room.
             '@media (min-width:821px){.ib .wrap{max-width:1600px}}'
+            # ONE ROW OF FILTERS THAT SCROLLS SIDEWAYS (owner, 2026-10-09: "the slider, horizontal menu, filtering
+            # menu"): the box's pills, then their platform menu and sort (patch 0010), running to the card's edges
+            # as it scrolls, its scrollbar hidden as a phone's would be.
+            '#ib-inbox [data-ownbox-filters]{overflow-x:auto;scrollbar-width:none;margin:0 -12px;padding:2px 12px}'
+            '#ib-inbox [data-ownbox-filters]::-webkit-scrollbar{display:none}'
+            '#ib-inbox [data-ownbox-filters]>*{flex:none}'
             # AN EMAIL'S LINKS (render.readable's own <a>) look like links.
             '#ib-inbox .ownbox-mail a,#ib-inbox details a{color:var(--link);text-decoration:underline}'
             # ONE SEARCH AT EVERY WIDTH (owner, #1977): on a phone the bar's, so theirs in the list is not drawn; on a
             # desktop, where the box's bar hides, theirs (which asks the box, patch 0004).
             '@media (max-width:820px){#ib-inbox .ib-list-search{display:none}}'
+            # THE LIST RUNS EDGE TO EDGE ON A PHONE (owner, 2026-10-09: "No padding on the left and right side please.
+            # Right now there's padding that is wasted space"). Anything else on the page (the stopped note, the
+            # notification offer, other machines' cards) keeps the page's gutter.
+            '@media (max-width:820px){.wrap:has(>#ib-inbox){padding-left:0;padding-right:0}'
+            '.wrap:has(>#ib-inbox)>:not(#ib-inbox){margin-left:16px;margin-right:16px}}'
             # A ROW'S ACTIONS FOR A SCREEN READER OR A KEYBOARD (list-actions.tsx): drawn nowhere until a keyboard
             # reaches them, then where the mouse's bar sits.
             '#ib-inbox .ib-acts{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;'
@@ -215,12 +248,12 @@ def inbox_body() -> str:
             # INSIDE A CONVERSATION, ON A MOBILE, THE COMPOSER TAKES THE BOTTOM: the bottom bar and its room step aside.
             # 48px TARGETS AND 16px FIELDS ON A MOBILE (the owner's ruling, every inbox screen): their controls are
             # 32px and their small type, so a thumb gets the size the old screens give it, and a field never zooms.
-            '@media (max-width:899px){#ib-inbox :is(button,[role=button],[role=combobox],select,textarea,'
+            '@media (max-width:899px){#ib-inbox :is(button,[role=button],[role=combobox],select,textarea,[data-ownbox-pill],'
             'input:not([type=hidden],[type=checkbox],[type=radio])){min-height:48px}'
             '#ib-inbox :is(button,[role=button]){min-width:48px}'
             '#ib-inbox :is(input,textarea,select){font-size:max(16px,1em)}'
             'html.ib-thread-open nav.tabs{display:none}'
-            'html.ib-thread-open body{padding-bottom:0}html.ib-thread-open :is(.sum,.pills,#ownbox-notify,.ib-below)'
+            'html.ib-thread-open body{padding-bottom:0}html.ib-thread-open :is(#ownbox-notify,.ib-below)'
             '{display:none}}'
             # A MESSAGE GETS THE PHONE'S SCREEN (owner, 2026-10-07, with Gmail's app as the model: "only about 10% of
             # the screen is the actual message"). Inside a conversation on a phone: no search bar (the thread's own
@@ -243,7 +276,7 @@ def inbox_body() -> str:
             '#ib-inbox button[aria-label="Insert emoji"]{display:none}}'
             # THEIR COMPOSER'S FIELD IS THE COMPOSER, in dark too: its own dark tint drew a second box inside it.
             'html.dark #ib-inbox textarea{background-color:transparent}</style>'
-            '<div id="ib-inbox"></div>'
+            f'<div id="ib-inbox" data-pills="{html.escape(json.dumps(pills or []), quote=True)}"></div>'
             # THE INBOX FILLS WHAT THE FRAME LEAVES: below the header, above the bottom bar's room, measured, never
             # assumed (a notch, a larger text size), again on a resize and when a conversation opens or closes.
             # THEIR DARK FOLLOWS THE BOX'S (#1990 1.5): their `dark:` styles key on a .dark class, the box's choice is

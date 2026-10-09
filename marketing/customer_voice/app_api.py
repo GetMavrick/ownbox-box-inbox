@@ -241,22 +241,25 @@ def api_conversations():
     if view is None or (disp and disp not in store.DISPOSITIONS):
         return jsonify({"error": "status is active, archived, deleted or junk; disposition is one of "
                                  + ", ".join(store.DISPOSITIONS), "code": "invalid_field_value"}), 400
-    # THE BOX'S PILLS ABOVE THEIR LIST (#1990 1.4): Unanswered (?waiting=1) and Prospects (?from_ad=1), the same store
+    # THE BOX'S PILLS IN THEIR FILTER ROW (#1990 1.4): Unanswered (?waiting=1) and Prospects (?from_ad=1), the same store
     # filters the old list's pills use, so the count in the header and the filtered list agree.
     waiting, from_ad = (request.args.get(k) == "1" for k in ("waiting", "from_ad"))
+    # ...and Drafts (?drafts=1, owner 2026-10-09: "61 drafts ready to send Should be Drafts pill"): the conversations
+    # with a reply waiting, the drafter's own queue (_waiting), so the pill's number and its list agree.
+    ready = {str(d["zcid"]): {"id": str(d["id"]), "body": str(d.get("body") or "")} for d in _waiting()}
+    among = list(ready) if request.args.get("drafts") == "1" else None
     q = (request.args.get("q") or "").strip()[:120]
     if q:
         # THE SEARCH IN THE BAR (#1977): what people WROTE, the box's own search, not only the loaded rows' names.
         # Their list filters what it is given by name and last message, so each hit carries the message that
         # matched as its last message, and a hit found in an old message is not filtered away on screen.
         rows = store.search_conversations(_space(), q, limit=n + 1, offset=off, platform=key, waiting=waiting,
-                                          from_ad=from_ad)
+                                          from_ad=from_ad, zcids=among)
         for r in rows:
             r["preview"] = _said(str(r["zernio_conversation_id"]), q) or r.get("preview")
     else:
         rows = store.list_conversations(_space(), limit=n + 1, offset=off, platform=key, view=view,
-                                        disposition=disp, waiting=waiting, from_ad=from_ad)
-    ready = {str(d["zcid"]): {"id": str(d["id"]), "body": str(d.get("body") or "")} for d in _waiting()}
+                                        disposition=disp, waiting=waiting, from_ad=from_ad, zcids=among)
     if request.args.get("sortOrder") == "asc":
         rows = rows[::-1]
     acct = request.args.get("accountId") or ""

@@ -2202,7 +2202,7 @@ def _find(q: str, channel: str, waiting: bool = False, from_ad: bool = False) ->
             '<button type="submit">Search</button></form>')
 
 
-def _bar_find(q: str, channel: str, waiting: bool = False, from_ad: bool = False) -> str:
+def _bar_find(q: str, channel: str, waiting: bool = False, from_ad: bool = False, drafts: bool = False) -> str:
     """THE MESSAGES PAGE'S OWN HEADER: the search, in the bar, the way Gmail does it.
 
     Owner, 2026-10-05, on the messages page at 390px: "we need to figure out a better header and a way that we can
@@ -2220,6 +2220,7 @@ def _bar_find(q: str, channel: str, waiting: bool = False, from_ad: bool = False
     keep = (f'<input type="hidden" name="channel" value="{_esc(channel)}">' if channel else "")
     keep += '<input type="hidden" name="waiting" value="1">' if waiting else ""
     keep += '<input type="hidden" name="from_ad" value="1">' if from_ad else ""
+    keep += '<input type="hidden" name="drafts" value="1">' if drafts else ""
     return ('<form class="barfind" method="get" action="/inbox/inbox" role="search">'
             '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
             'stroke-width="1.9" stroke-linecap="round" aria-hidden="true">'
@@ -2453,25 +2454,26 @@ def r_inbox():
     # ZERNIO'S LIST, WHERE THIS BOX HAS IT SWITCHED ON (#1990 1.4, app_ui.py). Off, the list below, as it always was.
     from . import app_ui as _ui
     if _ui.on():
-        # OUR SUMMARY LINE ABOVE THEIR LIST (#1990 1.4; owner 2026-09-29: "4 people are waiting on a reply · 6 drafts
-        # ready to send"), the same sentence the old list leads with.
-        # AND OUR FILTERS, All / Unanswered / Prospects and Done / Trash / Junk, each only when it can change the screen
-        # (app_ui.pills); their list reads the choice from the address (patch 0004) and the box filters
-        # (store.list_conversations). Their platform menu stands in for our channel chips.
+        # OUR FILTERS IN THEIR FILTER ROW (owner, 2026-10-09: "The whole inbox should move up the screen. And these
+        # things should be consolidated right into the slider"): Drafts, Unanswered and Prospects, their platform menu
+        # and sort, then Done, Trash and Junk, each only when it can change the screen (app_ui.pills). Nothing sits
+        # above their list any more: the drafts line is the Drafts pill. Their list reads the choice from the address
+        # (patches 0004, 0010) and the box filters (store.list_conversations).
         _sp = _space()
         _c = _counts(_sp)
         _q = (request.args.get("q") or "").strip()[:120]
         _wait = (request.args.get("waiting") or "") in ("1", "true", "yes", "on")
         _ad = (request.args.get("from_ad") or "") in ("1", "true", "yes", "on")
-        _pick = _ui.pills(_sp, _c, _wait, _ad, _ui.view_of(request.args.get("status")))
+        _dr = (request.args.get("drafts") or "") in ("1", "true", "yes", "on")
+        _pick = _ui.pills(_sp, _c, _wait, _ad, _ui.view_of(request.args.get("status")), _dr)
         # THE OWNER'S RULINGS THE OLD LIST CARRIES, CARRIED HERE TOO (#1995 change 2, the parity checklist): the
         # stopped note first (#1357), the search in the bar (#1977), the notification offer once there is anyone to
         # be told about (#1966), and other machines' cards below the conversations (core/panels.py).
         _offer = (_NOTIFY_OFFER + f'<script>{_push_client_js()}</script><script>{_NOTIFY_JS}</script>'
                   if _ui.has_conversations(_sp) else "")
-        return _shell(_stopped_note() + _head(_c["waiting"], _drafts_ready(_sp)) + _pick + _offer
-                      + _ui.inbox_body() + (f'<div class="ib-below">{_below}</div>' if (_below := _panels()) else ""),
-                      here="/inbox/inbox", wide=True, theirs=True, bar=_bar_find(_q, "", _wait, _ad)), 200
+        return _shell(_stopped_note() + _head(_c["waiting"]) + _offer
+                      + _ui.inbox_body(_pick) + (f'<div class="ib-below">{_below}</div>' if (_below := _panels()) else ""),
+                      here="/inbox/inbox", wide=True, theirs=True, bar=_bar_find(_q, "", _wait, _ad, _dr)), 200
     space = _space()
     # THE CHIP THE READER IS ON. Passed to the store as a bound predicate, never interpolated;
     # an unknown value simply matches no rows, which is the honest answer to a hand-typed URL.

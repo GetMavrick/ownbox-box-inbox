@@ -217,10 +217,34 @@ _WAITING = (f"k.opted_out = 0 AND COALESCE(k.automated, 0) = 0 AND {_NEWEST_IS_I
 _FROM_AD = "TRIM(COALESCE(k.ad_meta_id, '')) <> ''"
 
 
+def _among(where: str, args: list, zcids: list[str] | None) -> tuple[str, list]:
+    """Only these conversations: the inbox's Drafts pill, the ones with a reply waiting (owner, 2026-10-09).
+
+    THE LIST OF IDS COMES FROM THE DRAFTER (drafter.store.waiting), which owns what "a draft still waiting" means; this
+    file only narrows to it. Each id is a bound parameter. None is no filter; an empty list matches nothing, so a box
+    with no drafts shows an empty Drafts list, never the whole inbox."""
+    if zcids is None:
+        return where, args
+    ids = [str(z) for z in zcids][:1000]
+    if not ids:
+        return where + " AND 0", args
+    return where + f" AND k.zernio_conversation_id IN ({','.join('?' * len(ids))})", args + ids
+
+
+def count_among(space: str, zcids: list[str], *, view: str = "inbox") -> int:
+    """How many of these conversations one list shows: the number on the Drafts pill, the same SQL as its list."""
+    where, args = _among("k.space = ?", [space], zcids)
+    with state.connect() as c:
+        row = c.execute(f"SELECT COUNT(*) AS n FROM inbox_conversations k WHERE {where} AND {_VIEWS[view]}",
+                        tuple(args)).fetchone()
+    return int((row["n"] if row else 0) or 0)
+
+
 def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
                        platform: str | None = None, waiting: bool = False,
                        from_ad: bool = False, view: str | None = None,
-                       disposition: str | None = None, zcid: str | None = None) -> list[dict]:
+                       disposition: str | None = None, zcid: str | None = None,
+                       zcids: list[str] | None = None) -> list[dict]:
     """The conversations in one Space, newest inbound first — the inbox screen.
 
     THE STORE HAD NO READER A SCREEN COULD USE. `get_conversation` answers about ONE, by id, and
@@ -250,6 +274,7 @@ def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
     if zcid:
         where += " AND k.zernio_conversation_id = ?"
         args.append(str(zcid))
+    where, args = _among(where, args, zcids)
     if platform:
         where += " AND k.platform = ?"
         args.append(str(platform))
@@ -351,7 +376,8 @@ def platforms_present(space: str) -> list[dict]:
 
 def search_conversations(space: str, query: str, *, limit: int = 50,
                          offset: int = 0, platform: str | None = None,
-                         waiting: bool = False, from_ad: bool = False) -> list[dict]:
+                         waiting: bool = False, from_ad: bool = False,
+                         zcids: list[str] | None = None) -> list[dict]:
     """Conversations whose MESSAGES or participant match `query`, newest inbound first.
 
     THE CARD SELLS THIS AND THE BOX DID NOT HAVE IT. `$499` bullet 6 is "Search everything", and
@@ -389,6 +415,7 @@ def search_conversations(space: str, query: str, *, limit: int = 50,
     esc = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     like = f"%{esc}%"
     where, args = "k.space = ?", [space]
+    where, args = _among(where, args, zcids)
     if platform:
         where += " AND k.platform = ?"
         args.append(str(platform))

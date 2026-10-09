@@ -13,11 +13,15 @@ WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
     entries are cached so a mobile runs yesterday's build;
   · the page carries the Zernio key, its setting, or an Authorization header.
   · a swipe's lists (Done, Trash, Junk) are offered while empty, or the one on screen is not pressed, or their
-    accent washes out the box's own (its pressed pills, its bottom bar).
+    accent washes out the box's own (its pressed pills, its bottom bar);
+  · the box's pills leave their filter row (owner, 2026-10-09: "consolidated right into the slider"), or anything
+    sits above their list again, or All comes back.
 Run: python tests/test_the_thread_is_theirs.py
 """
 from __future__ import annotations
 
+import html
+import json
 import os
 import pathlib
 import re
@@ -88,8 +92,18 @@ ok("THE BOX'S LOOK SITS IN A LAYER BETWEEN THEIR RESET AND THEIR UTILITIES, so n
    and lst.index("@layer theme, base, shell") < lst.index("/inbox/ui/inbox-ui.css"))
 ok("INSIDE A CONVERSATION ON A MOBILE THE COMPOSER TAKES THE BOTTOM: the bar steps aside",
    "html.ib-thread-open nav.tabs{display:none}" in lst)
-ok("ABOVE THEIR LIST, NO WAITING COUNT (owner, 10-06): only the drafts ready to send, when there are any, linked",
-   not any("waiting on" in s for s in re.findall(r'<p class="quiet sum">(.*?)</p>', lst)))
+ok("NOTHING ABOVE THEIR LIST (owner, 10-09: \"The whole inbox should move up the screen\"): no summary line, no pill row",
+   'class="quiet sum"' not in lst and 'class="chips pills"' not in lst)
+
+
+def pills_of(page_html: str) -> list:
+    """The box's pills as the page hands them to their filter row (app_ui.pills, ownbox/box-pills.tsx)."""
+    m = re.search(r'<div id="ib-inbox" data-pills="([^"]*)"', page_html)
+    return json.loads(html.unescape(m.group(1))) if m else []
+
+
+def shown(page_html: str) -> dict:
+    return {p["label"]: p["on"] for p in pills_of(page_html)}
 
 # A NEW MESSAGE ARRIVES, so the conversation is unread again before a link opens it.
 store.upsert_conversation(space=SP, zcid="ig-priya", platform="instagram", participant=NAME,
@@ -119,19 +133,23 @@ ok("NO ZERNIO KEY, ITS SETTING OR AN AUTHORIZATION HEADER ON THE PAGE",
    "z" * 40 not in keyed and box_secrets.ZERNIO not in keyed and "ZERNIO_API_KEY" not in keyed
    and "Authorization" not in keyed)
 
-print("\nour filters, above their list")
-ok("OUR FILTERS LEAD THEIR LIST: All, and Unanswered now someone is waiting",
-   'class="chips pills"' in keyed and 'href="/inbox/inbox?waiting=1">Unanswered<' in keyed
-   and keyed.index('class="chips pills"') < keyed.index('id="ib-inbox"'), keyed[:400])
+print("\nour filters, in their filter row")
+ok("OUR PILLS RIDE ON THEIR LIST, FOR THEIR FILTER ROW: Unanswered now someone is waiting, and no All",
+   shown(keyed) == {"Unanswered": False}, pills_of(keyed))
 status, waiting_page = page(owner, "/inbox/inbox?waiting=1")
-ok("...Unanswered stays pressed while its list is shown, so the way back to All is one tap",
-   status == 200 and re.search(r'class="chip on" aria-pressed="true" href="[^"]*">Unanswered<', waiting_page)
-   is not None and 'id="ib-inbox"' in waiting_page)
+ok("...Unanswered stays pressed while its list is shown, so turning it off is one tap",
+   status == 200 and shown(waiting_page) == {"Unanswered": True} and 'id="ib-inbox"' in waiting_page)
+p10 = (ROOT / "web" / "inbox-ui" / "patches" / "0010-box-pills-lead-the-filter-row.patch").read_text(encoding="utf-8")
+_built = " ".join(f.read_text(encoding="utf-8") for f in app_ui.STATIC.glob("*.js"))
+ok("THEIR FILTER ROW TAKES THE BOX'S PILLS FIRST AND ITS LISTS LAST (owner: \"move done and trash to the very end\"), "
+   "through optional props (patch 0010), and it is built in",
+   p10.startswith("Ownbox:") and "+      {lead}" in p10 and "lead={filterLead}" in p10
+   and p10.index("+      {lead}") < p10.index("+      {trail}") and "trail={filterTrail}" in p10
+   and "data-ownbox-filters" in _built and "data-ownbox-pill" in _built, p10[:160])
 p4 = (ROOT / "web" / "inbox-ui" / "patches" / "0004-box-list-filters.patch").read_text(encoding="utf-8")
 ok("THEIR LIST ASKS THE BOX FOR THE FILTER THE ADDRESS CARRIES, through one patch to their list hook",
    p4.startswith("Ownbox:") and p4.count("+++ b/src/") == 1 and "['waiting', 'from_ad']" in p4, p4[:160])
-ok("...and it is built in", '["waiting","from_ad"]' in " ".join(f.read_text(encoding="utf-8")
-                                                               for f in app_ui.STATIC.glob("*.js")))
+ok("...and it is built in, with Drafts (patch 0010)", '["waiting","from_ad","drafts"]' in _built)
 # AND THE BOX FILTERS: someone who came from an ad and has been answered, beside Priya, who is waiting.
 store.upsert_conversation(space=SP, zcid="fb-tom", platform="facebook", participant="Tom Becker",
                           ad_meta_id="ad-spring-facials", ad_title="Spring facials",
@@ -156,23 +174,38 @@ ok("...and with neither, the list is everyone it was", {"ig-priya", "fb-tom"} <=
 print("\nthe list's actions: swipe to Done, Trash or a label")
 status, before = page(owner, "/inbox/inbox")
 ok("NOTHING IN DONE, TRASH OR JUNK, NO PILL FOR THEM: a list that can't change the screen is not offered",
-   not any(f">{n}<" in before for n in ("Done", "Trash", "Junk")), before[:400])
+   not ({"Done", "Trash", "Junk"} & set(shown(before))), pills_of(before))
 store.upsert_conversation(space=SP, zcid="fb-elena", platform="facebook", participant="Elena Brooks",
                           last_inbound_at="2026-10-06T05:30:00Z", account_id="acct-fb-glow")
 store.record_message(space=SP, zcid="fb-elena", zmid="fb-elena-m1", direction="in", sent_by="contact",
                      body="Thanks so much, see you next week!")
 store.mark_conversation(SP, "fb-elena", status="archived")
 status, inbox = page(owner, "/inbox/inbox")
-ok("ONE SWIPED TO DONE, AND DONE IS OFFERED beside the inbox's own filters",
-   'href="/inbox/inbox?status=archived">Done<' in inbox and ">Trash<" not in inbox and ">Junk<" not in inbox
-   and inbox.index('class="chips pills"') < inbox.index('id="ib-inbox"'), inbox[:400])
+ok("ONE SWIPED TO DONE, AND DONE IS OFFERED after the inbox's own filters",
+   [p["key"] for p in pills_of(inbox)] == ["waiting", "from_ad", "archived"] and not any(shown(inbox).values()),
+   pills_of(inbox))
 status, done = page(owner, "/inbox/inbox?status=archived")
-ok("...DONE ON SCREEN IS PRESSED, and All is the way back to the inbox",
-   status == 200 and 'class="chip on" aria-pressed="true" href="/inbox/inbox">Done<' in done
-   and 'class="chip" aria-pressed="false" href="/inbox/inbox">All<' in done and ">Unanswered<" not in done
-   and 'id="ib-inbox"' in done, done[:400])
+ok("...DONE ON SCREEN IS PRESSED, its own way back; Unanswered stays offered, off, as a way to the inbox",
+   status == 200 and shown(done) == {"Unanswered": False, "Prospects": False, "Done": True} and 'id="ib-inbox"' in done,
+   pills_of(done))
 ok("...and the address can ask only for the box's lists", app_ui.view_of("deleted") == "deleted"
    and app_ui.view_of("junk") == "junk" and app_ui.view_of("everything") == "" and app_ui.view_of(None) == "")
+
+print("\nDrafts: the line that sat above their list, now a pill in their row (owner, 10-09)")
+from marketing.customer_voice.drafter import store as drafts_store  # noqa: E402
+drafts_store.put(space=SP, zcid="ig-priya", in_reply_to="ig-priya-m2", body="Yes, parking is free right outside!")
+drafts_store.put(space=SP, zcid="fb-elena", in_reply_to="fb-elena-m1", body="See you next week, Elena!")
+status, inbox = page(owner, "/inbox/inbox")
+ok("A REPLY WAITING MAKES THE DRAFTS PILL, first, with how many conversations in the inbox have one (Done's is not)",
+   pills_of(inbox)[:1] == [{"key": "drafts", "label": "Drafts", "on": False, "count": 1}], pills_of(inbox))
+ok("...AND IT FILTERS: only the conversations in the inbox with a reply waiting",
+   listed("drafts=1") == {"ig-priya"} and {"ig-priya", "fb-tom"} <= listed("sortOrder=desc"), listed("drafts=1"))
+ok("...with a search too, and a search finds nothing outside it",
+   listed("drafts=1&q=parking") == {"ig-priya"} and listed("drafts=1&q=spring") == set())
+status, dpage = page(owner, "/inbox/inbox?drafts=1")
+ok("...PRESSED WHILE ITS LIST IS SHOWN, and a search from the bar keeps it",
+   status == 200 and shown(dpage).get("Drafts") is True
+   and '<input type="hidden" name="drafts" value="1">' in dpage, pills_of(dpage))
 p5 = (ROOT / "web" / "inbox-ui" / "patches" / "0005-list-row-slot.patch").read_text(encoding="utf-8")
 ok("THEIR LIST TAKES A SLOT AROUND EACH ROW AND A BADGE BESIDE THE NAME, through one patch to their list",
    p5.startswith("Ownbox:") and set(re.findall(r"^\+\+\+ b/(\S+)", p5, re.M))
@@ -201,8 +234,8 @@ ok("...and it takes no other address: a thread's messages are still its messages
    and "data" not in (r.get_json(silent=True) or {}), r.get_data(as_text=True)[:200])
 ok("...and the page asks for it whenever its list doesn't hold the one in the address",
    "ownbox-conversation" in built_all)
-ok("INSIDE A CONVERSATION ON A MOBILE, OUR PILLS STEP ASIDE with the summary line, the offer and the cards below",
-   "html.ib-thread-open :is(.sum,.pills,#ownbox-notify,.ib-below){display:none}" in inbox)
+ok("INSIDE A CONVERSATION ON A MOBILE, THE OFFER AND THE CARDS BELOW STEP ASIDE (the pills go with their list)",
+   "html.ib-thread-open :is(#ownbox-notify,.ib-below){display:none}" in inbox)
 ok("THEIR TOASTS (Moved to Done, Undo) TAKE THE BOX'S COLOURS, so a dark box shows a dark one",
    "[data-sonner-toaster]{--normal-bg:var(--card);--normal-text:var(--ink);" in inbox)
 p6 = (ROOT / "web" / "inbox-ui" / "patches" / "0006-email-icon.patch").read_text(encoding="utf-8")
