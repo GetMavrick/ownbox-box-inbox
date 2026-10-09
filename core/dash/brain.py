@@ -44,7 +44,7 @@ DOOR = "/brain"
 # SEND READIES A FILE ONLY THIS BIG AHEAD OF THE TAP (OSDev1's review of #2077): opening a sheet to rename or move a
 # 100 MB video must not spend 100 MB of the person's data. Above it, Send downloads instead.
 SHARE_AHEAD_MAX = 25 << 20
-TITLE = "Business Brain"
+TITLE = "Shared Brain"            # owner, 2026-10-09: "Change it TO: Shared Brain. Not business brain"
 LEDE = "Your business's files, kept on your Ownbox and nowhere else."
 
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import sys
 import tempfile
 
@@ -52,9 +53,12 @@ m.set_cookie(dash.COOKIE, dash.new_session(state.add_user("sam@example-medspa.co
 
 print("test_where_it_lives")
 settings = o.get("/settings").get_data(as_text=True)
-ok("Your Business is in System Settings, first after the Overview",
-   "/settings/business" in settings and settings.index("/settings/business") < settings.index("/settings/ai"),
-   settings[:300])
+# THE FIRST ROW OF GENERAL (owner, 2026-10-09: "move your business right at the top of the general subsection").
+_rail = settings.split('<nav class="rail"', 1)[-1].split("</nav>", 1)[0]
+ok("Your Business is in System Settings, the first row of General",
+   re.search(r'<span class="glabel">General</span><a href="/settings/business"', _rail) is not None
+   and _rail.index("/settings/shifts") < _rail.index("/settings/business") < _rail.index("/settings/mobile"),
+   _rail[:600])
 home = o.get("/dashboard").get_data(as_text=True)
 ok("the home screen asks the owner to tell the box about the business", "Tell your box about your business" in home)
 

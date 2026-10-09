@@ -78,10 +78,15 @@ RAIL_CSS = """/* the checkbox that opens the drawer — focusable, never visible
 border-radius:10px;cursor:pointer;color:var(--ink)}
 .ham:hover{background:var(--hover)}
 .ham{position:relative}
-.menubadge{position:absolute;right:0;bottom:2px;width:17px;height:17px;border-radius:50%;
-background:var(--ink);color:var(--on-ink);display:flex;align-items:center;justify-content:center;
-box-shadow:0 0 0 2px var(--ground)}
-.menubadge svg{width:11px;height:11px}
+/* WHITE ON LIGHT, BLACK ON DARK (owner, 2026-10-09, of the badge on a mobile: "please flip the coloring on the hamburger
+   menu. It's backwards right now. It should be white on light and black on dark theme"): the card's colour with ink
+   lines, and a hairline edge so a white badge still reads against the icon's white disc. No ring of the ground around
+   it (owner, the same day: "Can you remove that white outline around it?"). */
+.menubadge{position:absolute;right:1px;bottom:3px;width:15px;height:15px;border-radius:50%;
+background:var(--card);color:var(--ink);display:flex;align-items:center;justify-content:center;
+box-shadow:inset 0 0 0 1px var(--line)}
+/* A TOUCH SMALLER (owner, 2026-10-09: "It covers a little too much of the icon now"): 15, from 17. */
+.menubadge svg{width:9px;height:9px}
 .scrim{display:none;position:fixed;inset:0;z-index:35;background:var(--scrim);opacity:0;
 pointer-events:none;transition:opacity .2s ease}
 
@@ -194,7 +199,14 @@ align-items:center;gap:12px;min-height:52px;padding:0 6px 0 4px;background:var(-
 border-bottom:1px solid var(--hairline)}
 .navtoggle:focus-visible~.topbar .ham{outline:2px solid var(--accent);outline-offset:-2px}
 .mark{font-weight:600;letter-spacing:-.01em}
-.topbar .appmark{width:32px;height:32px}
+/* THE SAME ROUNDED SQUARE AS THE DRAWER'S, AT ITS SIZE (owner, 2026-10-09: "Use the same as the icon shape and size that's in the drawer menu. They are different shapes and sizes right now"): .who .av in core/dash/home.py. */
+.topbar .appmark{width:calc(38 * var(--px, 1px));height:calc(38 * var(--px, 1px));border-radius:11px}
+.topbar .appmark:not(.fill)>img{width:70%;height:70%}
+/* ...AND ITS NAME AS THE DRAWER'S NAME IS (owner, 2026-10-09: "Text is too small too. Match the drawer for both"): the
+   size, weight and ink of .who b. The button is a <label>, so the form labels' margin is taken off it: that margin
+   is what sat the icon 4px below its name ("vertically align the icon better with the text. Right now it's too low"). */
+.topbar .ham{margin:0}
+.topbar .mark{font-size:calc(18 * var(--px, 1px));font-weight:700;color:var(--ink)}
 /* the home's cards: one column on a mobile, a grid once there is room, as the owner's target draws */
 .dash-grid{display:grid;gap:16px;margin-bottom:16px}
 .dash-grid>.card{margin-bottom:0}
@@ -1659,15 +1671,23 @@ shell.register_section("approvals", order=5, machine="core", title="Approvals", 
 # to link to anything right now. Just the menu option." It will open the box's files (OSDev4's backend, owner 10-08: "a
 # basic files manager immediately ... listed as Business Brain in the menu at the top"). It opens /brain (core/dash/brain.py,
 # 10-09); until that screen shipped the row was drawn and not a link (`soon`).
-# A BRAIN, seen from above: two halves with their folds and the line between them.
-_BRAIN_ICON = ("M12 5.6C12 3.9 10.7 3.1 9.5 3.4C8.4 3.7 7.7 4.6 7.8 5.5C6.1 5.5 4.9 6.9 5.2 8.5C3.7 9.2 3.1 11 4 12.3"
-               "C3.2 13.7 3.7 15.6 5.3 16.2C5.5 18 7.1 19.3 8.8 18.9C9.7 20.2 11.4 20.5 12 19.1"
-               "M12 5.6C12 3.9 13.3 3.1 14.5 3.4C15.6 3.7 16.3 4.6 16.2 5.5C17.9 5.5 19.1 6.9 18.8 8.5"
-               "C20.3 9.2 20.9 11 20 12.3C20.8 13.7 20.3 15.6 18.7 16.2C18.5 18 16.9 19.3 15.2 18.9"
-               "C14.3 20.2 12.6 20.5 12 19.1M12 5.6V19.1M7.8 5.5C7.9 6.7 8.7 7.5 9.8 7.6M4 12.3C4.8 13 6.1 13.1 7.1 12.5"
-               "M8.8 18.9C8.6 17.6 9.1 16.4 10.2 15.8M16.2 5.5C16.1 6.7 15.3 7.5 14.2 7.6M20 12.3C19.2 13 17.9 13.1 16.9 12.5"
-               "M15.2 18.9C15.4 17.6 14.9 16.4 13.8 15.8")
-shell.register_section("brain", order=1, machine="core", title="Business Brain", href="/brain", icon=_BRAIN_ICON)
+# THE BRAIN IS LUCIDE'S (owner, 2026-10-09: "The brain icon for shared brain needs to improve. I found this one", with
+# Lucide's `brain`). Its nine paths joined into one `d`, as `_svg` draws exactly one path, at the menu's own stroke so it
+# sits with the other glyphs. It replaced a hand-drawn brain the same day.
+# Lucide, https://lucide.dev, ISC License: Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part
+# of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022. Permission to use, copy,
+# modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the
+# above copyright notice and this permission notice appear in all copies.
+_BRAIN_ICON = ("M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"
+               "M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"
+               "M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"
+               "M17.599 6.5a3 3 0 0 0 .399-1.375"
+               "M6.003 5.125A3 3 0 0 0 6.401 6.5"
+               "M3.477 10.896a4 4 0 0 1 .585-.396"
+               "M19.938 10.5a4 4 0 0 1 .585.396"
+               "M6 18a4 4 0 0 1-1.967-.516"
+               "M19.967 17.484A4 4 0 0 1 18 18")
+shell.register_section("brain", order=1, machine="core", title="Shared Brain", href="/brain", icon=_BRAIN_ICON)
 
 # THE MORNING REVIEW IS THIRD, under Business Brain (10-08); it was second, RIGHT BELOW BASE MACHINE. Owner, 2026-10-05: "In the left side bar, move morning
 # review up to the second item in the list right below base machine", and "It's part of the base machine, so let's
@@ -1703,8 +1723,9 @@ shell.register_section("add_machine", order=1000, machine="core", title="Add a M
 # `owner_only`, so a member is shown a shorter menu rather than doors that refuse them.
 shell.register_section("settings", order=10, machine="core", title="System Settings",
                        href="/settings", icon=_GEAR_ICON,
-                       # FOUR GROUPS, EACH NAMED ABOVE ITS ROWS (owner, 2026-10-02: "rename and re-organize some
-                       # things to clean up the user experience", approved from a preview).
+                       # THREE GROUPS, EACH NAMED ABOVE ITS ROWS (owner, 2026-10-02: "rename and re-organize some
+                       # things to clean up the user experience", approved from a preview). Business was a fourth, at
+                       # the top, until 2026-10-09 (below: Your Business heads General now).
                        #
                        # THE AI GROUP IN HIS ORDER (owner, 2026-10-02: "The order of the menu should go AI account,
                        # MCP server, data sources, and then coworkers", approved from a preview): the account that
@@ -1712,14 +1733,9 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                        # coworkers that work on the box. It is the order a box is set up in: "connect to their AI
                        # account, figure out how to do the inbound MCP server set up and then add outbound MCP data
                        # connections. And then set up the mobile app."
-                       group_labels={"business": "Business", "ai": "AI", "general": "General", "server": "Server"},
+                       group_labels={"ai": "AI", "general": "General", "server": "Server"},
                        items=[
                            {"key": "overview", "label": "Overview", "href": "/settings"},
-                           # YOUR BUSINESS FIRST (owner, 2026-10-04: business context "at the top of the base machine
-                           # settings"; #1957 C2): what the business does, who it serves, how it plans to grow. Every
-                           # machine on the box reads it (core/business_context.py). Anyone reads; the owner edits.
-                           {"key": "business", "label": "Your Business", "href": "/settings/business",
-                            "group": "business"},
                            {"key": "ai", "label": "AI Account", "href": "/settings/ai",
                             "owner_only": True, "group": "ai"},
                            # MCP SERVER, ON EVERY BOX (owner, 2026-10-02: "standard base machines should be able to
@@ -1741,6 +1757,13 @@ shell.register_section("settings", order=10, machine="core", title="System Setti
                            # other three need to be in another category"; he chose General from options). The app on
                            # your mobile; the address the box sends from (Morning Review, alerts), "Sending Email" so
                            # it is not taken for an inbox; and the people on the box.
+                           # YOUR BUSINESS HEADS GENERAL (owner, 2026-10-09: "menu cleanup. Please move your business
+                           # right at the top of the general subsection"). It had a group of its own at the top of these
+                           # settings since 2026-10-04 (#1957 C2). What the business does, who it serves, how it plans
+                           # to grow; every machine on the box reads it (core/business_context.py). Anyone reads; the
+                           # owner edits.
+                           {"key": "business", "label": "Your Business", "href": "/settings/business",
+                            "group": "general"},
                            {"key": "mobile", "label": "Mobile App", "href": "/settings/mobile",
                             "group": "general"},
                            {"key": "email", "label": "Sending Email", "href": "/settings/email",

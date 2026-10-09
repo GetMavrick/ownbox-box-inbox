@@ -276,7 +276,10 @@ def test_the_icons_are_the_tab_bar_s_own():
     by_href = {i.href: i.icon for i in live.items}
     for href in ("/inbox/", "/inbox/inbox", "/inbox/settings"):
         ok(f"{href} draws the same mark in both menus", by_href.get(href) == tabs.get(href), href)
-    ok("and the section itself wears the tray", live.icon == tabs["/inbox/inbox"])
+    # THE MACHINE'S OWN ROW WEARS ITS OWN MARK (owner, 2026-10-09: "for Inbox machine, use this one", Lucide's
+    # messages-square), not the tray: the row is the machine, and the tray is its Messages screen's.
+    ok("and the section itself wears the machine's two speech bubbles, not the tray",
+       live.icon == cv._MACHINE_ICON and live.icon != tabs["/inbox/inbox"])
     _restore()
     ok("the fixture rebuilt the box", "inbox" in {s.key for s in shell.sections()})
 

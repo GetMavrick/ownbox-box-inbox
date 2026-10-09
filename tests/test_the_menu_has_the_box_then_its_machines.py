@@ -7,7 +7,7 @@ machines. Which would be unified inbox and then add a machine."* And of that sec
 subtle. Almost just like an extra space."*
 
 So this suite renders the real menu, the way a buyer's box draws it, and holds:
-  1. the rows, in order: Base Machine, Business Brain, the Morning Review, Approvals, System Settings, then the add-on
+  1. the rows, in order: Base Machine, Shared Brain, the Morning Review, Approvals, System Settings, then the add-on
      machines, then Add a Machine — and a member is not shown the Morning Review, which refuses them; Business
      Brain opens its screen;
   2. exactly one row opens a new group: the first add-on machine, for the owner and a member alike;
@@ -73,12 +73,13 @@ rows = re.findall(ROW, nav, re.S)
 # Page? It should be in the dashboard").
 # BUSINESS BRAIN IS SECOND, RIGHT UNDER BASE MACHINE (owner, 2026-10-08: "Put it at the top of the menu right under
 # base machine. It doesn't need to link to anything right now. Just the menu option.").
-ok("Base Machine, Business Brain, the Morning Review, Approvals, System Settings, the add-on machines, Add a Machine",
-   rows == ["Base Machine", "Business Brain", "Morning Review", "Approvals", "System Settings", "AEO Machine",
+ok("Base Machine, Shared Brain, the Morning Review, Approvals, System Settings, the add-on machines, Add a Machine",
+   rows == ["Base Machine", "Shared Brain", "Morning Review", "Approvals", "System Settings", "AEO Machine",
             "Inbox Machine", "Add a Machine"], str(rows))
 # IT OPENS ITS SCREEN NOW (core/dash/brain.py, 10-09); it was drawn without a link until then (`soon`).
-_brain = re.search(r'<a( [^>]*)?>(?:(?!</a>).)*?<span class="lbl">Business Brain</span>', nav, re.S)
-ok("...Business Brain has its glyph and opens its screen",
+_brain = re.search(r'<a( [^>]*)?>(?:(?!</a>).)*?<span class="lbl">Shared Brain</span>', nav, re.S)
+# SHARED BRAIN (owner, 2026-10-09: "Change it TO: Shared Brain. Not business brain").
+ok("...Shared Brain has its glyph and opens its screen",
    _brain is not None and 'href="/brain"' in _brain.group(0) and "aria-disabled" not in _brain.group(0)
    and '<svg class="ic"' in _brain.group(0), _brain and _brain.group(0)[:300])
 ok("...and the Morning Review row opens the review", '<a href="/app/review"' in nav)
@@ -99,7 +100,7 @@ _m_rows = re.findall(ROW, _m_nav, re.S)
 ok("a member's menu has no Morning Review row", "Morning Review" not in _m_rows
    and "/app/review" not in _m_nav, str(_m_rows))
 ok("...and still has the rest, in the same order (no Approvals: approving is the owner's)",
-   _m_rows == ["Base Machine", "Business Brain", "System Settings", "AEO Machine", "Inbox Machine", "Add a Machine"],
+   _m_rows == ["Base Machine", "Shared Brain", "System Settings", "AEO Machine", "Inbox Machine", "Add a Machine"],
    str(_m_rows))
 # THE GAP IS CARRIED, not dropped with the row a member is not shown: it opens above their first machine.
 _m_grp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
@@ -150,13 +151,15 @@ _srows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _sn, r
 # HIS ORDER (owner, 2026-10-02, approved from a preview): "The order of the menu should go AI account, MCP server, data
 # sources, and then coworkers"; then General (owner, 2026-10-03: the mobile app, the address the box sends from, the
 # people on it: "AI is settled and server is settled, but the other three need to be in another category"), Server.
+# YOUR BUSINESS HEADS GENERAL (owner, 2026-10-09: "move your business right at the top of the general subsection"); it
+# was a Business group of its own at the top from 2026-10-04.
 ok("the rows, in their groups' order",
-   _srows == ["Overview", "Your Business", "AI Account", "MCP Server", "Data Sources", "Coworkers", "Mobile App", "Sending Email",
-              "People", "Time Zone", "Updates", "Server Access"], str(_srows))
+   _srows == ["Overview", "AI Account", "MCP Server", "Data Sources", "Coworkers", "Your Business", "Mobile App",
+              "Sending Email", "People", "Time Zone", "Updates", "Server Access"], str(_srows))
 _sgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _sn, re.S)
-ok("...each group opening with a gap", _sgrp == ["Your Business", "AI Account", "Mobile App", "Updates"], str(_sgrp))
+ok("...each group opening with a gap", _sgrp == ["AI Account", "Your Business", "Updates"], str(_sgrp))
 ok("...and its name above its first row", re.findall(r'<span class="glabel">([^<]*)</span>', _sn)
-   == ["Business", "AI", "General", "Server"], re.findall(r'<span class="glabel">([^<]*)</span>', _sn))
+   == ["AI", "General", "Server"], re.findall(r'<span class="glabel">([^<]*)</span>', _sn))
 ok("...and no old name is left", all(x not in _sn for x in ("AI Coworkers", "Outbound Email", "Coworkers (Agents)",
                                                            "Reaching you", '"glabel">Team<',
                                                            '"lbl">Shifts', '"lbl">Email<')))
@@ -167,10 +170,10 @@ _mn = _mc.get("/settings").get_data(as_text=True).split('<nav class="rail"', 1)[
 _mgrp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)', _mn, re.S)
 # A GROUP WHOSE FIRST ROWS A MEMBER IS NOT SHOWN still opens with its gap, on the first row they are.
 ok("a member's shorter menu keeps its gaps on the rows they are shown",
-   _mgrp == ["Your Business", "Coworkers", "Mobile App", "Updates"], str(_mgrp))
+   _mgrp == ["Coworkers", "Your Business", "Updates"], str(_mgrp))
 # A GROUP'S NAME TRAVELS WITH ITS GAP, and a group a member sees nothing of has no name over another group's rows.
 ok("...and its group names over them, never a name for a group they are shown nothing of",
-   re.findall(r'<span class="glabel">([^<]*)</span>', _mn) == ["Business", "AI", "General", "Server"],
+   re.findall(r'<span class="glabel">([^<]*)</span>', _mn) == ["AI", "General", "Server"],
    re.findall(r'<span class="glabel">([^<]*)</span>', _mn))
 
 

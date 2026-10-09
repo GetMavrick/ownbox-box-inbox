@@ -332,7 +332,7 @@ def _store(stream) -> tuple[str, int]:
         if shutil.disk_usage(r).free < DISK_FLOOR:
             raise BrainError("Your Ownbox is nearly out of space, so nothing more can be saved.")
         if usage()["bytes"] + size > total_max():
-            raise BrainError(f"The Business Brain holds {total_max() / (1 << 30):g} GB, and this would go past it. "
+            raise BrainError(f"The Shared Brain holds {total_max() / (1 << 30):g} GB, and this would go past it. "
                              "Delete something first.")
         sha = h.hexdigest()
         p = _blob(sha)

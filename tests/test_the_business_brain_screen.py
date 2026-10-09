@@ -6,7 +6,7 @@ Drive as design reference." The rules are core/business_brain.py's (#2071, tests
 the screen on core/dash/brain.py.
 
 WHAT WOULD HAVE TO BREAK FOR THIS TO GO RED:
-  * the menu's Business Brain row stops opening the screen, or someone signed out can open it;
+  * the menu's Shared Brain row stops opening the screen, or someone signed out can open it;
   * a view stops drawing on the server (a folder, a search, Recently deleted), or folders stop coming first;
   * a row loses its kind's icon, its size and date, its link, or its ⋮;
   * a folder that is gone breaks the page instead of saying so;
@@ -65,7 +65,7 @@ o.set_cookie(dash.COOKIE, dash.new_session(OWNER))
 
 print("test_the_menu_opens_it_and_a_stranger_cannot")
 dash_page = o.get("/dashboard").get_data(as_text=True)
-ok("the menu's Business Brain row opens /brain", re.search(r'<a href="/brain"[^>]*>(?:(?!</a>).)*Business Brain', dash_page,
+ok("the menu's Shared Brain row opens /brain", re.search(r'<a href="/brain"[^>]*>(?:(?!</a>).)*Shared Brain', dash_page,
                                                            re.S) is not None)
 out = app.test_client().get(brain.DOOR)
 ok("someone signed out is sent to sign in, and shown no files", out.status_code in (302, 303, 401, 403)
@@ -107,7 +107,7 @@ print("\ntest_a_folder_and_the_way_back")
 page = o.get(f"{brain.DOOR}?folder={contracts['id']}").get_data(as_text=True)
 ok("inside a folder: its files, and the path back to the top",
    rows(page)[:1] == ["Supplier agreement.pdf"] and '<nav class="bb-path"' in page
-   and f'<a href="{brain.DOOR}">Business Brain</a>' in page and '<span aria-current="page">Contracts</span>' in page)
+   and f'<a href="{brain.DOOR}">Shared Brain</a>' in page and '<span aria-current="page">Contracts</span>' in page)
 gone = o.get(f"{brain.DOOR}?folder=not-a-folder")
 ok("a folder that is gone says so and shows the top, never a broken page",
    gone.status_code == 200 and "That folder isn't there any more." in html.unescape(gone.get_data(as_text=True))
@@ -137,7 +137,7 @@ ok("a file's sheet: Send, Open, Download, Rename, Move, then Delete apart",
 ok("Delete asks first, and says it waits in Recently deleted for 30 days",
    'id="bb-del"' in page and f"It stays in Recently deleted for {bb.TRASH_DAYS} days" in page)
 ok("Move offers the top and every folder by its path",
-   f'<option value="">Business Brain (the top)</option>' in page
+   f'<option value="">Shared Brain (the top)</option>' in page
    and f'<option value="{contracts["id"]}">Contracts</option>' in page)
 
 print("\ntest_send_readies_only_a_small_file")

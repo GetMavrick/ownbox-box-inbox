@@ -338,7 +338,12 @@ a{color:inherit;text-decoration:none}
   backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid var(--hair)}
 @media (max-width:820px){ .bar{display:block} }
 .bar-in{display:flex;align-items:center;gap:10px;padding:9px 16px;max-width:620px;margin:0 auto}
-.bar-in .appmark{width:32px;height:32px}
+/* THE SAME ROUNDED SQUARE AS THE DRAWER'S, AT ITS SIZE (owner, 2026-10-09: "Use the same as the icon shape and size that's in the drawer menu. They are different shapes and sizes right now"): .who .av in core/dash/home.py. */
+.bar-in .appmark{width:calc(38 * var(--px, 1px));height:calc(38 * var(--px, 1px));border-radius:11px}
+.bar-in .appmark:not(.fill)>img{width:70%;height:70%}
+/* ...and the page's name beside it as the drawer's name is (owner, 2026-10-09: "Match the drawer for both"). */
+.bar-in .ham{margin:0}
+.bar-in .brand{font-size:calc(18 * var(--px, 1px));font-weight:var(--w-strong);color:var(--ink)}
 .brand{font-weight:var(--w-strong);letter-spacing:-.015em}
 .day{margin-left:auto;font-size:calc(14 * var(--px, 1px));color:var(--dimmer)}
 /* THE DATE, NOW ON THE SCREEN INSTEAD OF IN THE CHROME. Owner, 2026-09-22: *"That date in the
@@ -1174,13 +1179,23 @@ _TABS = (
 # Inbox, where a row called Inbox says nothing to the person reading it.
 _TAB_ICON = {href: d for href, _label, d in _TABS}
 
+# THE MACHINE'S OWN ROW WEARS LUCIDE'S MESSAGES-SQUARE (owner, 2026-10-09: "for Inbox machine, use this one", with
+# Lucide's `messages-square`): two speech bubbles, the machine that answers every channel. Its two paths joined into one
+# `d` (the menu's `_svg` draws one path). Only the main menu's row: the tab bar keeps its own glyphs, looked up above.
+# Lucide, https://lucide.dev, ISC License: Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part
+# of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022. Permission to use, copy,
+# modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the
+# above copyright notice and this permission notice appear in all copies.
+_MACHINE_ICON = ("M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2z"
+                 "M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1")
+
 shell.register_section(
     # UNIFIED INBOX, NOT INBOX. Owner, 2026-09-21: *"the name of the machine should be Unified
     # Inbox not Inbox."* It is the product's name and the dashboard card already used it, so the
     # rail was the one surface still calling it something shorter than it is called everywhere
     # else. `Messages` below is the SCREEN inside it and keeps its own name.
     "inbox", order=10, machine="customer_voice", title="Inbox Machine",
-    href="/inbox/", icon=_TAB_ICON["/inbox/inbox"],
+    href="/inbox/", icon=_MACHINE_ICON,
     items=[
         {"key": "messages", "label": "Messages", "href": "/inbox/inbox",
          "icon": _TAB_ICON["/inbox/inbox"]},
