@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import html
 import re
+from email.header import decode_header, make_header
 
 # A URL as it survives escaping: `&` has already become `&amp;`, so the pattern must accept it.
 # Trailing punctuation is left OUT of the link — a sentence ending "see https://x.com/a." should
@@ -450,3 +451,20 @@ def safe_frame(body_html: str, *, label: str = "Message") -> str:
             f'sandbox="{_FRAME_SANDBOX}" referrerpolicy="no-referrer" loading="lazy" '
             f'style="height:{_estimate_px(body_html)}px" '
             f'srcdoc="{html.escape(doc, quote=True)}"></iframe>')
+
+
+# A HEADER AS A PERSON READS IT (owner, 2026-10-09, of a LinkedIn alert whose subject showed as
+# "=?UTF-8?Q?=E2=80=9Cdirector_or_manager_or_sen?= =?UTF-8?Q?ior_AI...": "what?"). Mail carries any header with a
+# character outside plain ASCII as RFC 2047 encoded-words, and the sweep keeps headers exactly as they came
+# (email_channel._kept_headers) so the details panel can stand behind them. This turns encoded-words into the words
+# they are (curly quotes, "…", accents, any charset Python knows), joins the folded lines, and leaves everything else
+# as it was: a plain subject, and the <address> in a From, come back unchanged. A header that won't decode is shown as
+# it came, never as an error.
+def readable_header(value) -> str:
+    raw = str(value or "")
+    if "=?" in raw:
+        try:
+            raw = str(make_header(decode_header(raw)))
+        except Exception:                                # noqa: BLE001 — a bad header is not fatal
+            pass
+    return " ".join(raw.split())

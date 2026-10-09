@@ -129,7 +129,8 @@ def _subject(raw_headers) -> str:
         return ""
     for name, value in (h.items() if isinstance(h, dict) else []):
         if str(name).lower() == "subject":
-            return str(value or "")[:300]
+            from .inbox import render
+            return render.readable_header(value)[:300]
     return ""
 
 

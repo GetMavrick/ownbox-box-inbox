@@ -3312,8 +3312,11 @@ def _details(headers: dict) -> str:
     """Gmail's caret, with the rows we can fill honestly. "" when we kept nothing for this one."""
     if not headers:
         return ""
-    rows = [("from", headers.get("From")), ("to", headers.get("To")), ("cc", headers.get("Cc")),
-            ("date", headers.get("Date")), ("subject", headers.get("Subject")),
+    # DECODED FOR READING, KEPT AS THEY CAME: a name or subject sent as RFC 2047 encoded-words shows as its words; the
+    # address beside a name is untouched (render.readable_header).
+    from marketing.customer_voice.inbox.render import readable_header as _rh
+    rows = [("from", _rh(headers.get("From"))), ("to", _rh(headers.get("To"))), ("cc", _rh(headers.get("Cc"))),
+            ("date", headers.get("Date")), ("subject", _rh(headers.get("Subject"))),
             ("mailed-by", _domain_of(headers.get("Return-Path"))),
             ("signed-by", _signed_by(headers)), ("security", _checks(headers))]
     body = "".join(f'<div class="dr"><span class="dk">{_esc(k)}</span>'
