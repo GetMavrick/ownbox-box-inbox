@@ -84,6 +84,14 @@ def _manifest(folder: pathlib.Path) -> tuple[dict | None, str]:
             return None, f"sdk '{m['sdk']}' must be a whole number, like 1"
         if wanted > sdk.VERSION:
             return None, f"built for sdk {wanted}; this box has sdk {sdk.VERSION}. Let the next update arrive"
+    # `permissions:` (docs/SCOPE_CUSTOM_MACHINES_FROM_A_REPO.md): what it may reach and which keys it uses by name.
+    # Refused here by the same sentence the sandbox gives, so a machine built in-process moves into one unchanged.
+    if m.get("permissions") is not None:
+        from core.machine_sandbox import grants
+        try:
+            grants.parse(m)
+        except grants.GrantError as e:
+            return None, f"permissions: {e}"
     try:
         from core import packs
         ok, why = packs.requires_ok(m)
@@ -167,6 +175,7 @@ def load(process: str) -> list[dict]:
                 except BaseException:
                     sys.modules.pop(name, None)     # a half-imported module must not look loaded
                     raise
+            _declare_keys(slug, d["manifest"])
             bp = getattr(mod, "blueprint", None)
             if bp is not None:
                 _BLUEPRINTS[slug] = bp
@@ -180,6 +189,16 @@ def load(process: str) -> list[dict]:
             log.error("custom_machine.import_failed", slug=slug, process=process, error=why)
         results.append({"slug": slug, **_STATUS[slug]})
     return results
+
+
+def _declare_keys(slug: str, manifest: dict) -> None:
+    """Each key named under `permissions: keys:` gets its field on the machine's Keys page, labelled as declared."""
+    if not manifest.get("permissions"):
+        return
+    from core import machine_secrets, sdk
+    from core.machine_sandbox import grants
+    for name, k in grants.parse(manifest)["keys"].items():
+        machine_secrets.declare(sdk._key(slug), name, label=k["label"], help=k["help"])
 
 
 def blueprints() -> dict[str, object]:

@@ -8,7 +8,9 @@ which is the width he uses.
 
 So this suite loads the inbox's screens the way a buyer does and holds two things:
   1. the top bar carries no link to the dashboard at all;
-  2. the page carries exactly one — the menu's back control.
+  2. every way back is the menu's: its back control, and (owner, 2026-10-08) the icon and company name at its top,
+     "it should probably just go back to the very beginning screen, which is the base machine screen." Nothing else
+     on the page links there.
 
 Run: python tests/test_the_top_bar_has_no_way_back.py
 """
@@ -59,9 +61,11 @@ for path in ("/inbox/inbox", "/inbox/setup"):
     if bar:
         ok(f"{path}: ...and it holds no link to the dashboard",
            'href="/dashboard"' not in bar.group(1), bar.group(1)[:300])
-    ok(f"{path}: the page's one way back is the menu's",
-       html.count('href="/dashboard"') == 1 and '<a class="home" href="/dashboard"' in html,
-       str(html.count('href="/dashboard"')))
+    rail = html.split('<nav class="rail"', 1)[-1].split("</nav>", 1)[0]
+    ok(f"{path}: every way back is the menu's: its back control and the name at its top, nothing else",
+       html.count('href="/dashboard"') == rail.count('href="/dashboard"') == 2
+       and '<a class="home" href="/dashboard"' in rail and '<a class="who" href="/dashboard"' in rail,
+       (html.count('href="/dashboard"'), rail.count('href="/dashboard"')))
 
 print("\n" + ("all good" if not _failed else f"{_failed} FAILED"))
 sys.exit(1 if _failed else 0)

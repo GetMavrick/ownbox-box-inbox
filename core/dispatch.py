@@ -201,7 +201,8 @@ app.register_blueprint(_connector_mcp.blueprint)
 #
 # The registry's refusal is still right; it must not be silent. So it fails the same way a pack
 # does: the tools are absent, the reason is recorded, and the box keeps answering.
-for _mod in ("core.report_tools", "core.box_tools", "core.brief", "core.ask", "core.person_tool"):
+for _mod in ("core.report_tools", "core.box_tools", "core.brief", "core.ask", "core.person_tool",
+             "core.brain_tools"):
     try:
         __import__(_mod)
     except Exception as _e:                        # noqa: BLE001

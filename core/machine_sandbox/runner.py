@@ -53,7 +53,7 @@ class Running:
     """One machine, started. `stop()` stops the unit, then the door."""
 
     def __init__(self, slug: str, *, code_dir: str, data_dir: str, socket_dir: str | None = None,
-                 sdk_dir: str | None = None, store=None):
+                 sdk_dir: str | None = None, store=None, version: str = "", **door):
         paths = unit.host_paths(slug)
         self.slug = slug
         self.code_dir, self.data_dir = code_dir, data_dir
@@ -62,7 +62,8 @@ class Running:
         self.uid, self.gid = ensure_user(slug)
         prepare(slug, code_dir=code_dir, data_dir=data_dir, socket_dir=self.socket_dir, uid=self.uid, gid=self.gid)
         self.broker = Broker(slug, uid=self.uid, gid=self.gid,
-                             socket_path=os.path.join(self.socket_dir, "sdk.sock"), store=store)
+                             socket_path=os.path.join(self.socket_dir, "sdk.sock"), store=store, version=version,
+                             **door)
 
     def start(self) -> None:
         self.broker.start()

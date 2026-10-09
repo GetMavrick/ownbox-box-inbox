@@ -28,7 +28,9 @@ DEFAULT_CONVERSIONS: tuple[tuple[str, str], ...] = (
     ("Checkout click", "event = '$autocapture' and (elements_chain_href like '%buy.stripe.com%' "
                        "or elements_chain_href like '%checkout.stripe.com%')"),
     # "Booking click": the CRO script's "Book a call", same condition.
-    ("Booking click", "event = '$autocapture' and elements_chain_href like '%calendar.app.google%'"),
+    # Cal.com since 2026-10-08 (owner); the Google address stays for windows that span the switch.
+    ("Booking click", "event = '$autocapture' and (elements_chain_href like '%calendar.app.google%' "
+                      "or elements_chain_href like '%cal.com/brianmacdonald%')"),
     ("Contact form sent", "event = '$autocapture' and properties.$event_type = 'submit' "
                           "and properties.$pathname like '/contact%'"),
 )

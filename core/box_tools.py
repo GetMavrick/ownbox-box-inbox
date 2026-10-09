@@ -552,6 +552,109 @@ tools.register(
                     "description": "true to clear the owner's words instead."}},
 )
 
+
+# ── CTAs: HOW AN EMAIL REPLY ENDS ─────────────────────────────────────────────────────────────────────────────────
+# Owner, 2026-10-09: "another field called CTAs ... these will be placed at the end of email drafts to drive traffic and
+# Leeds. If you don't want a CTA leave this box empty." Their AI can read them and ask to replace them; only the owner's
+# yes on Approvals changes them (core.business_context.set_ctas; the Inbox's drafter reads them).
+CTAS_KIND = "business_ctas"
+CTAS_MEANS = ("your email replies end with the one of these that fits best, worded slightly to fit the conversation, "
+              "when email is set to Subtle or Strong sales (never Customer service, and never on top of a customer's "
+              "problem). Email replies waiting to be sent are rewritten with them.")
+
+
+def business_ctas():
+    """The owner's CTAs, which close the box's email replies."""
+    from core import business_context
+    return {"ctas": business_context.ctas(), "max": business_context.CTAS_MAX,
+            "chars": business_context.CTA_CHARS}
+
+
+def _render_ctas(r: dict) -> str:
+    lines = [str(c) for c in (r.get("ctas") or [])]
+    if lines:
+        head = ("Your CTAs, which end your email replies (the one that fits best, worded slightly to fit):\n"
+                + "\n".join(f"{n}. {c}" for n, c in enumerate(lines, 1)))
+    else:
+        head = (f"No CTAs yet. Write up to {r.get('max') or 3}, one per line, and each email reply ends with the one "
+                "that fits best, to drive traffic and leads. Leave it empty and replies end as they do now.")
+    return say.answer(head + f"\n\nChange them on Your business: {say.link(WORDS_SCREEN)}",
+                      say.ask_next(("core.propose_business_ctas", "Replace my CTAs")))
+
+
+def propose_business_ctas(ctas=None, clear=False, seat=None):
+    """Ask the owner to replace the CTAs that close the box's email replies, or to clear them."""
+    from core import approvals, business_context
+    if clear in (True, "true", "yes", 1):
+        if not business_context.ctas():
+            return {"asked": False, "note": "there are no CTAs to clear"}
+        text, title = "", "Clear your CTAs"
+        shown = {"Change": title, "Means": "your email replies end as they did before the CTAs"}
+    else:
+        if isinstance(ctas, (list, tuple)):
+            ctas = "\n".join(str(c) for c in ctas)
+        try:
+            text = business_context.clean_ctas(ctas)
+        except ValueError as e:
+            return {"asked": False, "note": str(e)}
+        if not text:
+            return {"asked": False, "note": "no CTAs were given: send up to "
+                                            f"{business_context.CTAS_MAX}, one per line, as they should read"}
+        if text.split("\n") == business_context.ctas():
+            return {"asked": False, "note": "those are already the CTAs, word for word"}
+        title = "Replace your CTAs"
+        shown = {"Change": title, "New CTAs": text, "Means": CTAS_MEANS}
+    a = approvals.propose(CTAS_KIND, machine=MACHINE, title=title,
+                          detail={"app": "Your business", "arguments": shown, "ctas": text, "clear": not text},
+                          seat_id=str((seat or {}).get("label") or (seat or {}).get("id") or ""))
+    return {"asked": True, "approval": a["id"], "repeat": bool(a.get("repeat")),
+            "note": "waiting for the owner, who approves or declines in the mobile app. Nothing has changed yet."}
+
+
+def _run_ctas(detail: dict) -> dict:
+    from core import approvals, business_context
+    by = f"approval:{approvals.decider() or 'owner'}"
+    try:
+        business_context.set_ctas("" if (detail or {}).get("clear") else (detail or {}).get("ctas"), by=by)
+    except ValueError as e:
+        return {"ok": False, "text": f"Not changed: {e}"}
+    if (detail or {}).get("clear"):
+        return {"ok": True, "text": "Done. Your CTAs are cleared, and email replies end as they did before."}
+    return {"ok": True, "text": "Done. Your email replies now end with your CTAs, and replies waiting to be sent are "
+                                "being rewritten with them."}
+
+
+_approvals.register_kind(CTAS_KIND, run=_run_ctas)
+
+
+def _render_ctas_ask(r: dict) -> str:
+    return say.proposal(r, ("core.business_ctas", "What are my CTAs?"))
+
+
+tools.register(
+    "business_ctas",
+    title="Read your CTAs",
+    fn=business_ctas, machine=MACHINE, min_role="read", render=_render_ctas, capability="read:manifest",
+    description="The owner's CTAs (up to three, one per line): the lines the box's email replies end with, to drive "
+                "traffic and leads, each worded slightly to fit the conversation. Used when email is set to Subtle or "
+                "Strong sales, never Customer service. Empty means replies end as they always did.",
+)
+
+tools.register(
+    "propose_business_ctas",
+    title="Ask before replacing your CTAs",
+    fn=propose_business_ctas, machine=MACHINE, min_role="act", render=_render_ctas_ask,
+    capability="write:proposals", wants_seat=True,
+    description="Ask the owner to replace the CTAs that end the box's email replies: up to three, one per line, each "
+                "under 400 characters, as the owner wrote them (a casual line about what the business does, with a "
+                "link, ending on an open question). Never write your own unless they asked you to. Or clear=true to "
+                "stop adding them. Nothing changes until the owner approves.",
+    args={"ctas": {"type": "string", "required": False,
+                   "description": "The CTAs, one per line, as they should read."},
+          "clear": {"type": "boolean", "required": False,
+                    "description": "true to clear the CTAs instead."}},
+)
+
 # WHAT NEEDS THE OWNER TODAY includes a box that is not well (core/connector/prompts.py; the ask is registered in
 # core/report_tools.py beside the review it reads first).
 prompts.use("what_needs_me", "core.health", "whether the box itself is running, and anything on it that is "

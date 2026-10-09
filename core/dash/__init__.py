@@ -1752,6 +1752,8 @@ from core.dash import shifts as _shifts  # noqa: E402,F401 — Shifts: coworkers
 from core.dash import upgrade as _upgrade  # noqa: E402,F401 — Upgrade to Pro: the button and its sheet
 from core.dash import theme as _theme  # noqa: E402,F401 — appearance per person: the stamp and its save
 from core.dash import unsubscribe as _unsubscribe  # noqa: E402,F401 — the box's own opt-out page, no sign-in
+from core.dash import brain_api as _brain_api  # noqa: E402,F401 — the Business Brain's files (owner 2026-10-08)
+from core.dash import brain as _brain  # noqa: E402,F401 — the Business Brain's screen, /brain (owner 2026-10-09)
 
 # THE BOX'S ONE LOOK: the stylesheet and fonts every screen links (`look.head_tags()`), served from
 # the box itself. Imported HERE for the same reason as the two above.

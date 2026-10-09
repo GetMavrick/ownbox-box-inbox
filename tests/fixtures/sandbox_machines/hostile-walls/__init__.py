@@ -57,6 +57,7 @@ for p in ("/opt/aios/.env", "/opt/aios/aios.db", "/opt/aios/config/settings.yaml
           "/root/aios-walls-decoy", "/home/aios-walls-decoy/secret", "/srv/aios-walls-decoy",
           "/run/aios-walls-decoy", "/tmp/aios-walls-decoy", "/var/tmp/aios-walls-decoy",
           "/opt/aios-walls-decoy/other-machine/data/secret",
+          "/aios-walls-decoy-top/secret", "/aios-walls-decoy-top.txt", "/swapfile",
           "/proc/1/environ", "/proc/1/cmdline", "/proc/1/root/etc/hostname", "/dev/mem", "/dev/sda", "/dev/vda"):
     attempt("read:" + p, lambda p=p: read(p))
 
@@ -112,12 +113,27 @@ attempt("raise priority", lambda: os.nice(-5))
 
 # ── the box's door, used wrongly ───────────────────────────────────────────────────────────────────────────────
 door = sdk._door()
-attempt("box:unknown call think", lambda: door.call("think", task="x", prompt="leak"))
+attempt("box:think without a grant", lambda: door.call("think", task="x", prompt="leak"))
 attempt("box:approve its own proposal", lambda: door.call("decide", approval="1", yes=True))
 attempt("box:another machine's setting key", lambda: door.call("save_setting", key="../my_other", value=1))
 attempt("box:setting over 64 KB", lambda: door.call("save_setting", key="big", value="x" * 70000))
 attempt("box:sdk 2 hello", lambda: door.call("hello", sdk=2, slug="hostile-walls"))
 attempt("box:hello as another machine", lambda: door.call("hello", sdk=1, slug="honest-twin"))
+
+# ── the box's fetch (step 2): the test grants fetch to crm-good.com and metadata-trick.com, and the key "crm" for
+# crm-good.com only. Its fake server echoes every header it receives, the worst case for a key. ──────────────────
+attempt("fetch:a host not granted", lambda: m.fetch("https://evil.com/"))
+attempt("fetch:a granted name that points at the metadata address", lambda: m.fetch("https://metadata-trick.com/"))
+attempt("fetch:http", lambda: m.fetch("http://crm-good.com/"))
+attempt("fetch:the key to another host", lambda: m.fetch("https://metadata-trick.com/", key="crm"))
+attempt("fetch:setting the key's header itself", lambda: m.fetch("https://crm-good.com/", key="crm",
+                                                                    headers={"Authorization": "x"}))
+attempt("key:read it", lambda: m.secret("crm"))
+try:
+    echo = m.fetch("https://crm-good.com/contacts", key="crm")
+    R["honest:fetch with its key"] = f"SEEN: {echo.status} {echo.text[:300]}"
+except Exception as e:                                             # noqa: BLE001
+    R["honest:fetch with its key"] = f"FAILED: {type(e).__name__} {e}"
 
 # ── the box's resources ────────────────────────────────────────────────────────────────────────────────────────
 kids = []
@@ -153,6 +169,11 @@ def big_file():
 
 attempt("disk:one 250 MB file", big_file)
 
+# The keys this machine reports through, made first: the settings flood below fills the rest.
+for k in ("honest", "walls", "job_ran", "memory", "flood"):
+    if m.setting(k) is None:
+        m.save_setting(k, False if k == "job_ran" else "")
+
 # ── the honest half: the walls must not have broken the door ──────────────────────────────────────────────────
 honest = os.path.join(m.data_dir(), "honest.txt")
 with open(honest, "w") as f:
@@ -169,6 +190,28 @@ def tick():
     with open(os.path.join(m.data_dir(), "ticks"), "a") as f:
         f.write("t\n")
     m.save_setting("job_ran", True)
+    if not m.setting("flood"):
+        flood()
+
+
+def flood():
+    """The box's own database and logs, flooded through the door (OSDev4's review of #2065). Run from the job, after
+    the machine has reported, and the minute waited out after, because a flood spends the door's whole rate."""
+    kept = logged = 0
+    for i in range(300):
+        try:
+            m.save_setting(f"flood{i}", i)
+            kept += 1
+        except Exception:                                          # noqa: BLE001 — a refusal is the point
+            pass
+    for i in range(500):
+        try:
+            door.call("log", level="info", event="flood", fields={"i": i})
+            logged += 1
+        except Exception:                                          # noqa: BLE001
+            pass
+    time.sleep(62)
+    m.save_setting("flood", {"settings kept of 300": kept, "log lines taken of 500": logged})
 
 
 # ── memory, last and once ─────────────────────────────────────────────────────────────────────────────────────

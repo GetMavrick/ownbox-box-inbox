@@ -189,6 +189,16 @@ def fixtures() -> dict:
         "core.business_words": {"text": "We give a business's AI agents one place to work beside its team.",
                                 "from": "you", "max": 5000},
         "core.propose_business_words": asked,
+        "core.business_ctas": {"ctas": ["Everyone's building AI agents, so I built them a place to work: ownbox.io. "
+                                        "Would love to hear what's on your mind."], "max": 3, "chars": 400},
+        "core.propose_business_ctas": asked,
+        "core.business_brain": {"folder": "Price sheets", "usage": {"files": 2, "bytes": 2048, "max": 5 << 30},
+                                "items": [{"id": "a1", "kind": "file", "name": "Gyms.md", "path": "Price sheets/Gyms.md",
+                                           "size": 1024}]},
+        "core.business_brain_file": {"path": "Price sheets/Gyms.md", "name": "Gyms.md", "size": 40,
+                                     "mime": "text/markdown", "readable": True, "text": "Gym plan: $59 a month.",
+                                     "link": "/brain/file/a1", "changed_at": "2026-10-08T20:00:00+00:00"},
+        "core.propose_business_brain_save": asked,
         "morning_review.report_day": REVIEW,
         "morning_review.report_days": {"days": [DAY, "2026-10-01", "2026-09-30"], "count": 3},
         "morning_review.report_trend": {

@@ -631,6 +631,63 @@ CREATE TABLE IF NOT EXISTS approvals (
   result      TEXT                       -- JSON: what happened when it ran
 );
 CREATE INDEX IF NOT EXISTS ix_approvals_status ON approvals (status, created_at);
+
+-- ── CUSTOM MACHINES FROM A REPOSITORY (docs/SCOPE_CUSTOM_MACHINES_FROM_A_REPO.md, build step 2) ───────────────
+-- What the owner allowed each sandboxed machine (machine_grants), and every call it made through its door
+-- (machine_audit, decision D18). Both live in the box's own database, which no sandboxed machine can open, so a
+-- machine can neither widen its grants nor rewrite its history. Written only by core/machine_sandbox/.
+-- SCHEMA, not MIGRATIONS: brand-new tables.
+CREATE TABLE IF NOT EXISTS machine_grants (
+  machine     TEXT PRIMARY KEY,          -- the slug
+  version     TEXT NOT NULL,             -- the version the owner approved these for
+  grants      TEXT NOT NULL,             -- JSON, in core/machine_sandbox/grants.py's shape
+  granted_by  TEXT NOT NULL,
+  granted_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS machine_audit (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  at          TEXT NOT NULL,
+  machine     TEXT NOT NULL,
+  version     TEXT NOT NULL DEFAULT '',
+  call        TEXT NOT NULL,
+  permission  TEXT NOT NULL DEFAULT '',  -- the grant the call needed, '' for one that needs none
+  ok          INTEGER NOT NULL,
+  code        TEXT NOT NULL DEFAULT '',  -- the refusal's code, '' when it went through
+  host        TEXT NOT NULL DEFAULT '',  -- for a fetch: the host, never the path (a path can carry a secret)
+  bytes_out   INTEGER NOT NULL DEFAULT 0,
+  bytes_in    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_machine_audit ON machine_audit (machine, at);
+
+-- ── THE BUSINESS BRAIN'S FILES (owner, 2026-10-08: "a basic files manager immediately ... listed as Business Brain in
+-- the menu at the top"). Folders and files people and agents keep on the box. A file's bytes live on the box's disk,
+-- named by their sha256 (core/business_brain.py); these rows are its name, place and history. Nothing is removed at
+-- once: a deleted item keeps its row with deleted_at for 30 days. SCHEMA, not MIGRATIONS: brand-new tables.
+CREATE TABLE IF NOT EXISTS brain_items (
+  id          TEXT PRIMARY KEY,
+  parent      TEXT NOT NULL DEFAULT '',  -- the folder's id, '' at the top
+  kind        TEXT NOT NULL,             -- 'folder' | 'file'
+  name        TEXT NOT NULL,
+  sha256      TEXT NOT NULL DEFAULT '',  -- a file's bytes, on disk under that name
+  size        INTEGER NOT NULL DEFAULT 0,
+  mime        TEXT NOT NULL DEFAULT '',
+  added_by    TEXT NOT NULL,
+  added_at    TEXT NOT NULL,
+  changed_by  TEXT NOT NULL,
+  changed_at  TEXT NOT NULL,
+  deleted_at  TEXT,
+  deleted_by  TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_brain_items_parent ON brain_items (parent, deleted_at);
+CREATE TABLE IF NOT EXISTS brain_history (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  at          TEXT NOT NULL,
+  item        TEXT NOT NULL,
+  action      TEXT NOT NULL,             -- added, replaced, renamed, moved, deleted, restored, purged
+  by          TEXT NOT NULL,             -- a person's id, or the approval that let an agent do it
+  detail      TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS ix_brain_history_item ON brain_history (item, at);
 """
 
 

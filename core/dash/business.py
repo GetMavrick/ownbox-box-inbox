@@ -54,12 +54,16 @@ _CSS = (
     ".bz-line button{min-height:48px;min-width:48px;margin:-12px 0;padding:0 4px 0 12px;border:0;background:none;"
     "color:var(--ink-2);font-size:calc(15 * var(--px, 1px));cursor:pointer}"
     # YOUR OWN WORDS: one big field, the page's first card, 16px, its count under it.
-    ".bz-words textarea{width:100%;min-height:15em;font:inherit;font-size:max(16px, 1em);line-height:1.45;"
+    ".bz-words textarea,.bz-ctas textarea{width:100%;min-height:15em;font:inherit;font-size:max(16px, 1em);"
+    "line-height:1.45;"
     "padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);"
     "resize:vertical}"
     ".bz-warn{margin:8px 0 10px;font-weight:600}"
     ".bz-count{text-align:right;font-variant-numeric:tabular-nums}"
-    ".bz-words button{min-height:48px}"
+    ".bz-words button,.bz-ctas button{min-height:48px}"
+    # CTAS: one a line, and a CTA wraps to two or three lines on a phone, so about seven show there, four on a desktop.
+    ".bz-ctas textarea{min-height:11em}"
+    "@media (min-width:720px){.bz-ctas textarea{min-height:7em}}"
     "@media (min-width:720px){.bz-chips{flex-direction:row;flex-wrap:wrap}"
     ".bz-chips label{min-height:40px;border-radius:999px}.bz-plan{flex-direction:row}}"
 )
@@ -132,6 +136,45 @@ def _words_card(text: str, errors: dict, *, saved: bool = False) -> str:
             '<script>(function(){var t=document.getElementById("bz-words"),c=document.getElementById("bz-words-count");'
             f'if(!t||!c)return;function n(){{c.textContent=t.value.length.toLocaleString()+" of {w["max"]:,} characters";}}'
             't.addEventListener("input",n);})();</script></div>')
+
+
+CTA_EXAMPLE = ("Everyone's busier than ever, so we made booking take thirty seconds: yourbusiness.com/book. "
+               "Would love to hear what's on your mind.")
+
+
+def _ctas_card(text: str, errors: dict, *, saved: bool = False) -> str:
+    """CTAS, RIGHT UNDER THE OWNER'S OWN WORDS (owner, 2026-10-09, to OSDev4: "another field called CTAs. The tool tip
+    or instruction should say an example similar to mine and say these will be placed at the end of email drafts to
+    drive traffic and Leeds. If you don't want a CTA leave this box empty."). The help text is his, the example sits in
+    the box as its placeholder (his ruling on #2079), and the Customer service note is #2078's. One field, one CTA a
+    line, with a Save of its own (action=ctas) that
+    sends this field alone, as the words' does; bc.put("ctas") refuses past bc.CTAS_MAX lines or bc.CTA_CHARS in a
+    line with a sentence, and what was typed stays."""
+    service = False
+    try:
+        service = str(box_settings.get("inbox", "reply_style.email") or "") == "service"
+    except Exception:                                    # noqa: BLE001 — an unreadable style shows no note
+        service = False
+    n = len([ln for ln in text.split("\n") if ln.strip()])
+    return ('<div class="card bz-ctas" id="bz-ctas-card"><h2>CTAs</h2>'
+            # THE EXAMPLE SITS IN THE BOX, NOT UNDER THIS (owner, 2026-10-09, on #2079: "just put that example inside
+            # the box"; and of this text, "It already explains they can write up to 3. 1 per line.").
+            '<p class="bz-hint" id="bz-ctas-help">These are placed at the end of your email drafts to drive traffic '
+            f'and leads. Write up to {bc.CTAS_MAX}, one per line. Each draft ends with the one that fits best, worded '
+            "slightly to fit. If you don't want a CTA, leave this box empty.</p>"
+            + ('<p class="bz-hint">Your email replies are set to Customer service, so no CTA is added. '
+               '<a href="/inbox/channels">Inbox, Channels</a></p>' if service else "")
+            # SAVED, AND WHAT THAT MEANS FOR A DRAFT; nothing more under Customer service, whose note says why.
+            + (('<p role="status"><b>Saved.</b>' + ("" if service else " " + (
+                f"Your email drafts end with one of these {n}." if n > 1 else
+                "Your email drafts end with this one." if n == 1 else "No CTA will be added.")) + "</p>")
+               if saved else "")
+            + f'<form method="post" action="{DOOR}"><input type="hidden" name="action" value="ctas">'
+            '<textarea id="bz-ctas" name="ctas" rows="4" aria-label="CTAs, one per line" '
+            f'aria-describedby="bz-ctas-help" placeholder="{_esc(CTA_EXAMPLE)}">{_esc(text)}</textarea>'
+            + _err(errors, "ctas") +
+            # AN OUTLINE, as the words' Save: the screen's one primary stays the big form's Save.
+            '<button type="submit" class="ghost">Save CTAs</button></form></div>')
 
 
 def _err(errors: dict, *fields) -> str:
@@ -254,6 +297,8 @@ def _read_only(ctx: dict) -> str:
         rows.append("<p>Sells: " + _esc(", ".join(s["name"] for s in ctx["sells"])) + "</p>")
     if ctx.get("description"):
         rows.append('<p style="white-space:pre-wrap">' + _esc(ctx["description"]) + "</p>")
+    if ctx.get("ctas"):
+        rows.append('<p>CTAs:</p><p style="white-space:pre-wrap">' + _esc(ctx["ctas"]) + "</p>")
     body = "".join(rows) or "<p>Nothing yet. The owner fills this in.</p>"
     return f'<div class="card bz-read">{body}<p class="bz-hint">Only the owner can change these.</p></div>'
 
@@ -316,17 +361,26 @@ def box_business_screen():
                 return redirect(DOOR + "?saved=words#bz-words-card", code=303)
             except ValueError as e:
                 errors["description"] = str(e)
+        if action == "ctas":
+            try:
+                bc.put("ctas", request.form.get("ctas") or "", by=str(_who().get("id") or "owner"))
+                return redirect(DOOR + "?saved=ctas#bz-ctas-card", code=303)
+            except ValueError as e:
+                errors["ctas"] = str(e)
         if action == "dismiss":
             box_settings.put(CARD_NS, CARD_KEY, True, set_by=str(_who().get("id") or "") or None)
             return redirect("/dashboard", code=303)
-        if action != "words":
+        if action not in ("words", "ctas"):
             errors = _save(request.form)
             if not errors:
                 return redirect(DOOR + "?saved=1", code=303)
     ctx = bc.get()
     words_text = str(ctx.get("description") or "")
+    ctas_text = str(ctx.get("ctas") or "")
     if errors and request.form.get("action") == "words":  # what they typed stays in the field on a refusal
         words_text = str(request.form.get("description") or "")
+    elif errors and request.form.get("action") == "ctas":
+        ctas_text = str(request.form.get("ctas") or "")
     elif errors:                                         # WHAT THEY TYPED, NOT THE STORE: nothing vanishes on a refusal
         ctx.update({f: v for f, v in _answers(request.form)})
     saved = ('<div class="card"><h2>Saved.</h2><p>Your next Morning Review starts from it.</p></div>'
@@ -342,6 +396,7 @@ def box_business_screen():
                   '<button type="submit" class="ghost">Put it back</button></form></div>')
     body = f"<style>{_CSS}</style>" + saved + (
         _words_card(words_text, errors, saved=request.args.get("saved") == "words" and not errors)
+        + _ctas_card(ctas_text, errors, saved=request.args.get("saved") == "ctas" and not errors)
         + _suggestion_card(ctx) + _industry_card() + _profile_card(ctx, owner=True) + _form(ctx, errors) if owner
         else _read_only(ctx) + _profile_card(ctx)) + _back()
     return chrome(DOOR, title=_TITLE, lede=_LEDE, body=body), (200 if not errors else 400)

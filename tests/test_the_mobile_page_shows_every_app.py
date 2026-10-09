@@ -208,7 +208,7 @@ master = _Img.open(_io.BytesIO(owner.get("/ui/client-icon.png").data))
 ok("the header's picture is the re-encoded upload, square, never the file as sent",
    master.format == "PNG" and master.size == (512, 512))
 ok("the top of the menu wears it too, where a letter tile used to be",
-   _re.search(r'<div class="who"><span aria-hidden="true"><span class="[^"]*\bav\b[^"]*"><img src="/ui/client-icon\.png\?v=', head)
+   _re.search(r'<a class="who" href="[^"]*"><span aria-hidden="true"><span class="[^"]*\bav\b[^"]*"><img src="/ui/client-icon\.png\?v=', head)
    is not None)
 ok("...and so does the browser tab", f'rel="icon" href="/ui/client-icon.png?v={got["sha"]}"' in head
    and 'href="/ui/icon.svg" type="image/svg+xml"' not in head)

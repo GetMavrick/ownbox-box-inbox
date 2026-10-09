@@ -58,6 +58,12 @@ CRASHES_PER_HOUR = 5                          # then systemd stops restarting it
 HIDDEN_TREES = ("/opt", "/var", "/run", "/srv", "/mnt", "/media", "/etc")
 # Gone entirely where present ('-' = a box without one is fine).
 GONE = ("-/boot", "-/snap", "-/lost+found")
+# THE TOP OF / IS AN ALLOWLIST (OSDev4's review of #2065). Only the system itself shows at /; every other entry a box
+# has there, whatever its name, is covered: a folder by an empty read-only tmpfs, anything else made inaccessible.
+# Without this, a file a script left at / was hidden by its mode only. Today that is /swapfile, which holds the
+# box's swapped-out memory, secrets included (scripts/bootstrap.sh), and tomorrow it is whatever comes next.
+TOP_KEEP = frozenset({"bin", "sbin", "lib", "lib32", "lib64", "libx32", "usr", "dev", "proc", "sys", "tmp",
+                      "home", "root", *(t.lstrip("/") for t in HIDDEN_TREES), *(g.lstrip("-/") for g in GONE)})
 # The files from /etc that Python needs, bound back in read-only. Adding one needs a reason in review: each is a
 # file a machine can read.
 ETC_KEEP = ("/etc/ld.so.cache", "/etc/localtime", "/etc/passwd", "/etc/group", "/etc/nsswitch.conf")
@@ -100,9 +106,32 @@ def _path(label: str, p: str) -> str:
     return p
 
 
-def properties(*, slug: str, code_dir: str, sdk_dir: str, data_dir: str, socket_dir: str) -> list[str]:
-    """The unit's properties, as `-p` values, in a fixed order so a review can diff them."""
+def top_entries(root: str = "/") -> list[tuple[str, bool]]:
+    """What the box has at the top of /: [(path, is a real folder)], sorted, never following a link."""
+    out = []
+    with os.scandir(root) as it:
+        for e in it:
+            out.append((os.path.join(root, e.name), e.is_dir(follow_symlinks=False)))
+    return sorted(out)
+
+
+def _top_covers(top) -> list[str]:
+    """A cover for every entry at / that is not the system itself. A name the unit cannot write safely stops the
+    start: an entry the sandbox cannot hide is never left showing."""
+    out = []
+    for path, is_dir in top:
+        if os.path.basename(path) in TOP_KEEP:
+            continue
+        _path("an entry at /", path)
+        out.append(f"TemporaryFileSystem={path}:ro" if is_dir else f"InaccessiblePaths=-{path}")
+    return out
+
+
+def properties(*, slug: str, code_dir: str, sdk_dir: str, data_dir: str, socket_dir: str, top=None) -> list[str]:
+    """The unit's properties, as `-p` values, in a fixed order so a review can diff them. `top` is what the box has
+    at / (`top_entries()`, read at every start, so a new entry is covered the next time the machine starts)."""
     user = user_name(slug)
+    covers = _top_covers(top_entries() if top is None else top)
     code_dir = _path("code_dir", code_dir)
     sdk_dir = _path("sdk_dir", sdk_dir)
     data_dir = _path("data_dir", data_dir)
@@ -121,6 +150,7 @@ def properties(*, slug: str, code_dir: str, sdk_dir: str, data_dir: str, socket_
         "ProtectHome=tmpfs",
         *[f"TemporaryFileSystem={t}:ro" for t in HIDDEN_TREES],
         f"InaccessiblePaths={' '.join(GONE)}",
+        *covers,
         f"BindReadOnlyPaths={' '.join('-' + f for f in ETC_KEEP)}",
         f"BindReadOnlyPaths={code_dir}:{CODE} {sdk_dir}:{SDK}",
         f"BindPaths={data_dir}:{DATA} {socket_dir}:{RUN}",
@@ -170,10 +200,11 @@ def properties(*, slug: str, code_dir: str, sdk_dir: str, data_dir: str, socket_
     ]
 
 
-def argv(*, slug: str, code_dir: str, sdk_dir: str, data_dir: str, socket_dir: str) -> list[str]:
+def argv(*, slug: str, code_dir: str, sdk_dir: str, data_dir: str, socket_dir: str, top=None) -> list[str]:
     """The `systemd-run` command that starts the machine. It returns once the unit has started."""
     out = ["systemd-run", "--quiet", "--collect", "--service-type=exec", f"--unit={unit_name(slug)}"]
-    for p in properties(slug=slug, code_dir=code_dir, sdk_dir=sdk_dir, data_dir=data_dir, socket_dir=socket_dir):
+    for p in properties(slug=slug, code_dir=code_dir, sdk_dir=sdk_dir, data_dir=data_dir, socket_dir=socket_dir,
+                        top=top):
         out += ["-p", p]
     # -I: ignore PYTHON* variables and the user's site folder; -S: no site-packages at all, so a machine has the
     # standard library and the SDK and nothing the box happens to have installed (D14).

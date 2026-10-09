@@ -6,12 +6,16 @@ change it nor reach past it: every call becomes one JSON line on the machine's o
 (core/machine_sandbox/broker.py).
 
 THE SAME API AS IN-PROCESS (decision D3). A machine written against core/sdk.py runs unchanged here, as far as
-the calls this step of the build carries: m.setting, m.save_setting, m.data_dir and m.every. Every other promised
-call names itself and the build step that brings it (step 2: think, fetch, keys, people, sending; step 4: screens),
-rather than half-working. tests/test_machine_sandbox.py keeps this file's names in step with core/sdk.py's SEAMS.
+the calls the build carries so far: m.setting, m.save_setting, m.data_dir, m.every, m.think and m.fetch. Every
+other promised call names itself and the build step that brings it, rather than half-working.
+tests/test_machine_sandbox.py keeps this file's names in step with core/sdk.py's SEAMS.
+
+KEYS ARE NEVER READ HERE (D8). `m.secret(name)` refuses for good inside the sandbox: name the key on the request,
+`m.fetch(url, key="hubspot")`, and the box attaches it for the one host it was entered for.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import pathlib
@@ -26,13 +30,14 @@ STYLE_CLASSES = ("card", "quiet", "addr", "consent")
 
 _SLUG = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 _JOBS: dict = {}                    # name -> fn, run by boot.py when the box says a job is due
-_MAX_LINE = 1 << 20
+_MAX_LINE = 2 << 20                 # one request (the box refuses more)
+_MAX_REPLY = 8 << 20                # one answer
 
 # What a sandboxed machine cannot call yet, and the build step that brings it.
 _LATER = {
-    "think": 2, "tool": 2, "link": 2, "secret": 2, "person": 2, "touch": 2, "claim": 2, "release": 2,
-    "messages": 2, "send_dm": 2, "comments": 2, "conversation_for": 2, "follows_you": 2, "reply_to_comment": 2,
-    "reporter": 4, "day_window": 4, "menu": 4, "screen": 4, "panel": 4,
+    "person": 3, "touch": 3, "claim": 3, "release": 3, "messages": 3, "send_dm": 3, "comments": 3,
+    "conversation_for": 3, "follows_you": 3, "reply_to_comment": 3,
+    "tool": 4, "link": 4, "reporter": 4, "day_window": 4, "menu": 4, "screen": 4, "panel": 4,
 }
 
 
@@ -83,7 +88,7 @@ class _Door:
                     if len(line) > _MAX_LINE:
                         raise BoxRefused("too_large", "one call is at most 1 MB")
                     self._sock.sendall(line)
-                    raw = self._file.readline(_MAX_LINE + 1)
+                    raw = self._file.readline(_MAX_REPLY + 1)
                     if not raw:
                         raise ConnectionError("the box closed the connection")
                     reply = json.loads(raw)
@@ -117,6 +122,29 @@ def _later(name: str, step: int):
 
 def page(path: str, *, title: str, lede: str, body: str) -> str:
     raise NotYet("sdk.page is not available to a sandboxed machine: its screens are declarative (step 4)")
+
+
+class Response:
+    """What `m.fetch` hands back: .status, .headers (lower-case names), .content (bytes), .text and .json()."""
+
+    def __init__(self, r: dict):
+        self.status = int(r.get("status") or 0)
+        self.headers = dict(r.get("headers") or {})
+        if r.get("body_b64") is not None:
+            self.content = base64.b64decode(r["body_b64"])
+        else:
+            self.content = str(r.get("body") or "").encode()
+
+    @property
+    def ok(self) -> bool:
+        return 200 <= self.status < 300
+
+    @property
+    def text(self) -> str:
+        return self.content.decode("utf-8", "replace")
+
+    def json(self):
+        return json.loads(self.content)
 
 
 class Machine:
@@ -153,6 +181,33 @@ class Machine:
             _JOBS[job] = f
             return f
         return register if fn is None else register(fn)
+
+    # ── reasoning ─────────────────────────────────────────────────────────────────────────────
+    def think(self, task: str, prompt: str, *, system: str | None = None, max_tokens: int = 1024) -> str:
+        """Ask the box's AI, on the box's account, within this machine's monthly allowance."""
+        return _door().call("think", task=task, prompt=prompt, system=system, max_tokens=max_tokens)
+
+    # ── the internet, through the box ─────────────────────────────────────────────────────────
+    def fetch(self, url: str, *, method: str = "GET", headers: dict | None = None, body=None,
+              key: str | None = None, timeout: float = 20) -> Response:
+        """One https request, made by the box to a host the owner allowed. `key` names a key the owner saved; the
+        box attaches it for its own host and this machine never sees it. A redirect is handed back, not followed.
+        `body` is text, bytes, or a dict sent as JSON."""
+        args = {"url": url, "method": method, "headers": dict(headers or {}), "timeout": timeout}
+        if key is not None:
+            args["key"] = key
+        if isinstance(body, dict):
+            args["body"] = json.dumps(body)
+            args["headers"].setdefault("Content-Type", "application/json")
+        elif isinstance(body, (bytes, bytearray)):
+            args["body_b64"] = base64.b64encode(bytes(body)).decode()
+        elif body is not None:
+            args["body"] = str(body)
+        return Response(_door().call("fetch", **args))
+
+    def secret(self, name: str, *, label: str | None = None, help: str = "") -> str:
+        raise BoxRefused("never_readable", "a sandboxed machine never reads a key: name it on the request, "
+                                           f"m.fetch(url, key={name!r}), and the box attaches it")
 
     @property
     def keys_page(self) -> str:

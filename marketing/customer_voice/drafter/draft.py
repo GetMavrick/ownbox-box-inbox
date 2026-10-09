@@ -223,25 +223,82 @@ def own_words() -> str:
         return ""
 
 
+# THE OWNER'S CTAs CLOSE EVERY EMAIL (owner, 2026-10-09: "another field called CTAs ... these will be placed at the end
+# of email drafts to drive traffic and Leeds", written as up to three examples, and "instruct the box to slightly
+# [change] them each time according to what it appears would work best in each given situation"). They take the place
+# of the light sentence, which drew on everything the business does and sent his drafts all over the place. EMAIL ONLY,
+# as he said: a DM keeps its own shape and its light sentence. NEVER IN CUSTOMER SERVICE (owner, the same day: "if it's
+# a customer service focused approach then they wouldn't want the CTA at the end of the email"): the style that sells
+# nothing adds none. LAST in the instructions, after the owner's own words, so nothing after it reopens the closing
+# line; the hard rules above still bind (case 3 answers nothing; these links are given, never invented).
+CTA_CLOSE = (
+    "\nTHE OWNER'S CTAs: HOW EVERY EMAIL REPLY ENDS. The business wrote the lines below to close its email replies, "
+    "to bring in traffic and leads. They replace the light sentence and any other closing line about the business: "
+    "end every reply you write (cases 1, 2 and 4; never case 3) with ONE of them, except a reply to a customer with "
+    "an open problem, and except when an earlier reply in this conversation already ended with one.\n"
+    "- Pick the one that fits this conversation best.\n"
+    "- Keep its point, its tone and its link as written. Change only a few words so it follows naturally from what "
+    "they wrote; when it already fits, use it as it is.\n"
+    "- One CTA, as the reply's last line: never two, never a blend of them, never a claim they do not make. Add no "
+    "other line about what the business does unless they asked, and no other link to the business's website.\n"
+    "- When the reply also needs a next step of its own (a prospect ready to book or buy, the one detail you need "
+    "from them), ask for it before the CTA.\n"
+    "- In case 2 it never changes who you are writing as: the applicant stays the applicant. In case 4 the CTA is "
+    "how you turn it around: thank them, then the CTA, in place of the invitation to take a look.\n"
+    "--- the owner's CTAs ---\n{ctas}\n--- end of the owner's CTAs ---")
+
+
+def ctas() -> list[str]:
+    """The owner's CTAs (core.business_context), or [] when there are none. Never raises."""
+    try:
+        from core import business_context
+        return business_context.ctas()
+    except Exception:                                    # noqa: BLE001 — a CTA never costs a draft
+        return []
+
+
+def _cta_close(platform, chosen: str) -> str:
+    """The CTA instructions for this channel and style, or "": not email, Customer service, or no CTAs written."""
+    if str(platform or "").strip().lower() != "email" or chosen == "service":
+        return ""
+    lines = ctas()
+    return CTA_CLOSE.format(ctas="\n".join(f"- {c}" for c in lines)) if lines else ""
+
+
+_LINK = re.compile(r"(?:https?://)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>()\"']*)?", re.I)
+
+
+def _cta_links(platform) -> tuple:
+    """The links in the owner's CTAs when they close this channel's replies, else ()."""
+    if not _cta_close(platform, reply_style(platform)):
+        return ()
+    return tuple(m.group(0).rstrip(".,;:!?") for c in ctas() for m in _LINK.finditer(c))
+
+
 def _system(platform=None) -> str:
     pb, chosen = pitch_back(), reply_style(platform)
     site = f" ({pb['link']})" if pb["link"] else ""
-    style = (STYLE_SALES.format(site=site) + EVERYONE_SENTENCE.format(site=site) if chosen == "sales" else
-             STYLE_SUBTLE.format(site=site) + EVERYONE_SENTENCE.format(site=site) if chosen == "subtle" else
+    cta = _cta_close(platform, chosen)
+    light = "" if cta else EVERYONE_SENTENCE.format(site=site)
+    style = (STYLE_SALES.format(site=site) + light if chosen == "sales" else
+             STYLE_SUBTLE.format(site=site) + light if chosen == "subtle" else
              STYLE_SERVICE if chosen == "service" else "")
     words = own_words()
     return (SYSTEM + (PITCH_CASE.format(link=pb["link"]) if pb["on"] else "") + _shape(platform) + style
-            + (OWN_WORDS.format(description=words) if words else ""))
+            + (OWN_WORDS.format(description=words) if words else "") + cta)
 
 
 def _bare(link: str) -> str:
     return link.lower().split("://", 1)[-1].removeprefix("www.").rstrip("/")
 
 
-def _turned_around(text: str, link: str) -> str:
-    """The reply without its marker, and with the owner's link in it whatever the model did."""
+def _turned_around(text: str, link: str, also: tuple = ()) -> str:
+    """The reply without its marker, and with the owner's link in it whatever the model did. A link from the owner's
+    CTAs (`also`) already in it counts: on email the CTA is how a pitch is turned around, and a second link under it
+    would read as a template."""
     body = text.strip()[len(PITCH_BACK):].strip()
-    if link and _bare(link) not in body.lower():
+    have = body.lower()
+    if link and not any(_bare(x) in have for x in (link, *also) if _bare(x)):
         body = f"{body}\n\nTake a look: {link}" if body else f"Take a look: {link}"
     return body
 
@@ -400,7 +457,7 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
     # job applications"). Labelling every inbound line "Customer" told the model the recruiter replying to HIS
     # application was a customer of his, and it answered as the employer. "Them" and "You" leave the roles to case 2,
     # and the first line says who started the thread, as far as this box can see.
-    prompt = _prompt(space=space, zcid=zcid, inbound=inbound, history=history)
+    prompt = _prompt(space=space, zcid=zcid, inbound=inbound, history=history, platform=platform)
 
     text = _ask_model(space=space, zcid=zcid, prompt=prompt, platform=platform,
                       job_id=f"draft:{space}:{in_reply_to}")
@@ -423,7 +480,7 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
             # Only asked for when it is on; a model that says it anyway gets a normal draft, marker gone.
             text, pitched = text[len(PITCH_BACK):].strip(), False
         else:
-            text = _turned_around(text, pb["link"])
+            text = _turned_around(text, pb["link"], _cta_links(platform))
         if not text:
             return None
     if not store.put(space=space, zcid=zcid, in_reply_to=in_reply_to, body=text, rules=rules(platform)):
@@ -438,12 +495,12 @@ def draft_one(*, space: str, zcid: str, in_reply_to: str, inbound: str,
 
 def rules(platform=None) -> str:
     """A fingerprint of everything that shapes a draft for this channel: the instructions, the reply style, the
-    cold-pitch setting and its link. Stored with each draft; a waiting draft whose fingerprint no longer matches
-    is rewritten by the next sweep (owner, 2026-10-04)."""
+    cold-pitch setting and its link, and on email the owner's CTAs. Stored with each draft; a waiting draft whose
+    fingerprint no longer matches is rewritten by the next sweep (owner, 2026-10-04)."""
     return hashlib.sha1(_system(platform).encode("utf-8")).hexdigest()[:12]
 
 
-def _prompt(*, space: str, zcid: str, inbound: str, history: list[dict] | None) -> str:
+def _prompt(*, space: str, zcid: str, inbound: str, history: list[dict] | None, platform=None) -> str:
     lines = []
     for m in (history or [])[-8:]:
         who = "Them" if str(m.get("direction")) == "in" else "You (the business)"
@@ -473,14 +530,19 @@ def _prompt(*, space: str, zcid: str, inbound: str, history: list[dict] | None) 
             examples.append(f"They wrote: {asked}\nBusiness replied: {sent}")
     # MATCH HOW THEY WRITE, NOT WHAT THEY ONCE WROTE (owner, 2026-10-08: "It's still writing that human approval
     # thing every single time"). "Their wording" made every draft copy the closing line of the replies he had sent.
+    # WITH THE OWNER'S CTAs, THEY ARE THE CLOSING LINE (CTA_CLOSE): nothing here may steer it elsewhere, so the sent
+    # replies' closing lines are not a thing to avoid, and the endings below are not shown at all.
+    closing = bool(_cta_close(platform, reply_style(platform)))
     voice = ("" if not examples else
              "Here are replies this business has actually sent before. Match how they write: their length, their "
-             "tone, their way of putting things. Never copy a sentence from them, least of all their closing line."
-             "\n\n--- examples ---\n"
+             "tone, their way of putting things. "
+             + ("Never copy a sentence from them; how the reply ends is the owner's CTAs, as your instructions say."
+                if closing else "Never copy a sentence from them, least of all their closing line.")
+             + "\n\n--- examples ---\n"
              + "\n\n".join(examples) + "\n--- end of examples ---\n\n")
     # AND HOW RECENT REPLIES ENDED, so the closing line really varies: no call can vary against drafts it never saw.
     try:
-        endings = store.recent_endings(space, exclude_zcid=zcid)
+        endings = [] if closing else store.recent_endings(space, exclude_zcid=zcid)
     except Exception:                            # noqa: BLE001 — a nicety, never a draft's blocker
         endings = []
     ended = ("" if not endings else
@@ -552,7 +614,7 @@ def rewrite_one(*, space: str, row: dict) -> bool:
     except Exception:                            # noqa: BLE001 — rewrite on the inbound alone
         history = []
     text = _ask_model(space=space, zcid=row["zcid"], prompt=_prompt(space=space, zcid=row["zcid"], inbound=inbound,
-                                                                     history=history),
+                                                                     history=history, platform=platform),
                       platform=platform, job_id=f"redraft:{space}:{did}:{rules(platform)}")
     if not text:
         return False
@@ -564,7 +626,7 @@ def rewrite_one(*, space: str, row: dict) -> bool:
         return True
     if text.upper().startswith(PITCH_BACK):
         pb = pitch_back()
-        text = _turned_around(text, pb["link"]) if pb["on"] else text[len(PITCH_BACK):].strip()
+        text = _turned_around(text, pb["link"], _cta_links(platform)) if pb["on"] else text[len(PITCH_BACK):].strip()
         if not text:
             return False
     if not store.rewrite(space=space, draft_id=did, body=text, rules=now):
@@ -587,7 +649,7 @@ def recheck_one(*, space: str, row: dict) -> bool:
         history = []
     now = rules(platform)
     text = _ask_model(space=space, zcid=row["zcid"], prompt=_prompt(space=space, zcid=row["zcid"], inbound=inbound,
-                                                                     history=history),
+                                                                     history=history, platform=platform),
                       platform=platform, job_id=f"recheck:{space}:{did}:{now}")
     if not text:
         return False
@@ -598,7 +660,7 @@ def recheck_one(*, space: str, row: dict) -> bool:
     pitched = text.upper().startswith(PITCH_BACK)
     if pitched:
         pb = pitch_back()
-        text = _turned_around(text, pb["link"]) if pb["on"] else text[len(PITCH_BACK):].strip()
+        text = _turned_around(text, pb["link"], _cta_links(platform)) if pb["on"] else text[len(PITCH_BACK):].strip()
         pitched = pitched and pb["on"]
         if not text:
             return False

@@ -36,7 +36,8 @@ PAGE = "/approvals"
 _KINDS: dict[str, dict] = {}
 # WHO REGISTERS EACH KIND, so a process that never imported it (the web process deciding what a worker-side
 # coworker proposed) can still run an approval. A kind's own module registers it at import; this only imports it.
-_PROVIDERS = {"app_action": "core.connections.gateway", "box_pause": "core.box_tools"}
+_PROVIDERS = {"app_action": "core.connections.gateway", "box_pause": "core.box_tools",
+              "business_brain_save": "core.brain_tools"}
 # THE LOCK SCREEN NAMES NO APP AND NO MACHINE (core/machine_breaks.py keeps the same rule): the page it opens does.
 PUSH_TITLE = "Ownbox"
 PUSH_BODY = "A coworker is waiting for your OK on Approvals. Tap to review."

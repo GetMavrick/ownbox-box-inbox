@@ -73,7 +73,7 @@ DEFAULTS: dict = {
     "website": "", "name": "", "industry": "", "area": "", "hours": "", "description": "",
     "socials": [], "sells": [], "customers": "", "customer_kinds": [], "coming": [], "push": [],
     "goals": [], "workflows": [], "stage": "", "team_size": "", "competitors": [],
-    "profile": [], "suggested": {},
+    "profile": [], "suggested": {}, "ctas": "",
 }
 FIELDS = tuple(DEFAULTS)
 
@@ -197,6 +197,8 @@ def _clean(field: str, value):
         return clean_website(value)
     if field == "description":
         return clean_words(value)
+    if field == "ctas":
+        return clean_ctas(value)
     if field in TEXT:
         return " ".join(str(value or "").split())[:TEXT[field]]
     if field == "industry":
@@ -313,6 +315,46 @@ def set_words(text, *, by: str) -> str:
     if not v:
         draft_words()
     return v
+
+
+# ── CTAs: how an email reply ends ─────────────────────────────────────────────────────────────────────────────────
+# Owner, 2026-10-09, after a long description sent every draft's closing line somewhere different: "Your business should
+# just stay there and could just be a brain dump to be used for general business context in other purposes ... it
+# should be another field called CTAs ... these will be placed at the end of email drafts to drive traffic and Leeds.
+# If you don't want a CTA leave this box empty." And how they are used: "give three examples and then instruct the box
+# to slightly [change] them each time according to what it appears would work best in each given situation". So one
+# field, one CTA a line, at most three, each kept short enough to close an email. The Inbox's drafter reads them
+# (marketing/customer_voice/drafter/draft.py, CTA_CLOSE); nothing else does, and empty is the box exactly as it was.
+CTAS_MAX = 3
+CTA_CHARS = 400
+
+
+def clean_ctas(value) -> str:
+    """The owner's CTAs, one a line: spaces inside a line collapsed, empty lines dropped. Raises ValueError, in a
+    sentence a person can act on, past CTAS_MAX lines or CTA_CHARS in a line: cutting what someone wrote would change
+    what every email says, silently."""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = [ln for ln in (" ".join(raw.split()) for raw in text.split("\n")) if ln]
+    if len(lines) > CTAS_MAX:
+        raise ValueError(f"That is {len(lines)} CTAs. Write up to {CTAS_MAX}, one per line.")
+    for n, ln in enumerate(lines, 1):
+        if len(ln) > CTA_CHARS:
+            raise ValueError(f"CTA {n} is {len(ln):,} characters. Keep each one under {CTA_CHARS}, so it still reads "
+                             "as the end of an email.")
+    return "\n".join(lines)
+
+
+def ctas() -> list[str]:
+    """The owner's CTAs, in their order, or [] when there are none. Never raises."""
+    try:
+        return [ln for ln in str(get().get("ctas") or "").split("\n") if ln.strip()]
+    except Exception:                                    # noqa: BLE001 — a CTA never costs a reply
+        return []
+
+
+def set_ctas(text, *, by: str) -> str:
+    """Store the owner's CTAs (empty clears them). -> the text as stored. Raises ValueError."""
+    return put("ctas", text, by=by)
 
 
 def _words_from_site(profile: list[dict]) -> str:

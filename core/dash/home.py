@@ -98,10 +98,15 @@ pointer-events:none;transition:opacity .2s ease}
 padding:0 10px 14px;display:flex;flex-direction:column;
 font:calc(17 * var(--px, 1px))/1.5 var(--sans,-apple-system),-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 .who{display:flex;align-items:center;gap:11px;padding:15px 8px 13px}
+a.who{color:inherit;text-decoration:none;border-radius:var(--r-sm,9px)}a.who:hover{background:var(--hover)}
 .who .av{width:calc(38 * var(--px, 1px));height:calc(38 * var(--px, 1px));border-radius:11px}
 .who .av:not(.fill)>img{width:70%;height:70%}
 .who .id{min-width:0;display:flex;flex-direction:column;line-height:1.25}
-.who b{font-size:calc(17 * var(--px, 1px));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* THE COMPANY NAME READS LIKE THE TITLE UNDER IT (owner, 2026-10-08: "make sure that that company name is in the darker
+   black text ... a touch bigger so it matches the same size and color as inbox machine right below it"): the ink and
+   the size and weight of .subhead b. Its own colour, because `.who span` below dims the line it sits in. */
+.who b{color:var(--ink);font-size:calc(18 * var(--px, 1px));font-weight:700;white-space:nowrap;overflow:hidden;
+text-overflow:ellipsis}
 .who span{color:var(--dim);font-size:calc(15 * var(--px, 1px));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* A SUB-MENU'S TITLE BAR: the way out on the left, where you are in the middle, in bold. The
@@ -120,6 +125,7 @@ text-overflow:ellipsis}
 .nav a{display:flex;align-items:center;gap:11px;min-height:44px;padding:8px 10px;
 border-radius:var(--r-sm,9px);color:var(--nav-ink);font-size:calc(17 * var(--px, 1px))}
 .nav a:hover{background:var(--hover)}
+.nav a[aria-disabled]{cursor:default}.nav a[aria-disabled]:hover{background:none}
 .nav a[aria-current]{background:var(--sel);color:var(--ink);font-weight:600;
 box-shadow:inset 0 0 0 1px var(--hairline,transparent)}
 .nav a.danger{color:var(--danger)}
@@ -499,10 +505,15 @@ def _account(who: str, email: str) -> str:
     is "used inside the dashboard like in the upper left side of the menu where it's not currently
     being updated properly". The letter tile never changed when an icon was uploaded; the menu
     opens from that icon, and should open onto it.
+
+    AND IT GOES HOME. Owner, 2026-10-08: "When people click the icon at the very top left or their company name, it
+    should probably just go back to the very beginning screen, which is the base machine screen." So the block is one
+    link to the home section (`shell.home_href()`), from every menu, the Inbox's included: the same place the back
+    arrows end up, never a second idea of where home is.
     """
-    return (f'<div class="who"><span aria-hidden="true">{look.header_mark("av")}</span>'
+    return (f'<a class="who" href="{_esc(shell.home_href())}"><span aria-hidden="true">{look.header_mark("av")}</span>'
             f'<span class="id"><b>{_esc(who)}</b>'
-            + (f'<span>{_esc(email)}</span>' if email else "") + '</span></div>')
+            + (f'<span>{_esc(email)}</span>' if email else "") + '</span></a>')
 
 
 def _foot() -> str:
@@ -548,7 +559,7 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
         # that says so, but a row whose destination is an https:// address IS away whether or not
         # somebody remembered the tone, and the two cannot drift apart.
         off = shell.is_off_box(it.href)
-        if have and not off and it.href not in have and it.tone != "away":
+        if have and not off and it.href not in have and it.tone != "away" and not it.soon:
             # SILENTLY ABSENT, not greyed out. A disabled row still promises the thing exists.
             #
             # AND AN OFF-BOX ROW IS EXEMPT, which is not a loophole but the same rule: `_serving()`
@@ -577,7 +588,10 @@ def rail_html(path: str, *, who: str = "", email: str = "") -> str:
         # A LINK THAT LEAVES OPENS AWAY FROM THE BOX and carries `noopener`: the destination is
         # outside this box's control, and a menu row is not a reason to hand it this window.
         away = (' target="_blank" rel="noopener noreferrer"' if off else "")
-        rows.append(f'<a href="{_esc(it.href)}"{away}'
+        # A ROW WHOSE SCREEN IS STILL BEING BUILT (shell.Item.soon) is the same row with no href: not a link, not in
+        # the tab order, and a tap goes nowhere.
+        door = ' aria-disabled="true"' if it.soon else f' href="{_esc(it.href)}"{away}'
+        rows.append(f'<a{door}'
                     + (f' class="{_esc(cls)}"' if cls else "")
                     # A SUB-MENU'S ROWS ARE WORDS ONLY. In the reference the icons belong to the
                     # first level, where they tell sections apart at a glance; one level down every
@@ -1640,7 +1654,22 @@ def _approvals_waiting() -> int:
 shell.register_section("approvals", order=5, machine="core", title="Approvals", href="/approvals",
                        icon=_CHECK_ICON, owner_only=True, count=_approvals_waiting)
 
-# THE MORNING REVIEW IS SECOND, RIGHT BELOW BASE MACHINE. Owner, 2026-10-05: "In the left side bar, move morning
+# BUSINESS BRAIN IS SECOND, RIGHT UNDER BASE MACHINE. Owner, 2026-10-08: "Emergency feature update. Please add a menu
+# item called Business Brain with a brain glyph. Put it at the top of the menu right under base machine. It doesn't need
+# to link to anything right now. Just the menu option." It will open the box's files (OSDev4's backend, owner 10-08: "a
+# basic files manager immediately ... listed as Business Brain in the menu at the top"). It opens /brain (core/dash/brain.py,
+# 10-09); until that screen shipped the row was drawn and not a link (`soon`).
+# A BRAIN, seen from above: two halves with their folds and the line between them.
+_BRAIN_ICON = ("M12 5.6C12 3.9 10.7 3.1 9.5 3.4C8.4 3.7 7.7 4.6 7.8 5.5C6.1 5.5 4.9 6.9 5.2 8.5C3.7 9.2 3.1 11 4 12.3"
+               "C3.2 13.7 3.7 15.6 5.3 16.2C5.5 18 7.1 19.3 8.8 18.9C9.7 20.2 11.4 20.5 12 19.1"
+               "M12 5.6C12 3.9 13.3 3.1 14.5 3.4C15.6 3.7 16.3 4.6 16.2 5.5C17.9 5.5 19.1 6.9 18.8 8.5"
+               "C20.3 9.2 20.9 11 20 12.3C20.8 13.7 20.3 15.6 18.7 16.2C18.5 18 16.9 19.3 15.2 18.9"
+               "C14.3 20.2 12.6 20.5 12 19.1M12 5.6V19.1M7.8 5.5C7.9 6.7 8.7 7.5 9.8 7.6M4 12.3C4.8 13 6.1 13.1 7.1 12.5"
+               "M8.8 18.9C8.6 17.6 9.1 16.4 10.2 15.8M16.2 5.5C16.1 6.7 15.3 7.5 14.2 7.6M20 12.3C19.2 13 17.9 13.1 16.9 12.5"
+               "M15.2 18.9C15.4 17.6 14.9 16.4 13.8 15.8")
+shell.register_section("brain", order=1, machine="core", title="Business Brain", href="/brain", icon=_BRAIN_ICON)
+
+# THE MORNING REVIEW IS THIRD, under Business Brain (10-08); it was second, RIGHT BELOW BASE MACHINE. Owner, 2026-10-05: "In the left side bar, move morning
 # review up to the second item in the list right below base machine", and "It's part of the base machine, so let's
 # keep it there." It had headed the add-on machines since 2026-09-29 ("move morning review down to the top of the
 # list of the add-on machines"); it sits in the box's own group now, between Base Machine (0) and Approvals (5). It
@@ -1648,7 +1677,7 @@ shell.register_section("approvals", order=5, machine="core", title="Approvals", 
 # doors).
 # OWNER-ONLY because its page publishes what the box spends and refuses anyone else (`review._admit`); a member is
 # shown no row rather than a door that sends them to sign in again.
-shell.register_section("review", order=1, machine="core", title="Morning Review",
+shell.register_section("review", order=2, machine="core", title="Morning Review",
                        href="/app/review", icon=_SUN_ICON, owner_only=True)
 
 # ADD A MACHINE CLOSES THE ADD-ON GROUP. Owner, 2026-09-24: the add-on machines are *"unified inbox

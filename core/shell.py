@@ -129,6 +129,11 @@ class Item:
     # approvals page? It should be in the dashboard"). A zero-argument callable, asked when the menu is drawn; a
     # count that cannot be read is drawn as no count, never as a broken menu. Set from the section's own `count`.
     count: object = None
+    # A ROW WHOSE SCREEN IS STILL BEING BUILT: drawn, but not a link. Owner, 2026-10-08: "add a menu item called Business
+    # Brain with a brain glyph ... It doesn't need to link to anything right now. Just the menu option." The renderer
+    # draws it like any row, without an href, so a tap goes nowhere rather than to a page that is not there, and it is
+    # exempt from "an unserved row is absent" for exactly that reason. Set from the section's own `soon`.
+    soon: bool = False
 
 
 @dataclass(frozen=True)
@@ -156,6 +161,8 @@ class Section:
     # `Item` is. The first is the Morning Review (owner, 2026-09-29: "Add the Morning Review to the
     # menu"): its page publishes what the box spends, and its gate sends anyone else to sign in.
     owner_only: bool = False
+    # ITS SCREEN IS STILL BEING BUILT (Item.soon). Core's alone: a promise in the box's own menu is the box's to make.
+    soon: bool = False
 
 
 @dataclass(frozen=True)
@@ -200,7 +207,7 @@ ADDONS_LABEL = "Add-on machines"
 def register_section(key: str, *, order: int, machine: str, title: str, href: str,
                      items: Iterable = (), home: bool = False, icon: str = "",
                      group: str = "", parent: str = "", owner_only: bool = False,
-                     group_labels: dict | None = None, count=None) -> None:
+                     group_labels: dict | None = None, count=None, soon: bool = False) -> None:
     """Declare one rail section. Called at import, like every other seam in this box.
 
     CHECKED HERE, AT IMPORT, where a mistake is a failed boot line — not on the screen, where it
@@ -241,6 +248,9 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
             raise ValueError(f"rail section {key!r} cannot nest under {parent!r}, itself nested")
         if home:
             raise ValueError(f"rail section {key!r} cannot be both nested and home")
+    if soon and (machine != "core" or home or items or parent):
+        raise ValueError(f"rail section {key!r}: only the box's own top-level row, with no sub-menu, may be drawn "
+                         "before its screen exists")
     if count is not None and not callable(count):
         raise ValueError(f"rail section {key!r} count must be a zero-argument callable")
     if owner_only and home:
@@ -289,6 +299,7 @@ def register_section(key: str, *, order: int, machine: str, title: str, href: st
     _SECTIONS[key] = Section(key=key, order=order, machine=machine, title=title.strip(),
                              href=href, items=tuple(built), home=bool(home), icon=str(icon or ""),
                              group=group, parent=str(parent or ""), owner_only=bool(owner_only), count=count,
+                             soon=bool(soon),
                              group_labels=tuple((str(k), str(v)) for k, v in (group_labels or {}).items()))
     log.info("shell.section_registered", key=key, machine=machine, items=len(built))
 
@@ -439,7 +450,7 @@ def rail(path: str) -> Rail:
     # never listed here.
     got = tuple(s for s in sections() if not s.parent)
     top = tuple(Item(key=s.key, label=s.title, href=s.href, icon=s.icon, count=s.count,
-                     owner_only=s.owner_only, submenu=bool(s.items) and not s.home,
+                     owner_only=s.owner_only, submenu=bool(s.items) and not s.home, soon=s.soon,
                      group_start=i > 0 and s.group != got[i - 1].group,
                      label_above=ADDONS_LABEL if s.group == "addons" and (i == 0 or got[i - 1].group != "addons")
                      else "")

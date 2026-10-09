@@ -7,8 +7,9 @@ machines. Which would be unified inbox and then add a machine."* And of that sec
 subtle. Almost just like an extra space."*
 
 So this suite renders the real menu, the way a buyer's box draws it, and holds:
-  1. the rows, in order: Base Machine, the Morning Review, Approvals, System Settings, then the add-on machines,
-     then Add a Machine — and a member is not shown the Morning Review, which refuses them;
+  1. the rows, in order: Base Machine, Business Brain, the Morning Review, Approvals, System Settings, then the add-on
+     machines, then Add a Machine — and a member is not shown the Morning Review, which refuses them; Business
+     Brain opens its screen;
   2. exactly one row opens a new group: the first add-on machine, for the owner and a member alike;
   3. the gap is space and nothing else: no heading, no rule, no extra words;
   4. a machine that registers a low `order` still cannot climb above the box's own rows,
@@ -62,15 +63,24 @@ def menu(path):
 
 print("\ntest_the_rows_read_in_the_owners_order")
 html, nav = menu("/dashboard")
-rows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', nav, re.S)
+# EVERY ROW, A LINK OR NOT: a row whose screen is still being built is an <a> with no href (shell.Item.soon).
+ROW = r'<a(?: href="[^"]*")?[^>]*>.*?<span class="lbl">([^<]*)</span>'
+rows = re.findall(ROW, nav, re.S)
 # THE ADD-ON MACHINES SIT BETWEEN THE BOX'S OWN ROWS AND ADD A MACHINE, in their registered order.
 # THE MORNING REVIEW IS SECOND, RIGHT BELOW BASE MACHINE (owner, 2026-10-05: "move morning review up to the second
 # item in the list right below base machine", and "It's part of the base machine, so let's keep it there"). It
 # headed the add-on machines from 2026-09-29 until then. APPROVALS FOLLOWS IT (owner, 10-04: "Where is the approvals
 # Page? It should be in the dashboard").
-ok("Base Machine, the Morning Review, Approvals, System Settings, then the add-on machines, then Add a Machine",
-   rows == ["Base Machine", "Morning Review", "Approvals", "System Settings", "AEO Machine", "Inbox Machine",
-            "Add a Machine"], str(rows))
+# BUSINESS BRAIN IS SECOND, RIGHT UNDER BASE MACHINE (owner, 2026-10-08: "Put it at the top of the menu right under
+# base machine. It doesn't need to link to anything right now. Just the menu option.").
+ok("Base Machine, Business Brain, the Morning Review, Approvals, System Settings, the add-on machines, Add a Machine",
+   rows == ["Base Machine", "Business Brain", "Morning Review", "Approvals", "System Settings", "AEO Machine",
+            "Inbox Machine", "Add a Machine"], str(rows))
+# IT OPENS ITS SCREEN NOW (core/dash/brain.py, 10-09); it was drawn without a link until then (`soon`).
+_brain = re.search(r'<a( [^>]*)?>(?:(?!</a>).)*?<span class="lbl">Business Brain</span>', nav, re.S)
+ok("...Business Brain has its glyph and opens its screen",
+   _brain is not None and 'href="/brain"' in _brain.group(0) and "aria-disabled" not in _brain.group(0)
+   and '<svg class="ic"' in _brain.group(0), _brain and _brain.group(0)[:300])
 ok("...and the Morning Review row opens the review", '<a href="/app/review"' in nav)
 _rv = c.get("/app/review")
 _rv_nav = _rv.get_data(as_text=True).split('<nav class="rail"', 1)[-1].split("</nav>", 1)[0]
@@ -85,11 +95,11 @@ _m = app.test_client()
 _m.set_cookie(dash.COOKIE, dash.new_session(state.add_user("lena.okafor@acme.co", name="Lena",
                                                            role="member")["id"]))
 _m_nav = _m.get("/dashboard").get_data(as_text=True).split('<nav class="rail"', 1)[-1].split("</nav>", 1)[0]
-_m_rows = re.findall(r'<a href="[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>', _m_nav, re.S)
+_m_rows = re.findall(ROW, _m_nav, re.S)
 ok("a member's menu has no Morning Review row", "Morning Review" not in _m_rows
    and "/app/review" not in _m_nav, str(_m_rows))
 ok("...and still has the rest, in the same order (no Approvals: approving is the owner's)",
-   _m_rows == ["Base Machine", "System Settings", "AEO Machine", "Inbox Machine", "Add a Machine"],
+   _m_rows == ["Base Machine", "Business Brain", "System Settings", "AEO Machine", "Inbox Machine", "Add a Machine"],
    str(_m_rows))
 # THE GAP IS CARRIED, not dropped with the row a member is not shown: it opens above their first machine.
 _m_grp = re.findall(r'<a href="[^"]*"[^>]*class="[^"]*\bgrp\b[^"]*"[^>]*>.*?<span class="lbl">([^<]*)</span>',
@@ -188,6 +198,15 @@ for it in sec.items:
     ok(f"{it.href}: the breadcrumb names it", bool(crumb) and f"<b>{it.label}</b>" in crumb.group(1),
        crumb.group(1) if crumb else "no crumb")
 
+print("\ntest_the_name_at_the_top_goes_home")
+# OWNER, 2026-10-08: "When people click the icon at the very top left or their company name, it should probably just go
+# back to the very beginning screen, which is the base machine screen." From the box's own menu and from a machine's.
+for _door in ("/settings/business", "/inbox/inbox"):
+    _top = re.search(r'<a class="who" href="([^"]*)">(.*?)</a>', menu(_door)[1], re.S)
+    ok(f"on {_door}, the icon and the company name are one link, to Base Machine",
+       _top is not None and _top.group(1) == shell.home_href() == "/dashboard" and "<b>" in _top.group(2)
+       and '<span aria-hidden="true">' in _top.group(2), _top and _top.group(0)[:200])
+
 print("\ntest_a_machine_cannot_climb_above_the_box")
 shell.register_section("eager", order=-5, machine="eager_machine", title="Eager",
                        href="/eager/")
@@ -202,6 +221,11 @@ try:
     ok("a group that does not exist is refused at boot", False)
 except ValueError:
     ok("a group that does not exist is refused at boot", True)
+try:
+    shell.register_section("teaser", order=50, machine="teaser_machine", title="Teaser", href="/teaser/", soon=True)
+    ok("a row drawn before its screen exists is the box's own to declare, never a machine's", False)
+except ValueError:
+    ok("a row drawn before its screen exists is the box's own to declare, never a machine's", True)
 
 print("\n" + ("all good" if not _failed else f"{_failed} FAILED"))
 sys.exit(1 if _failed else 0)

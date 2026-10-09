@@ -164,6 +164,12 @@ ok("the final message came back, and only it", out == "Yes — we open at nine."
 argv = open(os.path.join(os.environ["AIOS_CODEX_HOME"], "last_argv")).read()
 ok("read-only sandbox", "read-only" in argv, argv)
 ok("no MCP tools", "mcp_servers={}" in argv, argv)
+# OSDev4, 2026-10-08: read-only limits writes, not reads, and the CLI offers its shell by default.
+_args = argv.split("\n")
+_off = {_args[i + 1] for i, a in enumerate(_args[:-1]) if a == "--disable"}
+ok("every built-in tool is switched off by name: no shell, browser, computer, apps or plugins",
+   set(brain.CODEX_NO_TOOLS) <= _off and {"shell_tool", "unified_exec", "browser_use", "computer_use", "apps",
+                                          "plugins"} <= _off, sorted(_off))
 ok("ephemeral, no user config, no rules", all(f in argv for f in ("--ephemeral", "--ignore-user-config", "--ignore-rules")), argv)
 ok("prompt on stdin", argv.strip().endswith("-"), argv)
 ok("no model invented by default", "\n-m\n" not in argv, argv)

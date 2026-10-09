@@ -37,7 +37,11 @@ WHAT IS PROMISED (§9.2), AND WHAT IS NOT:
   * conversations    m.claim / m.release / m.messages / m.send_dm: work with the box's inbox through
                      its own send path and gates (core.conversations). A conversation a machine claims
                      isn't drafted or counted as waiting by the inbox. Added in SDK 1, owner 2026-10-01.
-  * the manifest     machine.yaml: name, version, requires_foundation, needs:, sdk
+  * the internet     m.fetch(url, method=, headers=, body=, key=, timeout=): one https request to a host the
+                     machine.yaml's `permissions: fetch:` lists, with a key named by reference (`keys:`), never
+                     read. The same call, the same rules, in-process and in the sandbox (core/machine_sandbox/).
+                     Added in SDK 1, owner 2026-10-08 (docs/SCOPE_CUSTOM_MACHINES_FROM_A_REPO.md v2).
+  * the manifest     machine.yaml: name, version, requires_foundation, needs:, sdk, permissions:
   NOT promised: worker.register / register_periodic (use m.every; a job on the worker's own loop
   holds up every other one), state.register_schema (a company's tables would block our migrations:
   use m.data_dir()), and any other `core.*` import.
@@ -56,11 +60,11 @@ VERSION = 1
 
 # The manifest fields a machine may rely on, and the seams above by name. `scripts/ownbox.py check`
 # and core/machine_breaks.py read these, so there is one list of what we promised.
-MANIFEST_FIELDS = ("name", "version", "requires_foundation", "needs", "sdk")
+MANIFEST_FIELDS = ("name", "version", "requires_foundation", "needs", "sdk", "permissions")
 SEAMS = ("machine", "think", "reporter", "tool", "menu", "screen", "page", "setting",
          "save_setting", "data_dir", "every", "panel", "claim", "release", "messages", "send_dm",
          "comments", "reply_to_comment", "conversation_for", "follows_you", "person", "touch", "secret",
-         "STYLE_CLASSES", "VERSION")
+         "fetch", "STYLE_CLASSES", "VERSION")
 
 # The style classes a screen may use. Our markup changes; these names keep their meaning.
 STYLE_CLASSES = ("card", "quiet", "addr", "consent")
@@ -227,6 +231,52 @@ class Machine:
             machine_secrets.declare(self.key, name, label=label, help=help)
         return machine_secrets.get(self.key, name)
 
+    # ── the internet ──────────────────────────────────────────────────────────────────────────
+    def fetch(self, url: str, *, method: str = "GET", headers: dict | None = None, body=None,
+              key: str | None = None, timeout: float = 20):
+        """One https request to a host this machine's machine.yaml lists under `permissions: fetch:`.
+
+        `key` names a key from `permissions: keys:`; the box attaches it, only for that key's host, and blanks it
+        out of the answer, so the machine never holds it. A redirect is handed back, not followed. `body` is text,
+        bytes, or a dict sent as JSON. Returns `.status`, `.headers`, `.content`, `.text`, `.json()`, `.ok`.
+
+        THE SAME RULES AS IN THE SANDBOX, so a machine built here moves into one unchanged: here they come from
+        the machine's own manifest; in the sandbox, from what the owner approved."""
+        import json as _json
+        from core.machine_sandbox import fetch as _fetch
+        from core.machine_sandbox import grants as _grants
+        spec = _grants.parse(self._manifest())
+        host = _fetch.host_of(url)
+        if host not in spec["fetch"]:
+            raise _fetch.FetchRefused("host_not_allowed", f"{host} is not in this machine's permissions: fetch:")
+        hdrs, secret = _fetch.machine_headers(headers), ""
+        if isinstance(body, dict):
+            data = _json.dumps(body).encode()
+            hdrs.setdefault("Content-Type", "application/json")
+        elif isinstance(body, (bytes, bytearray)):
+            data = bytes(body)
+        else:
+            data = str(body or "").encode()
+        if key is not None:
+            k = spec["keys"].get(key)
+            if k is None or k["host"] != host:
+                raise _fetch.FetchRefused("key_not_allowed", f"key {key!r} is not this machine's key for {host}")
+            from core import machine_secrets
+            if any(h.lower() == k["header"].lower() for h in hdrs):
+                raise _fetch.FetchRefused("bad_headers", f"the box sets the {k['header']} header from the key")
+            secret = machine_secrets.get(self.key, key)
+            if not secret:
+                raise _fetch.FetchRefused("key_missing", f"the owner has not saved the {k['label']} yet")
+            hdrs[k["header"]] = k["prefix"] + secret
+        return _Response(_fetch.request(url, method=method, headers=hdrs, body=data, timeout=timeout,
+                                        secret=secret))
+
+    def _manifest(self) -> dict:
+        from core import custom_machines
+        import yaml
+        f = custom_machines.machines_dir() / self.slug / "machine.yaml"
+        return (yaml.safe_load(f.read_text(encoding="utf-8")) or {}) if f.is_file() else {}
+
     @property
     def keys_page(self) -> str:
         """Where the owner saves this machine's secrets: link to it from your own screen."""
@@ -390,6 +440,23 @@ class Machine:
         d = custom_machines.machines_dir() / self.slug / "data"
         d.mkdir(parents=True, exist_ok=True)
         return d
+
+
+class _Response:
+    def __init__(self, r: dict):
+        self.status, self.headers, self.content = r["status"], r["headers"], r["body"]
+
+    @property
+    def ok(self) -> bool:
+        return 200 <= self.status < 300
+
+    @property
+    def text(self) -> str:
+        return self.content.decode("utf-8", "replace")
+
+    def json(self):
+        import json as _json
+        return _json.loads(self.content)
 
 
 def machine(slug: str) -> Machine:

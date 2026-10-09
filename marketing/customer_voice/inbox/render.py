@@ -279,6 +279,39 @@ def no_script_links(body_html: str) -> str:
     return _TAG.sub(lambda m: _defang(m.group(0)), str(body_html or ""))
 
 
+# EVERY LINK IN AN EMAIL OPENS OUTSIDE THE INBOX (owner, 2026-10-08, of a customer-portal email whose button showed
+# "billing.stripe.com refused to connect" in the reading pane: "we also didn't think about when people click links
+# inside emails ... Possibly just open a new browser tab? But Mobile is different because it's the native browser
+# integration pop-up"). A link with no target opened INSIDE the frame, and a site that refuses to be framed (a bank, a
+# billing portal, a sign-in page) drew its refusal there. So every <a> and <area> opens a new window, which a computer
+# shows as a new tab and an installed app on a phone as the phone's own browser sheet; the frame's sandbox allows exactly
+# that and no more (popups, escaping the sandbox). A sender's own target (_self, _top, a name) is replaced, and the frame
+# also carries <base target="_blank"> for anything this misses. rel="noopener noreferrer": the page that opens can't
+# reach back and move the reading pane, and is not told which box it came from. A link to a place in the same email
+# (href="#...", a newsletter's contents) stays in the frame, pointed at about:srcdoc#...: a frame drawn from srcdoc
+# reads a bare "#help" against the PAGE's address, so it loaded the Inbox itself inside the frame (measured in Brave,
+# 10-08), while about:srcdoc#help scrolls the email to it.
+_LINK_TAG = re.compile(r"""(?is)<(?:a|area)\b(?:[^>"']|"[^"]*"|'[^']*')*>""")
+_HREF = re.compile(r"""(?is)[\s"'/]href\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+)""")
+_TARGET_REL = re.compile(r"""(?is)(?P<lead>[\s"'/])(?:target|rel)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+)""")
+
+
+def links_open_outside(body_html: str) -> str:
+    """The sender's HTML with every link set to open in a window of its own (see the note above)."""
+    def one(m: re.Match) -> str:
+        tag = m.group(0)
+        end = "/>" if tag.endswith("/>") else ">"
+        inner = _TARGET_REL.sub(lambda x: x.group("lead") if x.group("lead") in "\"'" else " ", tag[: -len(end)])
+        href = _HREF.search(inner)
+        frag = html.unescape(href.group(1).strip("\"'")).strip() if href else ""
+        if frag.startswith("#"):
+            inner = (inner[: href.start(1)] + '"' + html.escape("about:srcdoc" + frag, quote=True) + '"'
+                     + inner[href.end(1):])
+            return inner.rstrip() + ' target="_self"' + end
+        return inner.rstrip() + ' target="_blank" rel="noopener noreferrer"' + end
+    return _LINK_TAG.sub(one, str(body_html or ""))
+
+
 # NO EMAIL MOVES ITS OWN FRAME (OSDev1, on #2029). A `<meta http-equiv="refresh">` in the sender's HTML would send the
 # frame somewhere else after it had drawn: another site in the reading pane, or a page of this box now that the frame
 # shares its origin. The tag is dropped whole, read the way a browser reads it (any case, entities decoded, spaces
@@ -387,6 +420,8 @@ def frame_doc(body_html: str) -> str:
             + csp_meta() +
             # NO ADDRESS LEAVES WITH A PICTURE OR A LINK: the frame's own requests send no referrer.
             '<meta name="referrer" content="no-referrer">'
+            # AND EVERY LINK OPENS OUTSIDE, even one `links_open_outside` could not read: the first <base> wins.
+            '<base target="_blank">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             # OUR OWN BASE STYLING, FIRST, so a message that styles nothing still reads like
             # something a person wrote rather than a 1996 default-serif wall. Anything the sender
@@ -396,7 +431,8 @@ def frame_doc(body_html: str) -> str:
             '"Segoe UI",Roboto,sans-serif;color:#111;background:#fff;word-break:break-word}'
             'img{max-width:100%;height:auto}table{max-width:100%}'
             'a{color:#0b57d0}</style></head><body>'
-            + no_script_links(no_refresh(no_dead_images(no_tracking_pixels(body_html)))) + '</body></html>')
+            + links_open_outside(no_script_links(no_refresh(no_dead_images(no_tracking_pixels(body_html)))))
+            + '</body></html>')
 
 
 def safe_frame(body_html: str, *, label: str = "Message") -> str:

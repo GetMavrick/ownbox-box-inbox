@@ -181,9 +181,9 @@ def test_the_door():
         ok("the store is the machine's own: a forged key is refused",
            call("save_setting", key="../my_other", value=1)["code"] == "bad_key")
         ok("a value over 64 KB is refused", call("save_setting", key="big", value="x" * 70000)["code"] == "too_large")
-        ok("a call the box does not offer yet is refused by code",
-           call("think", prompt="x")["code"] == "unknown_call" and call("decide", yes=True)["code"] == "unknown_call")
-        ok("the reply never echoes what a refused call carried", "leak" not in json.dumps(call("think", p="leak")))
+        ok("a call the box does not offer is refused by code",
+           call("people", q="x")["code"] == "unknown_call" and call("decide", yes=True)["code"] == "unknown_call")
+        ok("the reply never echoes what a refused call carried", "leak" not in json.dumps(call("decide", p="leak")))
 
         Peer.uid = 4242
         first, closed = _raw(b.socket_path, b'{"id":5,"call":"hello","args":{"sdk":1,"slug":"lead-machine"}}\n')
@@ -277,11 +277,11 @@ def test_the_guest_sdk():
        and g.VERSION == box_sdk.VERSION == broker.SDK_VERSION and g.STYLE_CLASSES == box_sdk.STYLE_CLASSES)
     m = g.Machine(SLUG)
     try:
-        m.think("x", "y")
+        m.person("email", "ava@glow.example")
         said = ""
     except g.NotYet as e:
         said = str(e)
-    ok("a call that arrives later says so and names its step", "m.think" in said and "step 2" in said, said)
+    ok("a call that arrives later says so and names its step", "m.person" in said and "step 3" in said, said)
 
     store = Store()
     b = _door(store)
@@ -309,6 +309,63 @@ def test_the_guest_sdk():
         b.stop()
 
 
+def test_the_review_fixes():
+    """OSDev4's review of #2065: the top of / is an allowlist, a machine's settings have a total, and its log lines a
+    rate, so neither the box's disk nor its own logs are the machine's to fill."""
+    print("\ntest_the_review_fixes")
+    top = [("/bin", False), ("/usr", True), ("/opt", True), ("/swapfile", False), ("/backups", True),
+           ("/lost+found", True), ("/tmp", True)]
+    props = unit.properties(**KW, top=top)
+    ok("a file at / that is not the system is made inaccessible (the swap file holds the box's memory)",
+       "InaccessiblePaths=-/swapfile" in props, [p for p in props if "swapfile" in p])
+    ok("a folder at / that is not the system is covered", "TemporaryFileSystem=/backups:ro" in props)
+    ok("the system itself, and what the unit already covers, gets no second cover",
+       not any(x in p for p in props for x in ("=/usr", "=/bin", "=-/bin", "=/tmp:", "=/opt:ro /", "-/lost+found:"))
+       and props.count("TemporaryFileSystem=/opt:ro") == 1, [p for p in props if p.startswith(("Temporary", "Inacc"))])
+    ok("an entry at / whose name the unit can't write stops the start, never shows",
+       bool(refused(unit.properties, **KW, top=[("/odd name", True)])))
+    live = unit.properties(**KW)
+    missed = [p for p, _ in unit.top_entries() if os.path.basename(p) not in unit.TOP_KEEP
+              and f"TemporaryFileSystem={p}:ro" not in live and f"InaccessiblePaths=-{p}" not in live]
+    ok("on this computer, every entry at / that is not the system is covered", not missed, missed)
+
+    class Counted(Store):
+        def usage(self, key):
+            sizes = {k: len(json.dumps(v)) for k, v in self.d.items()}
+            return len(sizes), sum(sizes.values()), sizes.get(key)
+
+    rate = broker.CALLS_PER_MINUTE
+    broker.CALLS_PER_MINUTE = 10 ** 6                # each cap on its own; the door's own rate is checked below
+    b = broker.Broker(SLUG, uid=1, socket_path="/nonexistent/s.sock", peer_uid=lambda c: 1, store=Counted())
+    call = lambda c, **a: b.handle({"id": 1, "call": c, "args": a})          # noqa: E731
+    codes = [call("save_setting", key=f"k{i}", value=i).get("code") for i in range(broker.MAX_SETTINGS + 5)]
+    ok(f"a machine keeps at most {broker.MAX_SETTINGS} settings", codes[:broker.MAX_SETTINGS] ==
+       [None] * broker.MAX_SETTINGS and set(codes[broker.MAX_SETTINGS:]) == {"too_many_settings"}, codes[-6:])
+    ok("...and can still change one it has", call("save_setting", key="k1", value="changed").get("ok"))
+    b = broker.Broker(SLUG, uid=1, socket_path="/nonexistent/s.sock", peer_uid=lambda c: 1, store=Counted())
+    call = lambda c, **a: b.handle({"id": 1, "call": c, "args": a})          # noqa: E731
+    big = "x" * (broker.MAX_VALUE - 100)
+    codes = [call("save_setting", key=f"b{i}", value=big).get("code") for i in range(40)]
+    ok(f"...and {broker.MAX_SETTINGS_BYTES >> 20} MB of them in all", "settings_full" in codes
+       and sum(len(json.dumps(v)) for v in b._store.d.values()) <= broker.MAX_SETTINGS_BYTES, codes[-3:])
+    sent = [call("log", event="flood", fields={"i": i}) for i in range(broker.LOGS_PER_MINUTE * 3)]
+    ok(f"a machine logs at most {broker.LOGS_PER_MINUTE} lines a minute; the rest are refused and counted",
+       sum(1 for r in sent if r.get("ok")) == broker.LOGS_PER_MINUTE
+       and {r.get("code") for r in sent if not r.get("ok")} == {"rate_limited"}
+       and b.logs_dropped == broker.LOGS_PER_MINUTE * 2, b.logs_dropped)
+    broker.CALLS_PER_MINUTE = rate
+    rows = []
+    b = broker.Broker(SLUG, uid=1, socket_path="/nonexistent/s.sock", peer_uid=lambda c: 1, store=Counted(),
+                      audit_fn=lambda *a, **k: rows.append(a))
+    got = [b.handle({"id": 1, "call": "setting", "args": {"key": "a"}}) for _ in range(broker.CALLS_PER_MINUTE * 4)]
+    ok(f"the door takes {broker.CALLS_PER_MINUTE} calls a minute; the rest are refused and written nowhere, so a "
+       f"flood can't fill the box's audit log", sum(1 for r in got if r.get("ok")) == broker.CALLS_PER_MINUTE
+       and len(rows) == broker.CALLS_PER_MINUTE and b.calls_dropped == broker.CALLS_PER_MINUTE * 3,
+       [len(rows), b.calls_dropped])
+    ok("...while the long-poll is never counted against it",
+       b.handle({"id": 1, "call": "next", "args": {"wait": 0}}).get("ok"))
+
+
 def test_the_walls_suite_runs_in_ci():
     print("\ntest_the_walls_suite_runs_in_ci")
     wf = ROOT / ".github" / "workflows" / "tests.yml"
@@ -326,6 +383,7 @@ def main():
     test_the_door()
     test_jobs_run_once_and_on_time()
     test_the_guest_sdk()
+    test_the_review_fixes()
     test_the_walls_suite_runs_in_ci()
     print("\nALL SANDBOX CHECKS PASS" if not FAILS else f"\n{len(FAILS)} SANDBOX CHECK(S) FAILED")
     return 1 if FAILS else 0

@@ -263,6 +263,30 @@ ok("...while the sender's other meta tags and the box's own CSP stay",
    render.no_refresh(_KEPT))
 
 
+print("\ntest_every_link_opens_outside_the_inbox")
+# Owner, 2026-10-08, of a customer-portal email whose button drew "billing.stripe.com refused to connect" in the reading
+# pane: a link opened INSIDE the frame. Every link now opens a window of its own (a new tab on a computer, the phone's
+# browser sheet in the installed app), whatever target the sender gave it, and cannot reach back to the reading pane.
+_OUT = ' target="_blank" rel="noopener noreferrer"'
+_LINKS = [('<a href="https://billing.stripe.com/p/login/test_8wM">Log in</a>', '<a href="https://billing.stripe.com/p/login/test_8wM"' + _OUT + '>'),
+          ('<a target="_self" href="https://glowmedspa.example/book" rel="nofollow">Book</a>', 'href="https://glowmedspa.example/book"' + _OUT + '>'),
+          ('<a href="https://glowmedspa.example/"target="_top">Home</a>', '<a href="https://glowmedspa.example/"' + _OUT + '>'),
+          ("<A HREF=https://glowmedspa.example TARGET='portal'>x</A>", '<A HREF=https://glowmedspa.example' + _OUT + '>'),
+          ('<area shape=rect coords="0,0,9,9" href="https://glowmedspa.example/map"/>', 'href="https://glowmedspa.example/map"' + _OUT + '/>')]
+for given, want in _LINKS:
+    sender = render.frame_doc(given).split("<body>", 1)[1]
+    ok(f"opens outside: {given[:58]!r}", want in sender and sender.count("target=") == 1, sender[:220])
+_IN = render.frame_doc('<a href="#prices" target="_blank">Prices</a><h2 id="prices">Prices</h2>').split("<body>", 1)[1]
+# A bare "#prices" in a srcdoc frame is read against the PAGE's address and loaded the Inbox inside the frame (Brave,
+# 10-08); about:srcdoc#prices scrolls the email.
+ok("...but a link to a place in the same email stays in it and scrolls it",
+   '<a href="about:srcdoc#prices" target="_self">' in _IN, _IN[:200])
+ok("...and nothing that only starts with an a is touched",
+   render.links_open_outside('<abbr title="x">y</abbr><address>z</address>') == '<abbr title="x">y</abbr><address>z</address>')
+_HEAD = render.frame_doc("<p>x</p>").split("<body>", 1)[0]
+ok("the frame says so for any link it could not read: <base target=\"_blank\">, before the sender's HTML",
+   '<base target="_blank">' in _HEAD)
+
 print("\ntest_pictures_load_by_themselves")
 # Owner, 2026-10-07: "I want to always show images. I don't think anyone ever doesn't want to show an image. Just make it
 # automatic." The frame's one policy allows pictures from https, and nothing more than it did: no http, no script.

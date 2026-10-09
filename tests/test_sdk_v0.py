@@ -53,8 +53,10 @@ ok("it is versioned on its own: sdk 1", sdk.VERSION == 1)
 handle = sdk.Machine.__dict__
 missing = [s for s in sdk.SEAMS if not (hasattr(sdk, s) or s in handle)]
 ok("every promised seam exists by name", not missing, str(missing))
+# `permissions` joined sdk 1 on 2026-10-08 (docs/SCOPE_CUSTOM_MACHINES_FROM_A_REPO.md v2, step 2): optional and additive,
+# so every machine built before it is unchanged.
 ok("the manifest fields it promises", set(sdk.MANIFEST_FIELDS) == {"name", "version", "requires_foundation",
-                                                                   "needs", "sdk"})
+                                                                   "needs", "sdk", "permissions"})
 ok("it does not re-export the unpromised seams",
    not any(hasattr(sdk, n) for n in ("register_periodic", "register_schema", "worker", "state")))
 try:

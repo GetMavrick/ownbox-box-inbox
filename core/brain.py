@@ -51,6 +51,15 @@ _client_key = ""          # the key `_client` was built with; a change rebuilds 
 _CALL: contextvars.ContextVar = contextvars.ContextVar("brain_call_account", default=None)
 _KIND_BACKEND = {"claude_oauth": "claude_code", "anthropic_key": "api", "codex": "codex"}
 
+# Every built-in tool the pinned Codex CLI (rust-v0.155.1) turns on by default that would let the model act rather
+# than answer: run commands, read files, browse, drive a computer, call apps or plugins, make images. Measured with
+# `codex features list` on 2026-10-08. A think call needs none of them (see _think_codex).
+CODEX_NO_TOOLS = ("shell_tool", "unified_exec", "unified_exec_tty", "shell_snapshot", "browser_use",
+                  "browser_use_external", "browser_use_full_cdp_access", "computer_use", "in_app_browser", "apps",
+                  "plugins", "remote_plugin", "plugin_sharing", "image_generation", "view_image", "code_mode_host",
+                  "skill_search", "skill_mcp_dependency_install", "tool_suggest", "sleep_tool", "multi_agent",
+                  "hooks", "in_app_local_automation")
+
 # Anthropic exception class names that mean "transient — retry later", matched by
 # name so the spine never imports the SDK at module load. Covers overloaded (529),
 # rate limit (429), 5xx, and connection/timeout. Bad-request/auth are absent on
@@ -400,6 +409,14 @@ def _think_codex(task: str, prompt: str, *, system, cached_context, job_id,
     strangers (transcripts); a prompt injection must find nothing to grab, exactly as `--tools ""`
     guarantees on the Claude path.
 
+    THE BUILT-IN TOOLS ARE SWITCHED OFF BY NAME (OSDev4's review, 2026-10-08). `-s read-only` limits WRITES: the
+    pinned CLI (rust-v0.155.1) still offers the model its shell, and read-only lets that shell read any file,
+    and this call runs as root, so an injected message could have the drafter read /opt/aios/.env into a reply.
+    `mcp_servers={}` removes MCP tools, not the built-in ones. Measured on that CLI: shell_tool, browser_use,
+    computer_use, apps, plugins and the rest are ON by default. Each is turned off with --disable (CODEX_NO_TOOLS).
+    An unknown name makes the CLI refuse to start, which fails CLOSED: drafting stops with a reason rather than
+    running with tools on. A new CLI version is re-measured before its pin moves (scripts/install_codex.sh).
+
     NO SYSTEM FLAG on this CLI, so the system text goes FIRST on stdin, above the prompt. The
     drafter already frames the untrusted part of its prompt as a quoted transcript, which is what
     keeps that ordering honest.
@@ -428,6 +445,8 @@ def _think_codex(task: str, prompt: str, *, system, cached_context, job_id,
     cmd = [bin_, "exec", "--skip-git-repo-check", "-C", str(workdir), "--ephemeral",
            "--ignore-user-config", "--ignore-rules", "-s", "read-only", "--color", "never",
            "-c", "mcp_servers={}"]
+    for feature in CODEX_NO_TOOLS:
+        cmd += ["--disable", feature]
     chosen = str((get_config().get("brain") or {}).get("codex_model") or "").strip()
     if chosen:
         cmd += ["-m", chosen]
