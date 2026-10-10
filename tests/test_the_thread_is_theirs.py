@@ -206,6 +206,36 @@ status, dpage = page(owner, "/inbox/inbox?drafts=1")
 ok("...PRESSED WHILE ITS LIST IS SHOWN, and a search from the bar keeps it",
    status == 200 and shown(dpage).get("Drafts") is True
    and '<input type="hidden" name="drafts" value="1">' in dpage, pills_of(dpage))
+
+print("\nthe list reads like Gmail (owner, 10-10)")
+store.upsert_conversation(space=SP, zcid="mail-dana", platform="email", participant="Dana Ruiz",
+                          last_inbound_at="2026-10-06T07:00:00Z", account_id="hello-glowmedspa")
+store.record_message(space=SP, zcid="mail-dana", zmid="mail-dana-m1", direction="in", sent_by="contact",
+                     body="Could we move it to 3:30?", detail={"body_text": "Could we move it to 3:30?",
+                                                                "headers": {"subject": "=?UTF-8?Q?Your_consultation_on_Thursday?="}})
+_rows = {c["id"]: c for c in (owner.get("/inbox/api/conversations?sortOrder=desc").get_json() or {}).get("data") or []}
+ok("AN EMAIL'S ROW CARRIES ITS SUBJECT, Gmail's second line, read as words whatever the header's case",
+   ((_rows.get("mail-dana") or {}).get("metadata") or {}).get("aios", {}).get("subject") == "Your consultation on Thursday",
+   _rows.get("mail-dana"))
+ok("...and a chat's row carries none", (_rows["ig-priya"]["metadata"]["aios"] or {}).get("subject") is None)
+with state.connect() as _c:
+    _plan = " | ".join(str(r["detail"]) for r in _c.execute(
+        f"EXPLAIN QUERY PLAN SELECT ({store._NEWEST_HEADERS}), ({store._NEWEST_BODY}) "
+        "FROM inbox_conversations k WHERE k.space = ?", (SP,)).fetchall())
+ok("...ASKED BY INDEX (OSDev1's review): a row's newest message and newest email's headers are a SEARCH of its own "
+   "messages, never a SCAN of every message in the box",
+   _plan.count("SEARCH m USING INDEX ix_inbox_messages_conv_time") == 2 and "SCAN m" not in _plan, _plan)
+_p11 = (ROOT / "web" / "inbox-ui" / "patches" / "0011-the-list-reads-like-gmail.patch").read_text(encoding="utf-8")
+_added = "\n".join(line for line in _p11.splitlines() if line.startswith("+"))
+_inbox_entry = (ROOT / "web" / "inbox-ui" / "ownbox" / "entry" / "inbox.tsx").read_text(encoding="utf-8")
+ok("THEIR LIST READS LIKE GMAIL (\"completely take out that whole inbox row\"; \"three lines of text\"): a small label for "
+   "its name in place of the header row, three lines at Gmail's size in the box's text unit, bold while unread and "
+   "lighter once read, no dot, one letter on the box's colour, through one optional prop (patch 0011)",
+   _p11.startswith("Ownbox:") and "{title ?? 'Inbox'}" in _added and "leading-[calc(18*var(--px,1px))]" in _added
+   and "unread ? 'font-semibold text-foreground' : 'font-normal text-muted-foreground'" in _added
+   and "bg-primary" not in _added and "avatarLetter(name)" in _added and "gmail={GMAIL}" in _inbox_entry
+   and "listStamp(conv.updatedTime)" in _inbox_entry and "data-ownbox-row" in " ".join(
+       f.read_text(encoding="utf-8") for f in app_ui.STATIC.glob("*.js")), _p11[:200])
 p5 = (ROOT / "web" / "inbox-ui" / "patches" / "0005-list-row-slot.patch").read_text(encoding="utf-8")
 ok("THEIR LIST TAKES A SLOT AROUND EACH ROW AND A BADGE BESIDE THE NAME, through one patch to their list",
    p5.startswith("Ownbox:") and set(re.findall(r"^\+\+\+ b/(\S+)", p5, re.M))
@@ -271,9 +301,23 @@ ok("...and those cards start below the screen, not peeking under the list from t
 
 print("\nthe AI draft card, above their composer")
 built = " ".join(f.read_text(encoding="utf-8") for f in app_ui.STATIC.glob("*.js"))
-ok("THE CARD IS IN THEIR INBOX: Drafted for you, with Send, Edit and Discard",
-   "Drafted for you. Read it before you send." in built and "/draft/discard" in built
+ok("THE CARD IS IN THEIR INBOX: a Draft, with Send, Edit and Discard",
+   'aria-label":"Draft"' in built and "data-ownbox-draft" in built and "/draft/discard" in built
    and "Idempotency-Key" in built, "")
+_card = (ROOT / "web" / "inbox-ui" / "ownbox" / "draft-card.tsx").read_text(encoding="utf-8")
+ok("...COMPACT (owner, 10-10: \"the draft takes up the entire screen\"): a small Draft label, four lines with Show all, "
+   "and one row of round pills, 36px to the eye and 48px to the thumb",
+   "'line-clamp-4'" in _card and "Show all" in _card and "rounded-full" in _card and "min-h-9" in _card
+   and "after:-inset-y-1.5" in _card and "h-12" not in _card and "Read it before you send" not in _card
+   and "after:-inset-y-4" in _card.split("const TAP =")[1].split(";")[0])
+ok("THEIR SPACING NO LONGER GROWS WITH THE PHONE'S TEXT SIZE (owner, 10-10: \"a ton of white space\"); the text still does",
+   ":root{--spacing:4px}" in app_ui.inbox_body() and "--text-sm" not in app_ui.inbox_body())
+_et = (ROOT / "web" / "inbox-ui" / "ownbox" / "email-text.tsx").read_text(encoding="utf-8")
+_ib = (ROOT / "web" / "inbox-ui" / "ownbox" / "entry" / "inbox.tsx").read_text(encoding="utf-8")
+ok("AN EMAIL CARD FROM THE PERSON AT THE TOP DOES NOT NAME THEM AGAIN (owner, 10-10: \"that's at the top\"); You and "
+   "anyone else in the thread are still named",
+   "!(person && samePerson(sender, person))" in _et and "outgoing ? sender || 'You'" in _et
+   and "<ThreadPerson.Provider value={conversation?.participantName ?? ''}>" in _ib)
 patch = (ROOT / "web" / "inbox-ui" / "patches" / "0001-draft-card-slot.patch")
 ptext = patch.read_text(encoding="utf-8") if patch.is_file() else ""
 ok("...through one small patch to their thread and composer, which says why it exists",
@@ -373,9 +417,10 @@ ok("A WALL OF TRACKING LINKS READS AS SHORT LINKS: the old thread's render.reada
 ok("THE CONVERSATION GETS THE WINDOW ON A DESKTOP, not the old list's 780px column",
    "@media (min-width:821px){.ib .wrap{max-width:1600px}}" in page(owner, "/inbox/inbox")[1])
 
-ok("AN EMAIL IS A CARD, NOT A CHAT BUBBLE (owner, 10-06, the enterprise layout): a readable column, headed by who wrote it",
+ok("AN EMAIL IS A CARD, NOT A CHAT BUBBLE (owner, 10-06, the enterprise layout): a readable column, headed by who wrote it "
+   "(You, or anyone but the person at the top)",
    "max-w-[760px]" in p2 and "const card = Boolean(emailOf(msg));" in p2 and "max-w-[760px]" in built
-   and "msg.senderName || 'You'" in email, "")
+   and "outgoing ? sender || 'You'" in email, "")
 
 _div = (ROOT / "web" / "inbox-ui" / "ownbox" / "list-divider.tsx").read_text(encoding="utf-8")
 ok("THE LIST'S WIDTH IS THE PERSON'S: a divider dragged or moved by the arrow keys, remembered, 280 to 560px",
@@ -429,17 +474,19 @@ ok("SAVED REPLIES LIVE INSIDE THE COMPOSER (owner, 10-07; OSDev1's assignment): 
    and "inComposer={(ctx) =>" in _ib and "<SavedReplies" not in _ib.split("inComposer={(ctx) =>")[0].split("aboveComposer={(ctx) =>")[-1])
 ok("A LIST IT JUST STARTED IS OFFERED AT ONCE (walk, 10-07): the first conversation swiped into Done, Trash or Junk "
    "adds that list's pill, in the box's order and markup, with no reload",
-   "offerList(into)" in _la and "document.querySelector('.chips.pills')" in _la
+   "offerList(into)" in _la and "window.dispatchEvent(new CustomEvent(OFFER_LIST" in _la
+   and "setPills((prev) => withList(prev, d.key, d.label))" in _ib
    and "['archived', 'Done'], ['deleted', 'Trash'], ['junk', 'Junk']" in _la)
 
 _body = app_ui.inbox_body()
 _p8 = (ROOT / "web" / "inbox-ui" / "patches" / "0008-no-today-chip.patch").read_text(encoding="utf-8")
 ok("A MESSAGE GETS THE PHONE'S SCREEN (owner, 10-07, Gmail's app the model): inside a conversation on a phone, no search "
-   "bar, no gutter, a touch of room, an email edge to edge, and no Today chip over a thread that is all today",
+   "bar, no gutter, a touch of room, an email edge to edge, no Today chip over a thread that is all today, and no day "
+   "chip over an email (owner, 10-10), whose card says its own date",
    "@media (max-width:820px){html.ib-thread-open .bar-find{display:none}" in _body
    and "html.ib-thread-open .wrap{padding-left:0;padding-right:0}" in _body
    and r"html.ib-thread-open #ib-inbox .max-w-\[760px\]{max-width:none;border:0;border-radius:0;" in _body
-   and ": msgDate.toDateString() !== new Date().toDateString();" in _p8
+   and ": msgDate.toDateString() !== new Date().toDateString());" in _p8 and "+                !emailOf(msg) &&" in _p8
    and r'#ib-inbox textarea[aria-label="Message"]:not(:placeholder-shown){flex:1 1 100%}' in _body
    and not (ROOT / "web" / "inbox-ui" / "ownbox" / "signature-note.tsx").exists())
 

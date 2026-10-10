@@ -212,6 +212,12 @@ def inbox_body(pills: list[dict] | None = None) -> str:
             # THE FRAME STOPS RESERVING A SCREEN OF ITS OWN: its layout box is a full screen tall below a header, which
             # left a page that scrolls by the header's height, and a focus scrolled it. The inbox sizes itself.
             '<style>#ib-inbox{min-height:320px;display:flex;flex-direction:column}.lay{min-height:0}'
+            # THEIR SPACING STOPS GROWING WITH THE PHONE'S TEXT SIZE (owner, 2026-10-10: "Overall, there is just a ton of
+            # white space"). Their every padding, gap and height is a multiple of --spacing, a quarter of the root's
+            # size, and on an iPhone the root is the reader's text size (box.css), so a phone set to larger text got
+            # 70px buttons and headers. Fixed at 4px, what it is at the default everywhere else; their text still
+            # follows the reader.
+            ':root{--spacing:4px}'
             # THE INBOX TAKES THE WINDOW ON A DESKTOP (owner, 2026-10-06: "widen the message"): the old list's 780px
             # column held one list; this holds the list and the conversation beside it, so the conversation was
             # squeezed under 400px. Up to 1600px, so a wide monitor does not stretch a line across a room.
@@ -248,9 +254,16 @@ def inbox_body(pills: list[dict] | None = None) -> str:
             # INSIDE A CONVERSATION, ON A MOBILE, THE COMPOSER TAKES THE BOTTOM: the bottom bar and its room step aside.
             # 48px TARGETS AND 16px FIELDS ON A MOBILE (the owner's ruling, every inbox screen): their controls are
             # 32px and their small type, so a thumb gets the size the old screens give it, and a field never zooms.
-            '@media (max-width:899px){#ib-inbox :is(button,[role=button],[role=combobox],select,textarea,[data-ownbox-pill],'
+            '@media (max-width:899px){#ib-inbox :is(button,[role=button],[role=combobox],select,textarea,'
             'input:not([type=hidden],[type=checkbox],[type=radio])){min-height:48px}'
             '#ib-inbox :is(button,[role=button]){min-width:48px}'
+            # ...BUT THE DRAFT'S PILLS ARE 36px TO THE EYE (owner, 10-10: "much smaller round pill buttons"): an
+            # invisible ring above and below each one keeps the thumb's 48px (ownbox/draft-card.tsx).
+            '#ib-inbox [data-ownbox-draft] button{min-height:36px}#ib-inbox [data-ownbox-draft] p+button{min-height:0;min-width:0}'
+            # ...AND THE FILTER ROW'S PILLS ARE 32px, Material 3's filter chip (owner, 10-10: "everything needs to be tight
+            # on the screen"), with the same kind of ring: 8px above and below makes the thumb's 48px.
+            '#ib-inbox [data-ownbox-filters] :is(a,button){min-height:32px;position:relative}'
+            '#ib-inbox [data-ownbox-filters] :is(a,button)::after{content:"";position:absolute;inset:-8px 0}'
             '#ib-inbox :is(input,textarea,select){font-size:max(16px,1em)}'
             'html.ib-thread-open nav.tabs{display:none}'
             'html.ib-thread-open body{padding-bottom:0}html.ib-thread-open :is(#ownbox-notify,.ib-below)'

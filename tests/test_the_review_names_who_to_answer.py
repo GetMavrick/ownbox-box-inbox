@@ -119,9 +119,12 @@ ok("right below the quote, before anything else (owner, 2026-10-06)", "WHO TO AN
            if h in text), text[:600])
 
 print("\ntest_never_on_slack")
+# DANA'S OWN WORDS, NOT THE BARE DAY (10-10): Slack's report opens with its date ("*Saturday · October 10, 2026*"), so
+# the bare word "Saturday" failed this check on every Saturday (main red at 00:09 UTC, 10-10). Her words are "Saturday
+# openings"; no date line carries them.
 slack = report.render(ABOUT, NOW)
 ok("no customer's name or words on Slack, and no heading for them (OSDev1)",
-   "Who to answer first" not in slack and not any(n in slack for n in ("Marcus Cole", "Dana Whitfield", "Saturday")),
+   "Who to answer first" not in slack and not any(n in slack for n in ("Marcus Cole", "Dana Whitfield", "Saturday openings")),
    slack)
 
 print("\ntest_no_names_no_section")

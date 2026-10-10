@@ -57,6 +57,16 @@ _NEWEST_BODY = (
     "    AND m.zernio_conversation_id = k.zernio_conversation_id "
     "  ORDER BY m.created_at DESC, m.id DESC LIMIT 1)")
 
+# THE NEWEST EMAIL'S HEADERS, for the list's subject line (owner, 2026-10-10: "each email has three lines of text the
+# sender, the subject and the first line"). The newest inbound message that kept its detail; NULL for a chat. Read by
+# app_api, which takes the Subject from it whatever its case and decodes it (render.readable_header).
+_NEWEST_HEADERS = (
+    "(SELECT d.headers FROM inbox_messages m JOIN inbox_message_detail d ON d.message_id = m.id "
+    "  WHERE m.space = k.space "
+    "    AND m.zernio_conversation_id = k.zernio_conversation_id "
+    "    AND m.direction = 'in' "
+    "  ORDER BY m.created_at DESC, m.id DESC LIMIT 1)")
+
 _NEWEST_IS_INBOUND = (
     "COALESCE((SELECT m.direction FROM inbox_messages m "
     "           WHERE m.space = k.space "
@@ -306,6 +316,7 @@ def list_conversations(space: str, *, limit: int = 50, offset: int = 0,
             # because somebody typed a name into a box.
             f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply, "
             f"       ({_NEWEST_BODY}) AS preview, "
+            f"       ({_NEWEST_HEADERS}) AS newest_headers, "
             f"       ({_HAS_INBOUND}) AS has_inbound, "
             f"       ({_UNREAD}) AS unread, "
             f"       {_HELD_BY} AS held_by, "
@@ -441,6 +452,7 @@ def search_conversations(space: str, query: str, *, limit: int = 50,
             # because somebody typed a name into a box.
             f"       ({_NEWEST_IS_INBOUND}) AS awaiting_reply, "
             f"       ({_NEWEST_BODY}) AS preview, "
+            f"       ({_NEWEST_HEADERS}) AS newest_headers, "
             f"       ({_HAS_INBOUND}) AS has_inbound, "
             f"       ({_UNREAD}) AS unread, "
             f"       {_HELD_BY} AS held_by "

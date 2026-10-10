@@ -118,6 +118,13 @@ CREATE TABLE IF NOT EXISTS inbox_messages (
   body        TEXT,
   created_at  TEXT NOT NULL
 );
+-- A CONVERSATION'S MESSAGES, NEWEST FIRST, BY INDEX (OSDev1's review of #2089, 2026-10-10). The list asks five
+-- correlated questions of each row's messages (store.py: its count, the newest body, the newest email's headers,
+-- whether it has an inbound one, whether it is unread), and without this each was a SCAN of every message in the
+-- box: 400 conversations and 20,000 messages took 1.7 s for a page of 50; with it, 3 ms. IF NOT EXISTS, so an old
+-- box builds it at its next start.
+CREATE INDEX IF NOT EXISTS ix_inbox_messages_conv_time
+  ON inbox_messages (space, zernio_conversation_id, created_at DESC, id DESC);
 
 -- Exactly-once + audit for every send (spec §8): idem_key UNIQUE means a requeue can
 -- never double-send; status records sending|ok|indeterminate|failed for reconcile.

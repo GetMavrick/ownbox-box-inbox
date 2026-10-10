@@ -307,8 +307,10 @@ for name, on in screens():
         ok(f"[{name}] every control a thumb presses in their screens is 48px, every field 16px, on a mobile",
            "#ib-inbox:is(button,[role=button],[role=combobox],select,textarea," in flat
            and "{min-height:48px}" in flat and "#ib-inbox:is(input,textarea,select){font-size:max(16px,1em)}" in flat)
-        ok(f"[{name}] ...and the box's own controls in them are 48px (the draft card, saved replies)",
-           BUILT.count("h-12") >= 4)
+        ok(f"[{name}] ...and the box's own controls in them reach 48px: saved replies, and the draft card's pills, 36px to "
+           "the eye with a ring that makes 48px to the thumb (owner, 10-10: \"much smaller round pill buttons\")",
+           BUILT.count("h-12") >= 1 and "min-h-9" in BUILT and "after:-inset-y-1.5" in BUILT
+           and "#ib-inbox[data-ownbox-draft]button{min-height:36px}" in flat)
 
 print("\nlight and dark")
 theme.put(OWNER, "dark")

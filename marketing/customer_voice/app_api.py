@@ -105,6 +105,9 @@ def _conversation(k: dict, ready: dict | None = None) -> dict:
                               "adTitle": k.get("ad_title") or None, "heldBy": k.get("held_by") or None,
                               "optedOut": bool(k.get("opted_out")),
                               "disposition": k.get("disposition") or None,
+                              # AN EMAIL'S SUBJECT, the list's second line as in Gmail (owner, 2026-10-10); None for
+                              # a chat, which has none.
+                              "subject": (_subject(k.get("newest_headers")) or None) if k.get("newest_headers") else None,
                               # THE DRAFT CARD'S DATA (step 1.3): the reply waiting here, or None. Send and Edit are the
                               # send route below; Discard is `…/draft/discard` with this id.
                               "draft": (ready or {}).get(str(k.get("zernio_conversation_id"))),
